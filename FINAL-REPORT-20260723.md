@@ -2,6 +2,7 @@
 
 Evidence cutoff: `2026-07-23T15:33:03Z`  
 Resumed evidence package: `/root/vicidial-evidence-resumed-20260723-154304` (`EVIDENCE_SCOPE=RESUMED_VALIDATION`)  
+Backup discovery evidence: `/root/vicidial-backup-evidence-20260723-160000` (`BACKUP_RESTORE_GATE=BLOCKED_EXTERNAL_PREREQUISITE`)  
 Application host: `middleware` (`65.109.65.169`)  
 VICIdial host: `static` (`65.21.67.207`)  
 Environment: protected production-like runtime; destructive validation was restricted to isolated Docker projects and ephemeral volumes.
@@ -46,7 +47,7 @@ campaign activation, database migration, or production cutover was performed.
 | Live VICIdial canary | Server B SSH and an operator-controlled zero-match destination now validate, but the approval does not bind campaign, synthetic list, isolated agent, trunk, caller ID, and an available operator to that destination. | Telephony owner must issue one bounded approval record containing those exact fields and provide the operator for the approved window. | Yes |
 | n8n runtime staging | Application runtime contains 19 inactive workflows but approved staging-only JWT/HTTP credential mappings are absent. | Credential owner must provision/map staging-only credentials and approved base URLs in n8n’s credential store. | Yes |
 | Runtime identity/RBAC | Isolated Keycloak tests pass, but Odoo/Agent Desktop runtime role matrix and DNC/transfer endpoint matrices lack protected test identities/credentials. | Identity owner must provide bounded staging test identities for all required roles and revocation/disablement cases. | Yes |
-| Backup replication | No approved off-server destination, encryption recipient/key reference, or alert destination exists. | Infrastructure owner must supply the protected off-server target, encryption recipient reference, retention approval, and alert receiver. | Yes |
+| Backup replication | Protected Hetzner token reference exists but provider API validation returned HTTP 401; no distinct off-server target, encryption recipient, pinned host key, or replication identity could be validated. | Infrastructure owner must provide a valid scoped provider credential or approved off-server target plus encryption/SSH references. | Yes |
 | Monitoring | No approved alert receiver/routing destination exists and no authoritative monitoring stack is deployed. | Operations owner must provide the alert destination/escalation policy and approve monitoring endpoint exposure. | Yes |
 | Odoo 19 representative migration | Official Odoo upgrade client requires a contract/access reference; none is present. | Contract owner/vendor must provide the official upgrade reference or an officially upgraded representative dump paired with its filestore. | Yes |
 | Media/WebRTC | Approved media lab, SIP test identity, and supported Edge runner are unavailable. | Telephony owner must provide bounded staging SIP/media credentials and the approved lab. | Yes |
