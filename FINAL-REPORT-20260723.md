@@ -5,6 +5,8 @@ Original evidence cutoff (preserved): `2026-07-23T14:21:54Z`
 Latest report update UTC: `2026-07-23T17:19:21Z`
 Latest resumed validation UTC: `2026-07-23T20:38:00Z`
 Latest resumed validation evidence: `/root/codestra-production-completion/evidence/RESUME-20260723T203800Z.md`
+Latest continuation UTC: `2026-07-23T20:44:35Z`
+Latest continuation evidence: `/root/codestra-production-completion/evidence/CONTINUATION-20260723T204435Z.md`
 Resumed evidence package: `/root/vicidial-evidence-resumed-20260723-154304` (`EVIDENCE_SCOPE=RESUMED_VALIDATION`)  
 Backup discovery evidence: `/root/vicidial-backup-evidence-20260723-160000` (`BACKUP_RESTORE_GATE=BLOCKED_EXTERNAL_PREREQUISITE`)  
 Odoo/n8n continuation evidence: `/root/odoo19-n8n-evidence-20260723-161309` (`ODOO19_CLEAN_COMPATIBILITY_GATE=PASS`; representative migration and runtime n8n credentials blocked)  
@@ -59,7 +61,7 @@ campaign activation, database migration, or production cutover was performed.
 | Component | Exact blocker | Required external action | Other work continued |
 |---|---|---|---|
 | Live VICIdial canary | Server B SSH and an operator-controlled zero-match destination now validate, but the approval does not bind campaign, synthetic list, isolated agent, trunk, caller ID, and an available operator to that destination. | Telephony owner must issue one bounded approval record containing those exact fields and provide the operator for the approved window. | Yes |
-| n8n runtime staging | The staged validation scope contains 27 inactive workflow definitions on disk; the shared runtime database contains 19 inactive records and zero credentials. No separate staging deployment exists. Existing staging host aliases target shared production-like n8n/middleware services and do not prove isolation. | Platform and credential owners must approve/provision a separate `codestra-flow-staging` deployment, staging-only credentials, and Odoo 19/middleware/callback URLs; then perform approved import/reconciliation. | Yes |
+| n8n runtime staging | A separate `codestra-n8n-staging` deployment now passes infrastructure isolation, inactivity, backup/restore, TLS, API-disablement, and production-invariant gates. Its ten workflows use deliberately invalid placeholder credentials and invalid staging endpoint hosts. | Credential and service owners must supply staging-only credential mappings and reachable Odoo 19, middleware, and synthetic callback endpoints; then run the credentialed workflow matrix while workflows remain individually controlled. | Yes |
 | Runtime identity/RBAC | Isolated Keycloak tests pass, but Odoo/Agent Desktop runtime role matrix and DNC/transfer endpoint matrices lack protected test identities/credentials. | Identity owner must provide bounded staging test identities for all required roles and revocation/disablement cases. | Yes |
 | Backup replication | Protected Hetzner token reference exists but provider API validation returned HTTP 401; no distinct off-server target, encryption recipient, pinned host key, or replication identity could be validated. | Infrastructure owner must provide a valid scoped provider credential or approved off-server target plus encryption/SSH references. | Yes |
 | Monitoring | No approved alert receiver/routing destination exists and no authoritative monitoring stack is deployed. | Operations owner must provide the alert destination/escalation policy and approve monitoring endpoint exposure. | Yes |
