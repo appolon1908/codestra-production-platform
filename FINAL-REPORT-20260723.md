@@ -1,9 +1,10 @@
 # Codestra production completion report
 
-Evidence cutoff: `2026-07-23T15:33:03Z`  
+Evidence cutoff: `2026-07-23T16:31:38Z`  
 Resumed evidence package: `/root/vicidial-evidence-resumed-20260723-154304` (`EVIDENCE_SCOPE=RESUMED_VALIDATION`)  
 Backup discovery evidence: `/root/vicidial-backup-evidence-20260723-160000` (`BACKUP_RESTORE_GATE=BLOCKED_EXTERNAL_PREREQUISITE`)  
 Odoo/n8n continuation evidence: `/root/odoo19-n8n-evidence-20260723-161309` (`ODOO19_CLEAN_COMPATIBILITY_GATE=PASS`; representative migration and runtime n8n credentials blocked)  
+Focused Odoo source-pair evidence: `/root/odoo19-n8n-canary-evidence-20260723-163138` (`REPRESENTATIVE_DATABASE_GATE=PASS_STRUCTURALLY_REPRESENTATIVE`; complete pair/application restore and official migration remain blocked)  
 Application host: `middleware` (`65.109.65.169`)  
 VICIdial host: `static` (`65.21.67.207`)  
 Environment: protected production-like runtime; destructive validation was restricted to isolated Docker projects and ephemeral volumes.
