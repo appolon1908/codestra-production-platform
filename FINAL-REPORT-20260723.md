@@ -1,6 +1,6 @@
 # Codestra production completion report
 
-Evidence cutoff: `2026-07-23T14:21:54Z`  
+Evidence cutoff: `2026-07-23T15:33:03Z`  
 Application host: `middleware` (`65.109.65.169`)  
 VICIdial host: `static` (`65.21.67.207`)  
 Environment: protected production-like runtime; destructive validation was restricted to isolated Docker projects and ephemeral volumes.
@@ -42,7 +42,7 @@ campaign activation, database migration, or production cutover was performed.
 
 | Component | Exact blocker | Required external action | Other work continued |
 |---|---|---|---|
-| Live VICIdial canary | Existing protected destination matches four VICIdial leads; no approved operator-controlled zero-match destination is available. Available SSH key is rejected by Server B. | Authorized owner must install a protected zero-match destination using the canonical approval procedure and provide working protected Server B administrative access. | Yes |
+| Live VICIdial canary | Server B SSH and an operator-controlled zero-match destination now validate, but the approval does not bind campaign, synthetic list, isolated agent, trunk, caller ID, and an available operator to that destination. | Telephony owner must issue one bounded approval record containing those exact fields and provide the operator for the approved window. | Yes |
 | n8n runtime staging | Application runtime contains 19 inactive workflows but approved staging-only JWT/HTTP credential mappings are absent. | Credential owner must provision/map staging-only credentials and approved base URLs in n8n’s credential store. | Yes |
 | Runtime identity/RBAC | Isolated Keycloak tests pass, but Odoo/Agent Desktop runtime role matrix and DNC/transfer endpoint matrices lack protected test identities/credentials. | Identity owner must provide bounded staging test identities for all required roles and revocation/disablement cases. | Yes |
 | Backup replication | No approved off-server destination, encryption recipient/key reference, or alert destination exists. | Infrastructure owner must supply the protected off-server target, encryption recipient reference, retention approval, and alert receiver. | Yes |
@@ -55,7 +55,7 @@ campaign activation, database migration, or production cutover was performed.
 ## 4. Test Summary
 
 ```text
-UNIT_TESTS=PASS_MIDDLEWARE_30_AGENT_DESKTOP_15
+UNIT_TESTS=PASS_MIDDLEWARE_34_AGENT_DESKTOP_15_SERVER_B_EDGE_55
 STATIC_ANALYSIS=PASS_MIDDLEWARE_RUFF_MYPY_DESKTOP_LINT_TYPESCRIPT
 N8N_ISOLATED_INTEGRATION=PASS_GATE5
 IDENTITY_ISOLATED_SECURITY=PASS_GATE2
@@ -63,7 +63,9 @@ BROWSER_TEST_CHROMIUM=PASS_1_OF_1
 DEPENDENCY_SECURITY_SCAN=PASS_ZERO_KNOWN_NPM_VULNERABILITIES
 RESTORE_TEST=PASS_DATABASE_FILESTORE_REGISTRY_HTTP_LOGIN_PAGE
 PROTECTED_HUMAN_RESTORE_LOGIN=NOT_RUN_CREDENTIAL_UNAVAILABLE
-LIVE_CANARY=BLOCKED_EXTERNAL_PROTECTED_DESTINATION
+CANARY_DESTINATION_ZERO_MATCH=PASS_ALL_CHECKED_SCOPES
+SERVER_B_SSH=PASS
+LIVE_CANARY=BLOCKED_EXTERNAL_TELEPHONY_APPROVAL_BINDING
 RUNTIME_RECONCILIATION=NOT_RUN_LIVE_EVENT_ABSENT
 REPRESENTATIVE_ODOO19_UPGRADE=BLOCKED_VENDOR_CONTRACT
 INDEPENDENT_GATE3A_RETEST=PASS_REMEDIATION_VERIFICATION_FORMAL_GATE_NO_GO
