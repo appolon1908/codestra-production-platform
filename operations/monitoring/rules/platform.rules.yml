@@ -17,7 +17,7 @@ groups:
         expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
         for: 10m
         labels: {severity: critical, service: host}
-        annotations: {summary: Host memory above 90 percent}
+        annotations: {summary: Host memory above 90 percent, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraDiskSpaceLow
         expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 85
         for: 10m
@@ -32,7 +32,7 @@ groups:
         expr: node_timex_sync_status == 0
         for: 5m
         labels: {severity: critical, service: host}
-        annotations: {summary: Host clock is not synchronized}
+        annotations: {summary: Host clock is not synchronized, runbook: operations/runbooks/critical-alert.md}
 
   - name: containers-and-http
     rules:
@@ -40,7 +40,7 @@ groups:
         expr: absent(container_last_seen{name=~"codestra-.+"})
         for: 2m
         labels: {severity: critical, service: containers}
-        annotations: {summary: Codestra container telemetry is absent}
+        annotations: {summary: Codestra container telemetry is absent, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraContainerRestarting
         expr: changes(container_start_time_seconds{name=~"codestra-.+"}[15m]) > 2
         labels: {severity: warning, service: containers}
@@ -79,22 +79,22 @@ groups:
         expr: histogram_quantile(0.95, sum by(le) (rate(codestra_event_processing_seconds_bucket[10m]))) > 5
         for: 10m
         labels: {severity: critical, service: integration}
-        annotations: {summary: P95 event-processing latency exceeds five seconds}
+        annotations: {summary: P95 event-processing latency exceeds five seconds, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraEventFailures
         expr: sum(rate(codestra_event_processing_failures_total[5m])) > 0
         for: 5m
         labels: {severity: critical, service: integration}
-        annotations: {summary: Event-processing failures detected}
+        annotations: {summary: Event-processing failures detected, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraReconciliationDrift
         expr: codestra_reconciliation_drift_records > 0
         for: 15m
         labels: {severity: critical, service: reconciliation}
-        annotations: {summary: VICIdial/middleware/Odoo reconciliation drift detected}
+        annotations: {summary: VICIdial/middleware/Odoo reconciliation drift detected, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraDatabaseUnavailable
         expr: codestra_database_up == 0
         for: 2m
         labels: {severity: critical, service: database}
-        annotations: {summary: Codestra database unavailable}
+        annotations: {summary: Codestra database unavailable, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraDatabaseConnectionsHigh
         expr: codestra_database_connections / codestra_database_max_connections > 0.8
         for: 10m
@@ -116,26 +116,26 @@ groups:
       - alert: CodestraDncFailClosed
         expr: increase(codestra_dnc_fail_closed_total[5m]) > 0
         labels: {severity: critical, service: compliance}
-        annotations: {summary: DNC fail-closed decision occurred}
+        annotations: {summary: DNC fail-closed decision occurred, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraUnauthorizedTransfer
         expr: increase(codestra_transfer_denied_total[5m]) > 0
         labels: {severity: critical, service: transfer}
-        annotations: {summary: Unauthorized transfer attempt detected}
+        annotations: {summary: Unauthorized transfer attempt detected, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraUnexpectedWorkflowActivation
         expr: codestra_n8n_active_workflows > 0
         for: 1m
         labels: {severity: critical, service: n8n}
-        annotations: {summary: Unexpected n8n workflow activation}
+        annotations: {summary: Unexpected n8n workflow activation, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraUnexpectedCampaignActivation
         expr: codestra_vicidial_unapproved_active_campaigns > 0
         for: 1m
         labels: {severity: critical, service: vicidial}
-        annotations: {summary: Unexpected VICIdial campaign activation}
+        annotations: {summary: Unexpected VICIdial campaign activation, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraConfigurationDrift
         expr: codestra_configuration_drift > 0
         for: 5m
         labels: {severity: critical, service: release}
-        annotations: {summary: Runtime image or configuration drift detected}
+        annotations: {summary: Runtime image or configuration drift detected, runbook: operations/runbooks/critical-alert.md}
       - alert: CodestraLogIngestionFailure
         expr: codestra_log_ingestion_up == 0
         for: 5m
@@ -154,9 +154,8 @@ groups:
       - alert: CodestraBackupFailure
         expr: increase(codestra_backup_failures_total[1h]) > 0
         labels: {severity: critical, service: backup}
-        annotations: {summary: Backup job failed}
+        annotations: {summary: Backup job failed, runbook: operations/runbooks/backup-failure.md}
       - alert: CodestraBackupReplicationFailure
         expr: increase(codestra_backup_replication_failures_total[1h]) > 0
         labels: {severity: critical, service: backup}
-        annotations: {summary: Off-server backup replication failed}
-
+        annotations: {summary: Off-server backup replication failed, runbook: operations/runbooks/backup-failure.md}

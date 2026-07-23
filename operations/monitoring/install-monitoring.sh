@@ -2,8 +2,10 @@
 set -euo pipefail
 
 CONFIG=${CODESTRA_ALERTMANAGER_CONFIG:-/etc/codestra/monitoring/alertmanager.yml}
+GOVERNANCE=${CODESTRA_GOVERNANCE_REFERENCES:-/etc/codestra/governance/production.env}
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+python3 "$ROOT/validate-governance.py" "$GOVERNANCE"
 [[ -r "$CONFIG" ]] || {
     echo "approved Alertmanager configuration is missing" >&2
     exit 2
@@ -12,6 +14,18 @@ if grep -q 'REPLACE_WITH_APPROVED' "$CONFIG"; then
     echo "refusing monitoring deployment with placeholder alert receiver" >&2
     exit 2
 fi
+for secret in primary_receiver_url secondary_receiver_url recovery_receiver_url; do
+    path="/etc/codestra/secrets/monitoring/$secret"
+    [[ -s "$path" ]] || {
+        echo "protected Alertmanager receiver secret is missing: $path" >&2
+        exit 2
+    }
+    mode=$(stat -c '%a' "$path")
+    [[ "$mode" == "400" || "$mode" == "440" || "$mode" == "600" || "$mode" == "640" ]] || {
+        echo "unsafe Alertmanager receiver secret mode: $path ($mode)" >&2
+        exit 2
+    }
+done
 
 docker run --rm \
     --entrypoint /bin/promtool \

@@ -2,18 +2,34 @@ global:
   resolve_timeout: 5m
 
 route:
-  receiver: approved-operations-receiver
+  receiver: approved-primary-receiver
   group_by: [alertname, environment, service]
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
   routes:
     - matchers: [severity="critical"]
+      receiver: approved-primary-receiver
+      repeat_interval: 30m
+      continue: true
+    - matchers: [severity="critical"]
+      receiver: approved-secondary-receiver
+      repeat_interval: 30m
+      continue: true
+    - matchers: [severity="critical"]
+      receiver: approved-recovery-receiver
       repeat_interval: 30m
 
 receivers:
-  - name: approved-operations-receiver
+  - name: approved-primary-receiver
     webhook_configs:
-      - url: https://REPLACE_WITH_APPROVED_ALERT_RECEIVER.invalid/codestra
+      - url_file: /run/secrets/alertmanager_primary_receiver_url
         send_resolved: true
-
+  - name: approved-secondary-receiver
+    webhook_configs:
+      - url_file: /run/secrets/alertmanager_secondary_receiver_url
+        send_resolved: true
+  - name: approved-recovery-receiver
+    webhook_configs:
+      - url_file: /run/secrets/alertmanager_recovery_receiver_url
+        send_resolved: true
