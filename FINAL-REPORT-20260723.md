@@ -35,6 +35,8 @@ campaign activation, database migration, or production cutover was performed.
 | Gate 3A remediation retest | Technically completed, formal gate remains no-go | Commit `04a4a27`; Ruff PASS, mypy PASS for 24 files, 34 tests PASS and one isolated-DB test skipped; all WP-00R policy subsets PASS; 40 workflow definitions inactive |
 | Gate 3A clean reproducibility | Technically completed | Commit `0359813`; two detached clean source/test/build runs produced source archive `ad101a7...` and identical image digest `sha256:23ebbc...`; both runs passed Ruff, mypy, and 34 tests |
 | Gate 3A hardened runtime/SBOM | Technically completed with upstream vulnerability limitation | Non-root distroless runtime, read-only smoke PASS, all capabilities dropped; CycloneDX SBOM preserved; zero critical and zero Python-package high/critical findings |
+| Backup operational framework | Technically completed, activation externally blocked | Commit `bc8fb30`; encrypted paired capture, strict-host-key replication, freshness/capacity checks, report-only retention, systemd units; 4/4 unit tests PASS |
+| Monitoring and alert framework | Technically completed, production routing externally blocked | Commit `b0e7c87`; pinned Prometheus stack, 29 rules and three runbooks validate; placeholder deployment rejected; isolated firing and resolved delivery PASS |
 
 ## 3. Remaining Blockers
 
@@ -67,6 +69,9 @@ REPRESENTATIVE_ODOO19_UPGRADE=BLOCKED_VENDOR_CONTRACT
 INDEPENDENT_GATE3A_RETEST=PASS_REMEDIATION_VERIFICATION_FORMAL_GATE_NO_GO
 TWO_CLEAN_REPRODUCIBILITY_RUNS=PASS_GATE3A_ARTIFACT
 GATE3A_IMAGE_SECURITY=NO_GO_17_UPSTREAM_HIGH_ZERO_FIXED_VERSIONS
+BACKUP_OPERATIONS_TESTS=PASS_4_OF_4
+MONITORING_RULE_VALIDATION=PASS_29_RULES
+ISOLATED_ALERT_RECEIPT_AND_RECOVERY=PASS
 ```
 
 The Gate 3A Python 3.10 incompatibility and synchronous TestClient deadlock
@@ -87,6 +92,8 @@ agent_desktop=4d72e9a939ce2c248f792004489a24d08a2a9d1c
 gate3a_remediation=04a4a272332f473480abd0817155f2cf5df21f37
 gate3a_reproducible_context=4418cc56d3b50e7d1ab30cea98b97bbd4a71db57
 gate3a_hardened_runtime=0359813771558658ed417a63915cae9a4caf5792
+platform_operations=bc8fb3048309970b1acba798993f7d349a5038e6
+alert_delivery_test=b0e7c87cdf035256209d593a832a5181e101d3c5
 ```
 
 ### Runtime images
@@ -134,11 +141,13 @@ MEASURED_FULL_ROLLBACK_TIME=NOT_AVAILABLE
 
 ## 7. Monitoring Status
 
-No Prometheus/Grafana/Alertmanager or equivalent authoritative stack is
-deployed. Container health checks exist and all core runtime containers were
-healthy with zero restarts at the evidence cutoff, but this is not a substitute
-for dashboards, durable metrics, alert routing, receipt tests, and recovery
-notifications. Required monitoring gates are `NOT_RUN`.
+The pinned Prometheus/Alertmanager/node-exporter/cAdvisor/blackbox framework
+and 29 alert rules validate, and isolated firing/recovery notification delivery
+passes. Production deployment is deliberately refused until an approved alert
+receiver is installed. Container health checks exist and all core runtime
+containers were healthy with zero restarts at the evidence cutoff, but
+production dashboards, durable metrics, and real receiver delivery remain
+`BLOCKED_EXTERNAL_PREREQUISITE`.
 
 ## 8. Security Status
 
