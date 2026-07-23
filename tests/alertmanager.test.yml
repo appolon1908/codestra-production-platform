@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 1s
+
+route:
+  receiver: isolated-test-receiver
+  group_wait: 0s
+  group_interval: 1s
+  repeat_interval: 1m
+
+receivers:
+  - name: isolated-test-receiver
+    webhook_configs:
+      - url: http://127.0.0.1:19093/alerts
+        send_resolved: true
+
