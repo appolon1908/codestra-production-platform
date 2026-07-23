@@ -1,6 +1,7 @@
 # Codestra production completion report
 
 Evidence cutoff: `2026-07-23T15:33:03Z`  
+Resumed evidence package: `/root/vicidial-evidence-resumed-20260723-154304` (`EVIDENCE_SCOPE=RESUMED_VALIDATION`)  
 Application host: `middleware` (`65.109.65.169`)  
 VICIdial host: `static` (`65.21.67.207`)  
 Environment: protected production-like runtime; destructive validation was restricted to isolated Docker projects and ephemeral volumes.
