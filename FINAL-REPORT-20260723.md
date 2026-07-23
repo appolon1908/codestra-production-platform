@@ -1,10 +1,13 @@
 # Codestra production completion report
 
 Evidence cutoff: `2026-07-23T16:31:38Z`  
+Original evidence cutoff (preserved): `2026-07-23T14:21:54Z`  
+Latest report update UTC: `2026-07-23T16:44:26Z`  
 Resumed evidence package: `/root/vicidial-evidence-resumed-20260723-154304` (`EVIDENCE_SCOPE=RESUMED_VALIDATION`)  
 Backup discovery evidence: `/root/vicidial-backup-evidence-20260723-160000` (`BACKUP_RESTORE_GATE=BLOCKED_EXTERNAL_PREREQUISITE`)  
 Odoo/n8n continuation evidence: `/root/odoo19-n8n-evidence-20260723-161309` (`ODOO19_CLEAN_COMPATIBILITY_GATE=PASS`; representative migration and runtime n8n credentials blocked)  
 Focused Odoo source-pair evidence: `/root/odoo19-n8n-canary-evidence-20260723-163138` (`REPRESENTATIVE_DATABASE_GATE=PASS_STRUCTURALLY_REPRESENTATIVE`; complete pair/application restore and official migration remain blocked)  
+Review remediation evidence: `/root/codestra-remediation-evidence-20260723-163904` (`N8N_SECRET_SCAN_INVOCATION_GATE=PASS`; `EVIDENCE_PATH_STABLE_VERIFICATION_GATE=PASS`; inventory and timestamp findings resolved)  
 Application host: `middleware` (`65.109.65.169`)  
 VICIdial host: `static` (`65.21.67.207`)  
 Environment: protected production-like runtime; destructive validation was restricted to isolated Docker projects and ephemeral volumes.
@@ -47,7 +50,7 @@ campaign activation, database migration, or production cutover was performed.
 | Component | Exact blocker | Required external action | Other work continued |
 |---|---|---|---|
 | Live VICIdial canary | Server B SSH and an operator-controlled zero-match destination now validate, but the approval does not bind campaign, synthetic list, isolated agent, trunk, caller ID, and an available operator to that destination. | Telephony owner must issue one bounded approval record containing those exact fields and provide the operator for the approved window. | Yes |
-| n8n runtime staging | Application runtime contains 19 inactive workflows but approved staging-only JWT/HTTP credential mappings are absent. | Credential owner must provision/map staging-only credentials and approved base URLs in n8n’s credential store. | Yes |
+| n8n runtime staging | The staged validation scope contains 27 inactive workflow definitions on disk; the earlier runtime database contained 19 workflow records. These are separate inventories. Approved staging-only JWT/HTTP credential mappings remain absent. | Credential owner must provision/map staging-only credentials and approved base URLs in n8n’s credential store; an approved import/reconciliation step is required before treating the inventories as identical. | Yes |
 | Runtime identity/RBAC | Isolated Keycloak tests pass, but Odoo/Agent Desktop runtime role matrix and DNC/transfer endpoint matrices lack protected test identities/credentials. | Identity owner must provide bounded staging test identities for all required roles and revocation/disablement cases. | Yes |
 | Backup replication | Protected Hetzner token reference exists but provider API validation returned HTTP 401; no distinct off-server target, encryption recipient, pinned host key, or replication identity could be validated. | Infrastructure owner must provide a valid scoped provider credential or approved off-server target plus encryption/SSH references. | Yes |
 | Monitoring | No approved alert receiver/routing destination exists and no authoritative monitoring stack is deployed. | Operations owner must provide the alert destination/escalation policy and approve monitoring endpoint exposure. | Yes |
@@ -176,6 +179,21 @@ NPM_DEPENDENCY_AUDIT=PASS_ZERO_KNOWN
 
 All n8n production-capability flags are explicitly false. Runtime database
 inspection reports `19` workflows and `0` active workflows.
+
+## 8A. Focused remediation gates
+
+```text
+N8N_SECRET_SCAN_INVOCATION_GATE=PASS
+EVIDENCE_PATH_STABLE_VERIFICATION_GATE=PASS
+N8N_WORKFLOW_INVENTORY_CLARITY_GATE=PASS
+REPORT_TIMESTAMP_CONSISTENCY_GATE=PASS
+STAGED_WORKFLOW_FILES_COUNT=27
+RUNTIME_DATABASE_WORKFLOWS_COUNT=19
+```
+
+The 27 count is the staged on-disk validation scope; the 19 count is the
+earlier runtime database inventory. No workflow was activated or imported to
+reconcile these counts.
 
 ## 9. Go-Live Recommendation
 
