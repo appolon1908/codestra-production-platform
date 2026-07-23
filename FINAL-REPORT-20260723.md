@@ -2,12 +2,13 @@
 
 Evidence cutoff: `2026-07-23T16:31:38Z`  
 Original evidence cutoff (preserved): `2026-07-23T14:21:54Z`  
-Latest report update UTC: `2026-07-23T16:46:57Z`  
+Latest report update UTC: `2026-07-23T17:19:21Z`
 Resumed evidence package: `/root/vicidial-evidence-resumed-20260723-154304` (`EVIDENCE_SCOPE=RESUMED_VALIDATION`)  
 Backup discovery evidence: `/root/vicidial-backup-evidence-20260723-160000` (`BACKUP_RESTORE_GATE=BLOCKED_EXTERNAL_PREREQUISITE`)  
 Odoo/n8n continuation evidence: `/root/odoo19-n8n-evidence-20260723-161309` (`ODOO19_CLEAN_COMPATIBILITY_GATE=PASS`; representative migration and runtime n8n credentials blocked)  
 Focused Odoo source-pair evidence: `/root/odoo19-n8n-canary-evidence-20260723-163138` (`REPRESENTATIVE_DATABASE_GATE=PASS_STRUCTURALLY_REPRESENTATIVE`; complete pair/application restore and official migration remain blocked)  
 Review remediation evidence: `/root/codestra-remediation-evidence-20260723-163904` (`N8N_SECRET_SCAN_INVOCATION_GATE=PASS`; `EVIDENCE_PATH_STABLE_VERIFICATION_GATE=PASS`; inventory and timestamp findings resolved)  
+Focused Odoo/n8n/canary continuation: `/root/odoo19-n8n-continuation-evidence-20260723-171921` (`DATABASE_FILESTORE_PAIR_GATE=PASS`; official Odoo upgrade, governance, isolated n8n staging, and signed canary prerequisites remain external blockers)
 Application host: `middleware` (`65.109.65.169`)  
 VICIdial host: `static` (`65.21.67.207`)  
 Environment: protected production-like runtime; destructive validation was restricted to isolated Docker projects and ephemeral volumes.
@@ -29,7 +30,7 @@ campaign activation, database migration, or production cutover was performed.
 | Area | Status | Executable evidence |
 |---|---|---|
 | Recovery point integrity | Technically completed | `/opt/codestra/backups/production-completion/20260723T122852Z/SHA256SUMS`: all nine listed artifacts passed `sha256sum -c` |
-| Odoo database/filestore restore | Technically completed, protected human login not run | Prior isolated restore: registry/HTTP/login page PASS, 208 database attachments with store files, zero missing files, measured restore 18 seconds |
+| Odoo database/filestore restore | Technically completed | Full isolated Odoo 18 application restore PASS: registry, admin/non-admin authentication, five attachments across five models, PostgreSQL/Odoo restart and repeated checks; 32 seconds |
 | Middleware isolated verification | Technically completed | `ruff check app tests` PASS; `mypy app` PASS for 30 files; `PYTHONPATH=. pytest -q` PASS, 30 tests |
 | n8n isolated Gate 5 | Technically completed | `scripts/run_gate5_acceptance.sh`: 12 manifest workflows imported inactive; signature/scope/idempotency/conflict/redaction/dead-letter/replay/no-side-effect PASS; middleware outage PASS; restart recovery PASS; final `GATE5_ACCEPTANCE=PASS` |
 | Identity isolated Gate 2 | Technically completed | `scripts/run_gate2_acceptance.sh`: browser PKCE, exact redirect, replay rejection, TOTP MFA, service credentials, logout/revocation, gateway session, JWT issuer/audience/expiry/nbf/algorithm/unknown-kid/signature and live JWKS rotation PASS |
@@ -50,13 +51,12 @@ campaign activation, database migration, or production cutover was performed.
 | Component | Exact blocker | Required external action | Other work continued |
 |---|---|---|---|
 | Live VICIdial canary | Server B SSH and an operator-controlled zero-match destination now validate, but the approval does not bind campaign, synthetic list, isolated agent, trunk, caller ID, and an available operator to that destination. | Telephony owner must issue one bounded approval record containing those exact fields and provide the operator for the approved window. | Yes |
-| n8n runtime staging | The staged validation scope contains 27 inactive workflow definitions on disk; the earlier runtime database contained 19 workflow records. These are separate inventories. Approved staging-only JWT/HTTP credential mappings remain absent. | Credential owner must provision/map staging-only credentials and approved base URLs in n8n’s credential store; an approved import/reconciliation step is required before treating the inventories as identical. | Yes |
+| n8n runtime staging | The staged validation scope contains 27 inactive workflow definitions on disk; the shared runtime database contains 19 inactive records and zero credentials. No separate staging deployment exists. Existing staging host aliases target shared production-like n8n/middleware services and do not prove isolation. | Platform and credential owners must approve/provision a separate `codestra-flow-staging` deployment, staging-only credentials, and Odoo 19/middleware/callback URLs; then perform approved import/reconciliation. | Yes |
 | Runtime identity/RBAC | Isolated Keycloak tests pass, but Odoo/Agent Desktop runtime role matrix and DNC/transfer endpoint matrices lack protected test identities/credentials. | Identity owner must provide bounded staging test identities for all required roles and revocation/disablement cases. | Yes |
 | Backup replication | Protected Hetzner token reference exists but provider API validation returned HTTP 401; no distinct off-server target, encryption recipient, pinned host key, or replication identity could be validated. | Infrastructure owner must provide a valid scoped provider credential or approved off-server target plus encryption/SSH references. | Yes |
 | Monitoring | No approved alert receiver/routing destination exists and no authoritative monitoring stack is deployed. | Operations owner must provide the alert destination/escalation policy and approve monitoring endpoint exposure. | Yes |
-| Odoo 19 representative migration | Official Odoo upgrade client requires a contract/access reference; none is present. | Contract owner/vendor must provide the official upgrade reference or an officially upgraded representative dump paired with its filestore. | Yes |
+| Odoo 19 representative migration | The source database/filestore pair now passes the complete application restore gate. Official Odoo upgrade entitlement/ticket and named migration/acceptance/rollback/security owners remain absent. | Contract owner must authorize and submit the official test upgrade; change owners must complete the prepared governance and rollback forms. | Yes |
 | Media/WebRTC | Approved media lab, SIP test identity, and supported Edge runner are unavailable. | Telephony owner must provide bounded staging SIP/media credentials and the approved lab. | Yes |
-| Human login restore proof | No protected human test credential was available for restored Odoo. | Application owner must perform or delegate the protected restored-user login check. | Yes |
 | Production approval | Human approver and signature cannot be fabricated. | Authorized approver must review the completed gates and sign only after all mandatory failures/blockers close. | Yes |
 
 ## 4. Test Summary
@@ -68,8 +68,8 @@ N8N_ISOLATED_INTEGRATION=PASS_GATE5
 IDENTITY_ISOLATED_SECURITY=PASS_GATE2
 BROWSER_TEST_CHROMIUM=PASS_1_OF_1
 DEPENDENCY_SECURITY_SCAN=PASS_ZERO_KNOWN_NPM_VULNERABILITIES
-RESTORE_TEST=PASS_DATABASE_FILESTORE_REGISTRY_HTTP_LOGIN_PAGE
-PROTECTED_HUMAN_RESTORE_LOGIN=NOT_RUN_CREDENTIAL_UNAVAILABLE
+RESTORE_TEST=PASS_DATABASE_FILESTORE_REGISTRY_AUTH_ATTACHMENTS_RESTART
+PROTECTED_HUMAN_RESTORE_LOGIN=PASS_DISPOSABLE_ADMIN_AND_NONADMIN_CREDENTIALS
 CANARY_DESTINATION_ZERO_MATCH=PASS_ALL_CHECKED_SCOPES
 SERVER_B_SSH=PASS
 LIVE_CANARY=BLOCKED_EXTERNAL_TELEPHONY_APPROVAL_BINDING
@@ -141,8 +141,8 @@ been applied to the representative runtime database.
 ```text
 LAST_VERIFIED_RECOVERY_POINT=/opt/codestra/backups/production-completion/20260723T122852Z
 CHECKSUM_VALIDATION=PASS
-ODOO_DATABASE_FILESTORE_PAIR=PASS_CAPTURED_WHILE_ODOO_QUIESCED
-ODOO_RESTORE_SECONDS=18
+ODOO_DATABASE_FILESTORE_PAIR=PASS_FULL_APPLICATION_RESTORE_AND_RESTART
+ODOO_RESTORE_SECONDS=32
 OFF_SERVER_REPLICATION=BLOCKED_TARGET_AND_ENCRYPTION_REFERENCE_ABSENT
 SCHEDULED_BACKUP=NOT_OPERATIONAL
 BACKUP_ALERTS=NOT_OPERATIONAL
