@@ -14,10 +14,10 @@ production traffic.
 | Change ID | |
 | Official Odoo upgrade request/ticket | |
 | Covered subscription/contract reference | |
-| Source backup identifier | `odoo19-n8n-canary-evidence-20260723-163138/source-pair` |
-| Source database SHA-256 | Record from validated evidence manifest |
-| Source filestore SHA-256 | Record from validated evidence manifest |
-| Exact custom-addons commits | |
+| Source backup identifier | `/root/odoo19-representative-migration-20260723T210200Z/source-pair` |
+| Source database SHA-256 | `877f447fb1510c03f729705e2b7238d3d9948fe9fa756e157ee3a9f6c7659e16` |
+| Source filestore SHA-256 | `086b6cfaf79d5b5773dcab06d42bdf571ac7ae8f3362ab7efbc8c8be37987fa7` |
+| Exact custom-addons commits | Odoo 18 capture: `e1b8ca76955185b7e9609cf501bfea1dfdeb61e6` plus captured dirty-tree manifest; Odoo 19 port: `a48f12f355239e9bac725898eca6976aa0c55fa2`; test pin: `3f2eff50254d62cb42531fe72e9d0be2cdb1a7d2` |
 | Migration window start | |
 | Migration window end | |
 | Timezone | |
