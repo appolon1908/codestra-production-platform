@@ -1,0 +1,17 @@
+[Unit]
+Description=Codestra encrypted application backup and off-server replication
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/codestra/backup/backup.env
+ExecStart=/opt/codestra/operations/backup/codestra-backup.sh
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/codestra/backups
+NoNewPrivileges=true
+

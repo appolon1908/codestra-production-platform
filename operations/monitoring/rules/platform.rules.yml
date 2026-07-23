@@ -1,0 +1,162 @@
+groups:
+  - name: host
+    rules:
+      - alert: CodestraHostUnavailable
+        expr: up{job="node"} == 0
+        for: 2m
+        labels: {severity: critical, service: host}
+        annotations:
+          summary: Codestra host exporter unavailable
+          runbook: operations/runbooks/host-unavailable.md
+      - alert: CodestraHostCpuHigh
+        expr: 100 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100 > 90
+        for: 15m
+        labels: {severity: warning, service: host}
+        annotations: {summary: Host CPU above 90 percent for 15 minutes}
+      - alert: CodestraHostMemoryHigh
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
+        for: 10m
+        labels: {severity: critical, service: host}
+        annotations: {summary: Host memory above 90 percent}
+      - alert: CodestraDiskSpaceLow
+        expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 85
+        for: 10m
+        labels: {severity: warning, service: storage}
+        annotations: {summary: Filesystem utilization above 85 percent}
+      - alert: CodestraDiskInodesLow
+        expr: (1 - node_filesystem_files_free{fstype!~"tmpfs|overlay"} / node_filesystem_files{fstype!~"tmpfs|overlay"}) * 100 > 85
+        for: 10m
+        labels: {severity: warning, service: storage}
+        annotations: {summary: Filesystem inode utilization above 85 percent}
+      - alert: CodestraClockUnsynchronized
+        expr: node_timex_sync_status == 0
+        for: 5m
+        labels: {severity: critical, service: host}
+        annotations: {summary: Host clock is not synchronized}
+
+  - name: containers-and-http
+    rules:
+      - alert: CodestraContainerMissing
+        expr: absent(container_last_seen{name=~"codestra-.+"})
+        for: 2m
+        labels: {severity: critical, service: containers}
+        annotations: {summary: Codestra container telemetry is absent}
+      - alert: CodestraContainerRestarting
+        expr: changes(container_start_time_seconds{name=~"codestra-.+"}[15m]) > 2
+        labels: {severity: warning, service: containers}
+        annotations: {summary: Container restarted more than twice in 15 minutes}
+      - alert: CodestraEndpointUnavailable
+        expr: probe_success{job="blackbox_https"} == 0
+        for: 2m
+        labels: {severity: critical, service: endpoint}
+        annotations:
+          summary: "Codestra endpoint unavailable: {{ $labels.instance }}"
+          runbook: operations/runbooks/endpoint-unavailable.md
+      - alert: CodestraEndpointLatencyHigh
+        expr: probe_duration_seconds{job="blackbox_https"} > 2
+        for: 10m
+        labels: {severity: warning, service: endpoint}
+        annotations: {summary: Endpoint latency above two seconds}
+      - alert: CodestraTlsCertificateExpiring
+        expr: probe_ssl_earliest_cert_expiry - time() < 1209600
+        for: 1h
+        labels: {severity: warning, service: tls}
+        annotations: {summary: TLS certificate expires within 14 days}
+
+  - name: integration
+    rules:
+      - alert: CodestraDeadLetterQueueNonEmpty
+        expr: codestra_dead_letter_depth > 0
+        for: 5m
+        labels: {severity: warning, service: integration}
+        annotations: {summary: Dead-letter queue contains events}
+      - alert: CodestraRetryVolumeHigh
+        expr: sum(rate(codestra_retry_total[10m])) > 0.2
+        for: 10m
+        labels: {severity: warning, service: integration}
+        annotations: {summary: Retry volume exceeds approved threshold}
+      - alert: CodestraEventLatencyHigh
+        expr: histogram_quantile(0.95, sum by(le) (rate(codestra_event_processing_seconds_bucket[10m]))) > 5
+        for: 10m
+        labels: {severity: critical, service: integration}
+        annotations: {summary: P95 event-processing latency exceeds five seconds}
+      - alert: CodestraEventFailures
+        expr: sum(rate(codestra_event_processing_failures_total[5m])) > 0
+        for: 5m
+        labels: {severity: critical, service: integration}
+        annotations: {summary: Event-processing failures detected}
+      - alert: CodestraReconciliationDrift
+        expr: codestra_reconciliation_drift_records > 0
+        for: 15m
+        labels: {severity: critical, service: reconciliation}
+        annotations: {summary: VICIdial/middleware/Odoo reconciliation drift detected}
+      - alert: CodestraDatabaseUnavailable
+        expr: codestra_database_up == 0
+        for: 2m
+        labels: {severity: critical, service: database}
+        annotations: {summary: Codestra database unavailable}
+      - alert: CodestraDatabaseConnectionsHigh
+        expr: codestra_database_connections / codestra_database_max_connections > 0.8
+        for: 10m
+        labels: {severity: warning, service: database}
+        annotations: {summary: Database connection utilization exceeds 80 percent}
+
+  - name: security-and-change
+    rules:
+      - alert: CodestraAuthenticationFailuresHigh
+        expr: sum(rate(codestra_authentication_failures_total[5m])) > 0.2
+        for: 5m
+        labels: {severity: warning, service: identity}
+        annotations: {summary: Authentication failure rate exceeds threshold}
+      - alert: CodestraAuthorizationFailuresHigh
+        expr: sum(rate(codestra_authorization_failures_total[5m])) > 0.2
+        for: 5m
+        labels: {severity: warning, service: authorization}
+        annotations: {summary: Authorization failure rate exceeds threshold}
+      - alert: CodestraDncFailClosed
+        expr: increase(codestra_dnc_fail_closed_total[5m]) > 0
+        labels: {severity: critical, service: compliance}
+        annotations: {summary: DNC fail-closed decision occurred}
+      - alert: CodestraUnauthorizedTransfer
+        expr: increase(codestra_transfer_denied_total[5m]) > 0
+        labels: {severity: critical, service: transfer}
+        annotations: {summary: Unauthorized transfer attempt detected}
+      - alert: CodestraUnexpectedWorkflowActivation
+        expr: codestra_n8n_active_workflows > 0
+        for: 1m
+        labels: {severity: critical, service: n8n}
+        annotations: {summary: Unexpected n8n workflow activation}
+      - alert: CodestraUnexpectedCampaignActivation
+        expr: codestra_vicidial_unapproved_active_campaigns > 0
+        for: 1m
+        labels: {severity: critical, service: vicidial}
+        annotations: {summary: Unexpected VICIdial campaign activation}
+      - alert: CodestraConfigurationDrift
+        expr: codestra_configuration_drift > 0
+        for: 5m
+        labels: {severity: critical, service: release}
+        annotations: {summary: Runtime image or configuration drift detected}
+      - alert: CodestraLogIngestionFailure
+        expr: codestra_log_ingestion_up == 0
+        for: 5m
+        labels: {severity: warning, service: logging}
+        annotations: {summary: Log ingestion unavailable}
+
+  - name: backup
+    rules:
+      - alert: CodestraBackupStale
+        expr: time() - codestra_backup_last_success_timestamp_seconds > 93600
+        for: 15m
+        labels: {severity: critical, service: backup}
+        annotations:
+          summary: Latest successful backup is older than 26 hours
+          runbook: operations/runbooks/backup-failure.md
+      - alert: CodestraBackupFailure
+        expr: increase(codestra_backup_failures_total[1h]) > 0
+        labels: {severity: critical, service: backup}
+        annotations: {summary: Backup job failed}
+      - alert: CodestraBackupReplicationFailure
+        expr: increase(codestra_backup_replication_failures_total[1h]) > 0
+        labels: {severity: critical, service: backup}
+        annotations: {summary: Off-server backup replication failed}
+

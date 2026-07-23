@@ -1,0 +1,14 @@
+[Unit]
+Description=Validate Codestra backup freshness and storage capacity
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/codestra/backup/backup.env
+ExecStart=/opt/codestra/operations/backup/check-backup-state.sh
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+
