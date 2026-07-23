@@ -3,6 +3,8 @@
 Evidence cutoff: `2026-07-23T16:31:38Z`  
 Original evidence cutoff (preserved): `2026-07-23T14:21:54Z`  
 Latest report update UTC: `2026-07-23T17:19:21Z`
+Latest resumed validation UTC: `2026-07-23T20:38:00Z`
+Latest resumed validation evidence: `/root/codestra-production-completion/evidence/RESUME-20260723T203800Z.md`
 Resumed evidence package: `/root/vicidial-evidence-resumed-20260723-154304` (`EVIDENCE_SCOPE=RESUMED_VALIDATION`)  
 Backup discovery evidence: `/root/vicidial-backup-evidence-20260723-160000` (`BACKUP_RESTORE_GATE=BLOCKED_EXTERNAL_PREREQUISITE`)  
 Odoo/n8n continuation evidence: `/root/odoo19-n8n-evidence-20260723-161309` (`ODOO19_CLEAN_COMPATIBILITY_GATE=PASS`; representative migration and runtime n8n credentials blocked)  
@@ -21,6 +23,12 @@ PRODUCTION_READINESS_CLAIM=NO
 GO_LIVE_RECOMMENDATION=NO_GO
 HUMAN_SIGNATURE_STATUS=AWAITING_HUMAN_SIGNATURE
 ```
+
+The latest resumed validation preserved the fail-closed runtime and refreshed
+the recovery, operations, Agent Desktop, n8n-inactive, and Server B safety
+checks. The canonical safety verifier remains `FAIL` because its approved
+Agent Desktop baseline does not match the current prepared working tree. The
+baseline was not promoted without an approval record.
 
 Mandatory technical gates remain incomplete. No production call, workflow activation,
 campaign activation, database migration, or production cutover was performed.
