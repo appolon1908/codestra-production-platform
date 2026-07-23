@@ -2,7 +2,7 @@
 
 Evidence cutoff: `2026-07-23T16:31:38Z`  
 Original evidence cutoff (preserved): `2026-07-23T14:21:54Z`  
-Latest report update UTC: `2026-07-23T16:44:26Z`  
+Latest report update UTC: `2026-07-23T16:46:57Z`  
 Resumed evidence package: `/root/vicidial-evidence-resumed-20260723-154304` (`EVIDENCE_SCOPE=RESUMED_VALIDATION`)  
 Backup discovery evidence: `/root/vicidial-backup-evidence-20260723-160000` (`BACKUP_RESTORE_GATE=BLOCKED_EXTERNAL_PREREQUISITE`)  
 Odoo/n8n continuation evidence: `/root/odoo19-n8n-evidence-20260723-161309` (`ODOO19_CLEAN_COMPATIBILITY_GATE=PASS`; representative migration and runtime n8n credentials blocked)  
