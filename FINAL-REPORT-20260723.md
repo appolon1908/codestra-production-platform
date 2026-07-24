@@ -289,3 +289,34 @@ This Phase 2 result does not change the overall production `NO_GO`: the
 official representative Odoo upgrade/governance gates, monitoring delivery,
 TURN/WebRTC lab, bounded signed canary authorization, and final human change
 approval remain outside this phase.
+
+## 13. Legacy queue disposition revalidation
+
+Evidence cutoff: `2026-07-24T01:05:39Z`  
+Evidence package:
+`/root/legacy-queue-disposition-evidence-20260724-010539`
+
+The live queue remains InnoDB with exactly 1,110 pending and one prior sent
+row. All pending records remain valid JSON but unsupported, unsigned, stale,
+and non-deliverable; retry counts remain zero. The normalized row ID, payload
+hash, status, and retry inventory matches the prior candidate manifest.
+
+Fresh read-only reconciliation found zero exact middleware/Odoo payload
+matches, two rows with newer authoritative Odoo state, and 1,108 unmatched
+rows. All 1,110 remain manual-review candidates. The sync service is still
+disabled/inactive, `SEND_EVENTS=false`, and both runtime and systemd kill
+switches remain active.
+
+No mandatory owner, approval, policy, archive recipient/destination,
+transaction, rollback, maintenance-window, or change-control prerequisite is
+validated. The only change record is explicitly `DRAFT_NOT_APPROVED`.
+Therefore no backup/archive transaction, mutating dry run, queue transaction,
+or rollback transaction was permitted or attempted.
+
+```text
+QUEUE_MUTATION_ATTEMPTED=NO
+LEGACY_QUEUE_GATE=QUARANTINED_INDEFINITELY
+```
+
+No queue row was delivered, replayed, rewritten, archived, deleted, rejected,
+or marked sent.
