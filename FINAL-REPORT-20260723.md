@@ -320,3 +320,49 @@ LEGACY_QUEUE_GATE=QUARANTINED_INDEFINITELY
 
 No queue row was delivered, replayed, rewritten, archived, deleted, rejected,
 or marked sent.
+
+## 14. Production alert receiver and human escalation routing
+
+Evidence cutoff: `2026-07-24T01:16Z`
+Evidence package:
+`/root/production-alert-routing-evidence-20260724-011608`
+
+No live Prometheus, Alertmanager, node exporter, cAdvisor, blackbox exporter,
+or Grafana deployment exists on the application server. Discovery of the
+approved secure locations found no authoritative production receiver,
+recovery receiver, primary or secondary escalation owner, protected contact
+reference, escalation policy, acknowledgment window, monitoring approver, or
+maintenance-window record. The existing example receiver is explicitly a
+placeholder and was not promoted.
+
+Receiver-independent validation passed for the non-secret candidate
+configuration: Prometheus loaded 29 rules, Alertmanager syntax validated using
+localhost-only test receiver references, and eight operations tests passed.
+An isolated Docker network demonstrated firing and resolved delivery,
+deduplication, redacted receiver-failure logging, retry and recovery after the
+receiver returned, Alertmanager restart, invalid-configuration rejection, and
+configuration rollback. All isolated containers, network, volume, and test
+receiver references were removed afterward.
+
+These local tests do not constitute production delivery or human
+acknowledgment. The current rule set also lacks part of the required critical
+coverage and required annotations, and corresponding runbooks are incomplete.
+Consequently:
+
+```text
+PRODUCTION_ALERT_RECEIVER_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+HUMAN_ESCALATION_ROUTING_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+CRITICAL_ALERT_RULE_GATE=FAIL
+ALERT_RUNBOOK_GATE=FAIL
+```
+
+The required external owner action is to provide approved protected references
+for the production and recovery receivers, primary and secondary owners and
+contacts, escalation/after-hours policy and timing, and the monitoring change
+approval/window. Only then may production delivery and real human
+acknowledgment/escalation be tested.
+
+No production application container was changed. No call, callback, transfer,
+workflow, queue delivery, or production write occurred. The sync service
+remains disabled/inactive, production delivery flags remain false, and the
+1,110 quarantined historical records remain unchanged.
