@@ -259,3 +259,33 @@ No Server B command, event injection, call, transfer, callback, workflow
 activation, production database write, or queue mutation occurred. The 1,110
 historical events remain quarantined with zero deliverable and no mutation
 authority. The controlled canary was not run.
+
+## 12. Phase 2 isolated staging-chain provisioning
+
+Evidence cutoff: `2026-07-24T00:56Z`  
+Evidence package:
+`/root/full-stack-phase2-evidence-20260724-004648`
+
+The missing Phase 2 infrastructure was provisioned and validated. Approved SSH
+access to Server B was restored; Server B services, zero-call state, private
+listeners, sync kill switches, and private mTLS connectivity passed. Dedicated
+middleware staging, Odoo 19 staging, PostgreSQL/Redis resources, a private
+authenticated callback receiver, and protected Odoo/Keycloak RBAC identities
+are healthy and isolated.
+
+One canonical synthetic event traversed the Server B test boundary, private
+mTLS ingress, middleware staging, controlled Odoo 19 and n8n staging handoffs,
+the signed staging callback, and reconciliation. Duplicate suppression,
+restart persistence, and network-disabled restore of middleware, Odoo, n8n,
+and the Odoo filestore passed. The middleware compatibility correction and
+regression test are committed as `7ad2ccd`.
+
+All production/write/delivery flags remained false. n8n has zero active
+workflows. Queue status remains 1,110 pending and one prior sent record; the
+sync service remains disabled/inactive. No historical event or payload was
+mutated or delivered. TURN/WebRTC and the controlled-call canary were not run.
+
+This Phase 2 result does not change the overall production `NO_GO`: the
+official representative Odoo upgrade/governance gates, monitoring delivery,
+TURN/WebRTC lab, bounded signed canary authorization, and final human change
+approval remain outside this phase.
