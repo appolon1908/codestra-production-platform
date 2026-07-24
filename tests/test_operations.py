@@ -154,14 +154,15 @@ class MonitoringGovernanceTests(unittest.TestCase):
         keys = (
             "PRODUCTION_ALERT_RECEIVER",
             "PRIMARY_ESCALATION_OWNER",
-            "PRIMARY_PROTECTED_CONTACT",
+            "PRIMARY_ESCALATION_CONTACT_REFERENCE",
             "SECONDARY_ESCALATION_OWNER",
-            "SECONDARY_PROTECTED_CONTACT",
+            "SECONDARY_ESCALATION_CONTACT_REFERENCE",
             "RECOVERY_NOTIFICATION_RECEIVER",
+            "RECOVERY_RECEIVER_OWNER_REFERENCE",
             "ALERT_ESCALATION_POLICY_REFERENCE",
-            "PRIMARY_ACKNOWLEDGMENT_WINDOW",
-            "SECONDARY_ESCALATION_WINDOW",
-            "MONITORING_APPROVAL_REFERENCE",
+            "ALERT_ACKNOWLEDGMENT_TIMEOUT_MINUTES",
+            "SECONDARY_ESCALATION_DELAY_MINUTES",
+            "MONITORING_APPROVER",
             "AFTER_HOURS_POLICY_REFERENCE",
             "INCIDENT_RESPONSE_OWNER",
             "MONITORING_OWNER",
@@ -183,7 +184,14 @@ class MonitoringGovernanceTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "governance.env"
-            path.write_text("".join(f"{key}=approved-reference-{index}\n" for index, key in enumerate(keys)))
+            values = {
+                key: (
+                    "5" if key in {"ALERT_ACKNOWLEDGMENT_TIMEOUT_MINUTES", "SECONDARY_ESCALATION_DELAY_MINUTES"}
+                    else f"approved-reference-{index}"
+                )
+                for index, key in enumerate(keys)
+            }
+            path.write_text("".join(f"{key}={value}\n" for key, value in values.items()))
             result = subprocess.run(
                 ["python3", str(MONITORING / "validate-governance.py"), str(path)],
                 text=True,
@@ -191,7 +199,7 @@ class MonitoringGovernanceTests(unittest.TestCase):
                 check=False,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("count=28", result.stdout)
+        self.assertIn("count=29", result.stdout)
 
     def test_every_critical_alert_has_an_existing_runbook(self) -> None:
         document = yaml.safe_load(

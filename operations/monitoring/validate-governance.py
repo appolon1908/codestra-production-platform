@@ -10,14 +10,15 @@ from pathlib import Path
 REQUIRED = (
     "PRODUCTION_ALERT_RECEIVER",
     "PRIMARY_ESCALATION_OWNER",
-    "PRIMARY_PROTECTED_CONTACT",
+    "PRIMARY_ESCALATION_CONTACT_REFERENCE",
     "SECONDARY_ESCALATION_OWNER",
-    "SECONDARY_PROTECTED_CONTACT",
+    "SECONDARY_ESCALATION_CONTACT_REFERENCE",
     "RECOVERY_NOTIFICATION_RECEIVER",
+    "RECOVERY_RECEIVER_OWNER_REFERENCE",
     "ALERT_ESCALATION_POLICY_REFERENCE",
-    "PRIMARY_ACKNOWLEDGMENT_WINDOW",
-    "SECONDARY_ESCALATION_WINDOW",
-    "MONITORING_APPROVAL_REFERENCE",
+    "ALERT_ACKNOWLEDGMENT_TIMEOUT_MINUTES",
+    "SECONDARY_ESCALATION_DELAY_MINUTES",
+    "MONITORING_APPROVER",
     "AFTER_HOURS_POLICY_REFERENCE",
     "INCIDENT_RESPONSE_OWNER",
     "MONITORING_OWNER",
@@ -67,6 +68,13 @@ def main() -> int:
     ]
     if invalid:
         print("invalid or missing governance references: " + ", ".join(invalid), file=sys.stderr)
+        return 2
+    numeric = ("ALERT_ACKNOWLEDGMENT_TIMEOUT_MINUTES", "SECONDARY_ESCALATION_DELAY_MINUTES")
+    try:
+        if any(int(values[key]) <= 0 for key in numeric):
+            raise ValueError
+    except ValueError:
+        print("invalid positive integer governance timing", file=sys.stderr)
         return 2
     print(f"governance_references=validated count={len(REQUIRED)}")
     return 0
