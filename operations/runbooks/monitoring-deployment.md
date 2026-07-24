@@ -18,6 +18,9 @@ sudo env CODESTRA_MONITORING_VALIDATE_ONLY=true \
 ```
 
 Record config digests and parser output. Validation is not deployment approval.
+The installer performs sanitized DNS/TCP validation for HTTP receivers and
+certificate-validating TLS connectivity for HTTPS receivers. It prints only
+receiver type, protected path, ownership/mode, and SHA-256 fingerprint.
 
 ## Approved deployment only
 

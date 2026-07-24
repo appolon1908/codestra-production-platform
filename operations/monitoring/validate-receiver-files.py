@@ -4,18 +4,39 @@
 from __future__ import annotations
 
 import sys
+import hashlib
+import socket
+import ssl
 import urllib.parse
 from pathlib import Path
 
 import yaml
 
 
+ALLOWED_MODES = {0o400, 0o440, 0o600, 0o640}
+
+
+def reachable(parsed: urllib.parse.ParseResult) -> None:
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    with socket.create_connection((parsed.hostname, port), timeout=10) as connection:
+        if parsed.scheme == "https":
+            context = ssl.create_default_context()
+            with context.wrap_socket(connection, server_hostname=parsed.hostname):
+                pass
+
+
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: validate-receiver-files.py ALERTMANAGER_CONFIG HOST_SECRET_DIR", file=sys.stderr)
+    args = sys.argv[1:]
+    check_network = False
+    if "--check-network" in args:
+        args.remove("--check-network")
+        check_network = True
+    if len(args) != 2:
+        print("usage: validate-receiver-files.py [--check-network] ALERTMANAGER_CONFIG HOST_SECRET_DIR", file=sys.stderr)
         return 2
-    config_path, secret_dir = map(Path, sys.argv[1:])
+    config_path, secret_dir = map(Path, args)
     config = yaml.safe_load(config_path.read_text())
+    validated = 0
     for receiver in config.get("receivers", []):
         for webhook in receiver.get("webhook_configs", []):
             if "url" in webhook:
@@ -29,6 +50,14 @@ def main() -> int:
             if not actual.is_file() or not actual.read_text().strip():
                 print(f"empty receiver file: {actual}", file=sys.stderr)
                 return 2
+            metadata = actual.stat()
+            mode = metadata.st_mode & 0o777
+            if metadata.st_uid != 0 or metadata.st_gid != 0:
+                print(f"unsafe receiver file owner: {actual}", file=sys.stderr)
+                return 2
+            if mode not in ALLOWED_MODES:
+                print(f"unsafe receiver file mode: {actual} ({mode:o})", file=sys.stderr)
+                return 2
             value = actual.read_text().strip()
             parsed = urllib.parse.urlparse(value)
             if parsed.scheme not in {"https", "http"} or not parsed.hostname:
@@ -41,7 +70,23 @@ def main() -> int:
             ):
                 print(f"placeholder receiver URL rejected: {actual}", file=sys.stderr)
                 return 2
-    print("receiver_files=validated")
+            if check_network:
+                try:
+                    reachable(parsed)
+                except (OSError, ssl.SSLError, ValueError) as exc:
+                    print(f"receiver network validation failed: {actual} ({type(exc).__name__})", file=sys.stderr)
+                    return 2
+            fingerprint = hashlib.sha256(value.encode()).hexdigest()
+            receiver_type = receiver.get("name", "unknown").replace("approved-", "")
+            print(
+                f"receiver_type={receiver_type} path={actual} owner=root:root "
+                f"mode={mode:o} fingerprint={fingerprint} network={'PASS' if check_network else 'NOT_CHECKED'}"
+            )
+            validated += 1
+    if validated != 4:
+        print(f"receiver reference count invalid: {validated}", file=sys.stderr)
+        return 2
+    print(f"receiver_files=validated count={validated}")
     return 0
 
 

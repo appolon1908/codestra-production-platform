@@ -110,12 +110,30 @@ class MonitoringGovernanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for index, name in enumerate(("primary_receiver_url", "secondary_receiver_url", "recovery_receiver_url", "rejected_route_url")):
-                (root / name).write_text(f"https://alerts.internal.testdomain/receiver-{index}")
+                path = root / name
+                path.write_text(f"https://alerts.internal.testdomain/receiver-{index}")
+                path.chmod(0o600)
             result = subprocess.run(
                 ["python3", str(MONITORING / "validate-receiver-files.py"), str(MONITORING / "alertmanager.example.yml"), str(root)],
                 text=True, capture_output=True, check=False,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("receiver_files=validated count=4", result.stdout)
+        self.assertNotIn("https://", result.stdout)
+
+    def test_receiver_validator_rejects_unsafe_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, name in enumerate(("primary_receiver_url", "secondary_receiver_url", "recovery_receiver_url", "rejected_route_url")):
+                path = root / name
+                path.write_text(f"https://alerts.internal.testdomain/receiver-{index}")
+                path.chmod(0o666)
+            result = subprocess.run(
+                ["python3", str(MONITORING / "validate-receiver-files.py"), str(MONITORING / "alertmanager.example.yml"), str(root)],
+                text=True, capture_output=True, check=False,
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unsafe receiver file mode", result.stderr)
 
     def test_empty_governance_template_fails_closed(self) -> None:
         result = subprocess.run(

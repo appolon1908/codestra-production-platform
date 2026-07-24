@@ -28,7 +28,8 @@ for secret in primary_receiver_url secondary_receiver_url recovery_receiver_url 
     }
 done
 
-python3 "$ROOT/validate-receiver-files.py" "$CONFIG" /etc/codestra/secrets/monitoring
+python3 "$ROOT/validate-receiver-files.py" \
+    --check-network "$CONFIG" /etc/codestra/secrets/monitoring
 
 docker run --rm \
     --entrypoint /bin/promtool \
