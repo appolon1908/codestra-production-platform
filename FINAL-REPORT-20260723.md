@@ -455,3 +455,45 @@ ONE_CALL_CANARY=NOT_RUN
 All safety flags remain false. No production call, callback, transfer,
 workflow, queue delivery, WebRTC route, VICIdial/Odoo write, monitoring
 deployment, or historical-event mutation occurred.
+
+## 17. Phase 6 signed one-call authorization checkpoint
+
+Evidence cutoff: `2026-07-24T01:56:03Z`
+External evidence package:
+`/root/signed-one-call-canary-evidence-20260724-015603`
+
+No signed canary approval record or mandatory resource authorization was
+available. The signed approval, document/signature references, approver and
+authority, change/window, bounded duration/events, campaign/list/agent/trunk,
+caller-ID approval, protected destination/owner/zero-match approval, operator
+confirmation, recording/callback scope, and emergency/rollback owners were
+either not provided or inaccessible. No value was invented or inferred from
+older test fixtures.
+
+The Phase 5B production receiver, acknowledgment, secondary escalation,
+recovery, and human-routing gates remain blocked or not run, and no production
+monitoring runtime exists. Strict-host-key SSH checks to the specified primary
+and application server addresses were inaccessible from this execution
+context. Observed application feature flags remain false and clock
+synchronization is active.
+
+A protected authorization template and sanitized fail-closed validator were
+added. The validator requires an active `America/Santo_Domingo` window,
+`MAX_CALLS=1`, `MAX_CONCURRENT_CALLS=1`, positive duration/event limits,
+`RETRY_CALLS_AUTHORIZED=NO`, a still-valid zero-match approval, and every
+mandatory reference. It never prints caller ID, destination, signature, or
+credential values.
+
+```text
+SIGNED_CANARY_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+PRECEDING_TECHNICAL_GATES=BLOCKED_EXTERNAL_PREREQUISITE
+CANARY_MONITORING_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+CANARY_OPERATOR_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+CALL_EXECUTION_GATE=NOT_RUN
+CONTROLLED_CANARY_GATE=NOT_RUN
+CALL_ATTEMPTS=0
+```
+
+No call-capable state was enabled, no call was attempted, and the one-call
+budget remains unused. No destination was accessed or displayed, no event was
+replayed, and the 1,110 quarantined historical events remain unchanged.
