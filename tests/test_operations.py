@@ -136,12 +136,20 @@ class MonitoringGovernanceTests(unittest.TestCase):
         keys = (
             "PRODUCTION_ALERT_RECEIVER",
             "PRIMARY_ESCALATION_OWNER",
+            "PRIMARY_PROTECTED_CONTACT",
             "SECONDARY_ESCALATION_OWNER",
+            "SECONDARY_PROTECTED_CONTACT",
             "RECOVERY_NOTIFICATION_RECEIVER",
             "ALERT_ESCALATION_POLICY_REFERENCE",
             "PRIMARY_ACKNOWLEDGMENT_WINDOW",
             "SECONDARY_ESCALATION_WINDOW",
             "MONITORING_APPROVAL_REFERENCE",
+            "AFTER_HOURS_POLICY_REFERENCE",
+            "INCIDENT_RESPONSE_OWNER",
+            "MONITORING_OWNER",
+            "MONITORING_CHANGE_ID",
+            "MONITORING_MAINTENANCE_WINDOW",
+            "MONITORING_RETENTION_POLICY",
             "API_PERMISSION_APPROVER",
             "DNC_POLICY_REFERENCE",
             "DNC_TEST_APPROVER",
@@ -165,7 +173,7 @@ class MonitoringGovernanceTests(unittest.TestCase):
                 check=False,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("count=20", result.stdout)
+        self.assertIn("count=28", result.stdout)
 
     def test_every_critical_alert_has_an_existing_runbook(self) -> None:
         document = yaml.safe_load(

@@ -415,3 +415,43 @@ All safety flags remain false by accepted evidence, the sync service remains
 disabled/inactive, and all 1,110 quarantined historical events remain
 unchanged. No production receiver, call, callback, transfer, workflow, queue
 delivery, WebRTC production route, or application write was activated.
+
+## 16. Phase 5B secure preparation checkpoint
+
+Evidence cutoff: `2026-07-24T01:49:47Z`
+External evidence package:
+`/root/production-alert-routing-live-evidence-20260724-014947`
+
+The four required receiver paths were securely prepared as empty `root:root`
+mode `0600` files beneath a `root:root` mode `0700` directory. They remain
+empty and correctly fail receiver validation. The required production
+governance file is absent; no identity, protected contact, policy, timing,
+approval, change window, retention decision, or acknowledgment was invented.
+
+The non-secret governance validator/template now includes all Phase 5B fields
+for protected primary/secondary contacts, after-hours policy, incident and
+monitoring ownership, monitoring change/window, and retention policy. All 28
+tests, the 76-rule Prometheus configuration, Alertmanager configuration,
+Compose rendering, and Phase 5A static validator pass.
+
+Pre-deployment inspection found zero existing Codestra monitoring containers,
+zero monitoring volumes, and no listeners on the monitoring ports. The
+installer was not run, no synthetic production alert was sent, and no human
+test was attempted.
+
+```text
+RECEIVER_RESOURCE_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+RECEIVER_SECRET_CONFIGURATION_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+ESCALATION_OWNER_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+MONITORING_GOVERNANCE_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+MONITORING_BASELINE_GATE=NOT_RUN
+PRODUCTION_ALERT_RECEIVER_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+PRIMARY_ACKNOWLEDGMENT_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+SECONDARY_ESCALATION_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+HUMAN_ESCALATION_ROUTING_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+ONE_CALL_CANARY=NOT_RUN
+```
+
+All safety flags remain false. No production call, callback, transfer,
+workflow, queue delivery, WebRTC route, VICIdial/Odoo write, monitoring
+deployment, or historical-event mutation occurred.
