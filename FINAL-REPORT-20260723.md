@@ -235,3 +235,27 @@ unpatched upstream base-image high findings, and human approval.
 6. Supply the approved SIP/WebRTC media lab and protected test identity.
 7. After every mandatory technical gate passes, review and sign the production
    change record. No signature is present or implied in this report.
+
+## 11. Cross-application integration continuation
+
+Evidence cutoff: `2026-07-24T00:02Z`  
+Evidence package:
+`/root/full-stack-integration-evidence-20260723-235323`
+
+The portable package verifier passes from `/tmp`. Isolated Keycloak Gate 2,
+n8n Gate 5, middleware static/type/regression suites, focused
+authentication/DNC/transfer/reliability tests, Agent Desktop
+unit/accessibility/build/browser tests, the network-isolated integration
+contract suite, and operations tests pass.
+
+The representative cross-application staging chain remains
+`BLOCKED_EXTERNAL_PREREQUISITE`. There is no Odoo 19 staging runtime,
+middleware staging runtime, authenticated staging callback receiver,
+authoritative monitoring receiver, protected runtime RBAC identity set, or
+currently usable Server B SSH credential. The canonical safety verifier also
+refuses the unapproved Agent Desktop baseline mismatch.
+
+No Server B command, event injection, call, transfer, callback, workflow
+activation, production database write, or queue mutation occurred. The 1,110
+historical events remain quarantined with zero deliverable and no mutation
+authority. The controlled canary was not run.
