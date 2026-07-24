@@ -1,161 +1,1301 @@
 groups:
-  - name: host
-    rules:
-      - alert: CodestraHostUnavailable
-        expr: up{job="node"} == 0
-        for: 2m
-        labels: {severity: critical, service: host}
-        annotations:
-          summary: Codestra host exporter unavailable
-          runbook: operations/runbooks/host-unavailable.md
-      - alert: CodestraHostCpuHigh
-        expr: 100 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100 > 90
-        for: 15m
-        labels: {severity: warning, service: host}
-        annotations: {summary: Host CPU above 90 percent for 15 minutes}
-      - alert: CodestraHostMemoryHigh
-        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 90
-        for: 10m
-        labels: {severity: critical, service: host}
-        annotations: {summary: Host memory above 90 percent, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraDiskSpaceLow
-        expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 85
-        for: 10m
-        labels: {severity: warning, service: storage}
-        annotations: {summary: Filesystem utilization above 85 percent}
-      - alert: CodestraDiskInodesLow
-        expr: (1 - node_filesystem_files_free{fstype!~"tmpfs|overlay"} / node_filesystem_files{fstype!~"tmpfs|overlay"}) * 100 > 85
-        for: 10m
-        labels: {severity: warning, service: storage}
-        annotations: {summary: Filesystem inode utilization above 85 percent}
-      - alert: CodestraClockUnsynchronized
-        expr: node_timex_sync_status == 0
-        for: 5m
-        labels: {severity: critical, service: host}
-        annotations: {summary: Host clock is not synchronized, runbook: operations/runbooks/critical-alert.md}
-
-  - name: containers-and-http
-    rules:
-      - alert: CodestraContainerMissing
-        expr: absent(container_last_seen{name=~"codestra-.+"})
-        for: 2m
-        labels: {severity: critical, service: containers}
-        annotations: {summary: Codestra container telemetry is absent, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraContainerRestarting
-        expr: changes(container_start_time_seconds{name=~"codestra-.+"}[15m]) > 2
-        labels: {severity: warning, service: containers}
-        annotations: {summary: Container restarted more than twice in 15 minutes}
-      - alert: CodestraEndpointUnavailable
-        expr: probe_success{job="blackbox_https"} == 0
-        for: 2m
-        labels: {severity: critical, service: endpoint}
-        annotations:
-          summary: "Codestra endpoint unavailable: {{ $labels.instance }}"
-          runbook: operations/runbooks/endpoint-unavailable.md
-      - alert: CodestraEndpointLatencyHigh
-        expr: probe_duration_seconds{job="blackbox_https"} > 2
-        for: 10m
-        labels: {severity: warning, service: endpoint}
-        annotations: {summary: Endpoint latency above two seconds}
-      - alert: CodestraTlsCertificateExpiring
-        expr: probe_ssl_earliest_cert_expiry - time() < 1209600
-        for: 1h
-        labels: {severity: warning, service: tls}
-        annotations: {summary: TLS certificate expires within 14 days}
-
-  - name: integration
-    rules:
-      - alert: CodestraDeadLetterQueueNonEmpty
-        expr: codestra_dead_letter_depth > 0
-        for: 5m
-        labels: {severity: warning, service: integration}
-        annotations: {summary: Dead-letter queue contains events}
-      - alert: CodestraRetryVolumeHigh
-        expr: sum(rate(codestra_retry_total[10m])) > 0.2
-        for: 10m
-        labels: {severity: warning, service: integration}
-        annotations: {summary: Retry volume exceeds approved threshold}
-      - alert: CodestraEventLatencyHigh
-        expr: histogram_quantile(0.95, sum by(le) (rate(codestra_event_processing_seconds_bucket[10m]))) > 5
-        for: 10m
-        labels: {severity: critical, service: integration}
-        annotations: {summary: P95 event-processing latency exceeds five seconds, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraEventFailures
-        expr: sum(rate(codestra_event_processing_failures_total[5m])) > 0
-        for: 5m
-        labels: {severity: critical, service: integration}
-        annotations: {summary: Event-processing failures detected, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraReconciliationDrift
-        expr: codestra_reconciliation_drift_records > 0
-        for: 15m
-        labels: {severity: critical, service: reconciliation}
-        annotations: {summary: VICIdial/middleware/Odoo reconciliation drift detected, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraDatabaseUnavailable
-        expr: codestra_database_up == 0
-        for: 2m
-        labels: {severity: critical, service: database}
-        annotations: {summary: Codestra database unavailable, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraDatabaseConnectionsHigh
-        expr: codestra_database_connections / codestra_database_max_connections > 0.8
-        for: 10m
-        labels: {severity: warning, service: database}
-        annotations: {summary: Database connection utilization exceeds 80 percent}
-
-  - name: security-and-change
-    rules:
-      - alert: CodestraAuthenticationFailuresHigh
-        expr: sum(rate(codestra_authentication_failures_total[5m])) > 0.2
-        for: 5m
-        labels: {severity: warning, service: identity}
-        annotations: {summary: Authentication failure rate exceeds threshold}
-      - alert: CodestraAuthorizationFailuresHigh
-        expr: sum(rate(codestra_authorization_failures_total[5m])) > 0.2
-        for: 5m
-        labels: {severity: warning, service: authorization}
-        annotations: {summary: Authorization failure rate exceeds threshold}
-      - alert: CodestraDncFailClosed
-        expr: increase(codestra_dnc_fail_closed_total[5m]) > 0
-        labels: {severity: critical, service: compliance}
-        annotations: {summary: DNC fail-closed decision occurred, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraUnauthorizedTransfer
-        expr: increase(codestra_transfer_denied_total[5m]) > 0
-        labels: {severity: critical, service: transfer}
-        annotations: {summary: Unauthorized transfer attempt detected, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraUnexpectedWorkflowActivation
-        expr: codestra_n8n_active_workflows > 0
-        for: 1m
-        labels: {severity: critical, service: n8n}
-        annotations: {summary: Unexpected n8n workflow activation, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraUnexpectedCampaignActivation
-        expr: codestra_vicidial_unapproved_active_campaigns > 0
-        for: 1m
-        labels: {severity: critical, service: vicidial}
-        annotations: {summary: Unexpected VICIdial campaign activation, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraConfigurationDrift
-        expr: codestra_configuration_drift > 0
-        for: 5m
-        labels: {severity: critical, service: release}
-        annotations: {summary: Runtime image or configuration drift detected, runbook: operations/runbooks/critical-alert.md}
-      - alert: CodestraLogIngestionFailure
-        expr: codestra_log_ingestion_up == 0
-        for: 5m
-        labels: {severity: warning, service: logging}
-        annotations: {summary: Log ingestion unavailable}
-
-  - name: backup
-    rules:
-      - alert: CodestraBackupStale
-        expr: time() - codestra_backup_last_success_timestamp_seconds > 93600
-        for: 15m
-        labels: {severity: critical, service: backup}
-        annotations:
-          summary: Latest successful backup is older than 26 hours
-          runbook: operations/runbooks/backup-failure.md
-      - alert: CodestraBackupFailure
-        expr: increase(codestra_backup_failures_total[1h]) > 0
-        labels: {severity: critical, service: backup}
-        annotations: {summary: Backup job failed, runbook: operations/runbooks/backup-failure.md}
-      - alert: CodestraBackupReplicationFailure
-        expr: increase(codestra_backup_replication_failures_total[1h]) > 0
-        labels: {severity: critical, service: backup}
-        annotations: {summary: Off-server backup replication failed, runbook: operations/runbooks/backup-failure.md}
+- name: application
+  rules:
+  - alert: CodestraMiddlewareUnavailable
+    expr: codestra_service_up{service="middleware"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: middleware
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware is unavailable
+      description: Middleware is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: service_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-unavailable
+      dashboard: monitoring-evidence://application/middleware-unavailable
+  - alert: CodestraMiddlewareRestartLoop
+    expr: increase(codestra_service_restarts_total{service="middleware"}[15m]) >= 3
+    for: 5m
+    labels:
+      severity: critical
+      service: middleware
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware is restarting repeatedly
+      description: Middleware is restarting repeatedly. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: 3 restarts / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-restart-loop.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-restart-loop
+      dashboard: monitoring-evidence://application/middleware-restart-loop
+  - alert: CodestraOdoo19StagingUnavailable
+    expr: codestra_service_up{service="odoo19",environment="staging"} == 0
+    for: 5m
+    labels:
+      severity: critical
+      service: odoo19
+      environment: staging
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Odoo 19 staging is unavailable
+      description: Odoo 19 staging is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: service_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/odoo19-staging-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/odoo19-staging-unavailable
+      dashboard: monitoring-evidence://application/odoo19-staging-unavailable
+  - alert: CodestraN8nStagingUnavailable
+    expr: codestra_service_up{service="n8n",environment="staging"} == 0
+    for: 5m
+    labels:
+      severity: critical
+      service: n8n
+      environment: staging
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: n8n staging is unavailable
+      description: n8n staging is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: service_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/n8n-staging-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/n8n-staging-unavailable
+      dashboard: monitoring-evidence://application/n8n-staging-unavailable
+  - alert: CodestraKeycloakUnavailable
+    expr: codestra_service_up{service="keycloak"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: keycloak
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Keycloak is unavailable
+      description: Keycloak is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: service_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/keycloak-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/keycloak-unavailable
+      dashboard: monitoring-evidence://application/keycloak-unavailable
+  - alert: CodestraPrivateCallbackReceiverUnavailable
+    expr: codestra_service_up{service="private-callback-receiver"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: callback
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Private callback receiver is unavailable
+      description: Private callback receiver is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: service_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/private-callback-receiver-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/private-callback-receiver-unavailable
+      dashboard: monitoring-evidence://application/private-callback-receiver-unavailable
+  - alert: CodestraIntegrationLatencyHigh
+    expr: histogram_quantile(0.95, sum by(le) (rate(codestra_event_processing_seconds_bucket[10m]))) > 10
+    for: 15m
+    labels:
+      severity: critical
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Integration processing latency is high
+      description: Integration processing latency is high. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: p95 > 10s / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/integration-latency-high.md
+      runbook_url: https://runbooks.codestra.agency/alerts/integration-latency-high
+      dashboard: monitoring-evidence://application/integration-latency-high
+  - alert: CodestraIntegrationLatencyWarning
+    expr: histogram_quantile(0.95, sum by(le) (rate(codestra_event_processing_seconds_bucket[10m]))) > 5
+    for: 30m
+    labels:
+      severity: warning
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: 'Early warning: integration processing latency is high'
+      description: Integration processing latency is high. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: p95 > 5s / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/integration-latency-high.md
+      runbook_url: https://runbooks.codestra.agency/alerts/integration-latency-high
+      dashboard: monitoring-evidence://application/integration-latency-high
+  - alert: CodestraQueueBacklogHigh
+    expr: codestra_queue_ready_depth > 100
+    for: 15m
+    labels:
+      severity: critical
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Queue backlog is high
+      description: Queue backlog is high. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: ready depth > 100 / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/queue-backlog-high.md
+      runbook_url: https://runbooks.codestra.agency/alerts/queue-backlog-high
+      dashboard: monitoring-evidence://application/queue-backlog-high
+  - alert: CodestraQueueBacklogWarning
+    expr: codestra_queue_ready_depth > 50
+    for: 30m
+    labels:
+      severity: warning
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: 'Early warning: queue backlog is high'
+      description: Queue backlog is high. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: ready depth > 50 / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/queue-backlog-high.md
+      runbook_url: https://runbooks.codestra.agency/alerts/queue-backlog-high
+      dashboard: monitoring-evidence://application/queue-backlog-high
+  - alert: CodestraRetryBacklogHigh
+    expr: codestra_retry_queue_depth > 25
+    for: 15m
+    labels:
+      severity: critical
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Retry backlog is high
+      description: Retry backlog is high. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: retry depth > 25 / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/retry-backlog-high.md
+      runbook_url: https://runbooks.codestra.agency/alerts/retry-backlog-high
+      dashboard: monitoring-evidence://application/retry-backlog-high
+  - alert: CodestraRetryBacklogWarning
+    expr: codestra_retry_queue_depth > 10
+    for: 30m
+    labels:
+      severity: warning
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: 'Early warning: retry backlog is high'
+      description: Retry backlog is high. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: retry depth > 10 / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/retry-backlog-high.md
+      runbook_url: https://runbooks.codestra.agency/alerts/retry-backlog-high
+      dashboard: monitoring-evidence://application/retry-backlog-high
+  - alert: CodestraDeadLetterBacklog
+    expr: codestra_dead_letter_depth > 0 or deriv(codestra_dead_letter_depth[15m]) > 0
+    for: 5m
+    labels:
+      severity: critical
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Dead-letter backlog is nonzero or growing
+      description: Dead-letter backlog is nonzero or growing. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: depth > 0 or growing / 5m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/dead-letter-backlog.md
+      runbook_url: https://runbooks.codestra.agency/alerts/dead-letter-backlog
+      dashboard: monitoring-evidence://application/dead-letter-backlog
+  - alert: CodestraCallbackFailureRateHigh
+    expr: sum(rate(codestra_callback_requests_total{result="failure"}[10m])) / clamp_min(sum(rate(codestra_callback_requests_total[10m])), 0.001) > 0.05
+    for: 10m
+    labels:
+      severity: critical
+      service: callback
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Callback failure rate is high
+      description: Callback failure rate is high. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: failure ratio > 5% / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/callback-failure-rate-high.md
+      runbook_url: https://runbooks.codestra.agency/alerts/callback-failure-rate-high
+      dashboard: monitoring-evidence://application/callback-failure-rate-high
+  - alert: CodestraDuplicateEventConflict
+    expr: increase(codestra_duplicate_event_conflicts_total[10m]) > 0
+    for: 2m
+    labels:
+      severity: critical
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Duplicate event conflict detected
+      description: Duplicate event conflict detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any conflict / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/duplicate-event-conflict.md
+      runbook_url: https://runbooks.codestra.agency/alerts/duplicate-event-conflict
+      dashboard: monitoring-evidence://application/duplicate-event-conflict
+  - alert: CodestraEventOrderingConflict
+    expr: increase(codestra_event_ordering_conflicts_total[10m]) > 0
+    for: 2m
+    labels:
+      severity: critical
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Event-ordering conflict detected
+      description: Event-ordering conflict detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any conflict / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/event-ordering-conflict.md
+      runbook_url: https://runbooks.codestra.agency/alerts/event-ordering-conflict
+      dashboard: monitoring-evidence://application/event-ordering-conflict
+  - alert: CodestraReconciliationDrift
+    expr: codestra_reconciliation_drift_records > 0
+    for: 15m
+    labels:
+      severity: critical
+      service: reconciliation
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Reconciliation drift detected
+      description: Reconciliation drift detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: drift records > 0 / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/reconciliation-drift.md
+      runbook_url: https://runbooks.codestra.agency/alerts/reconciliation-drift
+      dashboard: monitoring-evidence://application/reconciliation-drift
+  - alert: CodestraAuthenticationFailureSurge
+    expr: sum(rate(codestra_authentication_failures_total[5m])) > 1
+    for: 10m
+    labels:
+      severity: critical
+      service: identity
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Authentication failures surged
+      description: Authentication failures surged. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: rate > 1/s / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/authentication-failure-surge.md
+      runbook_url: https://runbooks.codestra.agency/alerts/authentication-failure-surge
+      dashboard: monitoring-evidence://application/authentication-failure-surge
+  - alert: CodestraAuthorizationFailureSurge
+    expr: sum(rate(codestra_authorization_failures_total[5m])) > 0.5
+    for: 10m
+    labels:
+      severity: critical
+      service: authorization
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Authorization failures surged
+      description: Authorization failures surged. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: rate > 0.5/s / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/authorization-failure-surge.md
+      runbook_url: https://runbooks.codestra.agency/alerts/authorization-failure-surge
+      dashboard: monitoring-evidence://application/authorization-failure-surge
+  - alert: CodestraDncFailClosedEvent
+    expr: increase(codestra_dnc_fail_closed_total[5m]) > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: compliance
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: DNC fail-closed event detected
+      description: DNC fail-closed event detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any event / 5m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/dnc-fail-closed-event.md
+      runbook_url: https://runbooks.codestra.agency/alerts/dnc-fail-closed-event
+      dashboard: monitoring-evidence://application/dnc-fail-closed-event
+  - alert: CodestraTransferAuthorizationDenialSurge
+    expr: increase(codestra_transfer_denied_total[5m]) >= 3
+    for: 5m
+    labels:
+      severity: critical
+      service: transfer
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Transfer authorization denials surged
+      description: Transfer authorization denials surged. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: 3 denials / 5m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/transfer-authorization-denial-surge.md
+      runbook_url: https://runbooks.codestra.agency/alerts/transfer-authorization-denial-surge
+      dashboard: monitoring-evidence://application/transfer-authorization-denial-surge
+  - alert: CodestraUnexpectedWorkflowActivation
+    expr: codestra_n8n_active_production_workflows > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: n8n
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Unexpected production workflow activation detected
+      description: Unexpected production workflow activation detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: active workflows > 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/unexpected-workflow-activation.md
+      runbook_url: https://runbooks.codestra.agency/alerts/unexpected-workflow-activation
+      dashboard: monitoring-evidence://application/unexpected-workflow-activation
+  - alert: CodestraUnexpectedWriteEnablement
+    expr: codestra_write_enablement{target=~"odoo|vicidial"} > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Unexpected Odoo or VICIdial write enablement detected
+      description: Unexpected Odoo or VICIdial write enablement detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: write enablement > 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/unexpected-write-enablement.md
+      runbook_url: https://runbooks.codestra.agency/alerts/unexpected-write-enablement
+      dashboard: monitoring-evidence://application/unexpected-write-enablement
+  - alert: CodestraUnexpectedSendEventsEnabled
+    expr: codestra_safety_flag{flag="SEND_EVENTS"} != 0
+    for: 1m
+    labels:
+      severity: critical
+      service: integration
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Unexpected SEND_EVENTS=true detected
+      description: Unexpected SEND_EVENTS=true detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: SEND_EVENTS != 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/unexpected-send-events-enabled.md
+      runbook_url: https://runbooks.codestra.agency/alerts/unexpected-send-events-enabled
+      dashboard: monitoring-evidence://application/unexpected-send-events-enabled
+  - alert: CodestraUnexpectedProductionCallbacksEnabled
+    expr: codestra_safety_flag{flag="PRODUCTION_CALLBACKS_ENABLED"} != 0
+    for: 1m
+    labels:
+      severity: critical
+      service: callback
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Unexpected production callback enablement detected
+      description: Unexpected production callback enablement detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: PRODUCTION_CALLBACKS_ENABLED != 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/unexpected-production-callbacks-enabled.md
+      runbook_url: https://runbooks.codestra.agency/alerts/unexpected-production-callbacks-enabled
+      dashboard: monitoring-evidence://application/unexpected-production-callbacks-enabled
+- name: voice
+  rules:
+  - alert: CodestraVicidialUnavailable
+    expr: codestra_service_up{service="vicidial"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: vicidial
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: VICIdial is unavailable
+      description: VICIdial is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: service_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/vicidial-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/vicidial-unavailable
+      dashboard: monitoring-evidence://voice/vicidial-unavailable
+  - alert: CodestraAsteriskUnavailable
+    expr: codestra_service_up{service="asterisk"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: asterisk
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Asterisk is unavailable
+      description: Asterisk is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: service_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/asterisk-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/asterisk-unavailable
+      dashboard: monitoring-evidence://voice/asterisk-unavailable
+  - alert: CodestraTrunkUnavailable
+    expr: codestra_voice_trunk_up == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: voice-trunk
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Voice trunk is unavailable
+      description: Voice trunk is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: trunk_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/trunk-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/trunk-unavailable
+      dashboard: monitoring-evidence://voice/trunk-unavailable
+  - alert: CodestraCarrierAuthenticationFailure
+    expr: increase(codestra_carrier_authentication_failures_total[5m]) > 0
+    for: 2m
+    labels:
+      severity: critical
+      service: carrier
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Carrier authentication failure detected
+      description: Carrier authentication failure detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any failure / 5m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/carrier-authentication-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/carrier-authentication-failure
+      dashboard: monitoring-evidence://voice/carrier-authentication-failure
+  - alert: CodestraUnexpectedActiveCall
+    expr: codestra_active_calls > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: voice
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Unexpected active call detected
+      description: Unexpected active call detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: active calls > 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/unexpected-active-call.md
+      runbook_url: https://runbooks.codestra.agency/alerts/unexpected-active-call
+      dashboard: monitoring-evidence://voice/unexpected-active-call
+  - alert: CodestraUnexpectedExternalDialingEnabled
+    expr: codestra_safety_flag{flag="EXTERNAL_DIAL_ENABLED"} != 0
+    for: 1m
+    labels:
+      severity: critical
+      service: voice
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Unexpected external dialing enablement detected
+      description: Unexpected external dialing enablement detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: EXTERNAL_DIAL_ENABLED != 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/unexpected-external-dialing-enabled.md
+      runbook_url: https://runbooks.codestra.agency/alerts/unexpected-external-dialing-enabled
+      dashboard: monitoring-evidence://voice/unexpected-external-dialing-enabled
+  - alert: CodestraEndpoint6101Unavailable
+    expr: codestra_sip_endpoint_registered{endpoint="6101"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: sip-endpoint-6101
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Endpoint 6101 is unavailable
+      description: Endpoint 6101 is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: authorized registration = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/endpoint-6101-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/endpoint-6101-unavailable
+      dashboard: monitoring-evidence://voice/endpoint-6101-unavailable
+  - alert: CodestraEndpoint6101UnauthorizedRegistration
+    expr: codestra_sip_endpoint_unauthorized_registrations{endpoint="6101"} > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: sip-endpoint-6101
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Endpoint 6101 has an unauthorized registration
+      description: Endpoint 6101 has an unauthorized registration. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: unauthorized registrations > 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/endpoint-6101-unauthorized-registration.md
+      runbook_url: https://runbooks.codestra.agency/alerts/endpoint-6101-unauthorized-registration
+      dashboard: monitoring-evidence://voice/endpoint-6101-unauthorized-registration
+  - alert: CodestraTurnUnavailable
+    expr: codestra_service_up{service="turn"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: turn
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: TURN is unavailable
+      description: TURN is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: service_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/turn-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/turn-unavailable
+      dashboard: monitoring-evidence://voice/turn-unavailable
+  - alert: CodestraTurnAuthenticationFailure
+    expr: increase(codestra_turn_authentication_failures_total[5m]) > 0
+    for: 2m
+    labels:
+      severity: critical
+      service: turn
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: TURN authentication failed
+      description: TURN authentication failed. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any failure / 5m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/turn-authentication-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/turn-authentication-failure
+      dashboard: monitoring-evidence://voice/turn-authentication-failure
+  - alert: CodestraWssHandshakeFailure
+    expr: increase(codestra_wss_handshake_failures_total[5m]) >= 3
+    for: 5m
+    labels:
+      severity: critical
+      service: webrtc
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: WSS handshakes are failing
+      description: WSS handshakes are failing. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: 3 failures / 5m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/wss-handshake-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/wss-handshake-failure
+      dashboard: monitoring-evidence://voice/wss-handshake-failure
+  - alert: CodestraIceFailure
+    expr: increase(codestra_ice_failures_total[5m]) >= 3
+    for: 5m
+    labels:
+      severity: critical
+      service: webrtc
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: ICE negotiation is failing
+      description: ICE negotiation is failing. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: 3 failures / 5m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/ice-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/ice-failure
+      dashboard: monitoring-evidence://voice/ice-failure
+  - alert: CodestraDtlsFailure
+    expr: increase(codestra_dtls_failures_total[5m]) >= 3
+    for: 5m
+    labels:
+      severity: critical
+      service: webrtc
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: DTLS negotiation is failing
+      description: DTLS negotiation is failing. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: 3 failures / 5m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/dtls-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/dtls-failure
+      dashboard: monitoring-evidence://voice/dtls-failure
+  - alert: CodestraSrtpFailure
+    expr: increase(codestra_srtp_failures_total[5m]) >= 3
+    for: 5m
+    labels:
+      severity: critical
+      service: webrtc
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: SRTP setup is failing
+      description: SRTP setup is failing. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: 3 failures / 5m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/srtp-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/srtp-failure
+      dashboard: monitoring-evidence://voice/srtp-failure
+  - alert: CodestraOneWayAudioIndication
+    expr: increase(codestra_one_way_audio_indications_total[10m]) >= 2
+    for: 5m
+    labels:
+      severity: critical
+      service: voice-media
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: One-way audio is indicated
+      description: One-way audio is indicated. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: 2 indications / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/one-way-audio-indication.md
+      runbook_url: https://runbooks.codestra.agency/alerts/one-way-audio-indication
+      dashboard: monitoring-evidence://voice/one-way-audio-indication
+  - alert: CodestraPacketLossExcessive
+    expr: codestra_rtp_packet_loss_ratio > 0.05
+    for: 10m
+    labels:
+      severity: critical
+      service: voice-media
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: RTP packet loss is excessive
+      description: RTP packet loss is excessive. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: packet loss > 5% / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/packet-loss-excessive.md
+      runbook_url: https://runbooks.codestra.agency/alerts/packet-loss-excessive
+      dashboard: monitoring-evidence://voice/packet-loss-excessive
+  - alert: CodestraJitterExcessive
+    expr: codestra_rtp_jitter_seconds > 0.05
+    for: 10m
+    labels:
+      severity: critical
+      service: voice-media
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: RTP jitter is excessive
+      description: RTP jitter is excessive. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: jitter > 50ms / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/jitter-excessive.md
+      runbook_url: https://runbooks.codestra.agency/alerts/jitter-excessive
+      dashboard: monitoring-evidence://voice/jitter-excessive
+  - alert: CodestraCallSetupLatencyExcessive
+    expr: histogram_quantile(0.95, sum by(le) (rate(codestra_call_setup_seconds_bucket[10m]))) > 8
+    for: 10m
+    labels:
+      severity: critical
+      service: voice
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Call setup latency is excessive
+      description: Call setup latency is excessive. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: p95 > 8s / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/call-setup-latency-excessive.md
+      runbook_url: https://runbooks.codestra.agency/alerts/call-setup-latency-excessive
+      dashboard: monitoring-evidence://voice/call-setup-latency-excessive
+  - alert: CodestraStuckAsteriskChannel
+    expr: codestra_asterisk_channel_age_seconds > 3600
+    for: 5m
+    labels:
+      severity: critical
+      service: asterisk
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: An Asterisk channel appears stuck
+      description: An Asterisk channel appears stuck. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: channel age > 1h
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/stuck-asterisk-channel.md
+      runbook_url: https://runbooks.codestra.agency/alerts/stuck-asterisk-channel
+      dashboard: monitoring-evidence://voice/stuck-asterisk-channel
+  - alert: CodestraChannelCleanupFailure
+    expr: increase(codestra_channel_cleanup_failures_total[10m]) > 0
+    for: 5m
+    labels:
+      severity: critical
+      service: asterisk
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Asterisk channel cleanup failed
+      description: Asterisk channel cleanup failed. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any failure / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/channel-cleanup-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/channel-cleanup-failure
+      dashboard: monitoring-evidence://voice/channel-cleanup-failure
+- name: database-host
+  rules:
+  - alert: CodestraPostgresqlUnavailable
+    expr: codestra_database_up{engine="postgresql"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: postgresql
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: PostgreSQL is unavailable
+      description: PostgreSQL is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: database_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/postgresql-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/postgresql-unavailable
+      dashboard: monitoring-evidence://database-host/postgresql-unavailable
+  - alert: CodestraMariadbUnavailable
+    expr: codestra_database_up{engine="mariadb"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: mariadb
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: MariaDB is unavailable
+      description: MariaDB is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: database_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/mariadb-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/mariadb-unavailable
+      dashboard: monitoring-evidence://database-host/mariadb-unavailable
+  - alert: CodestraRedisUnavailable
+    expr: codestra_service_up{service="redis"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: redis
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Redis is unavailable
+      description: Redis is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: service_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/redis-unavailable.md
+      runbook_url: https://runbooks.codestra.agency/alerts/redis-unavailable
+      dashboard: monitoring-evidence://database-host/redis-unavailable
+  - alert: CodestraDatabaseConnectionSaturation
+    expr: codestra_database_connections / clamp_min(codestra_database_max_connections, 1) > 0.9
+    for: 10m
+    labels:
+      severity: critical
+      service: database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Database connection capacity is saturated
+      description: Database connection capacity is saturated. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: connections > 90% / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/database-connection-saturation.md
+      runbook_url: https://runbooks.codestra.agency/alerts/database-connection-saturation
+      dashboard: monitoring-evidence://database-host/database-connection-saturation
+  - alert: CodestraDatabaseConnectionSaturationWarning
+    expr: codestra_database_connections / clamp_min(codestra_database_max_connections, 1) > 0.8
+    for: 30m
+    labels:
+      severity: warning
+      service: database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: 'Early warning: database connection capacity is saturated'
+      description: Database connection capacity is saturated. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: connections > 80% / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/database-connection-saturation.md
+      runbook_url: https://runbooks.codestra.agency/alerts/database-connection-saturation
+      dashboard: monitoring-evidence://database-host/database-connection-saturation
+  - alert: CodestraDiskCapacityCritical
+    expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) > 0.9
+    for: 15m
+    labels:
+      severity: critical
+      service: storage
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Disk capacity is critically low
+      description: Disk capacity is critically low. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: used > 90% / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/disk-capacity-critical.md
+      runbook_url: https://runbooks.codestra.agency/alerts/disk-capacity-critical
+      dashboard: monitoring-evidence://database-host/disk-capacity-critical
+  - alert: CodestraDiskCapacityWarning
+    expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) > 0.8
+    for: 30m
+    labels:
+      severity: warning
+      service: storage
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: 'Early warning: disk capacity is critically low'
+      description: Disk capacity is critically low. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: used > 80% / 30m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/disk-capacity-critical.md
+      runbook_url: https://runbooks.codestra.agency/alerts/disk-capacity-critical
+      dashboard: monitoring-evidence://database-host/disk-capacity-critical
+  - alert: CodestraInodeCapacityCritical
+    expr: (1 - node_filesystem_files_free{fstype!~"tmpfs|overlay"} / node_filesystem_files{fstype!~"tmpfs|overlay"}) > 0.9
+    for: 15m
+    labels:
+      severity: critical
+      service: storage
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Inode capacity is critically low
+      description: Inode capacity is critically low. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: used > 90% / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/inode-capacity-critical.md
+      runbook_url: https://runbooks.codestra.agency/alerts/inode-capacity-critical
+      dashboard: monitoring-evidence://database-host/inode-capacity-critical
+  - alert: CodestraInodeCapacityWarning
+    expr: (1 - node_filesystem_files_free{fstype!~"tmpfs|overlay"} / node_filesystem_files{fstype!~"tmpfs|overlay"}) > 0.8
+    for: 30m
+    labels:
+      severity: warning
+      service: storage
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: 'Early warning: inode capacity is critically low'
+      description: Inode capacity is critically low. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: used > 80% / 30m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/inode-capacity-critical.md
+      runbook_url: https://runbooks.codestra.agency/alerts/inode-capacity-critical
+      dashboard: monitoring-evidence://database-host/inode-capacity-critical
+  - alert: CodestraRecordingStorageCapacityCritical
+    expr: codestra_recording_storage_used_ratio > 0.9
+    for: 15m
+    labels:
+      severity: critical
+      service: recording-storage
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Recording-storage capacity is critically low
+      description: Recording-storage capacity is critically low. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: used > 90% / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/recording-storage-capacity-critical.md
+      runbook_url: https://runbooks.codestra.agency/alerts/recording-storage-capacity-critical
+      dashboard: monitoring-evidence://database-host/recording-storage-capacity-critical
+  - alert: CodestraRecordingStorageCapacityWarning
+    expr: codestra_recording_storage_used_ratio > 0.8
+    for: 30m
+    labels:
+      severity: warning
+      service: recording-storage
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: 'Early warning: recording-storage capacity is critically low'
+      description: Recording-storage capacity is critically low. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: used > 80% / 30m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/recording-storage-capacity-critical.md
+      runbook_url: https://runbooks.codestra.agency/alerts/recording-storage-capacity-critical
+      dashboard: monitoring-evidence://database-host/recording-storage-capacity-critical
+  - alert: CodestraContainerRestartLoop
+    expr: changes(container_start_time_seconds{name=~"codestra-.+"}[15m]) >= 3
+    for: 5m
+    labels:
+      severity: critical
+      service: containers
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: A container is restarting repeatedly
+      description: A container is restarting repeatedly. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: 3 restarts / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/container-restart-loop.md
+      runbook_url: https://runbooks.codestra.agency/alerts/container-restart-loop
+      dashboard: monitoring-evidence://database-host/container-restart-loop
+  - alert: CodestraClockDrift
+    expr: abs(node_timex_offset_seconds) > 0.1 or node_timex_sync_status == 0
+    for: 5m
+    labels:
+      severity: critical
+      service: host
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Host clock drift is excessive
+      description: Host clock drift is excessive. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: offset > 100ms or unsynchronized
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/clock-drift.md
+      runbook_url: https://runbooks.codestra.agency/alerts/clock-drift
+      dashboard: monitoring-evidence://database-host/clock-drift
+  - alert: CodestraTlsCertificateExpiration
+    expr: probe_ssl_earliest_cert_expiry - time() < 604800
+    for: 1h
+    labels:
+      severity: critical
+      service: tls
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: TLS certificate expiration is imminent
+      description: TLS certificate expiration is imminent. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: expires in < 7d
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/tls-certificate-expiration.md
+      runbook_url: https://runbooks.codestra.agency/alerts/tls-certificate-expiration
+      dashboard: monitoring-evidence://database-host/tls-certificate-expiration
+  - alert: CodestraTlsCertificateExpirationWarning
+    expr: probe_ssl_earliest_cert_expiry - time() < 1209600
+    for: 30m
+    labels:
+      severity: warning
+      service: tls
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: 'Early warning: tls certificate expiration is imminent'
+      description: TLS certificate expiration is imminent. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: expires in < 14d
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/tls-certificate-expiration.md
+      runbook_url: https://runbooks.codestra.agency/alerts/tls-certificate-expiration
+      dashboard: monitoring-evidence://database-host/tls-certificate-expiration
+  - alert: CodestraCredentialExpiration
+    expr: codestra_credential_expiry_timestamp_seconds - time() < 604800
+    for: 1h
+    labels:
+      severity: critical
+      service: security
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: A secret or credential expires soon
+      description: A secret or credential expires soon. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: expires in < 7d
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/credential-expiration.md
+      runbook_url: https://runbooks.codestra.agency/alerts/credential-expiration
+      dashboard: monitoring-evidence://database-host/credential-expiration
+  - alert: CodestraConfigurationDrift
+    expr: codestra_configuration_drift > 0
+    for: 10m
+    labels:
+      severity: critical
+      service: release
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Runtime configuration drift detected
+      description: Runtime configuration drift detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: drift > 0 / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/configuration-drift.md
+      runbook_url: https://runbooks.codestra.agency/alerts/configuration-drift
+      dashboard: monitoring-evidence://database-host/configuration-drift
+  - alert: CodestraRepositoryDrift
+    expr: codestra_repository_drift > 0
+    for: 10m
+    labels:
+      severity: critical
+      service: release
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Repository drift detected
+      description: Repository drift detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: drift > 0 / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/repository-drift.md
+      runbook_url: https://runbooks.codestra.agency/alerts/repository-drift
+      dashboard: monitoring-evidence://database-host/repository-drift
+  - alert: CodestraLogIngestionFailure
+    expr: codestra_log_ingestion_up == 0
+    for: 5m
+    labels:
+      severity: critical
+      service: logging
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Log ingestion failed
+      description: Log ingestion failed. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: ingestion_up = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/log-ingestion-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/log-ingestion-failure
+      dashboard: monitoring-evidence://database-host/log-ingestion-failure
+- name: backup
+  rules:
+  - alert: CodestraBackupFailure
+    expr: increase(codestra_backup_failures_total[1h]) > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: backup
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Backup job failed
+      description: Backup job failed. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any failure / 1h
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/backup-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/backup-failure
+      dashboard: monitoring-evidence://backup/backup-failure
+  - alert: CodestraOffServerReplicationFailure
+    expr: increase(codestra_backup_replication_failures_total[1h]) > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: backup
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Off-server backup replication failed
+      description: Off-server backup replication failed. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any failure / 1h
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/off-server-replication-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/off-server-replication-failure
+      dashboard: monitoring-evidence://backup/off-server-replication-failure
+  - alert: CodestraBackupChecksumFailure
+    expr: increase(codestra_backup_checksum_failures_total[1h]) > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: backup
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Backup checksum verification failed
+      description: Backup checksum verification failed. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any failure / 1h
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/backup-checksum-failure.md
+      runbook_url: https://runbooks.codestra.agency/alerts/backup-checksum-failure
+      dashboard: monitoring-evidence://backup/backup-checksum-failure
+  - alert: CodestraBackupStale
+    expr: time() - codestra_backup_last_success_timestamp_seconds > 93600
+    for: 15m
+    labels:
+      severity: critical
+      service: backup
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Latest successful backup is stale
+      description: Latest successful backup is stale. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: age > 26h / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/backup-stale.md
+      runbook_url: https://runbooks.codestra.agency/alerts/backup-stale
+      dashboard: monitoring-evidence://backup/backup-stale
+  - alert: CodestraRemoteBackupCapacityLow
+    expr: codestra_backup_remote_free_bytes < 10737418240
+    for: 30m
+    labels:
+      severity: critical
+      service: backup
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Remote backup capacity is low
+      description: Remote backup capacity is low. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: free < 10GiB / 30m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/remote-backup-capacity-low.md
+      runbook_url: https://runbooks.codestra.agency/alerts/remote-backup-capacity-low
+      dashboard: monitoring-evidence://backup/remote-backup-capacity-low
+  - alert: CodestraRemoteBackupCapacityLowWarning
+    expr: codestra_backup_remote_free_bytes < 21474836480
+    for: 30m
+    labels:
+      severity: warning
+      service: backup
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: 'Early warning: remote backup capacity is low'
+      description: Remote backup capacity is low. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: free < 20GiB / 1h
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/remote-backup-capacity-low.md
+      runbook_url: https://runbooks.codestra.agency/alerts/remote-backup-capacity-low
+      dashboard: monitoring-evidence://backup/remote-backup-capacity-low
+  - alert: CodestraBackupTimerDisabled
+    expr: codestra_systemd_timer_enabled{timer="codestra-backup.timer"} == 0
+    for: 5m
+    labels:
+      severity: critical
+      service: backup
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Backup timer is disabled
+      description: Backup timer is disabled. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: timer enabled = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/backup-timer-disabled.md
+      runbook_url: https://runbooks.codestra.agency/alerts/backup-timer-disabled
+      dashboard: monitoring-evidence://backup/backup-timer-disabled
+  - alert: CodestraBackupTimerFailed
+    expr: codestra_systemd_timer_failed{timer="codestra-backup.timer"} > 0
+    for: 2m
+    labels:
+      severity: critical
+      service: backup
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Backup timer failed
+      description: Backup timer failed. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: timer failed > 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/backup-timer-failed.md
+      runbook_url: https://runbooks.codestra.agency/alerts/backup-timer-failed
+      dashboard: monitoring-evidence://backup/backup-timer-failed
+  - alert: CodestraRestoreTestAgeExceeded
+    expr: time() - codestra_restore_test_last_success_timestamp_seconds > 2592000
+    for: 1h
+    labels:
+      severity: critical
+      service: recovery
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Restore-test age exceeded
+      description: Restore-test age exceeded. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: age > 30d
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/restore-test-age-exceeded.md
+      runbook_url: https://runbooks.codestra.agency/alerts/restore-test-age-exceeded
+      dashboard: monitoring-evidence://backup/restore-test-age-exceeded
+  - alert: CodestraRestoreTestAgeExceededWarning
+    expr: time() - codestra_restore_test_last_success_timestamp_seconds > 1814400
+    for: 30m
+    labels:
+      severity: warning
+      service: recovery
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: 'Early warning: restore-test age exceeded'
+      description: Restore-test age exceeded. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: age > 21d
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/restore-test-age-exceeded.md
+      runbook_url: https://runbooks.codestra.agency/alerts/restore-test-age-exceeded
+      dashboard: monitoring-evidence://backup/restore-test-age-exceeded
+  - alert: CodestraEncryptionKeyExpiration
+    expr: codestra_backup_encryption_key_expiry_timestamp_seconds - time() < 2592000
+    for: 1h
+    labels:
+      severity: critical
+      service: backup-security
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Backup encryption key expires soon
+      description: Backup encryption key expires soon. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: expires in < 30d
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/encryption-key-expiration.md
+      runbook_url: https://runbooks.codestra.agency/alerts/encryption-key-expiration
+      dashboard: monitoring-evidence://backup/encryption-key-expiration
+  - alert: CodestraSshHostKeyMismatch
+    expr: increase(codestra_backup_ssh_host_key_mismatch_total[1h]) > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: backup-security
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Backup SSH host-key mismatch detected
+      description: Backup SSH host-key mismatch detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any mismatch / 1h
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/ssh-host-key-mismatch.md
+      runbook_url: https://runbooks.codestra.agency/alerts/ssh-host-key-mismatch
+      dashboard: monitoring-evidence://backup/ssh-host-key-mismatch

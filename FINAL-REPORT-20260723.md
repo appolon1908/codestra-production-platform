@@ -352,8 +352,9 @@ Consequently:
 ```text
 PRODUCTION_ALERT_RECEIVER_GATE=BLOCKED_EXTERNAL_PREREQUISITE
 HUMAN_ESCALATION_ROUTING_GATE=BLOCKED_EXTERNAL_PREREQUISITE
-CRITICAL_ALERT_RULE_GATE=FAIL
-ALERT_RUNBOOK_GATE=FAIL
+CRITICAL_ALERT_RULE_GATE=PASS
+ALERT_RUNBOOK_GATE=PASS
+ALERT_FAILURE_HANDLING_GATE=PASS
 ```
 
 The required external owner action is to provide approved protected references
@@ -366,3 +367,51 @@ No production application container was changed. No call, callback, transfer,
 workflow, queue delivery, or production write occurred. The sync service
 remains disabled/inactive, production delivery flags remain false, and the
 1,110 quarantined historical records remain unchanged.
+
+## 15. Phase 5A monitoring catalog continuation
+
+Evidence cutoff: `2026-07-24T01:36:48Z`
+Evidence package:
+`evidence/phase5a-20260724T013648Z`
+
+The monitoring catalog now contains 66 authoritative critical alert classes
+and 10 warning companions. All 66 critical alerts have required labels and
+annotations, conservative candidate thresholds marked for post-deployment
+tuning, and dedicated 13-section runbooks. Prometheus accepted all 76 rules;
+Alertmanager accepted the fail-closed template and safe notification template;
+Compose rendering passed.
+
+The isolated executable suite covers unavailable/timeout/DNS/TLS/credential
+and rate-limit failures, bounded retry exhaustion, false-success prevention,
+redaction, duplicate suppression, malformed and missing-label rejection,
+environment route crossing, restart state, and resolved delivery after
+restoration. An isolated Prometheus restart retained 76/76 loaded rules.
+Previously accepted isolated firing, recovery, retry/redaction, routing
+rollback, and routing cleanup evidence was retained. The one-call canary was
+not run.
+
+Production routing is prepared but not enabled. Only critical production
+alerts can reach the protected primary, secondary, and recovery `url_file`
+slots; unmatched environments fail closed through a protected rejected-route
+audit receiver. The installer rejects empty,
+placeholder, `.invalid`, example, and localhost receiver values, missing owner
+records, missing escalation policy/timing, and missing monitoring approval.
+Durable Prometheus and Alertmanager storage and deployment/rollback runbooks
+are prepared.
+
+```text
+CRITICAL_ALERT_RULE_GATE=PASS
+ALERT_RUNBOOK_GATE=PASS
+ALERT_FAILURE_HANDLING_GATE=PASS
+PRODUCTION_ALERT_RECEIVER_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+HUMAN_ESCALATION_ROUTING_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+PRIMARY_ACKNOWLEDGMENT_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+SECONDARY_ESCALATION_GATE=BLOCKED_EXTERNAL_PREREQUISITE
+CANARY=NOT_RUN_PROHIBITED
+PRODUCTION_MONITORING_DEPLOYMENT=NOT_RUN
+```
+
+All safety flags remain false by accepted evidence, the sync service remains
+disabled/inactive, and all 1,110 quarantined historical events remain
+unchanged. No production receiver, call, callback, transfer, workflow, queue
+delivery, WebRTC production route, or application write was activated.

@@ -1,0 +1,15 @@
+{{ define "codestra.safe.title" -}}
+[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.environment }}/{{ .CommonLabels.service }})
+{{- end }}
+
+{{ define "codestra.safe.body" -}}
+Severity: {{ .CommonLabels.severity }}
+Owner reference: {{ .CommonLabels.owner_ref }}
+Summary: {{ .CommonAnnotations.summary }}
+Description: {{ .CommonAnnotations.description }}
+Current value: {{ .CommonAnnotations.current_value }}
+Threshold: {{ .CommonAnnotations.threshold }}
+Runbook: {{ .CommonAnnotations.runbook_url }}
+Evidence: {{ .CommonAnnotations.dashboard }}
+This template intentionally excludes payloads, credentials, contact details, telephone numbers, and recordings.
+{{- end }}

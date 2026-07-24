@@ -4,17 +4,18 @@ set -euo pipefail
 CONFIG=${CODESTRA_ALERTMANAGER_CONFIG:-/etc/codestra/monitoring/alertmanager.yml}
 GOVERNANCE=${CODESTRA_GOVERNANCE_REFERENCES:-/etc/codestra/governance/production.env}
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+VALIDATE_ONLY=${CODESTRA_MONITORING_VALIDATE_ONLY:-false}
 
 python3 "$ROOT/validate-governance.py" "$GOVERNANCE"
 [[ -r "$CONFIG" ]] || {
     echo "approved Alertmanager configuration is missing" >&2
     exit 2
 }
-if grep -q 'REPLACE_WITH_APPROVED' "$CONFIG"; then
+if grep -Eiq 'REPLACE_WITH_APPROVED|PLACEHOLDER|example\\.com|\\.invalid([/:]|$)' "$CONFIG"; then
     echo "refusing monitoring deployment with placeholder alert receiver" >&2
     exit 2
 fi
-for secret in primary_receiver_url secondary_receiver_url recovery_receiver_url; do
+for secret in primary_receiver_url secondary_receiver_url recovery_receiver_url rejected_route_url; do
     path="/etc/codestra/secrets/monitoring/$secret"
     [[ -s "$path" ]] || {
         echo "protected Alertmanager receiver secret is missing: $path" >&2
@@ -27,6 +28,8 @@ for secret in primary_receiver_url secondary_receiver_url recovery_receiver_url;
     }
 done
 
+python3 "$ROOT/validate-receiver-files.py" "$CONFIG" /etc/codestra/secrets/monitoring
+
 docker run --rm \
     --entrypoint /bin/promtool \
     -v "$ROOT/prometheus.yml":/etc/prometheus/prometheus.yml:ro \
@@ -36,7 +39,12 @@ docker run --rm \
 docker run --rm \
     --entrypoint /bin/amtool \
     -v "$CONFIG":/etc/alertmanager/alertmanager.yml:ro \
+    -v "$ROOT/templates":/etc/alertmanager/templates:ro \
     prom/alertmanager@sha256:9e082985f56f4c8c9f724e18f2288c6708f472e56a5286b8863d080434ea065d \
-    amtool check-config /etc/alertmanager/alertmanager.yml
+    check-config /etc/alertmanager/alertmanager.yml
 
+if [[ "$VALIDATE_ONLY" == "true" ]]; then
+    echo "monitoring_validation=pass deployment=not_started"
+    exit 0
+fi
 docker compose -f "$ROOT/compose.monitoring.yaml" up -d

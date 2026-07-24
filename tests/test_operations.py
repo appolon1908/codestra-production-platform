@@ -92,6 +92,31 @@ class BackupOperationsTests(unittest.TestCase):
 
 
 class MonitoringGovernanceTests(unittest.TestCase):
+    def test_receiver_validator_rejects_empty_invalid_and_placeholder_urls(self) -> None:
+        config = MONITORING / "alertmanager.example.yml"
+        names = ("primary_receiver_url", "secondary_receiver_url", "recovery_receiver_url", "rejected_route_url")
+        for invalid in ("", "https://receiver.invalid/hook", "REPLACE_WITH_APPROVED"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for name in names:
+                    (root / name).write_text(invalid)
+                result = subprocess.run(
+                    ["python3", str(MONITORING / "validate-receiver-files.py"), str(config), str(root)],
+                    text=True, capture_output=True, check=False,
+                )
+                self.assertEqual(result.returncode, 2)
+
+    def test_receiver_validator_accepts_nonplaceholder_protected_references(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, name in enumerate(("primary_receiver_url", "secondary_receiver_url", "recovery_receiver_url", "rejected_route_url")):
+                (root / name).write_text(f"https://alerts.internal.testdomain/receiver-{index}")
+            result = subprocess.run(
+                ["python3", str(MONITORING / "validate-receiver-files.py"), str(MONITORING / "alertmanager.example.yml"), str(root)],
+                text=True, capture_output=True, check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_empty_governance_template_fails_closed(self) -> None:
         result = subprocess.run(
             [
@@ -114,6 +139,9 @@ class MonitoringGovernanceTests(unittest.TestCase):
             "SECONDARY_ESCALATION_OWNER",
             "RECOVERY_NOTIFICATION_RECEIVER",
             "ALERT_ESCALATION_POLICY_REFERENCE",
+            "PRIMARY_ACKNOWLEDGMENT_WINDOW",
+            "SECONDARY_ESCALATION_WINDOW",
+            "MONITORING_APPROVAL_REFERENCE",
             "API_PERMISSION_APPROVER",
             "DNC_POLICY_REFERENCE",
             "DNC_TEST_APPROVER",
@@ -137,7 +165,7 @@ class MonitoringGovernanceTests(unittest.TestCase):
                 check=False,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("count=17", result.stdout)
+        self.assertIn("count=20", result.stdout)
 
     def test_every_critical_alert_has_an_existing_runbook(self) -> None:
         document = yaml.safe_load(
@@ -159,8 +187,12 @@ class MonitoringGovernanceTests(unittest.TestCase):
         document = yaml.safe_load(
             (MONITORING / "alertmanager.example.yml").read_text()
         )
-        self.assertEqual(len(document["receivers"]), 3)
-        for receiver in document["receivers"]:
+        protected = [
+            receiver for receiver in document["receivers"]
+            if receiver["name"].startswith("approved-")
+        ]
+        self.assertEqual(len(protected), 3)
+        for receiver in protected:
             for webhook in receiver["webhook_configs"]:
                 self.assertNotIn("url", webhook)
                 self.assertTrue(webhook["url_file"].startswith("/run/secrets/"))

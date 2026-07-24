@@ -1,0 +1,67 @@
+required_class	alertname	severity	service	environment	threshold	for	runbook	status
+middleware-unavailable	CodestraMiddlewareUnavailable	critical	middleware	production	service_up = 0	2m	operations/runbooks/alerts/middleware-unavailable.md	COVERED
+middleware-restart-loop	CodestraMiddlewareRestartLoop	critical	middleware	production	3 restarts / 15m	5m	operations/runbooks/alerts/middleware-restart-loop.md	COVERED
+odoo19-staging-unavailable	CodestraOdoo19StagingUnavailable	critical	odoo19	staging	service_up = 0	5m	operations/runbooks/alerts/odoo19-staging-unavailable.md	COVERED
+n8n-staging-unavailable	CodestraN8nStagingUnavailable	critical	n8n	staging	service_up = 0	5m	operations/runbooks/alerts/n8n-staging-unavailable.md	COVERED
+keycloak-unavailable	CodestraKeycloakUnavailable	critical	keycloak	production	service_up = 0	2m	operations/runbooks/alerts/keycloak-unavailable.md	COVERED
+private-callback-receiver-unavailable	CodestraPrivateCallbackReceiverUnavailable	critical	callback	production	service_up = 0	2m	operations/runbooks/alerts/private-callback-receiver-unavailable.md	COVERED
+integration-latency-high	CodestraIntegrationLatencyHigh	critical	integration	production	p95 > 10s / 15m	15m	operations/runbooks/alerts/integration-latency-high.md	COVERED
+queue-backlog-high	CodestraQueueBacklogHigh	critical	integration	production	ready depth > 100 / 15m	15m	operations/runbooks/alerts/queue-backlog-high.md	COVERED
+retry-backlog-high	CodestraRetryBacklogHigh	critical	integration	production	retry depth > 25 / 15m	15m	operations/runbooks/alerts/retry-backlog-high.md	COVERED
+dead-letter-backlog	CodestraDeadLetterBacklog	critical	integration	production	depth > 0 or growing / 5m	5m	operations/runbooks/alerts/dead-letter-backlog.md	COVERED
+callback-failure-rate-high	CodestraCallbackFailureRateHigh	critical	callback	production	failure ratio > 5% / 10m	10m	operations/runbooks/alerts/callback-failure-rate-high.md	COVERED
+duplicate-event-conflict	CodestraDuplicateEventConflict	critical	integration	production	any conflict / 10m	2m	operations/runbooks/alerts/duplicate-event-conflict.md	COVERED
+event-ordering-conflict	CodestraEventOrderingConflict	critical	integration	production	any conflict / 10m	2m	operations/runbooks/alerts/event-ordering-conflict.md	COVERED
+reconciliation-drift	CodestraReconciliationDrift	critical	reconciliation	production	drift records > 0 / 15m	15m	operations/runbooks/alerts/reconciliation-drift.md	COVERED
+authentication-failure-surge	CodestraAuthenticationFailureSurge	critical	identity	production	rate > 1/s / 10m	10m	operations/runbooks/alerts/authentication-failure-surge.md	COVERED
+authorization-failure-surge	CodestraAuthorizationFailureSurge	critical	authorization	production	rate > 0.5/s / 10m	10m	operations/runbooks/alerts/authorization-failure-surge.md	COVERED
+dnc-fail-closed-event	CodestraDncFailClosedEvent	critical	compliance	production	any event / 5m	1m	operations/runbooks/alerts/dnc-fail-closed-event.md	COVERED
+transfer-authorization-denial-surge	CodestraTransferAuthorizationDenialSurge	critical	transfer	production	3 denials / 5m	5m	operations/runbooks/alerts/transfer-authorization-denial-surge.md	COVERED
+unexpected-workflow-activation	CodestraUnexpectedWorkflowActivation	critical	n8n	production	active workflows > 0	1m	operations/runbooks/alerts/unexpected-workflow-activation.md	COVERED
+unexpected-write-enablement	CodestraUnexpectedWriteEnablement	critical	integration	production	write enablement > 0	1m	operations/runbooks/alerts/unexpected-write-enablement.md	COVERED
+unexpected-send-events-enabled	CodestraUnexpectedSendEventsEnabled	critical	integration	production	SEND_EVENTS != 0	1m	operations/runbooks/alerts/unexpected-send-events-enabled.md	COVERED
+unexpected-production-callbacks-enabled	CodestraUnexpectedProductionCallbacksEnabled	critical	callback	production	PRODUCTION_CALLBACKS_ENABLED != 0	1m	operations/runbooks/alerts/unexpected-production-callbacks-enabled.md	COVERED
+vicidial-unavailable	CodestraVicidialUnavailable	critical	vicidial	production	service_up = 0	2m	operations/runbooks/alerts/vicidial-unavailable.md	COVERED
+asterisk-unavailable	CodestraAsteriskUnavailable	critical	asterisk	production	service_up = 0	2m	operations/runbooks/alerts/asterisk-unavailable.md	COVERED
+trunk-unavailable	CodestraTrunkUnavailable	critical	voice-trunk	production	trunk_up = 0	2m	operations/runbooks/alerts/trunk-unavailable.md	COVERED
+carrier-authentication-failure	CodestraCarrierAuthenticationFailure	critical	carrier	production	any failure / 5m	2m	operations/runbooks/alerts/carrier-authentication-failure.md	COVERED
+unexpected-active-call	CodestraUnexpectedActiveCall	critical	voice	production	active calls > 0	1m	operations/runbooks/alerts/unexpected-active-call.md	COVERED
+unexpected-external-dialing-enabled	CodestraUnexpectedExternalDialingEnabled	critical	voice	production	EXTERNAL_DIAL_ENABLED != 0	1m	operations/runbooks/alerts/unexpected-external-dialing-enabled.md	COVERED
+endpoint-6101-unavailable	CodestraEndpoint6101Unavailable	critical	sip-endpoint-6101	production	authorized registration = 0	2m	operations/runbooks/alerts/endpoint-6101-unavailable.md	COVERED
+endpoint-6101-unauthorized-registration	CodestraEndpoint6101UnauthorizedRegistration	critical	sip-endpoint-6101	production	unauthorized registrations > 0	1m	operations/runbooks/alerts/endpoint-6101-unauthorized-registration.md	COVERED
+turn-unavailable	CodestraTurnUnavailable	critical	turn	production	service_up = 0	2m	operations/runbooks/alerts/turn-unavailable.md	COVERED
+turn-authentication-failure	CodestraTurnAuthenticationFailure	critical	turn	production	any failure / 5m	2m	operations/runbooks/alerts/turn-authentication-failure.md	COVERED
+wss-handshake-failure	CodestraWssHandshakeFailure	critical	webrtc	production	3 failures / 5m	5m	operations/runbooks/alerts/wss-handshake-failure.md	COVERED
+ice-failure	CodestraIceFailure	critical	webrtc	production	3 failures / 5m	5m	operations/runbooks/alerts/ice-failure.md	COVERED
+dtls-failure	CodestraDtlsFailure	critical	webrtc	production	3 failures / 5m	5m	operations/runbooks/alerts/dtls-failure.md	COVERED
+srtp-failure	CodestraSrtpFailure	critical	webrtc	production	3 failures / 5m	5m	operations/runbooks/alerts/srtp-failure.md	COVERED
+one-way-audio-indication	CodestraOneWayAudioIndication	critical	voice-media	production	2 indications / 10m	5m	operations/runbooks/alerts/one-way-audio-indication.md	COVERED
+packet-loss-excessive	CodestraPacketLossExcessive	critical	voice-media	production	packet loss > 5% / 10m	10m	operations/runbooks/alerts/packet-loss-excessive.md	COVERED
+jitter-excessive	CodestraJitterExcessive	critical	voice-media	production	jitter > 50ms / 10m	10m	operations/runbooks/alerts/jitter-excessive.md	COVERED
+call-setup-latency-excessive	CodestraCallSetupLatencyExcessive	critical	voice	production	p95 > 8s / 10m	10m	operations/runbooks/alerts/call-setup-latency-excessive.md	COVERED
+stuck-asterisk-channel	CodestraStuckAsteriskChannel	critical	asterisk	production	channel age > 1h	5m	operations/runbooks/alerts/stuck-asterisk-channel.md	COVERED
+channel-cleanup-failure	CodestraChannelCleanupFailure	critical	asterisk	production	any failure / 10m	5m	operations/runbooks/alerts/channel-cleanup-failure.md	COVERED
+postgresql-unavailable	CodestraPostgresqlUnavailable	critical	postgresql	production	database_up = 0	2m	operations/runbooks/alerts/postgresql-unavailable.md	COVERED
+mariadb-unavailable	CodestraMariadbUnavailable	critical	mariadb	production	database_up = 0	2m	operations/runbooks/alerts/mariadb-unavailable.md	COVERED
+redis-unavailable	CodestraRedisUnavailable	critical	redis	production	service_up = 0	2m	operations/runbooks/alerts/redis-unavailable.md	COVERED
+database-connection-saturation	CodestraDatabaseConnectionSaturation	critical	database	production	connections > 90% / 10m	10m	operations/runbooks/alerts/database-connection-saturation.md	COVERED
+disk-capacity-critical	CodestraDiskCapacityCritical	critical	storage	production	used > 90% / 15m	15m	operations/runbooks/alerts/disk-capacity-critical.md	COVERED
+inode-capacity-critical	CodestraInodeCapacityCritical	critical	storage	production	used > 90% / 15m	15m	operations/runbooks/alerts/inode-capacity-critical.md	COVERED
+recording-storage-capacity-critical	CodestraRecordingStorageCapacityCritical	critical	recording-storage	production	used > 90% / 15m	15m	operations/runbooks/alerts/recording-storage-capacity-critical.md	COVERED
+container-restart-loop	CodestraContainerRestartLoop	critical	containers	production	3 restarts / 15m	5m	operations/runbooks/alerts/container-restart-loop.md	COVERED
+clock-drift	CodestraClockDrift	critical	host	production	offset > 100ms or unsynchronized	5m	operations/runbooks/alerts/clock-drift.md	COVERED
+tls-certificate-expiration	CodestraTlsCertificateExpiration	critical	tls	production	expires in < 7d	1h	operations/runbooks/alerts/tls-certificate-expiration.md	COVERED
+credential-expiration	CodestraCredentialExpiration	critical	security	production	expires in < 7d	1h	operations/runbooks/alerts/credential-expiration.md	COVERED
+configuration-drift	CodestraConfigurationDrift	critical	release	production	drift > 0 / 10m	10m	operations/runbooks/alerts/configuration-drift.md	COVERED
+repository-drift	CodestraRepositoryDrift	critical	release	production	drift > 0 / 10m	10m	operations/runbooks/alerts/repository-drift.md	COVERED
+log-ingestion-failure	CodestraLogIngestionFailure	critical	logging	production	ingestion_up = 0	5m	operations/runbooks/alerts/log-ingestion-failure.md	COVERED
+backup-failure	CodestraBackupFailure	critical	backup	production	any failure / 1h	1m	operations/runbooks/alerts/backup-failure.md	COVERED
+off-server-replication-failure	CodestraOffServerReplicationFailure	critical	backup	production	any failure / 1h	1m	operations/runbooks/alerts/off-server-replication-failure.md	COVERED
+backup-checksum-failure	CodestraBackupChecksumFailure	critical	backup	production	any failure / 1h	1m	operations/runbooks/alerts/backup-checksum-failure.md	COVERED
+backup-stale	CodestraBackupStale	critical	backup	production	age > 26h / 15m	15m	operations/runbooks/alerts/backup-stale.md	COVERED
+remote-backup-capacity-low	CodestraRemoteBackupCapacityLow	critical	backup	production	free < 10GiB / 30m	30m	operations/runbooks/alerts/remote-backup-capacity-low.md	COVERED
+backup-timer-disabled	CodestraBackupTimerDisabled	critical	backup	production	timer enabled = 0	5m	operations/runbooks/alerts/backup-timer-disabled.md	COVERED
+backup-timer-failed	CodestraBackupTimerFailed	critical	backup	production	timer failed > 0	2m	operations/runbooks/alerts/backup-timer-failed.md	COVERED
+restore-test-age-exceeded	CodestraRestoreTestAgeExceeded	critical	recovery	production	age > 30d	1h	operations/runbooks/alerts/restore-test-age-exceeded.md	COVERED
+encryption-key-expiration	CodestraEncryptionKeyExpiration	critical	backup-security	production	expires in < 30d	1h	operations/runbooks/alerts/encryption-key-expiration.md	COVERED
+ssh-host-key-mismatch	CodestraSshHostKeyMismatch	critical	backup-security	production	any mismatch / 1h	1m	operations/runbooks/alerts/ssh-host-key-mismatch.md	COVERED

@@ -31,9 +31,11 @@ services:
       - --storage.path=/alertmanager
     volumes:
       - /etc/codestra/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./templates:/etc/alertmanager/templates:ro
       - /etc/codestra/secrets/monitoring/primary_receiver_url:/run/secrets/alertmanager_primary_receiver_url:ro
       - /etc/codestra/secrets/monitoring/secondary_receiver_url:/run/secrets/alertmanager_secondary_receiver_url:ro
       - /etc/codestra/secrets/monitoring/recovery_receiver_url:/run/secrets/alertmanager_recovery_receiver_url:ro
+      - /etc/codestra/secrets/monitoring/rejected_route_url:/run/secrets/alertmanager_rejected_route_url:ro
       - alertmanager_data:/alertmanager
     networks: [monitoring]
     read_only: true
