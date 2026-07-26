@@ -11,6 +11,9 @@ from odoo import fields
 
 
 stamp = os.environ["SYNTHETIC_ACCEPTANCE_STAMP"]
+extension = int(os.environ.get("SYNTHETIC_SIP_EXTENSION", "6199"))
+if not 6100 <= extension <= 6199 or extension == 6101:
+    raise RuntimeError("synthetic SIP extension is outside the approved staging range")
 login = f"test.agent.{stamp.lower()}@staging.invalid"
 idempotency = f"synthetic-identity-acceptance-{stamp.lower()}"
 
@@ -140,22 +143,23 @@ if request.state == "pending_approval":
     request.action_approve()
 if request.state == "approved":
     request.action_reserve_identifiers()
-pool = env["codestra.extension.pool"].search([("code", "=", "MOY-STAGE-6199")], limit=1)
+pool_code = f"MOY-STAGE-{extension}"
+pool = env["codestra.extension.pool"].search([("code", "=", pool_code)], limit=1)
 if not pool:
     pool = env["codestra.extension.pool"].create({
-        "name": "Transportation Verified Staging 6199",
-        "code": "MOY-STAGE-6199",
+        "name": f"Transportation Verified Staging {extension}",
+        "code": pool_code,
         "business_unit_id": unit.id,
-        "start_extension": 6199,
-        "end_extension": 6199,
+        "start_extension": extension,
+        "end_extension": extension,
         "technology": "pjsip",
-        "context": "from-internal",
+        "context": "codestra-echo-only",
         "wss_server": "wss://vicidial-staging.codestra.agency:8089/ws",
         "default_expiration_seconds": 3600,
         "active": True,
     })
 assignment = env["codestra.extension.assignment"].search(
-    [("request_id", "=", request.id), ("extension", "=", "6199")], limit=1
+    [("request_id", "=", request.id), ("extension", "=", str(extension))], limit=1
 )
 if not assignment:
     assignment = pool.reserve_extension(employee, request)

@@ -7,6 +7,7 @@ from odoo import fields
 
 
 stamp = os.environ["SYNTHETIC_ACCEPTANCE_STAMP"]
+extension = os.environ.get("SYNTHETIC_SIP_EXTENSION", "6199")
 request = env["codestra.provisioning.request"].search([
     ("idempotency_key", "=", f"synthetic-identity-acceptance-{stamp.lower()}"),
 ], limit=1)
@@ -65,7 +66,7 @@ reservations.write({
     "released_at": now,
 })
 request.env["codestra.extension.pool"].search([
-    ("code", "=", "MOY-STAGE-6199"),
+    ("code", "=", f"MOY-STAGE-{extension}"),
 ]).active = False
 request.env["call.center.campaign"].with_context(active_test=False).search([
     ("code", "in", ("MOY-STAGE-SYNTH", "COD-STAGE-UNRELATED")),
