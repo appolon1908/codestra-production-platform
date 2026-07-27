@@ -8,6 +8,7 @@ Generated UTC: 2026-07-27.
 - Deployment branch: `release/production-activation`
 - Curated baseline SHA: `5df0c1bd07cdd2716ef0f7a13e5ebbb69a9adc20`
 - Latest published audit/domain checkpoint: `8b731e5`
+- Latest published implementation checkpoint: `ba11cf8`
 - Odoo domain: `crm.codestra.agency`
 - Middleware domain: `api.codestra.agency`
 - n8n domain: `n8n.codestra.agency`

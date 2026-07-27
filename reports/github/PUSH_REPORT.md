@@ -6,8 +6,10 @@ Generated UTC: 2026-07-27.
 - Branch: `release/production-activation`
 - Initial curated baseline: `5df0c1bd07cdd2716ef0f7a13e5ebbb69a9adc20`
 - Curated audit/domain checkpoint: `8b731e5`
+- Synthetic identity implementation checkpoint: `ba11cf8`
 - Push mode: normal, non-force
 - Published range: `e7a8bb4..8b731e5`
+- Revalidation publication range: `c1156af..ba11cf8`
 - Status: `SUCCESS`
 
 The push occurred only after explicit staged-path review, staged whitespace and
