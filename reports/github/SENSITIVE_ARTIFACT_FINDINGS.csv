@@ -1,0 +1,3 @@
+path,category,detection_method,redacted_fingerprint,remediation,decision
+src/codestra_vicidial/app.py,protected credential-file reference,extension/path/content rule,sha256:34fa7ec4d55f46d1,retain; value is loaded from protected file,INCLUDE
+tests/test_curation_inventory.py,synthetic secret-scanner fixture,extension/path/content rule,sha256:ff98d2f22015864f,retain synthetic-only regression fixture,INCLUDE
