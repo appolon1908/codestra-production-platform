@@ -1,4 +1,8 @@
 {
+  ".github/workflows/vicidial-adapter-source.yml": {
+    "bytes": 5692,
+    "sha256": "e87e646831fb4a8765ced450ec416348c4607ee421ba556205dccf781d542a7b"
+  },
   ".gitignore": {
     "bytes": 854,
     "sha256": "f8ce244e7990b51af7a656a0d9970444ee3a3fdf2467c950af35e00dfc7399b6"
@@ -96,8 +100,8 @@
     "sha256": "83d01fa6a0a8dae663395504241f553e5685af2e42b82fe29dc0b7f636419c16"
   },
   "deploy/vicidial-restricted-adapter/adapter.env.example": {
-    "bytes": 763,
-    "sha256": "64d8304c2a31ee77d9aed601d1220bad8d741cec59110e96fb64fb1e24a28023"
+    "bytes": 819,
+    "sha256": "892c4d406629ac84b5dc3237c7e3cee7cfea4d27e8c784be79544ef3b7d8648f"
   },
   "deploy/vicidial-restricted-adapter/apache-private-ingress.include": {
     "bytes": 937,
@@ -836,8 +840,8 @@
     "sha256": "ec48a58087eb58e4629a68c10fbf8b018ed559b2f2dd407cd5904926a16605b0"
   },
   "reports/github/WORKING_TREE_INVENTORY.csv": {
-    "bytes": 31091,
-    "sha256": "536b73be507c2b3f74ade621853de5e97d1744c3a56f38197a44bc0bebf16c4b"
+    "bytes": 31184,
+    "sha256": "357dc518bb4b0cb82fd88f467beef97608e062af5b60435756e34dfe142e434b"
   },
   "scripts/audit_repository_secrets.py": {
     "bytes": 4676,

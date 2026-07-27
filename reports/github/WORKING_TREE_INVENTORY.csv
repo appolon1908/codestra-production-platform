@@ -1,4 +1,5 @@
 path,bytes,file_type,git_disposition
+.github/workflows/vicidial-adapter-source.yml,5692,application/octet-stream,TRACKED_FINAL_TREE
 .gitignore,854,application/octet-stream,TRACKED_FINAL_TREE
 .gitleaksignore,385,application/octet-stream,TRACKED_FINAL_TREE
 AGENTS.md,897,application/x-genesis-rom,TRACKED_FINAL_TREE
@@ -23,7 +24,7 @@ config/secret-ownership-manifest.tsv,3772,text/tab-separated-values,TRACKED_FINA
 config/synthetic-automatic-campaign.env.example,849,application/octet-stream,TRACKED_FINAL_TREE
 deploy/codestra-tel-events.service,974,application/octet-stream,TRACKED_FINAL_TREE
 deploy/tel-events-publisher.env.example,929,application/octet-stream,TRACKED_FINAL_TREE
-deploy/vicidial-restricted-adapter/adapter.env.example,763,application/octet-stream,TRACKED_FINAL_TREE
+deploy/vicidial-restricted-adapter/adapter.env.example,819,application/octet-stream,TRACKED_FINAL_TREE
 deploy/vicidial-restricted-adapter/apache-private-ingress.include,937,application/octet-stream,TRACKED_FINAL_TREE
 deploy/vicidial-restricted-adapter/codestra-vicidial-restricted-adapter-health.service,451,application/octet-stream,TRACKED_FINAL_TREE
 deploy/vicidial-restricted-adapter/codestra-vicidial-restricted-adapter-health.timer,233,application/octet-stream,TRACKED_FINAL_TREE
@@ -203,10 +204,10 @@ reports/github/INITIAL_COMMIT_REPORT.md,523,application/x-genesis-rom,TRACKED_FI
 reports/github/POTENTIALLY_SENSITIVE_PATHS.txt,3378,text/plain,TRACKED_FINAL_TREE
 reports/github/PRE_INITIAL_COMMIT_STATUS.md,8133,application/x-genesis-rom,TRACKED_FINAL_TREE
 reports/github/PUSH_REPORT.md,662,application/x-genesis-rom,TRACKED_FINAL_TREE
-reports/github/SECRET_REVIEW.md,1346,application/x-genesis-rom,TRACKED_FINAL_TREE
+reports/github/SECRET_REVIEW.md,806,application/x-genesis-rom,TRACKED_FINAL_TREE
 reports/github/SECRET_SCAN_FINDINGS.csv,1062,text/x-comma-separated-values,TRACKED_FINAL_TREE
 reports/github/SENSITIVE_ARTIFACT_INVENTORY.csv,37,text/x-comma-separated-values,TRACKED_FINAL_TREE
-reports/github/SENSITIVE_ARTIFACT_REVIEW.md,1031,application/x-genesis-rom,TRACKED_FINAL_TREE
+reports/github/SENSITIVE_ARTIFACT_REVIEW.md,460,application/x-genesis-rom,TRACKED_FINAL_TREE
 reports/github/UNTRACKED_LARGE_FILES.csv,21,text/x-comma-separated-values,TRACKED_FINAL_TREE
 scripts/audit_repository_secrets.py,4676,text/x-python,TRACKED_FINAL_TREE
 scripts/capture_consistent_odoo18_pair.sh,278,application/x-shellscript,TRACKED_FINAL_TREE
