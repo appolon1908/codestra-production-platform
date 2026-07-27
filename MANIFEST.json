@@ -1,0 +1,38 @@
+{
+  "AGENTS.md": {
+    "bytes": 965,
+    "sha256": "33b2b6cbb2aae1ee3cbef55e4d6c16a6508b221d30ec1c7573fe0e0b7cada15d"
+  },
+  "CODEX_VICIDIAL_SERVER.md": {
+    "bytes": 7334,
+    "sha256": "54040c589d9fe41cc72e8a87c5545e283ab33f7465d98d5ceee2330656f5fc22"
+  },
+  "README.md": {
+    "bytes": 845,
+    "sha256": "915af488d4f06760210aa2788e5959cfae2210f51fe27ca8727f070ecc26dc26"
+  },
+  "config/vicidial-server.env.example": {
+    "bytes": 443,
+    "sha256": "307f308275c2a1b8a4ee824aa7357bc02c17881f5a7a5599066fe8e9391f9ed6"
+  },
+  "docs/AUTOMATIC_CAMPAIGN_PROVISIONING.md": {
+    "bytes": 12580,
+    "sha256": "bf6e60ac02791088a317e66943231478da41b7307b0af27b435ca61dabb61c2f"
+  },
+  "docs/VICIDIAL_ADAPTER_CONTRACT.md": {
+    "bytes": 2646,
+    "sha256": "3199374d40a0d14c6a839ab85f98ad537263c75182a29fd2161c0d6801c4f46b"
+  },
+  "install-vicidial-package.sh": {
+    "bytes": 1506,
+    "sha256": "6b503ba6cac6a514e2a16ac72a99343f7e88b2f8dbbfb66e5f53d188594d1609"
+  },
+  "specs/VICIDIAL_ODOO_MAPPING_SPEC.md": {
+    "bytes": 27374,
+    "sha256": "24e3a738ab8fc384fe3b4e30b6bf059f3639d78ad45e8c99582044f1015685fd"
+  },
+  "start-codex-vicidial.sh": {
+    "bytes": 884,
+    "sha256": "261c1b11e1ec9d5c89a3676e812126f8bf30a596f70e11411177c3ef41479b2f"
+  }
+}
