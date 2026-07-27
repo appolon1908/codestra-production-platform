@@ -1,6 +1,6 @@
 # Pre-Initial Commit Status
 
-Generated UTC: `2026-07-27T20:24:12Z`
+Generated UTC: `2026-07-27T20:30:09Z`
 
 ## Repository
 
@@ -8,8 +8,9 @@ Generated UTC: `2026-07-27T20:24:12Z`
 /root/codestra-production-completion
 origin	https://github.com/appolon1908-hue/codestra-production-platform.git (fetch)
 origin	https://github.com/appolon1908-hue/codestra-production-platform.git (push)
-## feature/callcenter-platform-19
- M .gitignore
+## release/production-activation...origin/release/production-activation
+ M reports/github/PRE_INITIAL_COMMIT_STATUS.md
+ M scripts/curate-initial-commit.sh
  M scripts/run_synthetic_identity_odoo_stage.py
 ?? .campaign-invariant-evidence
 ?? .identity-center-backup
@@ -18,21 +19,12 @@ origin	https://github.com/appolon1908-hue/codestra-production-platform.git (push
 ?? .r2_candidate/
 ?? .remote-edit/
 ?? .vicidial-mapping-evidence
-?? .vicidial-staging-repo.tar.gz
 ?? .vicidial-staging-repo/
-?? AGENTS.md
-?? CODEX_APP_SERVER_A.md
-?? CODEX_UPDATE_GITHUB_AND_DOMAINS.md
 ?? FINAL-PRODUCTION-GOVERNANCE-CHANGE-RECORD-20260725.md
-?? MANIFEST.json
 ?? PRODUCTION-IDENTITY-DEPLOYMENT-FINAL-REPORT.md
-?? README.md
-?? config/application-server-a.env.example
 ?? config/database-architecture-staging.env.example
 ?? config/production-call-ended-watermark.json
 ?? config/vicidial-db-secret-ownership.tsv
-?? deploy/
-?? docs/
 ?? evidence/CHG-20260725-VICIDIAL-MAPPING-STAGING-01-20260725T195811Z/
 ?? evidence/COMPANY-MAILBOX-ADAPTER-20260726T021800Z.md
 ?? evidence/CRL-MONITORING-20260726T002829Z.md
@@ -100,10 +92,68 @@ origin	https://github.com/appolon1908-hue/codestra-production-platform.git (push
 ?? phase5a_bounded_call_ended_soak.py
 ?? phase5a_d1_deploy.sh
 ?? phase5a_d1r2_deploy.sh
-?? pytest.ini
 ?? reconcile_d1r2_current_candidate.sh
 ?? remote-fixes/
-?? reports/
+?? reports/SHA256SUMS
+?? reports/app-server-a/DOMAIN_VERIFICATION.md
+?? reports/blockers.md
+?? reports/business-unit-implementation.md
+?? reports/campaign-matrix.csv
+?? reports/crm-lead-campaign-invariant.md
+?? reports/crm-team-matrix.csv
+?? reports/cross-system-mapping-status.md
+?? reports/current-inventory.md
+?? reports/current-module-map.md
+?? reports/current-service-map.md
+?? reports/database-architecture-audit.md
+?? reports/database-schema-odoo-n8n-middleware.md
+?? reports/database-staging-implementation.md
+?? reports/discovery-inventory.md
+?? reports/mapping-api-test-results.md
+?? reports/mapping-blockers.md
+?? reports/mapping-functional-test-results.md
+?? reports/mapping-production-gate.md
+?? reports/mapping-reconciliation-results.md
+?? reports/mapping-remediation-roadmap.md
+?? reports/mapping-security-test-results.md
+?? reports/middleware-campaign-registry.csv
+?? reports/module-status.md
+?? reports/n8n-blockers.md
+?? reports/n8n-business-unit-matrix.csv
+?? reports/n8n-campaign-projection.csv
+?? reports/n8n-credential-matrix.csv
+?? reports/n8n-error-handling.md
+?? reports/n8n-production-gate.md
+?? reports/n8n-test-results.md
+?? reports/n8n-vicidial-mapping.csv
+?? reports/n8n-webhook-matrix.csv
+?? reports/n8n-workflow-inventory.md
+?? reports/n8n-workflow-matrix.csv
+?? reports/odoo-campaign-projection.csv
+?? reports/odoo-vicidial-mapping.csv
+?? reports/operational-binding-matrix.csv
+?? reports/production-gate.md
+?? reports/remediation-roadmap.md
+?? reports/repository-inventory.csv
+?? reports/security-matrix.csv
+?? reports/server-b-legacy-campaign-classification.csv
+?? reports/test-results.md
+?? reports/vicidial-blockers.md
+?? reports/vicidial-campaign-matrix.csv
+?? reports/vicidial-collision-analysis.md
+?? reports/vicidial-discovery-inventory.md
+?? reports/vicidial-disposition-matrix.csv
+?? reports/vicidial-final-report.md
+?? reports/vicidial-identifier-constraints.md
+?? reports/vicidial-inbound-group-matrix.csv
+?? reports/vicidial-list-matrix.csv
+?? reports/vicidial-production-gate.md
+?? reports/vicidial-remediation-roadmap.md
+?? reports/vicidial-reuse-plan.md
+?? reports/vicidial-script-matrix.csv
+?? reports/vicidial-staging-fixture-plan.md
+?? reports/vicidial-test-results.md
+?? reports/vicidial-user-group-matrix.csv
 ?? scripts/arm_phase4_p3.sh
 ?? scripts/bounded_external_record_call.sh
 ?? scripts/bounded_snapshot_persistence_gate.py
@@ -112,7 +162,6 @@ origin	https://github.com/appolon1908-hue/codestra-production-platform.git (push
 ?? scripts/build_n8n_architecture_reports.py
 ?? scripts/build_vicidial_staging_repository.py
 ?? scripts/canonical_event_client.py.reference
-?? scripts/curate-initial-commit.sh
 ?? scripts/generate_n8n_staging_catalog.py
 ?? scripts/internal_voip_endpoint_gate.sh
 ?? scripts/internal_voip_matrix_remaining_two.sh
@@ -133,15 +182,14 @@ origin	https://github.com/appolon1908-hue/codestra-production-platform.git (push
 ?? scripts/test_safe_diagnostics.py
 ?? scripts/validate_n8n_database_export.py
 ?? scripts/validate_n8n_staging_architecture.py
-?? scripts/verify-domains.sh
 ?? scripts/vicidial_internal_fixture_gate.sh
 ?? scripts/vicidial_sync.py.candidate
 ?? seal_phase5a_s1_blocked.sh
 ?? seal_phase5a_s1r1_reports.sh
-?? specs/
+?? specs/CODESTRA_CROSS_SERVER_COMPLETION_PLAN.md
+?? specs/CODESTRA_MISSING_AUTOMATION_AI_WEBHOOK_ARCHITECTURE.md
+?? specs/CODESTRA_ODOO19_MULTI_BUSINESS_MASTER_SPEC_V2.md
+?? specs/CODESTRA_VICIDIAL_CAMPAIGN_MAPPING_TEMPLATE_V2.csv
+?? specs/CODESTRA_VICIDIAL_CROSS_SYSTEM_MAPPING_MASTER_SPEC_V2.md
 ?? start-codex-app-server.sh
-?? tel_events/
-?? tests/test_production_vicidial_sync.py
-?? tests/test_tel_events_publisher.py
-?? tools/
 ```

@@ -17,7 +17,7 @@ resolve_a() {
 
 check_host() {
   local host="$1"
-  local result status
+  local result status https_status
   result="$(resolve_a "$host" | sort -u | paste -sd, - || true)"
   if [[ ",${result}," == *",${EXPECTED_IP},"* ]]; then
     status="PASS"
@@ -26,14 +26,18 @@ check_host() {
   else
     status="MISMATCH"
   fi
-  printf '| `%s` | `%s` | `%s` | `%s` |\n' "$host" "${result:-NONE}" "$EXPECTED_IP" "$status"
+  https_status="$(curl -sS -o /dev/null --connect-timeout 5 --max-time 10 \
+    -w '%{http_code}' "https://${host}/" 2>/dev/null || true)"
+  [[ "$https_status" == "000" || -z "$https_status" ]] && https_status="UNREACHABLE"
+  printf '| `%s` | `%s` | `%s` | `%s` | `%s` |\n' \
+    "$host" "${result:-NONE}" "$EXPECTED_IP" "$status" "$https_status"
 }
 
 {
   printf '# Domain Verification\n\n'
   printf 'Generated UTC: `%s`\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf '| Hostname | Resolved IPv4 | Expected IPv4 | Result |\n'
-  printf '|---|---|---|---|\n'
+  printf '| Hostname | Resolved IPv4 | Expected IPv4 | DNS result | HTTPS status |\n'
+  printf '|---|---|---|---|---|\n'
   check_host crm.codestra.agency
   check_host api.codestra.agency
   check_host n8n.codestra.agency

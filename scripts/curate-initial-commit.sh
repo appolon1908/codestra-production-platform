@@ -26,21 +26,40 @@ suspicious="$REPORT_DIR/POTENTIALLY_SENSITIVE_PATHS.txt"
   printf '```\n'
 } > "$status_report"
 
-printf 'status,path,bytes\n' > "$inventory"
-git status --porcelain=v1 -z | while IFS= read -r -d '' entry; do
-  status="${entry:0:2}"
-  path="${entry:3}"
+printf 'status,path,bytes,file_type,classification\n' > "$inventory"
+{
+  git ls-files --modified -z |
+    while IFS= read -r -d '' path; do
+      printf ' M\0%s\0tracked-modified\0' "$path"
+    done
+  git ls-files --others --exclude-standard -z |
+    while IFS= read -r -d '' path; do
+      printf '??\0%s\0untracked\0' "$path"
+    done
+} | while IFS= read -r -d '' status &&
+          IFS= read -r -d '' path &&
+          IFS= read -r -d '' classification; do
   bytes=""
-  [[ -f "$path" ]] && bytes="$(wc -c < "$path" | tr -d ' ')"
-  printf '"%s","%s","%s"\n' "$status" "${path//\"/\"\"}" "$bytes" >> "$inventory"
+  file_type=""
+  if [[ -f "$path" ]]; then
+    bytes="$(wc -c < "$path" | tr -d ' ')"
+    file_type="$(file -b -- "$path" 2>/dev/null || printf unknown)"
+  elif [[ -L "$path" ]]; then
+    file_type="symbolic link"
+  fi
+  printf '"%s","%s","%s","%s","%s"\n' \
+    "$status" "${path//\"/\"\"}" "$bytes" \
+    "${file_type//\"/\"\"}" "$classification" >> "$inventory"
 done
 
-printf 'path,bytes\n' > "$large"
+printf 'path,bytes,file_type\n' > "$large"
 git ls-files --others --exclude-standard -z | while IFS= read -r -d '' path; do
   if [[ -f "$path" ]]; then
     bytes="$(wc -c < "$path" | tr -d ' ')"
     if (( bytes >= 1048576 )); then
-      printf '"%s","%s"\n' "${path//\"/\"\"}" "$bytes" >> "$large"
+      file_type="$(file -b -- "$path" 2>/dev/null || printf unknown)"
+      printf '"%s","%s","%s"\n' \
+        "${path//\"/\"\"}" "$bytes" "${file_type//\"/\"\"}" >> "$large"
     fi
   fi
 done

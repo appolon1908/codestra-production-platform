@@ -33,6 +33,7 @@
 ./evidence/voip-odoo-internal-20260725T133623Z/server-b/vicidial-fixture-gate/rollback.sql
 ./operations/runbooks/alerts/credential-expiration.md
 ./operations/runbooks/alerts/recording-storage-capacity-critical.md
+./reports/github/SECRET_REVIEW.md
 ./reports/n8n-credential-matrix.csv
 ./reports/schema/middleware-staging-schema.sql
 ./reports/schema/n8n-staging-schema.sql
