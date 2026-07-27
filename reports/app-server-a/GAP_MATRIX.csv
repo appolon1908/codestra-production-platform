@@ -11,7 +11,7 @@ Keycloak TLS,FAIL,"Certificate expires 2026-07-28","Renew and prove automated re
 Reverse proxy,PASS,"Healthy container owns ports 80 and 443","Validate route-specific TLS after DNS"
 Monitoring,PASS,"Prometheus and monitoring containers running","Run alert and rollback acceptance"
 VICIdial SSH reachability,PASS,"65.21.67.207:22 reachable","Preserve read-only inventory path"
-VICIdial adapter reachability,BLOCKED,"65.21.67.207:9443 unreachable; HTTPS /health /ready /version return 404","Deploy or restore restricted authenticated adapter listener"
+VICIdial adapter reachability,PASS,"Private Apache mTLS ingress 10.40.0.2:8443 proxies the loopback adapter; public 9443 remains closed","Keep staging-only and writes disabled pending later production gates"
 Campaign design core,PARTIAL,"Canonical disabled manifest, validation, idempotency and atomic SQLite allocation implemented; 16 tests pass","Integrate API persistence and Odoo outbox consumer"
 Automated repository tests,PASS,"94 tests and 9 subtests passed","Add API and deployed integration coverage"
 Backup scheduling,FAIL,"Expected backup timer units are not installed/active","Install safely and validate scheduled off-server backup"
