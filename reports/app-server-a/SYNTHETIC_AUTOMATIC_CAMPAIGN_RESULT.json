@@ -1,0 +1,40 @@
+{
+  "agent": {"active": false, "user_id": "TST6101"},
+  "audit_counts": {
+    "approval": 1,
+    "audit_event": 3,
+    "n8n_scope": 1,
+    "odoo_projection": 1,
+    "outbox_event": 1
+  },
+  "campaign": {
+    "active": false,
+    "actual_id": "TSTE344E",
+    "canonical_id": "TEST-E2E-OUT"
+  },
+  "correlation_id": "staging-auto-campaign-01985ac1",
+  "design_event_count": 1,
+  "dispositions": ["DNC", "TEST"],
+  "evidence_sha256": "63093c65b4302587a3733848a4e2c14ee16f889ecf6135a1ba7efa25b2cfe1a9",
+  "external_communication": false,
+  "groups": ["TEST_E2E_AGENT", "TEST_E2E_CLOSERS", "TEST_E2E_INBOUND"],
+  "idempotent_campaign_replay": true,
+  "idempotent_lead_replay": true,
+  "integration_uuid": "01985ac0-4268-7d11-8f47-7b731b1d9101",
+  "lead": {
+    "adapter_lead_id_present": true,
+    "customer_number_used": false,
+    "external_id_sha256": "1ff70bb4dc0a4c192ee4050f7b651e6d4944836a2d3e9f894e2ef0b305484868",
+    "synthetic": true
+  },
+  "list": {"active": false, "list_id": 91000},
+  "manifest_sha256": "738957fb8987b59e12e57a04cfc0018732d94c51d7088b37f1f2f0648ab8fa02",
+  "n8n": {"active": false, "scope": "STG-TEST-E2E-V1"},
+  "odoo_status": "rolled_back_disabled",
+  "production_dialing": false,
+  "reconciliation": "no_unexplained_drift",
+  "rollback": "disabled",
+  "scripts": ["TEST_E2E_AGENT_V1"],
+  "status": "PASS",
+  "transfer_policy": "same-campaign-only"
+}
