@@ -61,7 +61,7 @@ def readiness(values: dict[str, str]) -> dict:
     context.load_cert_chain(
         values["ADAPTER_CLIENT_CERT_FILE"], values["ADAPTER_CLIENT_KEY_FILE"]
     )
-    request = urllib.request.Request(values["ADAPTER_URL"] + "/health/ready")
+    request = urllib.request.Request(values["ADAPTER_URL"] + "/ready")
     try:
         response = urllib.request.urlopen(request, context=context, timeout=8)
     except urllib.error.HTTPError as error:

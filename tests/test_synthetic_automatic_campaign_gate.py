@@ -14,13 +14,13 @@ SPEC.loader.exec_module(gate)
 def safe():
     return {
         "ENVIRONMENT": "staging",
-        "BUSINESS_UNIT": "MOY",
-        "CANONICAL_CAMPAIGN": "MOY-TEST-OUT",
-        "VICIDIAL_CAMPAIGN": "MOYDCB3B",
-        "VICIDIAL_LIST_ID": "91001",
-        "TEST_AGENT": "synthetic-campaign-agent",
+        "BUSINESS_UNIT": "TEST",
+        "CANONICAL_CAMPAIGN": "TEST-E2E-OUT",
+        "VICIDIAL_CAMPAIGN": "TST00000",
+        "VICIDIAL_LIST_ID": "91000",
+        "TEST_AGENT": "TST6101",
         "TEST_ENDPOINT": "6101",
-        "ADAPTER_URL": "https://edge.internal.codestra.agency:8443",
+        "ADAPTER_URL": "https://edge.internal.codestra.agency:8443/restricted-vicidial",
         **{flag: "false" for flag in gate.FALSE_FLAGS},
     }
 

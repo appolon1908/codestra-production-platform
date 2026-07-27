@@ -65,6 +65,30 @@ def test_staging_uses_test_range(tmp_path):
     assert manifest["n8n"]["scope"].startswith("STG-")
 
 
+def test_test_business_unit_is_staging_only_and_adapter_safe(tmp_path):
+    service = CampaignDesignService(SQLiteDesignRepository(str(tmp_path / "design.db")))
+    manifest = service.preview(
+        request(
+            environment="staging",
+            business_unit="TEST",
+            purpose="E2E",
+        )
+    )
+    assert manifest["odoo"]["campaign_code"] == "TEST-E2E-OUT"
+    assert manifest["vicidial"]["default_list_id"] == 91000
+    assert manifest["vicidial"]["actual_campaign_id"].startswith("TST")
+    assert len(manifest["vicidial"]["actual_campaign_id"]) == 8
+
+    with pytest.raises(DesignValidationError):
+        service.preview(
+            request(
+                environment="production",
+                business_unit="TEST",
+                purpose="E2E",
+            )
+        )
+
+
 def test_changed_replay_is_rejected(tmp_path):
     service = CampaignDesignService(SQLiteDesignRepository(str(tmp_path / "design.db")))
     original = request()
