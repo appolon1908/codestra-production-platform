@@ -16,5 +16,7 @@ is ignored and must not enter Git.
 Existing artifacts were preserved in place; none were deleted, reset, or moved.
 The protected configuration backup and pre-curation Git inventory are stored
 outside Git under `/root/codestra-update-backups/20260727T202944Z`.
+The repeated pre-curation snapshot is stored under
+`/root/codestra-update-backups/20260727T203514Z`.
 
 `SENSITIVE_ARTIFACT_REVIEW=PASS_FOR_CURATED_STAGING`

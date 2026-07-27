@@ -14,7 +14,7 @@ stamp = os.environ["SYNTHETIC_ACCEPTANCE_STAMP"]
 extension = int(os.environ.get("SYNTHETIC_SIP_EXTENSION", "6199"))
 if not 6100 <= extension <= 6199 or extension == 6101:
     raise RuntimeError("synthetic SIP extension is outside the approved staging range")
-login = f"test.agent.{stamp.lower()}@staging.invalid"
+login = f"synthetic.agent.{stamp.lower()}@staging.invalid"
 idempotency = f"synthetic-identity-acceptance-{stamp.lower()}"
 
 unit = env["call.center.business.unit"].search([("id", "=", 1)], limit=1)
@@ -82,11 +82,11 @@ role = env["codestra.role.template"].search(
     order="version desc,id desc", limit=1,
 )
 employee = env["hr.employee"].search(
-    [("name", "=", f"Test Agent {stamp}")], limit=1
+    [("name", "=", f"Synthetic Agent {stamp}")], limit=1
 )
 if not employee:
     employee = env["hr.employee"].create({
-        "name": f"Test Agent {stamp}",
+        "name": f"Synthetic Agent {stamp}",
         "company_id": company.id,
         "department_id": False,
         "work_email": login,
@@ -98,7 +98,7 @@ user = env["res.users"].with_context(active_test=False).search(
 if not user:
     agent_group = env.ref("call_center_core.group_call_center_agent")
     user = env["res.users"].with_context(no_reset_password=True).create({
-        "name": f"Test Agent {stamp}",
+        "name": f"Synthetic Agent {stamp}",
         "login": login,
         "email": login,
         "active": False,

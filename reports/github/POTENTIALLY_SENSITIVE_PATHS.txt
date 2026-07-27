@@ -34,11 +34,14 @@
 ./operations/runbooks/alerts/credential-expiration.md
 ./operations/runbooks/alerts/recording-storage-capacity-critical.md
 ./reports/github/SECRET_REVIEW.md
+./reports/github/SECRET_SCAN_FINDINGS.csv
 ./reports/n8n-credential-matrix.csv
 ./reports/schema/middleware-staging-schema.sql
 ./reports/schema/n8n-staging-schema.sql
 ./reports/schema/odoo-staging-schema.sql
+./scripts/__pycache__/audit_repository_secrets.cpython-310.pyc
 ./scripts/__pycache__/rotate_service_secrets.cpython-310.pyc
+./scripts/audit_repository_secrets.py
 ./scripts/rotate_service_secrets.py
 ./scripts/synthetic_gate_rotate_db_credential.sh
 ./scripts/synthetic_gate_secret_scan.py

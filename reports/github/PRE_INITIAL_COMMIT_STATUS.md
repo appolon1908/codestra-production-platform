@@ -1,6 +1,6 @@
 # Pre-Initial Commit Status
 
-Generated UTC: `2026-07-27T20:30:09Z`
+Generated UTC: `2026-07-27T20:35:14Z`
 
 ## Repository
 
@@ -10,16 +10,7 @@ origin	https://github.com/appolon1908-hue/codestra-production-platform.git (fetc
 origin	https://github.com/appolon1908-hue/codestra-production-platform.git (push)
 ## release/production-activation...origin/release/production-activation
  M reports/github/PRE_INITIAL_COMMIT_STATUS.md
- M scripts/curate-initial-commit.sh
  M scripts/run_synthetic_identity_odoo_stage.py
-?? .campaign-invariant-evidence
-?? .identity-center-backup
-?? .locks/
-?? .n8n-current-evidence
-?? .r2_candidate/
-?? .remote-edit/
-?? .vicidial-mapping-evidence
-?? .vicidial-staging-repo/
 ?? FINAL-PRODUCTION-GOVERNANCE-CHANGE-RECORD-20260725.md
 ?? PRODUCTION-IDENTITY-DEPLOYMENT-FINAL-REPORT.md
 ?? config/database-architecture-staging.env.example
@@ -95,7 +86,6 @@ origin	https://github.com/appolon1908-hue/codestra-production-platform.git (push
 ?? reconcile_d1r2_current_candidate.sh
 ?? remote-fixes/
 ?? reports/SHA256SUMS
-?? reports/app-server-a/DOMAIN_VERIFICATION.md
 ?? reports/blockers.md
 ?? reports/business-unit-implementation.md
 ?? reports/campaign-matrix.csv
