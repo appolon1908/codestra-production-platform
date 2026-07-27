@@ -1,4 +1,12 @@
 {
+  ".gitignore": {
+    "bytes": 854,
+    "sha256": "f8ce244e7990b51af7a656a0d9970444ee3a3fdf2467c950af35e00dfc7399b6"
+  },
+  ".gitleaksignore": {
+    "bytes": 385,
+    "sha256": "a64c95d1bb453aedcb3e9574500bf54b704ee3a54e92e8a23a075e4b28b3105d"
+  },
   "AGENTS.md": {
     "bytes": 897,
     "sha256": "58bbc7dc924b0c083802ebd28ef47a167c9b09cf17a0ccc351dfeab04b244278"
@@ -7,32 +15,1320 @@
     "bytes": 7673,
     "sha256": "2017046f1e5b0f7d271ef08e74c2e5d3a19ae0f1f92e400471235824c455ef28"
   },
+  "CODEX_UPDATE_GITHUB_AND_DOMAINS.md": {
+    "bytes": 8034,
+    "sha256": "ae1980ab6564179e374fe2cf784365ce56a4626e0875abf14df23df45dac3a5a"
+  },
+  "FINAL-PRODUCTION-CHANGE-RECORD-20260723.md": {
+    "bytes": 7998,
+    "sha256": "27cf82cbbfa17925d16c48252e634f7a996c27d301d8f7b46143b56ca7f34b20"
+  },
+  "FINAL-REPORT-20260723.md": {
+    "bytes": 28639,
+    "sha256": "b39ef47812394a4df8441627119ef9e6b7ba844a433d45d68886441191f5dab7"
+  },
+  "GATE3A-REPRODUCIBILITY-20260723.md": {
+    "bytes": 2590,
+    "sha256": "a5c1630ad19839707644435534f15562d2647d8230fd5df00b952666f076c2c1"
+  },
+  "ODOO19-MIGRATION-GOVERNANCE-DRAFT.md": {
+    "bytes": 4573,
+    "sha256": "106da0dfe8921c11336d5ba65b58e20a91a81ffd0cdb0fc832b4a0b5e0485e12"
+  },
+  "ODOO19-MIGRATION-GOVERNANCE.md": {
+    "bytes": 3796,
+    "sha256": "c00e7d61997252e91c2335c02f7fad73a76bca1ee35259bcf15aec03d8419cb6"
+  },
+  "ODOO19-ROLLBACK-REHEARSAL-DRAFT.md": {
+    "bytes": 2397,
+    "sha256": "3434fd5f30623de1fc2f1a6ac23a15a92394c40990800f2295534b5e0a990ee5"
+  },
+  "OPERATIONS-EVIDENCE-20260723.md": {
+    "bytes": 3623,
+    "sha256": "ef72aef44dab93ef0cc5837197b3d81022e2f0d3782c20da74f892116b5aa692"
+  },
+  "PROGRESS-20260723.md": {
+    "bytes": 4285,
+    "sha256": "f13ad78b5d1a83a0f9c6ebdd71cbf5ba416b7bee096e1fc82fa0decf4080a038"
+  },
   "README.md": {
     "bytes": 882,
     "sha256": "3d9b03143048a4fa10ca42f0daf90d02355d9d95ade0846f69359a1bc3b6e05f"
   },
+  "campaign_provisioning/__init__.py": {
+    "bytes": 643,
+    "sha256": "bc57d4c75151dc2aa14af82b61b52782fcf5d0a271790d8696d77d30cce71850"
+  },
+  "campaign_provisioning/design.py": {
+    "bytes": 13039,
+    "sha256": "b2cef917cb36a50182ab6903cd9cbb540f254514f96fb321b1c9eb61578738ef"
+  },
+  "campaign_provisioning/lifecycle.py": {
+    "bytes": 19697,
+    "sha256": "61a3a1415cb10867b6c4724711d7f639bd8e7dc425d62c836e1489d54500c8dc"
+  },
   "config/application-server-a.env.example": {
-    "bytes": 535,
-    "sha256": "293652c3ce89f19dc1f38b7a5838d50e6e8fd319fbc2898bffa6a71bb407c298"
+    "bytes": 679,
+    "sha256": "d73e7859eb325009dbf814d1c64d0de21961a329325f597383927556c4652571"
+  },
+  "config/caddy-keycloak-public.Caddyfile.example": {
+    "bytes": 310,
+    "sha256": "eeedfd5548aac1acf3094cad0f4fc6ad0df8c498b5ae488b5355c0b57eaa6455"
+  },
+  "config/middleware-private-vicidial-adapter.env.example": {
+    "bytes": 774,
+    "sha256": "a8607f9c2af5848d1754d1db4fce3402420c6bd26e007e379bcb41353ad698fe"
+  },
+  "config/secret-ownership-manifest.tsv": {
+    "bytes": 3772,
+    "sha256": "5b0043d73892e3852aa4b304c11a26e37dd5ad4852fa108d2011cd2e8411b883"
+  },
+  "config/synthetic-automatic-campaign.env.example": {
+    "bytes": 849,
+    "sha256": "aedce36a20dabb1d8f552f479a5e5743b93d0da892caa9380b12f3b8a4728b3e"
+  },
+  "deploy/codestra-tel-events.service": {
+    "bytes": 974,
+    "sha256": "aa5ff50aa182ae1e019bee7dc7831b5abdf34f97a030b54dc03286b0729e9580"
+  },
+  "deploy/tel-events-publisher.env.example": {
+    "bytes": 929,
+    "sha256": "83d01fa6a0a8dae663395504241f553e5685af2e42b82fe29dc0b7f636419c16"
+  },
+  "deploy/vicidial-restricted-adapter/adapter.env.example": {
+    "bytes": 763,
+    "sha256": "64d8304c2a31ee77d9aed601d1220bad8d741cec59110e96fb64fb1e24a28023"
+  },
+  "deploy/vicidial-restricted-adapter/apache-private-ingress.include": {
+    "bytes": 937,
+    "sha256": "b825f081be92f4a25559488648da8384668c4e71f762216b6397f53522560d03"
+  },
+  "deploy/vicidial-restricted-adapter/codestra-vicidial-restricted-adapter-health.service": {
+    "bytes": 451,
+    "sha256": "13e96ebd8295ed719fd162a30c234cb3dea616de8d386dc94586aca0827d2d02"
+  },
+  "deploy/vicidial-restricted-adapter/codestra-vicidial-restricted-adapter-health.timer": {
+    "bytes": 233,
+    "sha256": "91ceb2879fd89bc8dc277a9175fc55992a6ca1e38b77ca22a04c24602f12c5b0"
+  },
+  "deploy/vicidial-restricted-adapter/codestra-vicidial-restricted-adapter.service": {
+    "bytes": 2125,
+    "sha256": "04457468493495bccae0a1455b12bba132af3f15f7eb48cd2046da23ad05c8fb"
+  },
+  "deploy/vicidial-restricted-adapter/firewalld-private-ingress.xml.example": {
+    "bytes": 234,
+    "sha256": "5871aba07a17f33a937b8a58195a04897abd100dc790e70954a492c823b061df"
   },
   "docs/AUTOMATIC_CAMPAIGN_PROVISIONING.md": {
     "bytes": 12580,
     "sha256": "bf6e60ac02791088a317e66943231478da41b7307b0af27b435ca61dabb61c2f"
   },
+  "docs/CONFIRMED_PRODUCTION_IDENTITY.md": {
+    "bytes": 800,
+    "sha256": "dfe5789cd93bf8ffcc66f1a60d347a8a05dc3234b9afbf5c223101365cf9013c"
+  },
   "docs/VICIDIAL_ADAPTER_CONTRACT.md": {
     "bytes": 2646,
     "sha256": "3199374d40a0d14c6a839ab85f98ad537263c75182a29fd2161c0d6801c4f46b"
   },
-  "install-app-server-package.sh": {
-    "bytes": 1542,
-    "sha256": "1e49275c94b02c052d19ccd9219cba2068a8daa95a241c0f6b4a521612c62ccd"
+  "evidence/BLOCKED-AUDIT-20260723T204904Z.md": {
+    "bytes": 2009,
+    "sha256": "db5ed4c80a150deca31a79f81e5992cd104fa53a142b91f8c8b1550420a0b871"
+  },
+  "evidence/CONTINUATION-20260723T204435Z.md": {
+    "bytes": 4039,
+    "sha256": "40c990c9f60a36d079cc1ce67206e6022de0ddb073ff10cbca5e62f7e1883687"
+  },
+  "evidence/IDENTITY-PROVISIONING-EXECUTION-20260726.md": {
+    "bytes": 3904,
+    "sha256": "2f63d45745fb2c53f38d0ab2552d33c28f1d24099f1545785268815408fed5ac"
+  },
+  "evidence/IDENTITY-PROVISIONING-EXECUTION-20260726.sha256": {
+    "bytes": 119,
+    "sha256": "a456f208ab84062a914c2011823e44ce31265d2a3eba17a84e59c8cb0c6a0dd1"
+  },
+  "evidence/IDENTITY-PROVISIONING-IMPLEMENTATION-20260726.md": {
+    "bytes": 3951,
+    "sha256": "4af6ad5a4c98f8f67c2470d8c75bcc64f214ac855faef0190311ab7c7651d889"
+  },
+  "evidence/IMMUTABLE-RELEASE-CANDIDATE-20260726.md": {
+    "bytes": 6026,
+    "sha256": "66a81227922bb4d970d3ccee952ca06c6bac5e2176822e400af56ed2b1ee64f2"
+  },
+  "evidence/IMMUTABLE-RELEASE-RISK-PACKET-20260726.md": {
+    "bytes": 1713,
+    "sha256": "908723dc6cae7fc80495a8ae34b856c34f7d8aec0da5705fa73a872b97b8f1bf"
+  },
+  "evidence/ODOO19-FOCUSED-20260723T210843Z.md": {
+    "bytes": 1071,
+    "sha256": "4d3d3c511c4fba885a62779aec73646fcfe120f9ed204fa0f874cccbd8b1def1"
+  },
+  "evidence/ODOO19-FOCUSED-MISSION-20260725.md": {
+    "bytes": 4419,
+    "sha256": "af1a105ab300614808ee3b702ce8bdcccd610d510bb620d50b61c6837973c7e7"
+  },
+  "evidence/RESUME-20260723T203800Z.md": {
+    "bytes": 2942,
+    "sha256": "f024fbeb1934ac58674895f586403e3a5533ea6a29d84d5af9111cad6b65f6c6"
+  },
+  "evidence/RESUMED-AUDIT-20260723T150919Z.md": {
+    "bytes": 4359,
+    "sha256": "b495d8561cafbb227bd806d06b3d8cb8888309c12b4909d2b41663c713701dbb"
+  },
+  "evidence/SECRET-ROTATION-SERVICE-OWNERSHIP-20260723.md": {
+    "bytes": 5478,
+    "sha256": "65f457757eb5571ac7f244f39d0e2c29c4af2994683a546c6ddb7c951019571b"
+  },
+  "evidence/SYNTHETIC-AUTOMATIC-CAMPAIGN-20260727-BLOCKED.md": {
+    "bytes": 1417,
+    "sha256": "01a2c66ba124ce2d8be972375e56050da965927884c51e1bd01f494ce6f7613f"
+  },
+  "evidence/SYNTHETIC-IDENTITY-ACCEPTANCE-20260726T0225Z.md": {
+    "bytes": 5482,
+    "sha256": "687cf13ec3aadeaec410715ccf8883054c6a9fee609ade4477cbfe94e5805241"
+  },
+  "evidence/SYNTHETIC-IDENTITY-ACCEPTANCE-20260726T0247Z.md": {
+    "bytes": 4439,
+    "sha256": "ae3798c7f2250a1a1214daf05fa9aab8b11753c73b93ae09dc2750d6aa15a413"
+  },
+  "evidence/SYNTHETIC-TELEPHONY-CREDENTIAL-REMEDIATION-20260726T024000Z.md": {
+    "bytes": 1911,
+    "sha256": "c7d0bf5e375c5d0ac72e5c6e9e7aaba99e080f50fe9b297ab2bf21624cfe036f"
+  },
+  "evidence/acceptance-owner-decisions.md": {
+    "bytes": 163,
+    "sha256": "2b2f084a7c76d6a65835cd227b67285491db85832f2ffe07206e671a224d52a7"
+  },
+  "evidence/attachment-validation.md": {
+    "bytes": 239,
+    "sha256": "45618bf96ade19334e4befdf270472a70b6022b628ee751c1113800fd4be94b5"
+  },
+  "evidence/clean-install-results.md": {
+    "bytes": 255,
+    "sha256": "d1f93f65a8a4c01ff4dd101649efe1657a42b4a1b4d273619bcd29f217f67537"
+  },
+  "evidence/data-reconciliation.md": {
+    "bytes": 195,
+    "sha256": "c8f501b023c09c35fe9a1816e57e66f1a797756b1518443d4bd3053d01d74dab"
+  },
+  "evidence/database-filestore-pair.md": {
+    "bytes": 554,
+    "sha256": "4a9ec2361337b8e9476e4bea88b18dbb220738b84a8dc91b2f65da27aeabeb18"
+  },
+  "evidence/email-safety-tests.md": {
+    "bytes": 173,
+    "sha256": "22e48572ab8273d78cb18d05013518e77f177254f035d5ddd2648a2ca9d0b7f4"
+  },
+  "evidence/known-defects.md": {
+    "bytes": 374,
+    "sha256": "9a552fb920b5ded16bd394d8ed2c292f8c8ac65a9476f4620a55e2bb327eb4ee"
+  },
+  "evidence/migrated-database-upgrade-results.md": {
+    "bytes": 215,
+    "sha256": "946e9b575f64b92661f178fa5727e4474e1f5aecff1e86553eb0c4a890c138ad"
+  },
+  "evidence/migration-governance-approval.md": {
+    "bytes": 265,
+    "sha256": "f703238a7b8cf354f868af250ce16f84bc8dced4a2bcbb63e6b2b3715af06560"
+  },
+  "evidence/module-version-digests.md": {
+    "bytes": 584,
+    "sha256": "96aa71e7f1c4d793b625fee52bcce866c272a855c86ae1fcad3f27f593c0f015"
+  },
+  "evidence/odoo19-upgrade-reference.md": {
+    "bytes": 900,
+    "sha256": "a9f6d34991ebd8df2b8300af6e21117ca71ee0b4500d9b83ed5cccdcf62eab35"
+  },
+  "evidence/official-upgrade-request.md": {
+    "bytes": 216,
+    "sha256": "c9aa2b06ad72e38c09a8cae1849a00d3b7a2bee5d6121c8b9f6cb725d3c320db"
+  },
+  "evidence/performance-results.md": {
+    "bytes": 207,
+    "sha256": "aa91b13cb02f8cbf00b5218010cd1d3d38e6bb1460204c13cf767080278f8b64"
+  },
+  "evidence/phase5a-20260724T013648Z/CRITICAL-RULES-RESULT.md": {
+    "bytes": 770,
+    "sha256": "88914aea47f04b5ba07e59c217bd4f869ab1ce2aefa3dc85bdf0daf27ba94178"
+  },
+  "evidence/phase5a-20260724T013648Z/EXTERNAL-INPUT-FORM.md": {
+    "bytes": 1398,
+    "sha256": "d910e5c7287c6d01700386aad1c7f547265d366f729e157f6bc4e363d169ddee"
+  },
+  "evidence/phase5a-20260724T013648Z/FAILURE-HANDLING-RESULT.md": {
+    "bytes": 1281,
+    "sha256": "b11d82abc381561392ac2221afd5c56f43d1ec587b9b5cd7b947f448d619d2f8"
+  },
+  "evidence/phase5a-20260724T013648Z/GATES.env": {
+    "bytes": 833,
+    "sha256": "6ea34072e75ef39f033430fd019caee33a7dca863db5ad676c1b6a500e680864"
+  },
+  "evidence/phase5a-20260724T013648Z/PACKAGE-MANIFEST": {
+    "bytes": 257,
+    "sha256": "64de260507fce0a19e1b26a03e23ba0cec986612256a807e3920700814e8b03b"
+  },
+  "evidence/phase5a-20260724T013648Z/RESTART-ROLLBACK-RESULT.md": {
+    "bytes": 845,
+    "sha256": "afa94e4c545e411f4c984a6819bb0325f8bd977384ba84889ab35f03a179954b"
+  },
+  "evidence/phase5a-20260724T013648Z/ROUTING-VALIDATION.md": {
+    "bytes": 757,
+    "sha256": "9aa1f534d07a87580795936306be9fe3da89c978484d0eac73b0015ad6eda3a7"
+  },
+  "evidence/phase5a-20260724T013648Z/RULE-COVERAGE-MATRIX.tsv": {
+    "bytes": 11123,
+    "sha256": "5ba9222d0a10dfc0ed1199620bddb1a593f138ae9f205096e486dbea4721129b"
+  },
+  "evidence/phase5a-20260724T013648Z/RUNBOOK-COVERAGE.tsv": {
+    "bytes": 8056,
+    "sha256": "30053efe3476ceed86a7676ef6a2f3d463eee16be0fe21dfed1ccee278ee76d9"
+  },
+  "evidence/phase5a-20260724T013648Z/SECRET-SCAN-RESULT.md": {
+    "bytes": 477,
+    "sha256": "ac0158501d1094d82c09ad81ed21adbec4dc48f2c70b496fdebacf37718dd6d9"
+  },
+  "evidence/phase5a-20260724T013648Z/SHA256SUMS": {
+    "bytes": 1055,
+    "sha256": "74feb8f4bb1f8fe31f612fd554171f039e523392559b6a8f03d406efe94b7c2a"
+  },
+  "evidence/phase5a-20260724T013648Z/THRESHOLD-ASSUMPTIONS.md": {
+    "bytes": 7599,
+    "sha256": "c072b590556ff554ecd11144a5d45d1d8bef6c9105096e9aa0b9fc1494ae2f31"
+  },
+  "evidence/phase5a-20260724T013648Z/verify-evidence.sh": {
+    "bytes": 424,
+    "sha256": "45e50ef26e014875cc9402983eb4a9a359dea55cf482c359d13d1651e835e113"
+  },
+  "evidence/production-runbook.md": {
+    "bytes": 421,
+    "sha256": "b37adadcf6ac9de241fda3f3ed307117e8bd480b1eb2440ceba8546abdaa9e7d"
+  },
+  "evidence/repository-history-scan.md": {
+    "bytes": 821,
+    "sha256": "4e75baa1e0c7051e8a325aa0b33a821f83ac16445f08e724891b4cb5b5e6be96"
+  },
+  "evidence/rollback-rehearsal.md": {
+    "bytes": 431,
+    "sha256": "9034a74c0bd9dd2f8051fbe206563dbe03ba390143101fe8e3bcc61ce572d5c1"
+  },
+  "evidence/rollback-runbook.md": {
+    "bytes": 495,
+    "sha256": "bcddc24cf47860406d4e42d97b48a54005f1ee59a9171aded52089463bf7d077"
+  },
+  "evidence/secret-rotation-report.md": {
+    "bytes": 736,
+    "sha256": "f1b4f53b87162ed53d465f15d898b0082dcfe84719f79f2a5d36e70fa596021a"
+  },
+  "evidence/security-tests.md": {
+    "bytes": 640,
+    "sha256": "64e60a7818636b862cb37e2dd4676de2363a499f24c9c9a332deffb4f29a4949"
+  },
+  "evidence/social-workflow-tests.md": {
+    "bytes": 122,
+    "sha256": "05106736dd1140dbda893150016e4f81da5139609368f0a17791621b1c4abddd"
+  },
+  "evidence/vicidial-integration-tests.md": {
+    "bytes": 172,
+    "sha256": "23464d3e42f729bd07fab948319f2c855398511c1431cb488c1c416de8ede656"
+  },
+  "gate3a-release-0359813-sbom.cdx.json": {
+    "bytes": 114455,
+    "sha256": "ff4119f85870abf268cb79d07968b9e21bffbe8eb51db3d127653949bafafdec"
+  },
+  "gate3a-release-0359813-vulnerability.json": {
+    "bytes": 79643,
+    "sha256": "6a9de34a001e8791bc09664ed47a8c3bf829f21df8f10ac38aef23121d5a7477"
+  },
+  "operations/backup/backup.env.example": {
+    "bytes": 531,
+    "sha256": "c05403fd6035b9c819541d1e84231e7cf8822bee7a3204679974cbf84a64ce1d"
+  },
+  "operations/backup/check-backup-state.sh": {
+    "bytes": 914,
+    "sha256": "15b6f7ed57485fe256463a154b32f8d13390ada99e9674c0e5f02226b261532c"
+  },
+  "operations/backup/cleanup-backups.sh": {
+    "bytes": 1185,
+    "sha256": "9a3528f8aaf9a2e88bc77815e08a16c05f1bd722bbde1322c88c5bf5e31ba033"
+  },
+  "operations/backup/codestra-backup.sh": {
+    "bytes": 4998,
+    "sha256": "c886ea827eec56938f59c4e67ec5d06f2cc05eb5a7337c637b24275274776652"
+  },
+  "operations/canary/canary-authorization.env.example": {
+    "bytes": 900,
+    "sha256": "c2f57c387bd68fac8038c12226bcf22d9975fbf5c47f325cb559454dc4457b08"
+  },
+  "operations/canary/create-blocked-evidence.py": {
+    "bytes": 7868,
+    "sha256": "a179313686fc7179f611f6782f5a09258fe711f64f6b2e141a2708f3ed0bf2a9"
+  },
+  "operations/canary/validate-authorization.py": {
+    "bytes": 5076,
+    "sha256": "e5ea4c07f0c73669ca6b3119d8d3dd501f837d3fffa4c2d18fe620ca2fdd8da1"
+  },
+  "operations/monitoring/RULE-COVERAGE-MATRIX.tsv": {
+    "bytes": 11123,
+    "sha256": "5ba9222d0a10dfc0ed1199620bddb1a593f138ae9f205096e486dbea4721129b"
+  },
+  "operations/monitoring/RUNBOOK-COVERAGE.tsv": {
+    "bytes": 8056,
+    "sha256": "30053efe3476ceed86a7676ef6a2f3d463eee16be0fe21dfed1ccee278ee76d9"
+  },
+  "operations/monitoring/THRESHOLD-ASSUMPTIONS.md": {
+    "bytes": 7599,
+    "sha256": "c072b590556ff554ecd11144a5d45d1d8bef6c9105096e9aa0b9fc1494ae2f31"
+  },
+  "operations/monitoring/alertmanager.example.yml": {
+    "bytes": 1294,
+    "sha256": "8f56b869b77262a98a9b3801af645b0e5c7e62528703327bbc409964ccd503f6"
+  },
+  "operations/monitoring/blackbox.yml": {
+    "bytes": 200,
+    "sha256": "b08bc4f8831dfd67862f5f191c2b0babb477526aa93e3ef3329202636ca9acc5"
+  },
+  "operations/monitoring/compose.monitoring.yaml": {
+    "bytes": 3227,
+    "sha256": "6e08d1a6c0bfd839755972cbea54a5351cb29eb7a20296b38a8430c994b6c1c0"
+  },
+  "operations/monitoring/generate_alert_catalog.py": {
+    "bytes": 26866,
+    "sha256": "3d4f57e0907e9df05af56637b9cf31eb90a731abd819a34a5a78b887bf44e695"
+  },
+  "operations/monitoring/governance.env.example": {
+    "bytes": 880,
+    "sha256": "92812da4cc90d1455deaf29ee5da3d197c73c3ae7e1c6c68852bf1b7abcca848"
+  },
+  "operations/monitoring/install-monitoring.sh": {
+    "bytes": 2075,
+    "sha256": "0831bba6c13bdf9c58e6b17597e636113a1cf74eb766c6d3f2dd061ccdc81e3a"
+  },
+  "operations/monitoring/prometheus.yml": {
+    "bytes": 1653,
+    "sha256": "ecaff3973a4696904d8617573e49bbcebe6f9ae90c3d947fbe38a443e6b5d0da"
+  },
+  "operations/monitoring/rules/platform.rules.yml": {
+    "bytes": 62298,
+    "sha256": "bf333ba2244893ca5b9d2be16520d040d6dcdd364742464782a36b5ea9475b11"
+  },
+  "operations/monitoring/templates/codestra.tmpl": {
+    "bytes": 693,
+    "sha256": "d79243a400e818e1eee29ca5601abcb68b734fcbd8f9a393122888b69b3ad51c"
+  },
+  "operations/monitoring/validate-governance.py": {
+    "bytes": 2636,
+    "sha256": "e0df527f3795a7bcdd2282295f300e2cacc756a4cc797b7c48a3351f6e15d199"
+  },
+  "operations/monitoring/validate-receiver-files.py": {
+    "bytes": 3806,
+    "sha256": "7c041d20ba568377503dbad5dbb524227ca2f98baa9746b8974768cae1c7d43a"
+  },
+  "operations/monitoring/validate_phase5a.py": {
+    "bytes": 4481,
+    "sha256": "0f7f031503268a48cc189637d882a381116c66759485c7b53fa3b30410f67202"
+  },
+  "operations/runbooks/alerts/asterisk-unavailable.md": {
+    "bytes": 3887,
+    "sha256": "3ee75f47f36524377ab4b6e00687ecd0c0e8d0e571d2fb3ec93e664b24af0347"
+  },
+  "operations/runbooks/alerts/authentication-failure-surge.md": {
+    "bytes": 3823,
+    "sha256": "da483b875976b0e93cf46c8d86a3089b05dbd0215c2a507e02cfb8b78e24c92f"
+  },
+  "operations/runbooks/alerts/authorization-failure-surge.md": {
+    "bytes": 3828,
+    "sha256": "e1dd9b5e30fd6cf5425bd0480cd102897e1cc41a0db8d34d199a167003f34f5e"
+  },
+  "operations/runbooks/alerts/backup-checksum-failure.md": {
+    "bytes": 3813,
+    "sha256": "c7a037b835bff3ab7cbe5387ccb6b9e553335844d942faed989c90e8e97050d3"
+  },
+  "operations/runbooks/alerts/backup-failure.md": {
+    "bytes": 3770,
+    "sha256": "5c4b2260fc36464a247a6190252b8114d581925c06a902ab773c39eadfa41b4a"
+  },
+  "operations/runbooks/alerts/backup-stale.md": {
+    "bytes": 3799,
+    "sha256": "36d1829d948464f116a47a55964251ce993761e66e2ce7f9c8338bfc07d6a7a5"
+  },
+  "operations/runbooks/alerts/backup-timer-disabled.md": {
+    "bytes": 3808,
+    "sha256": "900eae9f37390d4982bff09832d3f9e668cd54f7f486864eafe4bbf5b02199ee"
+  },
+  "operations/runbooks/alerts/backup-timer-failed.md": {
+    "bytes": 3796,
+    "sha256": "139ffc9171ac2c3ac9838ff97044603322b1592e35e26eb5a23333d59753bf8d"
+  },
+  "operations/runbooks/alerts/call-setup-latency-excessive.md": {
+    "bytes": 3951,
+    "sha256": "f65ad002e9b378a63bcbddee2bad4006a14125df258d2476343ec826823ecabb"
+  },
+  "operations/runbooks/alerts/callback-failure-rate-high.md": {
+    "bytes": 4084,
+    "sha256": "e9e255514d49f8005fd03bde41db7aaf6ecabe886baac7544f4adf7774cd6818"
+  },
+  "operations/runbooks/alerts/carrier-authentication-failure.md": {
+    "bytes": 3942,
+    "sha256": "565e7e865f4457d33d46010fee9bcf59f8d9e87fe8ac04c95876a56f6990f049"
+  },
+  "operations/runbooks/alerts/channel-cleanup-failure.md": {
+    "bytes": 3916,
+    "sha256": "dec393013ee40efaf6ec216e6c91c660f1b87142559c11c610bf701cc2a442f3"
+  },
+  "operations/runbooks/alerts/clock-drift.md": {
+    "bytes": 3809,
+    "sha256": "676eba4c87cb9b82d531f3bde2e6e0362d488df793a884c87dda9e714708bafa"
+  },
+  "operations/runbooks/alerts/configuration-drift.md": {
+    "bytes": 3786,
+    "sha256": "b91fee8283b2e3bb229a8c98a25f779f2a499f3379c3324a60344785c0c99ec0"
+  },
+  "operations/runbooks/alerts/container-restart-loop.md": {
+    "bytes": 3827,
+    "sha256": "40a79f884df0dab9ca01c099dc3aba48dce6f650a6b2c05f6bcf755268210f5e"
+  },
+  "operations/runbooks/alerts/credential-expiration.md": {
+    "bytes": 3817,
+    "sha256": "e7c0136ce22aefe4bf364a1b1722393e6b563fb841c75a9858bcffc7518d7581"
+  },
+  "operations/runbooks/alerts/database-connection-saturation.md": {
+    "bytes": 3873,
+    "sha256": "bca1689cfc64ff94f2492306df9c2bcf5fdb51a7166acd8d9a0378d214c90584"
+  },
+  "operations/runbooks/alerts/dead-letter-backlog.md": {
+    "bytes": 3844,
+    "sha256": "bda2e481b620994a36ab7ae8164fc100dd9232bc22dce71e11ef7378430125d7"
+  },
+  "operations/runbooks/alerts/disk-capacity-critical.md": {
+    "bytes": 3872,
+    "sha256": "7fdd61e3ab32ed90acd6657c213ea746aa0177076f018c423a9e6723f23fc07e"
+  },
+  "operations/runbooks/alerts/dnc-fail-closed-event.md": {
+    "bytes": 3960,
+    "sha256": "cfdbdd6acb2e32676be7a5c82cfbe334bfaceed23aa31c669ae49a3cbf6e79ee"
+  },
+  "operations/runbooks/alerts/dtls-failure.md": {
+    "bytes": 3877,
+    "sha256": "4245d2b0c0aa694524f84c61fc521e123fdd8ec45ddb7160245de8b9d3c625b9"
+  },
+  "operations/runbooks/alerts/duplicate-event-conflict.md": {
+    "bytes": 3997,
+    "sha256": "22ec80a435ee9582b5d4ccd9b0d8439a52ba72e14fafda8bfc58edb4d35bf813"
+  },
+  "operations/runbooks/alerts/encryption-key-expiration.md": {
+    "bytes": 3842,
+    "sha256": "e8f2cf6afc43c66aaea8ef8fc6446a23c31ccc750e2aae70e252d9a47fff525f"
+  },
+  "operations/runbooks/alerts/endpoint-6101-unauthorized-registration.md": {
+    "bytes": 3994,
+    "sha256": "dd4ddef9d82f571c90ec512c6e9834a8fc296d5634a91b9209a8389d54441b4a"
+  },
+  "operations/runbooks/alerts/endpoint-6101-unavailable.md": {
+    "bytes": 3932,
+    "sha256": "7e1b2b46d01e14d0925f7958a6004345400ad053e05435318fa79df5b9da9a32"
+  },
+  "operations/runbooks/alerts/event-ordering-conflict.md": {
+    "bytes": 3993,
+    "sha256": "e206f413c3cd4a78fa0bbfb0f1808e302e4e8544010f2d150cd3f6492a9fbaed"
+  },
+  "operations/runbooks/alerts/ice-failure.md": {
+    "bytes": 3873,
+    "sha256": "ce3a8da69cfb41f06c55fdb9e96e2ea65f428a0989c05eb9a010a33de1e6e413"
+  },
+  "operations/runbooks/alerts/inode-capacity-critical.md": {
+    "bytes": 3869,
+    "sha256": "666d4a2070567d31b6771a11edc331ed83d6ad2472cfc5b49222c18ddee15ecd"
+  },
+  "operations/runbooks/alerts/integration-latency-high.md": {
+    "bytes": 3863,
+    "sha256": "7d28761caac94a2ce5121edaf9e4c8f2f4870491a0cf44be13510e4792a3c35b"
+  },
+  "operations/runbooks/alerts/jitter-excessive.md": {
+    "bytes": 3880,
+    "sha256": "bdb652c0b55e9194432b25756ba2ef8186ae58b4ad7450bd2ad0d89b414dd99c"
+  },
+  "operations/runbooks/alerts/keycloak-unavailable.md": {
+    "bytes": 3784,
+    "sha256": "9f21b9babe7560acfebff373fa604ce3f306b1818dd2c3726823cb378f06565f"
+  },
+  "operations/runbooks/alerts/log-ingestion-failure.md": {
+    "bytes": 3768,
+    "sha256": "3047bd0392bf8b93e02b30ef7ad17c8b3a6f5ef1a523fa8f82e102bb6484401d"
+  },
+  "operations/runbooks/alerts/mariadb-unavailable.md": {
+    "bytes": 3780,
+    "sha256": "cc130a51ab652b3e2704802dc4577255d225f00ced6235c5a1d918d4e783d529"
+  },
+  "operations/runbooks/alerts/middleware-restart-loop.md": {
+    "bytes": 3833,
+    "sha256": "c1df8b3584034b066080aad1ecb132e6add9ba2ab45939de2fdfbf32a05cb314"
+  },
+  "operations/runbooks/alerts/middleware-unavailable.md": {
+    "bytes": 3794,
+    "sha256": "bd9ceed1dbcb220a4b672bc796704260207ba2731d3c7c40b25d893bf87d9aea"
+  },
+  "operations/runbooks/alerts/n8n-staging-unavailable.md": {
+    "bytes": 3800,
+    "sha256": "4a570d76cbe13788d0e80fb72841a878d7fd168c41a73655a063a109ce340fed"
+  },
+  "operations/runbooks/alerts/odoo19-staging-unavailable.md": {
+    "bytes": 3816,
+    "sha256": "a96839c515ff9ad5def9ad579a94f4d844bf7a2d9da5d060c9f512f69b3749cb"
+  },
+  "operations/runbooks/alerts/off-server-replication-failure.md": {
+    "bytes": 3829,
+    "sha256": "c438eee9920ab9d4ec01e94c33a552d66936c3c7c474d22a2ab9b91bff94189b"
+  },
+  "operations/runbooks/alerts/one-way-audio-indication.md": {
+    "bytes": 3918,
+    "sha256": "e86b51ffc813f39da45424d16b1863c212b8765146d5d754b3314656c7fc842c"
+  },
+  "operations/runbooks/alerts/packet-loss-excessive.md": {
+    "bytes": 3899,
+    "sha256": "67847c7e1e277c9e603c15b432d6d5c8f3a198b922526070fb3b9dac46f8aefe"
+  },
+  "operations/runbooks/alerts/postgresql-unavailable.md": {
+    "bytes": 3795,
+    "sha256": "f92cad7db4b9340ee7a7732131a7f43e8802293cd3b6334ce67e2874326ddb63"
+  },
+  "operations/runbooks/alerts/private-callback-receiver-unavailable.md": {
+    "bytes": 4023,
+    "sha256": "7ecc99d4024d57d5b3da0317a402a84b30f9524b2cbcbe95ed753d58717f0348"
+  },
+  "operations/runbooks/alerts/queue-backlog-high.md": {
+    "bytes": 3954,
+    "sha256": "c594306099ebd8765ceadb47df9ad8ef0c0ced0e9259893e1717d0df1523a826"
+  },
+  "operations/runbooks/alerts/reconciliation-drift.md": {
+    "bytes": 3980,
+    "sha256": "cfe0ad214d1b2e2cfcc69cac7e0efdcd6e4461f3f93cfad673da8f7a2a6d3fe0"
+  },
+  "operations/runbooks/alerts/recording-storage-capacity-critical.md": {
+    "bytes": 3844,
+    "sha256": "fc1229a7e12a6cd12d14c269b1b766988f8d0db665e45d1ded8176b9aae38d2d"
+  },
+  "operations/runbooks/alerts/redis-unavailable.md": {
+    "bytes": 3769,
+    "sha256": "2dbc053b315849ef036f3d12ca23efa0f2aeef8f1385a76499cb3e808d0a8280"
+  },
+  "operations/runbooks/alerts/remote-backup-capacity-low.md": {
+    "bytes": 3806,
+    "sha256": "c6271b33042f2170005b7d9b0f76202a454466d3f9ba1d8f2224201171e7db0d"
+  },
+  "operations/runbooks/alerts/repository-drift.md": {
+    "bytes": 3766,
+    "sha256": "7269e28ce8fc2389701ca263434de8f2ea55d648d17568aba5adc8b8412144b2"
+  },
+  "operations/runbooks/alerts/restore-test-age-exceeded.md": {
+    "bytes": 3814,
+    "sha256": "7eb2711bc13c599b9f327bf7bcb09a9ce4819b07187f85dc69bec1c81b8c0604"
+  },
+  "operations/runbooks/alerts/retry-backlog-high.md": {
+    "bytes": 3777,
+    "sha256": "6727c2ddea12e887ad35f2a740724a446ceec9f2544b16be2c6130f648ba3d96"
+  },
+  "operations/runbooks/alerts/srtp-failure.md": {
+    "bytes": 3871,
+    "sha256": "f5aa60115d5bd3af8d9ee0958ac42e980bc2b6a0dbe1f9267cf2179b231eb17f"
+  },
+  "operations/runbooks/alerts/ssh-host-key-mismatch.md": {
+    "bytes": 3823,
+    "sha256": "ec0647ee870728c6cf44695b332f151b85047f79b2d2b2bad6e26c4aacbb2fdc"
+  },
+  "operations/runbooks/alerts/stuck-asterisk-channel.md": {
+    "bytes": 3901,
+    "sha256": "9881968156803f6f61183e6d72569070b1820e72555873a215166b161f7c8856"
+  },
+  "operations/runbooks/alerts/tls-certificate-expiration.md": {
+    "bytes": 3809,
+    "sha256": "cdea30c3f6b6ff2367b4cbbedf8f89ecd7e6b5a5de97cca92c7aba27f79b8e8b"
+  },
+  "operations/runbooks/alerts/transfer-authorization-denial-surge.md": {
+    "bytes": 3829,
+    "sha256": "8b2df21ef60ea352a92f59f2616b93ba9c5c06e4f3c90d8113817362f1baaf31"
+  },
+  "operations/runbooks/alerts/trunk-unavailable.md": {
+    "bytes": 3869,
+    "sha256": "d0612266017f3c740b9e533ddb43c26d75f2cff637df8f7344e121f997386237"
+  },
+  "operations/runbooks/alerts/turn-authentication-failure.md": {
+    "bytes": 3917,
+    "sha256": "c88515fc8bd28717e871e5e055181f7829a06b768df317206831804b9c1d2900"
+  },
+  "operations/runbooks/alerts/turn-unavailable.md": {
+    "bytes": 3867,
+    "sha256": "7304eb6b3f2f8b84deaaad5ec641713443e21a0728d88f54c03fd58b45dcddcb"
+  },
+  "operations/runbooks/alerts/unexpected-active-call.md": {
+    "bytes": 3877,
+    "sha256": "035595a94d8918753b8bae7c270e40f76be17c51afde63b4dd04b61c7df14fe8"
+  },
+  "operations/runbooks/alerts/unexpected-external-dialing-enabled.md": {
+    "bytes": 3957,
+    "sha256": "eaada028a90b899b7f60cde4a04e20b222fc2d199e77e108f527feeb92cedb74"
+  },
+  "operations/runbooks/alerts/unexpected-production-callbacks-enabled.md": {
+    "bytes": 4057,
+    "sha256": "dc52ff2baf48f56bba6b4f39a258f4f068fc919c532ea6801464b320d4e3f043"
+  },
+  "operations/runbooks/alerts/unexpected-send-events-enabled.md": {
+    "bytes": 3994,
+    "sha256": "3066da34a41ee1f40334b610aab42a7b1c5985df466fe440e2540a102b89b9eb"
+  },
+  "operations/runbooks/alerts/unexpected-workflow-activation.md": {
+    "bytes": 3830,
+    "sha256": "b50a4f10aa2877500a13769337fefc1c7bed3266d0f61a3837ceca8489d71d42"
+  },
+  "operations/runbooks/alerts/unexpected-write-enablement.md": {
+    "bytes": 3845,
+    "sha256": "6914cacc8f7c7a8e76fc7da77265dc5e4f60ff5414c60cf89a93b927aa013c37"
+  },
+  "operations/runbooks/alerts/vicidial-unavailable.md": {
+    "bytes": 3887,
+    "sha256": "921ac80137b06824dc81d8c7a2075fcc9325f8be6975660249ac4d415572d753"
+  },
+  "operations/runbooks/alerts/wss-handshake-failure.md": {
+    "bytes": 3901,
+    "sha256": "2fe11d2d70108ef0093aeb1f97e4befec51561195185658ce4cf70699785a9a9"
+  },
+  "operations/runbooks/backup-failure.md": {
+    "bytes": 432,
+    "sha256": "7d5ea347b580928854e5d36345d6bf18dba2bc40ad5c273fb54eb4daf3d9ce30"
+  },
+  "operations/runbooks/critical-alert.md": {
+    "bytes": 902,
+    "sha256": "66d3b3211c2f3ee10969811944933a75ef78d0bb5c0442273f58f098b1a2eed6"
+  },
+  "operations/runbooks/endpoint-unavailable.md": {
+    "bytes": 343,
+    "sha256": "8d4ddca3dc5b7c7338925f2ac6a2ead0aba1d336df4530ccc8d415cfc8c3cce2"
+  },
+  "operations/runbooks/host-unavailable.md": {
+    "bytes": 340,
+    "sha256": "3940b6c5a643d75a2f35f26a53a45c8b225c85875aa7ee7414a1e5e07dd63ee6"
+  },
+  "operations/runbooks/monitoring-deployment.md": {
+    "bytes": 2451,
+    "sha256": "4867048651eddfd1fccd99be2f08e865e629fc1b1a39165d1a008a8e553b0688"
+  },
+  "operations/runbooks/monitoring-rollback.md": {
+    "bytes": 1292,
+    "sha256": "08269304bc023ee3a24811a31b70e8bfd2281bd38815771f0affc6faf6b33e02"
+  },
+  "operations/systemd/codestra-backup-state.service": {
+    "bytes": 308,
+    "sha256": "9ac24e242651c8a755810e650b57221e08481cd1ac29a9ef9a05c6303e643e33"
+  },
+  "operations/systemd/codestra-backup-state.timer": {
+    "bytes": 171,
+    "sha256": "1587d73712a79fd3ce643ff8dac89660e5b72c380068502aa5d6c478ec9b0fd2"
+  },
+  "operations/systemd/codestra-backup.service": {
+    "bytes": 422,
+    "sha256": "3ee751647d1c2a907997cc4565a54b3182071d78f61712254a66154850025680"
+  },
+  "operations/systemd/codestra-backup.timer": {
+    "bytes": 193,
+    "sha256": "bf63e9d36b68d7f5e7e20c178e839f7c139bad30710d055aca1ab947d79a2c27"
+  },
+  "pytest.ini": {
+    "bytes": 67,
+    "sha256": "e3579987896e970484f7b8242b2c9b0dc43c43a4489d15522e409118cd7d4996"
+  },
+  "reports/app-server-a/BACKUP_TIMER_INVENTORY_20260727.md": {
+    "bytes": 1944,
+    "sha256": "42c126014f987fdc31a8ccee62809d600ef8ad6a688a1183cfcc8269110c929a"
+  },
+  "reports/app-server-a/BASELINE.md": {
+    "bytes": 2972,
+    "sha256": "dc59a3b6b2aff8f9b59ce06a546c52b28e462a1437c73356c1f791fc6f72e264"
+  },
+  "reports/app-server-a/DOMAIN_VERIFICATION.md": {
+    "bytes": 577,
+    "sha256": "fb6517f6cfd15f9e7879093b8d9145f5c426f3bb0a9c5c9ac916ba6ceaf5bf3c"
+  },
+  "reports/app-server-a/GAP_MATRIX.csv": {
+    "bytes": 2246,
+    "sha256": "2273af287e3bb29df4be02095f8ff75fae3e0f3c316d239ef087bd597ac84406"
+  },
+  "reports/app-server-a/IMPLEMENTATION.md": {
+    "bytes": 1910,
+    "sha256": "9935d20534e77d26f3c3a44be58b7b78b70defee878ea0cdb3b82aea3acfb970"
+  },
+  "reports/app-server-a/KEYCLOAK_PUBLIC_TLS_20260727.md": {
+    "bytes": 2036,
+    "sha256": "331136bb9c22e98d7d14c917683f7cf695672336e0cdd8d2ef49a4d396bbb39b"
+  },
+  "reports/app-server-a/MIDDLEWARE_TESTS.md": {
+    "bytes": 844,
+    "sha256": "129e3c968edd49b58ae98bbbd2b4ff1d459a4dce2e7ddbcbce7a58c141f2bd75"
+  },
+  "reports/app-server-a/SYNTHETIC_AUTOMATIC_CAMPAIGN_CHECKSUMS.txt": {
+    "bytes": 1336,
+    "sha256": "2ec0467481d7e08683878298245659ddf2e56617e9c50fe97508023d0cd5b87f"
+  },
+  "reports/app-server-a/SYNTHETIC_AUTOMATIC_CAMPAIGN_RESULT.json": {
+    "bytes": 1379,
+    "sha256": "1fd6ab58222ad7357ff25e3da8500f2c44ffc306025ac6899493a958b6dd5207"
+  },
+  "reports/app-server-a/SYNTHETIC_AUTOMATIC_CAMPAIGN_TEST.md": {
+    "bytes": 2422,
+    "sha256": "8cd230bce4e9285aaadd182841eb04ddc758978eac0b27049a43f0c074c6bca2"
+  },
+  "reports/app-server-a/VICIDIAL_ADAPTER_ACCEPTANCE.md": {
+    "bytes": 1248,
+    "sha256": "b5f2113bdc09fa1634acf5b05f6bdd3363bc3a1337458aaf565b091f97b3aae5"
+  },
+  "reports/app-server-a/VICIDIAL_ADAPTER_CHECKSUMS.txt": {
+    "bytes": 942,
+    "sha256": "883a84b1ec17f4838917aac6b34b3281ea832d119c059891bbcf658d802246d9"
+  },
+  "reports/app-server-a/VICIDIAL_ADAPTER_STAGING_DEPLOYMENT.md": {
+    "bytes": 1852,
+    "sha256": "ee78831273104899ffadf7e94c3e5ced6b844ca83953129718020206f803e2ec"
+  },
+  "reports/app-server-a/VICIDIAL_DATABASE_ACCESS_REVIEW.md": {
+    "bytes": 1923,
+    "sha256": "f7ca91e4a37b1c8fbdc494eb08b22674da27361a79284d4947766cd4f182ceba"
+  },
+  "reports/github/DEPLOYMENT_PROVENANCE.md": {
+    "bytes": 780,
+    "sha256": "1c513338e95639bb4c2694128583c335c7c16d4ca7a125f6fc86e4604783eef6"
+  },
+  "reports/github/IGNORE_POLICY.md": {
+    "bytes": 920,
+    "sha256": "2b3727c264691aacf374ab1e2054aa38862837ea1ecd606e1a0e0dac7cb8bce8"
+  },
+  "reports/github/INITIAL_COMMIT_REPORT.md": {
+    "bytes": 523,
+    "sha256": "0b6759fefbcba674bebd44430be8f1128276e81e0657e6cba8d434469a0f456c"
+  },
+  "reports/github/POTENTIALLY_SENSITIVE_PATHS.txt": {
+    "bytes": 3378,
+    "sha256": "bf918224d75c8cc5dd36733acf4156ab227c18970f3f5fdb02a2fda9d095f675"
+  },
+  "reports/github/PRE_INITIAL_COMMIT_STATUS.md": {
+    "bytes": 8133,
+    "sha256": "19305a6ba5f7b351864e03f91b6764017f6fe0ffc7da0b0f8cfa0d7b4c3989f2"
+  },
+  "reports/github/PUSH_REPORT.md": {
+    "bytes": 662,
+    "sha256": "13fdf001ba85e068a7e8ba6d539b5f512fd5df4135ccc78deaa61d1bcf1113f7"
+  },
+  "reports/github/SECRET_REVIEW.md": {
+    "bytes": 806,
+    "sha256": "c7aa951bae9e1201d58aaa560f1562a84bd8c260d792aae01b4bdbef0e90ddc5"
+  },
+  "reports/github/SECRET_SCAN_FINDINGS.csv": {
+    "bytes": 1062,
+    "sha256": "fdda83f9fc7228bbc16f63a4bc7cc57f4bac01b166f9092de0a5a481ce2292f9"
+  },
+  "reports/github/SENSITIVE_ARTIFACT_INVENTORY.csv": {
+    "bytes": 37,
+    "sha256": "f642957de88be1757ef29c3fc13a74da42628bfbbacfea82b4e37a24415a213f"
+  },
+  "reports/github/SENSITIVE_ARTIFACT_REVIEW.md": {
+    "bytes": 460,
+    "sha256": "94bb9ffa4ca1fa3db9df738db208757dcb42f2aa0b8c15738ad81c75b042961c"
+  },
+  "reports/github/UNTRACKED_LARGE_FILES.csv": {
+    "bytes": 21,
+    "sha256": "ec48a58087eb58e4629a68c10fbf8b018ed559b2f2dd407cd5904926a16605b0"
+  },
+  "reports/github/WORKING_TREE_INVENTORY.csv": {
+    "bytes": 31091,
+    "sha256": "536b73be507c2b3f74ade621853de5e97d1744c3a56f38197a44bc0bebf16c4b"
+  },
+  "scripts/audit_repository_secrets.py": {
+    "bytes": 4676,
+    "sha256": "7aa38d5e21db36a8bf9299af3e0b51016a9a62103e84e92095a26fd39f01609b"
+  },
+  "scripts/capture_consistent_odoo18_pair.sh": {
+    "bytes": 278,
+    "sha256": "86acdb32971c0ff0f3933608e87b1a7bc3ffb27a8486e8cc82af4ccf6121d4a1"
+  },
+  "scripts/capture_consistent_odoo19_pair.sh": {
+    "bytes": 4922,
+    "sha256": "82c35dec61734f2df96dcdd7000f7a10e321b4cda82f89b8c946d88c521a0b9d"
+  },
+  "scripts/curate-initial-commit.sh": {
+    "bytes": 2652,
+    "sha256": "56e8adb0ca609c47d576ae52cd66c5448bfb24d6c2ff266bcaa5eecef9c3bd42"
+  },
+  "scripts/rollback_synthetic_identity_odoo.py": {
+    "bytes": 3515,
+    "sha256": "3da3eb2493ab3039ce60d926e583a8d6dba62cd68a5691833d5f9035fe5b6d0d"
+  },
+  "scripts/rotate_service_secrets.py": {
+    "bytes": 10970,
+    "sha256": "edea2a9973669c7dce1317be7306a694e8e9de8633c190ae46b0b45c86ec42a9"
+  },
+  "scripts/run_synthetic_automatic_campaign_lifecycle.py": {
+    "bytes": 2936,
+    "sha256": "0003334218a557c77fe7b77916029842821232ee695777de2be668fb2f369d44"
+  },
+  "scripts/run_synthetic_identity_odoo_stage.py": {
+    "bytes": 7116,
+    "sha256": "6cc3d0676e696808388088d0db1ee5256191c767170b2f92162ec8d08187b8a1"
+  },
+  "scripts/run_synthetic_keycloak_disabled.py": {
+    "bytes": 3733,
+    "sha256": "4156fce7fc2a0bb35abd66cae29c00e99bdb14a9c2ffbccf3687381e15d8095b"
+  },
+  "scripts/run_synthetic_telephony_lifecycle.py": {
+    "bytes": 8059,
+    "sha256": "0120467f4f5b98656d00e0c1a20d0f6a698540f4d3415fad49ea045b1413844e"
+  },
+  "scripts/synthetic_automatic_campaign_gate.py": {
+    "bytes": 4519,
+    "sha256": "63b50a679a27373ce25aa51fc7f15745ad0ae1a9490e226d601f814f906c1b81"
+  },
+  "scripts/terminate_synthetic_keycloak.py": {
+    "bytes": 2537,
+    "sha256": "dcae3d9133c43f8da8414ee84b2805ac3d091a58b8a6f7b0ba62d701b4ce6dae"
+  },
+  "scripts/verify-domains.sh": {
+    "bytes": 1535,
+    "sha256": "6758d20a4446afe0c2012af5237182666eec6d7f97ff3bd190a464b898c46da0"
+  },
+  "scripts/verify_synthetic_odoo_control_plane.py": {
+    "bytes": 4665,
+    "sha256": "7a5fda6ab5884f2354e09a2ac75792622af9dc4c881f3b727de26a3a9db85466"
+  },
+  "specs/CODESTRA_CARRIER_ROUTE_DIAGNOSTIC_AND_BOUNDED_REMEDIATION_AUTHORIZATION.md": {
+    "bytes": 11358,
+    "sha256": "9309d7f930d059751a03ac068cf66db7e01f0fd17058637d712df08912f92eec"
+  },
+  "specs/CODESTRA_CODEX_LAUNCH_PROMPT_V2.md": {
+    "bytes": 1944,
+    "sha256": "3bdcaddf2d7330de93964c1692183a5ac431356f3b83dffdb789d7304e2e59ee"
+  },
+  "specs/CODESTRA_MASTER_SPEC_V2.sha256": {
+    "bytes": 216,
+    "sha256": "5d4a21da136d9399d3bfa1b6f7a69970ca150c059b6aef31453f21bf0eb50f9f"
+  },
+  "specs/CODESTRA_PRODUCTION_READINESS_AND_STAGED_CUTOVER_AUTHORIZATION.md": {
+    "bytes": 21575,
+    "sha256": "ce1d994fd2ee600965495ce0b0b3ec79294debb4a46a3534191d99fd76f9e44a"
+  },
+  "specs/CODESTRA_SERVER_ASSIGNMENT_MATRIX.md": {
+    "bytes": 3183,
+    "sha256": "869a5b43e68074f656b8a1a6bbe122e77d9de65a99d856110e6abe3a59d9c571"
+  },
+  "specs/CODESTRA_SERVER_A_IMPLEMENTATION_INSTRUCTIONS.md": {
+    "bytes": 38274,
+    "sha256": "bd2c4e6aa222c5e886920a4308781b658226a5862fc9747bd115c72d7cdfd30f"
+  },
+  "specs/CODESTRA_SERVER_B_IMPLEMENTATION_INSTRUCTIONS.md": {
+    "bytes": 24470,
+    "sha256": "b7a3fc4c563a41f5bb3785ebdc87d1d4da4cb4b5676519936fa3f6e573617d76"
+  },
+  "specs/CODESTRA_SYNTHETIC_CALL_GATE_AUTHORIZATION.md": {
+    "bytes": 12387,
+    "sha256": "b35b3b0a8eb67f37f9b6d50241bf62129864f601ece3c8fb402d4fe9dfd78723"
+  },
+  "specs/CODESTRA_SYNTHETIC_GATE_REMEDIATION_AND_REAUTHORIZATION.md": {
+    "bytes": 15312,
+    "sha256": "164de388f6fec96ab12a9ba78d4844c61c7296bd8e489907093b1f7d58aaed7f"
+  },
+  "specs/CODESTRA_VICIDIAL_CODEX_LAUNCH_PROMPT_V2.md": {
+    "bytes": 3297,
+    "sha256": "42532eb9b761a1cc03c2e93ebecb552fe2edce0ba0302c7b197959a5df926a1a"
+  },
+  "specs/CODESTRA_VICIDIAL_MAPPING_V2.sha256": {
+    "bytes": 350,
+    "sha256": "08fd7e2126c6481b4eb01623f1c7aba26249fa75a656264145dd9ccf6260e3a5"
+  },
+  "specs/CODESTRA_VOIP_TO_ODOO_TEST_AUTHORIZATION.md": {
+    "bytes": 15065,
+    "sha256": "4aa7b70cafa2f90f2e60361d26193925b90539db8e941338cc8a062d850fa2ee"
+  },
+  "specs/SERVER_A_SPECIFICATION_MANIFEST.tsv": {
+    "bytes": 1170,
+    "sha256": "71b23a6f1d025a69c6d7c24391ac5c087d7544d66c318830cf2c3c2ea1ec2738"
   },
   "specs/VICIDIAL_ODOO_MAPPING_SPEC.md": {
     "bytes": 27374,
     "sha256": "24e3a738ab8fc384fe3b4e30b6bf059f3639d78ad45e8c99582044f1015685fd"
   },
-  "start-codex-app-server.sh": {
-    "bytes": 813,
-    "sha256": "6bbf4774649d9ab503cb502e86dd0b484d0bf5b411fc66604a6b7b42091d6b1f"
+  "tel_events/__init__.py": {
+    "bytes": 398,
+    "sha256": "32ca5dc0eb15720a639533c86a9b493c30238e03f0fddcbdc5bb48b423201283"
+  },
+  "tel_events/publisher.py": {
+    "bytes": 12293,
+    "sha256": "24c5479bcf3940ff36bfb3ec44ec0ef9706174a82f497f5e68d989fc0ec8f3d9"
+  },
+  "tel_events/service.py": {
+    "bytes": 4951,
+    "sha256": "2c9ba8e0963d5da046f1831484b0cfd9f18f6c38eafcb4d4a26e98c62066ced8"
+  },
+  "tests/alertmanager.test.yml": {
+    "bytes": 271,
+    "sha256": "4cdc01b8d105b6d8198b9dd3c6a97e7a8204385678199eca6f75e45c63b8ac12"
+  },
+  "tests/test_campaign_design.py": {
+    "bytes": 4401,
+    "sha256": "3f939dd5130691cc1670f5cebe0964294d9e375d5369d97fd71fa09c92686ed0"
+  },
+  "tests/test_canary_authorization.py": {
+    "bytes": 3415,
+    "sha256": "c2dcc26e5a9ca8a02b627e00bb771c7c76d5ab1bdbe6533984d7195ea5ba496d"
+  },
+  "tests/test_capture_consistent_odoo19_pair.sh": {
+    "bytes": 550,
+    "sha256": "942bc749573c51fee2a50cc4cec42d30d48c1c751d9e5d7f404b2aed9dfb1a4c"
+  },
+  "tests/test_monitoring_failure_handling.py": {
+    "bytes": 6829,
+    "sha256": "dc405c4d41886b06a00e6d488956dea9a69dc2b3d12943553e9285d6f5ac6c61"
+  },
+  "tests/test_operations.py": {
+    "bytes": 10143,
+    "sha256": "c8350a24ab3933f9c49399b10e266489f92b6f848ffe11a7384de3d75039831d"
+  },
+  "tests/test_production_vicidial_sync.py": {
+    "bytes": 11244,
+    "sha256": "e15a3edb0cba84812445fdc2276db28d9929ddfcdbc58a15f866be868d1de97a"
+  },
+  "tests/test_rotate_service_secrets.py": {
+    "bytes": 7110,
+    "sha256": "f1e2ba8acad064b2f887f0d80a64240edcb17aff04700b258fe6af30f1539a89"
+  },
+  "tests/test_synthetic_automatic_campaign_gate.py": {
+    "bytes": 2009,
+    "sha256": "e0c8ac8eda5d615800af938b410f4396208a7eb3c564125fefde85d0268bfb28"
+  },
+  "tests/test_synthetic_campaign_lifecycle.py": {
+    "bytes": 5129,
+    "sha256": "05b534fb3597f76f1eab20fac4f370e0b41eb1d604374c53a2f0ed15611847e6"
+  },
+  "tests/test_tel_events_publisher.py": {
+    "bytes": 3409,
+    "sha256": "72e68f547f2e6cd1191de3242764004417809e2454bc9d1e6f7edbd43df8fdfb"
+  },
+  "tests/webhook_receiver.py": {
+    "bytes": 1173,
+    "sha256": "732ea484bbc2af9ef21c07fe58f993299cedeb38ecd604c89efb2cf498dfee24"
+  },
+  "tools/build_odoo_vertical_evidence.py": {
+    "bytes": 12330,
+    "sha256": "650f5e46cb96fa32efcb2aba2b561f798d42705cf93423c043f6e440e47ad51e"
+  },
+  "tools/generate_odoo_vertical_suite.py": {
+    "bytes": 40864,
+    "sha256": "3fe7ad92ad1aeb369f02cfe21bf906bc890025b1123218be3e79cda8a5bec1b0"
+  },
+  "tools/generate_vertical_pipeline_xml.py": {
+    "bytes": 2164,
+    "sha256": "fc53c627d2d6ff75b49759e78877d6960e9cd1c8d96e1b705da979824040f471"
+  },
+  "tools/odoo_acceptance_users.py": {
+    "bytes": 857,
+    "sha256": "3bb0c361817bbcf3ffecd51cb323c55d6a35f7d1766eadeccd7696989b30f11f"
+  },
+  "tools/odoo_vertical_staging_acceptance.py": {
+    "bytes": 6890,
+    "sha256": "ef81af38fad91b4f31032cf2d4ae249d4e8fdb4db6087b6b27a615006d45d647"
+  },
+  "vicidial/AGENTS.md": {
+    "bytes": 965,
+    "sha256": "33b2b6cbb2aae1ee3cbef55e4d6c16a6508b221d30ec1c7573fe0e0b7cada15d"
+  },
+  "vicidial/README.md": {
+    "bytes": 968,
+    "sha256": "fa10281474b84727763762073b17b82204853745641b8af2dfe978db0b76b7f4"
+  },
+  "vicidial/config/adapter.env.example": {
+    "bytes": 897,
+    "sha256": "dfb6cda16114f98b18a0ba95e38cb39830c8a014f3c9af8630eb2167c80ec66e"
+  },
+  "vicidial/config/vicidial-server.env.example": {
+    "bytes": 621,
+    "sha256": "310c505bd43f7ba025bdf12b9540905584a3b21a54363213ea609e79c07d0f25"
+  },
+  "vicidial/docs/ADAPTER_OPERATIONS.md": {
+    "bytes": 1748,
+    "sha256": "40a7675c57ede9ec8e2555f9fedbc21c85854985ea839b2c654ee01908928657"
+  },
+  "vicidial/docs/AUTOMATIC_CAMPAIGN_PROVISIONING.md": {
+    "bytes": 12580,
+    "sha256": "bf6e60ac02791088a317e66943231478da41b7307b0af27b435ca61dabb61c2f"
+  },
+  "vicidial/docs/VICIDIAL_ADAPTER_CONTRACT.md": {
+    "bytes": 2646,
+    "sha256": "3199374d40a0d14c6a839ab85f98ad537263c75182a29fd2161c0d6801c4f46b"
+  },
+  "vicidial/ops/apache/codestra-vicidial-restricted-adapter.include": {
+    "bytes": 872,
+    "sha256": "3eca79a12c03bd3aa4478c85dcd9d8912bb579223bf0789074a5cd44431f29cd"
+  },
+  "vicidial/ops/codestra-vicidial-restricted-adapter-health.service": {
+    "bytes": 451,
+    "sha256": "13e96ebd8295ed719fd162a30c234cb3dea616de8d386dc94586aca0827d2d02"
+  },
+  "vicidial/ops/codestra-vicidial-restricted-adapter-health.timer": {
+    "bytes": 233,
+    "sha256": "91ceb2879fd89bc8dc277a9175fc55992a6ca1e38b77ca22a04c24602f12c5b0"
+  },
+  "vicidial/ops/codestra-vicidial-restricted-adapter.service": {
+    "bytes": 2125,
+    "sha256": "04457468493495bccae0a1455b12bba132af3f15f7eb48cd2046da23ad05c8fb"
+  },
+  "vicidial/ops/firewalld/codestra-vicidial-adapter-rich-rule.xml.example": {
+    "bytes": 153,
+    "sha256": "b1ee800657850bfc6c2fce762d10e4f0bcbec2e0870f57e3b7563249211512a6"
+  },
+  "vicidial/ops/monitoring/codestra-vicidial-adapter-blackbox.yml": {
+    "bytes": 254,
+    "sha256": "16b3afccda5e5cb5c59efffed0ad228fdd4365a86ad5ee423b4faf79c92f0e08"
+  },
+  "vicidial/pyproject.toml": {
+    "bytes": 479,
+    "sha256": "e3b1d431137292c3e323b29eb3db3e18ddf3cce304805e091b9122ee9280cd04"
+  },
+  "vicidial/reports/github/DEPLOYMENT_PROVENANCE.md": {
+    "bytes": 557,
+    "sha256": "3d188b3eadfafcf0f5a9aaf2c3b15188665255ef2eee6fd7f5e11212cb4274f9"
+  },
+  "vicidial/reports/github/GITLEAKS_CANDIDATE.json": {
+    "bytes": 3,
+    "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+  },
+  "vicidial/reports/github/GITLEAKS_HISTORY.json": {
+    "bytes": 3,
+    "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+  },
+  "vicidial/reports/github/GITLEAKS_REVIEW.md": {
+    "bytes": 673,
+    "sha256": "045d51aea5f7ac142a2ffd8b8bd2f27a97f8712c8867e93582823180053c8701"
+  },
+  "vicidial/reports/github/GITLEAKS_STAGED.json": {
+    "bytes": 3,
+    "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+  },
+  "vicidial/reports/github/IGNORE_POLICY.md": {
+    "bytes": 474,
+    "sha256": "9807bec44c851ab0508c84ee2410230d32497e1d4eeca7e3fde0f8628463ce32"
+  },
+  "vicidial/reports/github/INITIAL_COMMIT_REPORT.md": {
+    "bytes": 605,
+    "sha256": "f81b3a2612f23d636e9c881fd748187b73a7b69f7f12803f60db9c6ac286258c"
+  },
+  "vicidial/reports/github/NESTED_REPOSITORIES.md": {
+    "bytes": 179,
+    "sha256": "1bb8e22e75c474b5798aec9926a641127b2c376966613d34b019fb64f47a9299"
+  },
+  "vicidial/reports/github/PRE_INITIAL_COMMIT_STATUS.md": {
+    "bytes": 894,
+    "sha256": "79aa3192405f2cee14756c6de8d45dd5f157c85ccb052fe1daf21335b3eb82a6"
+  },
+  "vicidial/reports/github/PUSH_REPORT.md": {
+    "bytes": 459,
+    "sha256": "7c670fc780c027d09d9e1bc5781a69f472fc178884c043d9ec550987334e5191"
+  },
+  "vicidial/reports/github/SECRET_REVIEW.md": {
+    "bytes": 1160,
+    "sha256": "5b653547f0d3bbff034610944542f0bc20011344be194c759eddc5c6da984550"
+  },
+  "vicidial/reports/github/SENSITIVE_ARTIFACT_FINDINGS.csv": {
+    "bytes": 398,
+    "sha256": "965bb3a85a5d39e1fbe6af4256b1c9ca94d0dbd62a613e01585a5a4a1259edfc"
+  },
+  "vicidial/reports/github/SENSITIVE_ARTIFACT_REVIEW.md": {
+    "bytes": 797,
+    "sha256": "709c5652df97087a1efd7c5918407b1aea7c6af498a9d709cc8131ba0c0cbc8a"
+  },
+  "vicidial/reports/github/UNTRACKED_LARGE_FILES.csv": {
+    "bytes": 26,
+    "sha256": "6346598ce78bc05c9c6893d522ffef3f41e422892af17025b963ebf1dbb71a06"
+  },
+  "vicidial/reports/github/WORKING_TREE_INVENTORY.csv": {
+    "bytes": 6553,
+    "sha256": "22a8f0f35672dc4a9fbd45a94623227d50f4f28b88a23419394bfea659ba475a"
+  },
+  "vicidial/reports/n8n-vicidial-mapping.csv": {
+    "bytes": 378,
+    "sha256": "ed4d16a8c2a04b40b0cc43c8ec12da573665f59c73e74b20470fce65858542a5"
+  },
+  "vicidial/reports/odoo-vicidial-mapping.csv": {
+    "bytes": 344,
+    "sha256": "f9ec4d7d7c964e6f39b1053a50daf854ed0209bb2c94fc65cdfbb7e7862d04bb"
+  },
+  "vicidial/reports/vicidial-blockers.md": {
+    "bytes": 282,
+    "sha256": "08729dec1d679eee7b70ae1aa2c05436e8856ccdbabbdbd6177df61de7a3fe4d"
+  },
+  "vicidial/reports/vicidial-campaign-matrix.csv": {
+    "bytes": 1546,
+    "sha256": "7a4f72c605868ba245f2f23ad2c512b3f558ac2cda71207ba541915954b87c82"
+  },
+  "vicidial/reports/vicidial-disposition-matrix.csv": {
+    "bytes": 131,
+    "sha256": "8085fd093fa6ed4ef4493e3a72692a4fc2163ea8ee0a80b045feb5e49b26862a"
+  },
+  "vicidial/reports/vicidial-inbound-group-matrix.csv": {
+    "bytes": 290,
+    "sha256": "3187b4f356efd854f1e8f5d1e7afa19786f106b058dda3999340e0799abffd33"
+  },
+  "vicidial/reports/vicidial-list-matrix.csv": {
+    "bytes": 244,
+    "sha256": "f5dd88cc2623a61937dc5501d47076d64a55912e116f7dfb044f9d2295ad2434"
+  },
+  "vicidial/reports/vicidial-production-gate.md": {
+    "bytes": 358,
+    "sha256": "351bd51913dbc407155c2906249cd66087dd7637f59d74cfe95047ee530b1ed6"
+  },
+  "vicidial/reports/vicidial-script-matrix.csv": {
+    "bytes": 254,
+    "sha256": "07d5d3d3f9ad67dd0493e54b26a580901a65167b73f6c3d7f1cdef82d80c1855"
+  },
+  "vicidial/reports/vicidial-test-results.md": {
+    "bytes": 184,
+    "sha256": "e6a4180ba8e5d0924b307aee958becbdd13f399dbf6c4fa97bb9a1391ea6ca63"
+  },
+  "vicidial/reports/vicidial-user-group-matrix.csv": {
+    "bytes": 263,
+    "sha256": "f9989cd68ed98f3593db38057824c9a46c7c31ca8d3e91c6707ef892283edac6"
+  },
+  "vicidial/reports/vicidial/ADAPTER_IMPLEMENTATION.md": {
+    "bytes": 1927,
+    "sha256": "0fb4bc15f24218437036828a9001f2e9cf3c398d36949a751c359724d94bd68f"
+  },
+  "vicidial/reports/vicidial/ADAPTER_NEGATIVE_TESTS.md": {
+    "bytes": 739,
+    "sha256": "39c18b7ffd653e423e0c9f654a3b74422aa25f92ab6b269055794b8c18d0e35f"
+  },
+  "vicidial/reports/vicidial/ADAPTER_TESTS.md": {
+    "bytes": 1700,
+    "sha256": "d5f74313deee947566a0b3b9ca337a4f701fc0b68be87092b4d0febec055fde5"
+  },
+  "vicidial/reports/vicidial/ADAPTER_TRUST_CONFIGURATION.md": {
+    "bytes": 1009,
+    "sha256": "ddfaf6ad3f713602d18e1089a275eecfb0636c2476ce71b929a03d99d36585b3"
+  },
+  "vicidial/reports/vicidial/AUTOMATIC_CAMPAIGN_TESTS.md": {
+    "bytes": 731,
+    "sha256": "c9ce61ee926d58dd6eaf94ae9137cb31379be8641f90deeb2b0447509850cd16"
+  },
+  "vicidial/reports/vicidial/BACKUP_RESTORE.md": {
+    "bytes": 836,
+    "sha256": "77ae8cc28b0b6c5295fe8789014a83fa083392164179f55a5397ac8a31c2fe88"
+  },
+  "vicidial/reports/vicidial/BASELINE.md": {
+    "bytes": 3241,
+    "sha256": "34bff3c878c7c4d46cfffef5f626c88184be7c28b75f354f17e508468aebece1"
+  },
+  "vicidial/reports/vicidial/CAMPAIGN_INVENTORY.csv": {
+    "bytes": 588,
+    "sha256": "dec2a3783a5cf3198962d9bb1971317e8a388ef63f70e2b7adb6e3e691139492"
+  },
+  "vicidial/reports/vicidial/DEPLOYMENT_CHECKSUMS.sha256": {
+    "bytes": 674,
+    "sha256": "12281546b8c9621a426119c944f761c4257325ac4e88ddcc6e1a84694a579216"
+  },
+  "vicidial/reports/vicidial/DISPOSITION_INVENTORY.csv": {
+    "bytes": 253,
+    "sha256": "7bc9f38556f94c38f7cfd98621066f9145cc67bc95669fe9291d2ffc3884a47b"
+  },
+  "vicidial/reports/vicidial/EVENT_GATEWAY_TESTS.md": {
+    "bytes": 891,
+    "sha256": "c1ac7abb47fa029068fe60262a10c755a81560bbe4857b80225a09bf4d4a0b20"
+  },
+  "vicidial/reports/vicidial/FIREWALL.md": {
+    "bytes": 808,
+    "sha256": "d476815c7df633f7f9721c01a56bf2dd1eb04df18041a55016d10bf28e2881f5"
+  },
+  "vicidial/reports/vicidial/FIREWALL_VALIDATION.md": {
+    "bytes": 656,
+    "sha256": "946a4ae95cfcdb527afcb181b64869a1fdf58835042fb1c51bb42f767d1ba098"
+  },
+  "vicidial/reports/vicidial/GAP_MATRIX.csv": {
+    "bytes": 2666,
+    "sha256": "d76d80e89e89f7ad38573611e86aab0e1a0d5405da9a3a84b953d935167a8a63"
+  },
+  "vicidial/reports/vicidial/GROUP_INVENTORY.csv": {
+    "bytes": 666,
+    "sha256": "ad300001f01ac6c4618d538e4a59bcc0d23b8382e5dd38e6d683a36e3294a9d2"
+  },
+  "vicidial/reports/vicidial/LIST_INVENTORY.csv": {
+    "bytes": 309,
+    "sha256": "0eee5fe5187a601a35ea21b4ab8c22216003ad77e2d515d02620947c93dee722"
+  },
+  "vicidial/reports/vicidial/MARIADB_GRANT_REVIEW.md": {
+    "bytes": 2449,
+    "sha256": "eb3ab7924adb0774a48509a5ca0ec9f47805802889b13d793815ccc69a84807c"
+  },
+  "vicidial/reports/vicidial/PRE_UPDATE_SERVICE_HEALTH.md": {
+    "bytes": 564,
+    "sha256": "9420dd9523a38d15bf31b1b9775537f2f115a1a71f7eab36459d4b7f9b54dbd6"
+  },
+  "vicidial/reports/vicidial/PRODUCTION_GATE.md": {
+    "bytes": 2505,
+    "sha256": "e3e39efb9c95e9f54446791db75e0c0c49d57d932d1be67d24b404c7c2615fab"
+  },
+  "vicidial/reports/vicidial/RECONCILIATION.md": {
+    "bytes": 1117,
+    "sha256": "5a08a95e5219ab98dc0f0d91b52d7d6fd186fd7c0e8becdc0e35cdd22be2eb11"
+  },
+  "vicidial/reports/vicidial/ROLLBACK_TEST.md": {
+    "bytes": 716,
+    "sha256": "bb9bd214c1ca0c7f5dca2def008696190e039cae879f56b0721beab87bcc1723"
+  },
+  "vicidial/reports/vicidial/SCRIPT_INVENTORY.csv": {
+    "bytes": 237,
+    "sha256": "af4a1b704dc8f13a80948f6e40282ee9a3a259abe2d9bef21bdb22cf7907c7a6"
+  },
+  "vicidial/reports/vicidial/STAGING_DEPLOYMENT.md": {
+    "bytes": 1755,
+    "sha256": "7088babe67cb6299a25d120df78164cbfb917156a013b4b1872b3c2ddadeaeb6"
+  },
+  "vicidial/scripts/curation_inventory.py": {
+    "bytes": 4629,
+    "sha256": "f446a0ea9afbd209071d9599839380736ceeec733b3deb0686c86c47f2e74497"
+  },
+  "vicidial/scripts/validate_runtime.py": {
+    "bytes": 1523,
+    "sha256": "ef57f2cb4cfacb74e2ab1f14f3cf241f5d2a1f59cb98fd450efe4340b1655f08"
+  },
+  "vicidial/specs/VICIDIAL_ODOO_MAPPING_SPEC.md": {
+    "bytes": 27374,
+    "sha256": "24e3a738ab8fc384fe3b4e30b6bf059f3639d78ad45e8c99582044f1015685fd"
+  },
+  "vicidial/src/codestra_vicidial/__init__.py": {
+    "bytes": 79,
+    "sha256": "3ba61cffba4fabbe28e5a9d3688a917cf2788964f282034f5f1bffc634010532"
+  },
+  "vicidial/src/codestra_vicidial/app.py": {
+    "bytes": 11564,
+    "sha256": "7a46b1c301b672103cc10d342ae507875949776cb6abb2547022975429780092"
+  },
+  "vicidial/src/codestra_vicidial/curation.py": {
+    "bytes": 662,
+    "sha256": "db6abbc44c0e5add9c40a0abff805c661324eb7c27f622e57883dacda0ec61b4"
+  },
+  "vicidial/src/codestra_vicidial/models.py": {
+    "bytes": 6451,
+    "sha256": "daffbaee46ece0ca86df308a9616b5c91150679b1e5c02ff1e509b13f931f214"
+  },
+  "vicidial/src/codestra_vicidial/repository.py": {
+    "bytes": 32583,
+    "sha256": "1994666db5b041281cb9a552989c50004b6a74058619b38a5cce43b7f2ae6ec7"
+  },
+  "vicidial/src/codestra_vicidial/security.py": {
+    "bytes": 1903,
+    "sha256": "eeb023e4b0951cb6b2873ba72219ba20e0292b341c5befbd9376b24ccb30dbb3"
+  },
+  "vicidial/src/codestra_vicidial/service.py": {
+    "bytes": 15602,
+    "sha256": "544e0b0eb6b1a2f2905a41ff7a65d462d0c50f07bfa840417588e82f7d6c4784"
+  },
+  "vicidial/src/codestra_vicidial/state.py": {
+    "bytes": 8256,
+    "sha256": "99fd8bf6f9e8217ac6a9dbe42c90e8d4116a78094e21197e93fb6fcf5e5ca25f"
+  },
+  "vicidial/tests/test_adapter.py": {
+    "bytes": 21968,
+    "sha256": "22640e8a88dac791b120c82f15f749ffb8a84691ea75aca2dfb3fa9334e41150"
   }
 }

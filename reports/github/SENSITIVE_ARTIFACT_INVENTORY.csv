@@ -1,13 +1,1 @@
 path,bytes,git_policy,classification
-".vicidial-staging-repo.tar.gz",2933,"ignored","sensitive-extension"
-"evidence/crm-lead-campaign-invariant-20260725T185407Z/backup/call-center-addons.prechange.tgz",24109,"ignored","sensitive-extension"
-"evidence/crm-lead-campaign-invariant-20260725T185407Z/backup/codestra_master_v2_staging.prechange.filestore.tgz",527,"ignored","sensitive-extension"
-"evidence/crm-lead-campaign-invariant-20260725T185407Z/backup/codestra_master_v2_staging.prechange.pgcustom",4163663,"ignored","sensitive-extension"
-"evidence/n8n-automation-architecture-20260725T162842Z/backups/n8n-staging-config-redacted.tar.gz",1192,"ignored","sensitive-extension"
-"evidence/n8n-automation-architecture-20260725T162842Z/backups/n8n-staging-definitions.tar.gz",35844,"ignored","sensitive-extension"
-"evidence/n8n-automation-architecture-20260725T162842Z/backups/n8n_staging.pgcustom",427880,"ignored","sensitive-extension"
-"evidence/voip-odoo-acceptance-resume-20260725T135721Z/server-b/vicidial-fixture-gate/rollback.sql",477,"ignored","sensitive-extension"
-"evidence/voip-odoo-internal-20260725T133623Z/server-b/vicidial-fixture-gate/rollback.sql",477,"ignored","sensitive-extension"
-"reports/schema/middleware-staging-schema.sql",44521,"ignored","sensitive-extension"
-"reports/schema/n8n-staging-schema.sql",211811,"ignored","sensitive-extension"
-"reports/schema/odoo-staging-schema.sql",2092751,"ignored","sensitive-extension"
