@@ -1,0 +1,38 @@
+{
+  "AGENTS.md": {
+    "bytes": 897,
+    "sha256": "58bbc7dc924b0c083802ebd28ef47a167c9b09cf17a0ccc351dfeab04b244278"
+  },
+  "CODEX_APP_SERVER_A.md": {
+    "bytes": 7673,
+    "sha256": "2017046f1e5b0f7d271ef08e74c2e5d3a19ae0f1f92e400471235824c455ef28"
+  },
+  "README.md": {
+    "bytes": 882,
+    "sha256": "3d9b03143048a4fa10ca42f0daf90d02355d9d95ade0846f69359a1bc3b6e05f"
+  },
+  "config/application-server-a.env.example": {
+    "bytes": 535,
+    "sha256": "293652c3ce89f19dc1f38b7a5838d50e6e8fd319fbc2898bffa6a71bb407c298"
+  },
+  "docs/AUTOMATIC_CAMPAIGN_PROVISIONING.md": {
+    "bytes": 12580,
+    "sha256": "bf6e60ac02791088a317e66943231478da41b7307b0af27b435ca61dabb61c2f"
+  },
+  "docs/VICIDIAL_ADAPTER_CONTRACT.md": {
+    "bytes": 2646,
+    "sha256": "3199374d40a0d14c6a839ab85f98ad537263c75182a29fd2161c0d6801c4f46b"
+  },
+  "install-app-server-package.sh": {
+    "bytes": 1542,
+    "sha256": "1e49275c94b02c052d19ccd9219cba2068a8daa95a241c0f6b4a521612c62ccd"
+  },
+  "specs/VICIDIAL_ODOO_MAPPING_SPEC.md": {
+    "bytes": 27374,
+    "sha256": "24e3a738ab8fc384fe3b4e30b6bf059f3639d78ad45e8c99582044f1015685fd"
+  },
+  "start-codex-app-server.sh": {
+    "bytes": 813,
+    "sha256": "6bbf4774649d9ab503cb502e86dd0b484d0bf5b411fc66604a6b7b42091d6b1f"
+  }
+}
