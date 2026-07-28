@@ -32,7 +32,7 @@ jobs:
           cache: pip
 
       - name: Install source-test dependencies
-        run: python -m pip install pytest pytest-subtests PyYAML
+        run: python -m pip install pytest pytest-subtests PyYAML requests
 
       - name: Verify recovered source evidence hashes
         run: |
