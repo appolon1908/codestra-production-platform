@@ -46,7 +46,9 @@ jobs:
       - name: Run complete clean-checkout platform suite
         run: |
           set -o pipefail
-          python -m pytest -q | tee "${RUNNER_TEMP}/pytest-output.txt"
+          sudo --preserve-env=PATH \
+            "$(command -v python)" -m pytest -q |
+            tee "${RUNNER_TEMP}/pytest-output.txt"
           python - "${RUNNER_TEMP}/pytest-output.txt" <<'PY'
           import re
           import sys
