@@ -68,19 +68,26 @@ jobs:
 
       - name: Compile all tracked Python involved in the suite
         run: |
-          git ls-files -z -- \
-            'campaign_provisioning/**/*.py' \
-            'campaign_provisioning/*.py' \
-            'scripts/**/*.py' \
-            'scripts/*.py' \
-            'tel_events/**/*.py' \
-            'tel_events/*.py' \
-            'tests/**/*.py' \
-            'tests/*.py' |
-            xargs -0 --no-run-if-empty python -m py_compile
-          python -m py_compile \
-            scripts/canonical_event_client.py.reference \
-            scripts/vicidial_sync.py.candidate
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+
+          paths = {
+              Path(value)
+              for value in subprocess.check_output(
+                  ["git", "ls-files", "*.py"], text=True
+              ).splitlines()
+          }
+          paths.update(
+              {
+                  Path("scripts/canonical_event_client.py.reference"),
+                  Path("scripts/vicidial_sync.py.candidate"),
+              }
+          )
+          for path in sorted(paths):
+              compile(path.read_text(), str(path), "exec", dont_inherit=True)
+          print(f"compiled {len(paths)} tracked Python sources")
+          PY
 
       - name: Validate Git whitespace
         run: git diff --check "${{ github.event.pull_request.base.sha }}..HEAD"
