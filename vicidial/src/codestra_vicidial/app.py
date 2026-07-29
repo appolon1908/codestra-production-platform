@@ -8,8 +8,19 @@ from fastapi.responses import JSONResponse
 
 from . import __version__
 from .models import (
-    AgentCommand, CallbackCommand, CampaignCommand, DisableAgentCommand,
-    LeadCommand, TransferPolicyCommand,
+    AgentCommand,
+    CallbackCommand,
+    CampaignCommand,
+    DisableAgentCommand,
+    LeadCommand,
+    TransferPolicyCommand,
+)
+from .platform_api import TokenVerifier, platform_router
+from .platform_security import ExecutionGrantVerifier, KeycloakTokenVerifier
+from .platform_service import (
+    LocalTelephonyBackend,
+    PlatformAdapterService,
+    PlatformFlags,
 )
 from .repository import CollisionError, MemoryRepository, MySQLRepository
 from .security import RequestAuthenticator
@@ -17,7 +28,13 @@ from .service import AdapterService, FeatureFlags, ReadbackMismatch
 from .state import StateStore
 
 
-def create_app(service: AdapterService, authenticator: RequestAuthenticator) -> FastAPI:
+def create_app(
+    service: AdapterService,
+    authenticator: RequestAuthenticator,
+    *,
+    platform_service: PlatformAdapterService | None = None,
+    platform_token_verifier: TokenVerifier | None = None,
+) -> FastAPI:
     app = FastAPI(title="Codestra restricted VICIdial adapter", version=__version__)
 
     @app.exception_handler(CollisionError)
@@ -196,6 +213,8 @@ def create_app(service: AdapterService, authenticator: RequestAuthenticator) -> 
         await authorize(request, "telephony:read", *values)
         return {"run_id": run_id, **service.reconciliation()}
 
+    if platform_service is not None and platform_token_verifier is not None:
+        app.include_router(platform_router(platform_service, platform_token_verifier))
     return app
 
 
@@ -248,7 +267,59 @@ def app_from_environment() -> FastAPI:
             "127.0.0.1",
         }),
     )
-    return create_app(service, auth)
+    platform_key_file = Path(os.environ.get(
+        "CODESTRA_EXECUTION_GRANT_KEY_FILE",
+        "/run/secrets/telephony-execution-grant-key",
+    ))
+    platform_key = (
+        platform_key_file.read_bytes().strip()
+        if platform_key_file.exists() else b"development-disabled-execution-grant-key"
+    )
+    token_key_file = Path(os.environ.get(
+        "CODESTRA_KEYCLOAK_VERIFICATION_KEY_FILE",
+        "/run/secrets/keycloak-verification-key.pem",
+    ))
+    token_key = (
+        token_key_file.read_text().strip()
+        if token_key_file.exists() else "development-disabled-token-key"
+    )
+    state = service.state
+    platform_service = PlatformAdapterService(
+        state,
+        PlatformFlags.from_environment(),
+        ExecutionGrantVerifier(platform_key, state),
+        LocalTelephonyBackend(Path(os.environ.get(
+            "CODESTRA_ASTERISK_STAGING_CONFIG_ROOT",
+            "/var/lib/codestra-vicidial/asterisk-staging",
+        ))),
+        environment=os.environ.get("CODESTRA_ENVIRONMENT", "staging"),
+        resource_allowlist=frozenset(filter(None, os.environ.get(
+            "CODESTRA_TELEPHONY_RESOURCE_ALLOWLIST", ""
+        ).split(","))),
+    )
+    platform_tokens = KeycloakTokenVerifier(
+        issuer=os.environ.get(
+            "CODESTRA_KEYCLOAK_ISSUER",
+            "https://identity.invalid/realms/codestra",
+        ),
+        audience=os.environ.get(
+            "CODESTRA_TELEPHONY_AUDIENCE", "codestra-telephony-adapter"
+        ),
+        verification_key=token_key,
+        algorithms=tuple(filter(None, os.environ.get(
+            "CODESTRA_KEYCLOAK_ALGORITHMS", "RS256"
+        ).split(","))),
+        approved_subjects=frozenset(filter(None, os.environ.get(
+            "CODESTRA_APPROVED_TELEPHONY_SUBJECTS",
+            "codestra-middleware,codestra-provisioning",
+        ).split(","))),
+    )
+    return create_app(
+        service,
+        auth,
+        platform_service=platform_service,
+        platform_token_verifier=platform_tokens,
+    )
 
 
 app = app_from_environment()

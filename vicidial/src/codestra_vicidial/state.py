@@ -46,8 +46,64 @@ class StateStore:
           evidence_id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at TEXT NOT NULL,
           operation TEXT NOT NULL, target_hash TEXT NOT NULL, outcome TEXT NOT NULL,
           redacted_json TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS execution_grants(
+          grant_id TEXT PRIMARY KEY, grant_hash TEXT NOT NULL,
+          maximum_actions INTEGER NOT NULL, consumed_actions INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL, auto_disabled INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS action_flags(
+          flag_name TEXT NOT NULL, resource_id TEXT NOT NULL,
+          grant_id TEXT NOT NULL, enabled INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+          PRIMARY KEY(flag_name,resource_id));
         """)
         self.db.commit()
+
+    def consume_grant(self, grant_id: str, grant_hash: str, maximum_actions: int,
+                      expires_at: int, now: int) -> int:
+        """Atomically consume one bounded action and auto-disable at exhaustion."""
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self.db.execute(
+                "SELECT grant_hash,maximum_actions,consumed_actions,expires_at,"
+                "auto_disabled FROM execution_grants WHERE grant_id=?",
+                (grant_id,),
+            ).fetchone()
+            if row is None:
+                self.db.execute(
+                    "INSERT INTO execution_grants VALUES(?,?,?,?,?,0)",
+                    (grant_id, grant_hash, maximum_actions, 0, expires_at),
+                )
+                consumed = 0
+            else:
+                if (row["grant_hash"] != grant_hash
+                        or row["maximum_actions"] != maximum_actions
+                        or row["expires_at"] != expires_at):
+                    raise PermissionError("execution grant binding conflict")
+                if row["auto_disabled"]:
+                    raise PermissionError("execution grant is auto-disabled")
+                consumed = int(row["consumed_actions"])
+            if expires_at < now:
+                raise PermissionError("execution grant expired")
+            if consumed >= maximum_actions:
+                raise PermissionError("execution grant action budget exhausted")
+            consumed += 1
+            auto_disabled = 1 if consumed >= maximum_actions else 0
+            self.db.execute(
+                "UPDATE execution_grants SET consumed_actions=?,auto_disabled=? "
+                "WHERE grant_id=?",
+                (consumed, auto_disabled, grant_id),
+            )
+            self.db.commit()
+            return maximum_actions - consumed
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def action_budget(self, grant_id: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT maximum_actions,consumed_actions,expires_at,auto_disabled "
+            "FROM execution_grants WHERE grant_id=?", (grant_id,)
+        ).fetchone()
+        return dict(row) if row else None
 
     @staticmethod
     def digest(value: object) -> str:
