@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,7 +11,8 @@ from pathlib import Path
 class StateStore:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path)
+        self._lock = threading.RLock()
+        self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript("""
@@ -60,6 +62,13 @@ class StateStore:
     def consume_grant(self, grant_id: str, grant_hash: str, maximum_actions: int,
                       expires_at: int, now: int) -> int:
         """Atomically consume one bounded action and auto-disable at exhaustion."""
+        with self._lock:
+            return self._consume_grant(
+                grant_id, grant_hash, maximum_actions, expires_at, now
+            )
+
+    def _consume_grant(self, grant_id: str, grant_hash: str, maximum_actions: int,
+                       expires_at: int, now: int) -> int:
         try:
             self.db.execute("BEGIN IMMEDIATE")
             row = self.db.execute(
@@ -99,10 +108,11 @@ class StateStore:
             raise
 
     def action_budget(self, grant_id: str) -> dict | None:
-        row = self.db.execute(
-            "SELECT maximum_actions,consumed_actions,expires_at,auto_disabled "
-            "FROM execution_grants WHERE grant_id=?", (grant_id,)
-        ).fetchone()
+        with self._lock:
+            row = self.db.execute(
+                "SELECT maximum_actions,consumed_actions,expires_at,auto_disabled "
+                "FROM execution_grants WHERE grant_id=?", (grant_id,)
+            ).fetchone()
         return dict(row) if row else None
 
     @staticmethod
@@ -110,10 +120,12 @@ class StateStore:
         return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
     def prior(self, operation: str, key: str, request_hash: str) -> dict | None:
-        row = self.db.execute(
-            "SELECT request_hash,result FROM requests WHERE operation=? AND idempotency_key=?",
-            (operation, key),
-        ).fetchone()
+        with self._lock:
+            row = self.db.execute(
+                "SELECT request_hash,result FROM requests "
+                "WHERE operation=? AND idempotency_key=?",
+                (operation, key),
+            ).fetchone()
         if row is None:
             return None
         if row["request_hash"] != request_hash:
@@ -121,22 +133,24 @@ class StateStore:
         return json.loads(row["result"])
 
     def record(self, operation: str, key: str, request_hash: str, result: dict) -> None:
-        self.db.execute(
-            "INSERT INTO requests VALUES(?,?,?,?,?)",
-            (operation, key, request_hash, json.dumps(result, sort_keys=True),
-             datetime.now(timezone.utc).isoformat()),
-        )
-        self.db.commit()
+        with self._lock:
+            self.db.execute(
+                "INSERT INTO requests VALUES(?,?,?,?,?)",
+                (operation, key, request_hash, json.dumps(result, sort_keys=True),
+                 datetime.now(timezone.utc).isoformat()),
+            )
+            self.db.commit()
 
     def audit(self, correlation_id: str, actor: str, operation: str, target: str,
               outcome: str, detail: object) -> None:
-        self.db.execute(
-            "INSERT INTO audit(occurred_at,correlation_id,actor,operation,target_hash,outcome,detail_hash)"
-            " VALUES(?,?,?,?,?,?,?)",
-            (datetime.now(timezone.utc).isoformat(), correlation_id, actor, operation,
-             self.digest(target), outcome, self.digest(detail)),
-        )
-        self.db.commit()
+        with self._lock:
+            self.db.execute(
+                "INSERT INTO audit(occurred_at,correlation_id,actor,operation,"
+                "target_hash,outcome,detail_hash) VALUES(?,?,?,?,?,?,?)",
+                (datetime.now(timezone.utc).isoformat(), correlation_id, actor,
+                 operation, self.digest(target), outcome, self.digest(detail)),
+            )
+            self.db.commit()
 
     def mapping(self, kind: str, external_id: str) -> sqlite3.Row | None:
         return self.db.execute(

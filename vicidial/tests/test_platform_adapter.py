@@ -223,6 +223,29 @@ def test_private_api_auth_and_safe_flag_response(tmp_path):
     assert "key" not in response.json()
 
 
+def test_private_api_mutation_uses_thread_safe_state_and_exact_route_binding(
+    tmp_path,
+):
+    adapter, grants, _ = service(tmp_path, enabled_user_flags())
+    app = FastAPI()
+    app.include_router(platform_router(adapter, Tokens()))
+    client = TestClient(app)
+    request = signed_user(grants)
+    response = client.put(
+        "/api/v1/vicidial/users/AGT-test-001",
+        headers={"Authorization": "Bearer valid"},
+        json=request.model_dump(mode="json"),
+    )
+    assert response.status_code == 200
+    assert response.json()["actual"]["state"] == "DISABLED"
+    mismatch = client.put(
+        "/api/v1/vicidial/users/AGT-other-001",
+        headers={"Authorization": "Bearer valid"},
+        json=request.model_dump(mode="json"),
+    )
+    assert mismatch.status_code == 409
+
+
 def test_route_table_has_no_generic_sql_shell_file_or_raw_dialplan(tmp_path):
     adapter, _, _ = service(tmp_path, enabled_user_flags())
     app = FastAPI()
