@@ -18,7 +18,7 @@ make_ca test-ca
 make_ca unknown-root
 
 issue() {
-  local name=$1 ca=$2 subject=$3 dates=$4 san=${5:-}
+  local name=$1 ca=$2 subject=$3 start_date=$4 end_date=$5 san=${6:-}
   openssl req -newkey rsa:2048 -nodes -sha256 -subj "/CN=${subject}" \
     -keyout "$pki/${name}.key" -out "$pki/${name}.csr" >/dev/null 2>&1
   local ext=()
@@ -27,7 +27,8 @@ issue() {
     ext=(-extfile "$pki/${name}.ext")
   fi
   openssl ca -batch -config "$pki/ca.cnf" -cert "$pki/${ca}.pem" -keyfile "$pki/${ca}.key" \
-    "${ext[@]}" $dates -in "$pki/${name}.csr" -out "$pki/${name}.pem" >/dev/null 2>&1
+    "${ext[@]}" -startdate "$start_date" -enddate "$end_date" \
+    -in "$pki/${name}.csr" -out "$pki/${name}.pem" >/dev/null 2>&1
   cat "$pki/${name}.pem" "$pki/${ca}.pem" > "$pki/${name}.chain.pem"
 }
 
@@ -49,10 +50,10 @@ policy=policy
 commonName=supplied
 EOF
 : > "$pki/index.txt"; printf '1000\n' > "$pki/serial"
-issue valid test-ca asterisk-ami.test.invalid "-startdate $now -enddate $future_end" asterisk-ami.test.invalid
-issue expired test-ca expired.test.invalid "-startdate $past -enddate $past_end" asterisk-ami.test.invalid
-issue future test-ca future.test.invalid "-startdate $future -enddate $future_end" asterisk-ami.test.invalid
-issue missing-san test-ca missing-san.test.invalid "-startdate $now -enddate $future_end"
+issue valid test-ca asterisk-ami.test.invalid "$now" "$future_end" asterisk-ami.test.invalid
+issue expired test-ca expired.test.invalid "$past" "$past_end" asterisk-ami.test.invalid
+issue future test-ca future.test.invalid "$future" "$future_end" asterisk-ami.test.invalid
+issue missing-san test-ca missing-san.test.invalid "$now" "$future_end"
 openssl req -newkey rsa:2048 -nodes -sha256 -subj "/CN=unknown-ca.test.invalid" \
   -keyout "$pki/unknown-ca.key" -out "$pki/unknown-ca.csr" >/dev/null 2>&1
 printf 'subjectAltName=DNS:asterisk-ami.test.invalid\nextendedKeyUsage=serverAuth\n' > "$pki/unknown-ca.ext"
