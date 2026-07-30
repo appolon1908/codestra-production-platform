@@ -47,7 +47,7 @@ def test_missing_san_rejected():
     assert "subjectAltName" not in decoded
     ctx = ssl.create_default_context(cafile=str(RUNTIME / "pki/test-ca.pem"))
     ctx.hostname_checks_common_name = False
-    raw = socket.create_connection((HOST, 15042), timeout=3)
+    raw = socket.create_connection((HOST, 15042 + PORT_OFFSET), timeout=3)
     with pytest.raises(ssl.CertificateError):
         ctx.wrap_socket(raw, server_hostname=TLS_HOSTNAME)
     record("missing_san", result="PASS")
@@ -56,7 +56,10 @@ def test_missing_san_rejected():
 def test_plaintext_to_tls_rejected_and_no_downgrade():
     with socket.create_connection((HOST, 15039 + PORT_OFFSET), timeout=3) as conn:
         conn.sendall(b"Action: Ping\r\n\r\n")
-        data = conn.recv(256)
+        try:
+            data = conn.recv(256)
+        except ConnectionResetError:
+            data = b""
     assert b"Asterisk Call Manager" not in data
     record("plaintext_to_tls_no_downgrade", result="PASS")
 
