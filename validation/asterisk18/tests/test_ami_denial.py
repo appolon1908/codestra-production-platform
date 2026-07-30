@@ -24,6 +24,7 @@ DENIED_ACTIONS = [
     ("BlindTransfer", {"Channel": "Local/nonexistent-test", "Context": "test-denied", "Exten": "99999"}),
     ("Atxfer", {"Channel": "Local/nonexistent-test", "Context": "test-denied", "Exten": "99999"}),
 ]
+UNEXPOSED_ASTERISK18_ACTIONS = {"CoreRestart", "CoreStop"}
 
 
 def authenticated_action(action: str, params: Dict[str, str]) -> Dict[str, str]:
@@ -75,16 +76,22 @@ def test_write_action_explicitly_denied_without_side_effect(action, params):
     after = state()
     sanitized = {k: v for k, v in response.items() if k.lower() not in {"secret", "key"}}
     message = response.get("Message", "").lower()
-    denied = response.get("Response") == "Error" and (
-        "permission" in message or "invalid/unknown command" in message
+    denied = response.get("Response") == "Error" and "permission" in message
+    unexposed = (
+        action in UNEXPOSED_ASTERISK18_ACTIONS
+        and response.get("Response") == "Error"
+        and "invalid/unknown command" in message
     )
     unchanged = before == after
     row = {
         "ACTION": action,
         "ACTION_ID": response.get("ActionID", ""),
         "TEST_TIMESTAMP_UTC": started,
-        "EXPECTED_RESULT": "DENIED",
-        "ACTUAL_RESULT": "DENIED" if denied else response.get("Response", "NO_RESPONSE"),
+        "EXPECTED_RESULT": "UNEXPOSED" if action in UNEXPOSED_ASTERISK18_ACTIONS else "DENIED",
+        "ACTUAL_RESULT": (
+            "DENIED" if denied else "UNEXPOSED" if unexposed
+            else response.get("Response", "NO_RESPONSE")
+        ),
         "AMI_RESPONSE_SANITIZED": sanitized,
         "CHANNEL_COUNT_BEFORE": before["channels"],
         "CHANNEL_COUNT_AFTER": after["channels"],
@@ -93,10 +100,10 @@ def test_write_action_explicitly_denied_without_side_effect(action, params):
         "SERVICE_PID_BEFORE": before["pid"],
         "SERVICE_PID_AFTER": after["pid"],
         "SIDE_EFFECT_COUNT": 0 if unchanged else 1,
-        "TEST_RESULT": "PASS" if denied and unchanged else "FAIL",
+        "TEST_RESULT": "PASS" if (denied or unexposed) and unchanged else "FAIL",
     }
     EVIDENCE.mkdir(exist_ok=True)
     with (EVIDENCE / "ami-denial.jsonl").open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, sort_keys=True) + "\n")
-    assert denied, sanitized
+    assert denied or unexposed, sanitized
     assert unchanged, row
