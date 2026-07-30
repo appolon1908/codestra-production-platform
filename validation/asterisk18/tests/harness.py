@@ -13,7 +13,8 @@ from typing import Dict, Optional
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "runtime"
 EVIDENCE = ROOT / "evidence"
-HOST = "127.0.0.1"
+HOST = os.environ.get("HARNESS_HOST", "127.0.0.1")
+PORT_OFFSET = int(os.environ.get("HARNESS_PORT_OFFSET", "0"))
 TLS_HOSTNAME = "asterisk-ami.test.invalid"
 
 
@@ -33,7 +34,7 @@ def secret() -> str:
 
 
 def ami_exchange(port: int, fields: Dict[str, str], tls: bool = True) -> Dict[str, str]:
-    raw = socket.create_connection((HOST, port), timeout=4)
+    raw = socket.create_connection((HOST, port + PORT_OFFSET), timeout=4)
     if tls:
         ctx = ssl.create_default_context(cafile=str(RUNTIME / "pki/test-ca.pem"))
         raw = ctx.wrap_socket(raw, server_hostname=TLS_HOSTNAME)

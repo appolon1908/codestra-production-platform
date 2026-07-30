@@ -23,7 +23,7 @@ assert all(re.search(r"@[0-9a-f]{40}$", item) for item in uses), uses
 compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
 assert compose["networks"]["isolated"]["internal"] is True
 svc = compose["services"]["asterisk"]
-assert all(str(p).startswith("127.0.0.1:") for p in svc["ports"])
+assert not svc.get("ports")
 assert svc["cap_drop"] == ["ALL"]
 assert sorted(svc["cap_add"]) == ["DAC_READ_SEARCH", "SETGID", "SETUID"]
 assert "privileged" not in svc and "network_mode" not in svc

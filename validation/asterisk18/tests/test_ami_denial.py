@@ -29,8 +29,8 @@ DENIED_ACTIONS = [
 def authenticated_action(action: str, params: Dict[str, str]) -> Dict[str, str]:
     import socket
     import ssl
-    from harness import HOST, RUNTIME, TLS_HOSTNAME
-    raw = socket.create_connection((HOST, 15039), timeout=4)
+    from harness import HOST, PORT_OFFSET, RUNTIME, TLS_HOSTNAME
+    raw = socket.create_connection((HOST, 15039 + PORT_OFFSET), timeout=4)
     ctx = ssl.create_default_context(cafile=str(RUNTIME / "pki/test-ca.pem"))
     conn = ctx.wrap_socket(raw, server_hostname=TLS_HOSTNAME)
     conn.recv(4096)

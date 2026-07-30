@@ -19,13 +19,6 @@ services:
       - no-new-privileges:true
     networks:
       - isolated
-    ports:
-      - "127.0.0.1:15038:5038"
-      - "127.0.0.1:15039:5039"
-      - "127.0.0.1:15040:5040"
-      - "127.0.0.1:15041:5041"
-      - "127.0.0.1:15042:5042"
-      - "127.0.0.1:15043:5043"
     volumes:
       - type: bind
         source: ./runtime/manager.conf

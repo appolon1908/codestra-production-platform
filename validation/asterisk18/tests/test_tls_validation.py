@@ -4,12 +4,12 @@ import subprocess
 
 import pytest
 
-from harness import HOST, RUNTIME, TLS_HOSTNAME, login, record
+from harness import HOST, PORT_OFFSET, RUNTIME, TLS_HOSTNAME, login, record
 
 
 def connect(port: int, *, cafile: str = "test-ca.pem", hostname: str = TLS_HOSTNAME):
     ctx = ssl.create_default_context(cafile=str(RUNTIME / "pki" / cafile))
-    raw = socket.create_connection((HOST, port), timeout=3)
+    raw = socket.create_connection((HOST, port + PORT_OFFSET), timeout=3)
     return ctx.wrap_socket(raw, server_hostname=hostname)
 
 
@@ -54,7 +54,7 @@ def test_missing_san_rejected():
 
 
 def test_plaintext_to_tls_rejected_and_no_downgrade():
-    with socket.create_connection((HOST, 15039), timeout=3) as conn:
+    with socket.create_connection((HOST, 15039 + PORT_OFFSET), timeout=3) as conn:
         conn.sendall(b"Action: Ping\r\n\r\n")
         data = conn.recv(256)
     assert b"Asterisk Call Manager" not in data
@@ -69,7 +69,7 @@ def test_tls_to_plaintext_rejected():
 
 def test_prohibited_tls10_rejected():
     result = subprocess.run(
-        ["openssl", "s_client", "-connect", f"{HOST}:15039", "-tls1", "-brief"],
+        ["openssl", "s_client", "-connect", f"{HOST}:{15039 + PORT_OFFSET}", "-tls1", "-brief"],
         text=True, capture_output=True, timeout=5,
     )
     assert result.returncode != 0
@@ -78,7 +78,7 @@ def test_prohibited_tls10_rejected():
 
 def test_prohibited_cipher_rejected_where_supported():
     result = subprocess.run(
-        ["openssl", "s_client", "-connect", f"{HOST}:15039", "-tls1_2",
+        ["openssl", "s_client", "-connect", f"{HOST}:{15039 + PORT_OFFSET}", "-tls1_2",
          "-cipher", "AES128-SHA", "-brief"],
         text=True, capture_output=True, timeout=5,
     )
@@ -91,5 +91,5 @@ def test_missing_ca_secret_and_unreachable_fail_closed():
         connect(15039, cafile="absent-ca.pem")
     assert login(password="").get("Response") == "Error"
     with pytest.raises(OSError):
-        socket.create_connection((HOST, 15999), timeout=.2)
+        socket.create_connection((HOST, 15999 + PORT_OFFSET), timeout=.2)
     record("fail_closed_ca_secret_unreachable", result="PASS")
