@@ -10,7 +10,7 @@ services:
     tmpfs:
       - /run:size=8m,mode=0755
       - /tmp:size=32m,mode=1777
-      - /var/lib/asterisk:size=16m,uid=10001,gid=10001
+      - /var/lib/asterisk:size=16m,uid=0,gid=0,mode=0777
       - /var/log/asterisk:size=16m,uid=10001,gid=10001
       - /var/run/asterisk:size=4m,uid=10001,gid=10001
     cap_drop: [ALL]
