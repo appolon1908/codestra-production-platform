@@ -24,12 +24,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 asterisk \
     && useradd --system --uid 10001 --gid asterisk --home /var/lib/asterisk asterisk
-COPY --from=build /stage/ /
+COPY --from=build /stage/usr/ /usr/
+COPY --from=build /stage/var/lib/asterisk/ /var/lib/asterisk/
+COPY --from=build /stage/var/spool/asterisk/ /var/spool/asterisk/
 COPY config/extensions.conf config/logger.conf config/modules.conf /etc/asterisk/
 COPY scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint
 RUN chmod 0755 /usr/local/bin/container-entrypoint \
-    && mkdir -p /var/lib/asterisk /var/log/asterisk /var/run/asterisk \
-    && chown -R asterisk:asterisk /etc/asterisk /var/lib/asterisk /var/log/asterisk /var/run/asterisk
+    && mkdir -p /var/lib/asterisk /var/log/asterisk /var/run/asterisk /var/spool/asterisk \
+    && chown -R asterisk:asterisk /etc/asterisk /var/lib/asterisk /var/log/asterisk \
+      /var/run/asterisk /var/spool/asterisk
 LABEL org.opencontainers.image.version="${ASTERISK_VERSION}" \
       org.opencontainers.image.description="Disposable CI-only Asterisk 18 AMI validation harness"
 EXPOSE 5038 5039 5040 5041 5042 5043
