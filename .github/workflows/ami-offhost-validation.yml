@@ -1,0 +1,76 @@
+name: Off-host Asterisk 18 AMI validation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offhost-asterisk18-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Disposable AMI TLS denial and rollback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact validation head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install test-only dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pytest python3-yaml shellcheck
+
+      - name: Validate workflow and isolation statically
+        run: |
+          validation/asterisk18/scripts/validate-static.sh
+          shellcheck validation/asterisk18/scripts/*.sh
+
+      - name: Build and start disposable Asterisk 18
+        id: start
+        run: |
+          validation/asterisk18/scripts/start-harness.sh
+          validation/asterisk18/scripts/wait-for-health.sh
+
+      - name: Validate TLS, AMI denial, isolation, and rollback
+        id: harness
+        if: steps.start.outcome == 'success'
+        run: |
+          validation/asterisk18/scripts/run-tls-negative-tests.sh
+          validation/asterisk18/scripts/run-ami-denial-matrix.sh
+          python3 -m pytest -q validation/asterisk18/tests/test_no_external_network.py
+          validation/asterisk18/scripts/run-backup-restore-test.sh
+
+      - name: Collect sanitized evidence
+        if: always()
+        env:
+          HARNESS_TEST_OUTCOME: ${{ steps.start.outcome == 'success' && steps.harness.outcome == 'success' && 'success' || 'failure' }}
+          EVIDENCE_OUTPUT_DIR: ${{ runner.temp }}/asterisk18-sanitized-evidence
+        run: validation/asterisk18/scripts/collect-sanitized-evidence.sh
+
+      - name: Require complete sanitized evidence
+        if: always()
+        env:
+          EVIDENCE_OUTPUT_DIR: ${{ runner.temp }}/asterisk18-sanitized-evidence
+        run: |
+          test "$(find "$EVIDENCE_OUTPUT_DIR" -maxdepth 1 -type f | wc -l)" -eq 9
+          ! grep -R -E 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|Secret:[[:space:]]|Authorization:[[:space:]]|gh[opsu]_[A-Za-z0-9]+' "$EVIDENCE_OUTPUT_DIR"
+
+      - name: Upload sanitized validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: asterisk18-offhost-sanitized-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/asterisk18-sanitized-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Stop and erase disposable harness
+        if: always()
+        run: validation/asterisk18/scripts/stop-harness.sh

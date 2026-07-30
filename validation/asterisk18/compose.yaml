@@ -1,0 +1,46 @@
+services:
+  asterisk:
+    build:
+      context: .
+      args:
+        ASTERISK_VERSION: "18.26.4"
+        ASTERISK_SHA256: "a17f511bfa092c8fa9eccd3a5ecf5f728ccdcf2b1a04d2c06e7177d96c3c9ee1"
+    image: codestra/asterisk18-offhost:18.26.4
+    read_only: true
+    tmpfs:
+      - /run:size=8m,mode=0755
+      - /tmp:size=32m,mode=1777
+      - /var/lib/asterisk:size=16m,uid=10001,gid=10001
+      - /var/log/asterisk:size=16m,uid=10001,gid=10001
+      - /var/run/asterisk:size=4m,uid=10001,gid=10001
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - isolated
+    ports:
+      - "127.0.0.1:15038:5038"
+      - "127.0.0.1:15039:5039"
+      - "127.0.0.1:15040:5040"
+      - "127.0.0.1:15041:5041"
+      - "127.0.0.1:15042:5042"
+      - "127.0.0.1:15043:5043"
+    volumes:
+      - type: bind
+        source: ./runtime/manager.conf
+        target: /etc/asterisk/manager.conf
+        read_only: true
+      - type: bind
+        source: ./runtime
+        target: /harness
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show version' >/dev/null 2>&1"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+networks:
+  isolated:
+    internal: true
+    driver: bridge
