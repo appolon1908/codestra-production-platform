@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd --system --gid 10001 asterisk \
     && useradd --system --uid 10001 --gid asterisk --home /var/lib/asterisk asterisk
 COPY --from=build /stage/usr/ /usr/
-COPY --from=build /stage/var/lib/asterisk/ /asterisk-seed/
+COPY --from=build /stage/var/lib/asterisk/documentation/ /asterisk-seed/documentation/
 COPY --from=build /stage/var/spool/asterisk/ /var/spool/asterisk/
 COPY config/asterisk.conf config/extensions.conf config/logger.conf config/modules.conf /etc/asterisk/
 COPY scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint

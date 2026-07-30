@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cp -r /asterisk-seed/. /var/lib/asterisk/
+cp -r /asterisk-seed/documentation /var/lib/asterisk/
 
 tls_proxy() {
   local port=$1 cert=$2
