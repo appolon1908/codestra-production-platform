@@ -14,7 +14,7 @@ services:
       - /var/log/asterisk:size=16m,uid=10001,gid=10001
       - /var/run/asterisk:size=4m,uid=10001,gid=10001
     cap_drop: [ALL]
-    cap_add: [SETGID, SETUID]
+    cap_add: [DAC_READ_SEARCH, SETGID, SETUID]
     security_opt:
       - no-new-privileges:true
     networks:
@@ -36,7 +36,7 @@ services:
         target: /harness
         read_only: true
     healthcheck:
-      test: ["CMD-SHELL", "asterisk -rx 'core show version' >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "runuser -u asterisk -- asterisk -rx 'core show version' >/dev/null 2>&1"]
       interval: 2s
       timeout: 2s
       retries: 30

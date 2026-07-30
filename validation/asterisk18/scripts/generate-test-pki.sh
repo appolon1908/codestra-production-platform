@@ -63,4 +63,5 @@ openssl x509 -req -sha256 -days 2 -in "$pki/unknown-ca.csr" \
 mv "$pki/unknown-ca.pem.tmp" "$pki/unknown-ca.pem"
 cat "$pki/unknown-ca.pem" "$pki/unknown-root.pem" > "$pki/unknown-ca.chain.pem"
 find "$root/runtime" -type f -exec chmod go-rwx {} +
+chmod 0644 "$root/runtime/manager.conf"
 find "$root/runtime" -type d -exec chmod 0755 {} +

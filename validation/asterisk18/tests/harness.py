@@ -65,7 +65,8 @@ def login(port: int = 15039, password: Optional[str] = None) -> Dict[str, str]:
 
 def docker_exec(command: str) -> str:
     result = subprocess.run(
-        ["docker", "compose", "-f", str(ROOT / "compose.yaml"), "exec", "-T", "asterisk",
+        ["docker", "compose", "-f", str(ROOT / "compose.yaml"), "exec", "-T",
+         "--user", "10001:10001", "asterisk",
          "sh", "-ec", command],
         check=True, text=True, capture_output=True,
     )

@@ -6,7 +6,8 @@ out=${EVIDENCE_OUTPUT_DIR:-"$root/artifact"}
 rm -rf "$out"
 mkdir -p "$out"
 
-version=$(docker compose -f "$root/compose.yaml" exec -T asterisk asterisk -rx 'core show version' 2>/dev/null | head -1 || printf 'UNAVAILABLE')
+version=$(docker compose -f "$root/compose.yaml" exec -T --user 10001:10001 asterisk \
+  asterisk -rx 'core show version' 2>/dev/null | head -1 || printf 'UNAVAILABLE')
 image_digest=$(cat "$root/runtime/image-digest.txt" 2>/dev/null || printf 'UNAVAILABLE')
 config_sha=$(find "$root/config" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
 manager_sha=$(sha256sum "$root/runtime/manager.conf" 2>/dev/null | cut -d' ' -f1 || printf 'UNAVAILABLE')
