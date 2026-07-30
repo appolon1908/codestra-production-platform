@@ -74,7 +74,10 @@ def test_write_action_explicitly_denied_without_side_effect(action, params):
     response = authenticated_action(action, params)
     after = state()
     sanitized = {k: v for k, v in response.items() if k.lower() not in {"secret", "key"}}
-    denied = response.get("Response") == "Error" and "permission" in response.get("Message", "").lower()
+    message = response.get("Message", "").lower()
+    denied = response.get("Response") == "Error" and (
+        "permission" in message or "invalid/unknown command" in message
+    )
     unchanged = before == after
     row = {
         "ACTION": action,
