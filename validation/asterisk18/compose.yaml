@@ -14,6 +14,7 @@ services:
       - /var/log/asterisk:size=16m,uid=10001,gid=10001
       - /var/run/asterisk:size=4m,uid=10001,gid=10001
     cap_drop: [ALL]
+    cap_add: [SETGID, SETUID]
     security_opt:
       - no-new-privileges:true
     networks:

@@ -25,6 +25,7 @@ assert compose["networks"]["isolated"]["internal"] is True
 svc = compose["services"]["asterisk"]
 assert all(str(p).startswith("127.0.0.1:") for p in svc["ports"])
 assert svc["cap_drop"] == ["ALL"]
+assert sorted(svc["cap_add"]) == ["SETGID", "SETUID"]
 assert "privileged" not in svc and "network_mode" not in svc
 assert "/var/run/docker.sock" not in str(svc.get("volumes", []))
 PY

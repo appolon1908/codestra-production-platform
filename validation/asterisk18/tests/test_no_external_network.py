@@ -10,6 +10,7 @@ def test_compose_is_internal_unprivileged_and_loopback_only():
     assert compose["networks"]["isolated"]["internal"] is True
     service = compose["services"]["asterisk"]
     assert service.get("privileged") is not True
+    assert sorted(service["cap_add"]) == ["SETGID", "SETUID"]
     assert "network_mode" not in service
     assert all(str(port).startswith("127.0.0.1:") for port in service["ports"])
     assert "/var/run/docker.sock" not in str(service.get("volumes", []))
