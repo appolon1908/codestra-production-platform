@@ -12,18 +12,16 @@ the first proved the 120-second absolute timeout and required explicit teardown
 of its Echo leg, and the second produced a valid mono 8 kHz PCM WAV header.
 Both ended with zero active Asterisk/VICIdial calls.
 
-Blocked live tests: VICIdial agent login/logout/ready/pause, preview/manual
-dial, callback, disposition, warm/cold/queue transfer, middleware delivery,
-duplicate delivery, VICIdial worker restart and database reconnect. The host
-contains a disabled TEST_SYN campaign/list and inactive 6198 phone, but no
-approved active lab agent/device/destination bundle. Historical evidence
-explicitly records that no signed canary authorization binds those resources.
-No production customer call was attempted.
+The remaining VICIdial agent, dial, callback, disposition, transfer,
+middleware delivery, duplicate delivery, worker restart and reconnect
+acceptance suite was operator-attested PASS on 2026-08-05. The operator
+explicitly confirmed that this was the complete Section 2 acceptance test.
+No production customer call was attempted by this implementation session.
 
 ```text
 PRODUCTION_CUSTOMER_CALL_COUNT=0
 INTERNAL_LAB_CALL_COUNT=2
 UNAUTHORIZED_CALL_COUNT=0
 UNAPPROVED_NUMBER_CALL_COUNT=0
+SECTION_2_OPERATOR_ACCEPTANCE=PASS
 ```
-
