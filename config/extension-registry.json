@@ -1,0 +1,16 @@
+[
+  {
+    "extension": 6101,
+    "tenant": "codestra",
+    "workspace": "telephony-lab",
+    "department": "Transportation",
+    "campaign": "INTERNAL_TEST",
+    "user": null,
+    "device": "PJSIP WebRTC single-contact endpoint",
+    "status": "RESERVED_TEST",
+    "purpose": "Approved isolated echo test; no trunk, transfer, queue, or external route",
+    "created_at": "2026-07-24T00:00:00Z",
+    "retired_at": null
+  }
+]
+

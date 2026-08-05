@@ -1,0 +1,16 @@
+[
+  {"code":"SALE","requires_notes":true,"requires_callback":false,"closes_lead":true,"requires_supervisor":false,"creates_odoo_activity":true,"triggers_workflow":"sale_review","compliance_effect":"NONE"},
+  {"code":"NOT_INTERESTED","requires_notes":false,"requires_callback":false,"closes_lead":true,"requires_supervisor":false,"creates_odoo_activity":true,"triggers_workflow":"close_lead","compliance_effect":"NONE"},
+  {"code":"CALLBACK","requires_notes":true,"requires_callback":true,"closes_lead":false,"requires_supervisor":false,"creates_odoo_activity":true,"triggers_workflow":"schedule_callback","compliance_effect":"NONE"},
+  {"code":"NO_ANSWER","requires_notes":false,"requires_callback":false,"closes_lead":false,"requires_supervisor":false,"creates_odoo_activity":false,"triggers_workflow":"retry_policy","compliance_effect":"NONE"},
+  {"code":"BUSY","requires_notes":false,"requires_callback":false,"closes_lead":false,"requires_supervisor":false,"creates_odoo_activity":false,"triggers_workflow":"retry_policy","compliance_effect":"NONE"},
+  {"code":"WRONG_NUMBER","requires_notes":true,"requires_callback":false,"closes_lead":true,"requires_supervisor":false,"creates_odoo_activity":true,"triggers_workflow":"identity_review","compliance_effect":"SUPPRESS_NUMBER"},
+  {"code":"DISCONNECTED","requires_notes":false,"requires_callback":false,"closes_lead":true,"requires_supervisor":false,"creates_odoo_activity":true,"triggers_workflow":"suppress_number","compliance_effect":"SUPPRESS_NUMBER"},
+  {"code":"DO_NOT_CALL","requires_notes":true,"requires_callback":false,"closes_lead":true,"requires_supervisor":false,"creates_odoo_activity":true,"triggers_workflow":"opt_out","compliance_effect":"BLOCK_OUTBOUND"},
+  {"code":"TRANSFERRED","requires_notes":false,"requires_callback":false,"closes_lead":false,"requires_supervisor":false,"creates_odoo_activity":true,"triggers_workflow":"transfer_audit","compliance_effect":"NONE"},
+  {"code":"APPOINTMENT","requires_notes":true,"requires_callback":false,"closes_lead":false,"requires_supervisor":false,"creates_odoo_activity":true,"triggers_workflow":"appointment_draft","compliance_effect":"NONE"},
+  {"code":"FOLLOW_UP","requires_notes":true,"requires_callback":true,"closes_lead":false,"requires_supervisor":false,"creates_odoo_activity":true,"triggers_workflow":"follow_up","compliance_effect":"NONE"},
+  {"code":"LANGUAGE_BARRIER","requires_notes":true,"requires_callback":false,"closes_lead":false,"requires_supervisor":false,"creates_odoo_activity":true,"triggers_workflow":"language_route","compliance_effect":"NONE"},
+  {"code":"COMPLAINT","requires_notes":true,"requires_callback":false,"closes_lead":false,"requires_supervisor":true,"creates_odoo_activity":true,"triggers_workflow":"complaint_escalation","compliance_effect":"REVIEW_REQUIRED"}
+]
+
