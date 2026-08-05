@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily encrypted Codestra VICIdial platform backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 America/New_York
+Persistent=true
+RandomizedDelaySec=15m
+Unit=codestra-platform-backup.service
+
+[Install]
+WantedBy=timers.target

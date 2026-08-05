@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+BACKUP_ROOT=/root/codestra-platform-backups
+KEY_FILE=/etc/codestra/secrets/platform-backup-passphrase
+REMOTE_HOST=65.109.65.169
+REMOTE_ROOT=/srv/codestra-backups/vicidial
+SSH_KEY=/root/.ssh/codestra_app_server
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+OUT="$BACKUP_ROOT/$STAMP"
+
+[[ -s "$KEY_FILE" ]] || { echo "backup key unavailable" >&2; exit 1; }
+install -d -m 700 "$OUT"
+
+mysqldump --single-transaction --quick --skip-lock-tables asterisk | gzip -9 >"$OUT/asterisk.sql.gz"
+tar -C / -czf "$OUT/configuration.tgz" \
+  etc/asterisk etc/astguiclient.conf etc/apache2 etc/firewalld etc/cron.d \
+  etc/systemd/system etc/logrotate.d usr/local/sbin 2>"$OUT/tar-warnings.log"
+nft list ruleset >"$OUT/firewall.nft"
+systemctl list-unit-files --no-pager >"$OUT/systemd-unit-files.txt"
+sha256sum "$OUT"/asterisk.sql.gz "$OUT"/configuration.tgz "$OUT"/firewall.nft \
+  "$OUT"/systemd-unit-files.txt "$OUT"/tar-warnings.log >"$OUT/SHA256SUMS"
+tar -C "$OUT" -cf - asterisk.sql.gz configuration.tgz firewall.nft systemd-unit-files.txt \
+  tar-warnings.log SHA256SUMS | openssl enc -aes-256-cbc -pbkdf2 -salt -pass "file:$KEY_FILE" \
+  -out "$OUT/codestra-vicidial-$STAMP.tar.enc"
+(cd "$OUT" && sha256sum "codestra-vicidial-$STAMP.tar.enc" >ENCRYPTED.SHA256)
+
+ssh -i "$SSH_KEY" -o BatchMode=yes root@"$REMOTE_HOST" "install -d -m 700 '$REMOTE_ROOT/$STAMP'"
+scp -q -i "$SSH_KEY" "$OUT/codestra-vicidial-$STAMP.tar.enc" "$OUT/ENCRYPTED.SHA256" \
+  root@"$REMOTE_HOST:$REMOTE_ROOT/$STAMP/"
+ssh -i "$SSH_KEY" -o BatchMode=yes root@"$REMOTE_HOST" \
+  "cd '$REMOTE_ROOT/$STAMP' && sha256sum -c ENCRYPTED.SHA256"
+
+find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +14 -print
+printf 'BACKUP_STATUS=PASS stamp=%s encrypted=true checksum_verified=true off_server_copy=true\n' "$STAMP"

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+MANIFEST=/etc/codestra-monitor/asterisk-platform.sha256
+BACKUP_ROOT=/root/codestra-platform-backups
+LOG=/var/log/asterisk/full
+failed=0
+
+asterisk_state="$(systemctl is-active asterisk 2>/dev/null || true)"
+[[ "$asterisk_state" == active ]] || failed=1
+
+channels_output="$(asterisk -rx 'core show channels count' 2>/dev/null || true)"
+channels="$(awk '/active channels/{print $1}' <<<"$channels_output")"
+calls="$(awk '/active calls/{print $1}' <<<"$channels_output")"
+
+recent="$(mktemp)"
+trap 'rm -f -- "$recent"' EXIT
+if [[ -f "$LOG" ]]; then tail -n 10000 "$LOG" >"$recent"; else : >"$recent"; fi
+sip_auth_failures="$(grep -Eci '(auth|password|forbidden|failed|reject).*(SIP|PJSIP)|(SIP|PJSIP).*(auth|password|forbidden|failed|reject)' "$recent" || true)"
+rtp_failures="$(grep -Eci '(RTP|SRTP|DTLS).*(fail|error|reject|timeout|unencrypted)' "$recent" || true)"
+
+disk_percent="$(df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+(( disk_percent < 85 )) || failed=1
+
+latest_backup="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%T@\n' 2>/dev/null | sort -nr | head -1)"
+now="$(date +%s)"
+if [[ -n "$latest_backup" ]]; then
+  backup_age_hours="$(awk -v now="$now" -v then="$latest_backup" 'BEGIN {printf "%d", (now-then)/3600}')"
+else
+  backup_age_hours=-1
+fi
+(( backup_age_hours >= 0 && backup_age_hours < 30 )) || failed=1
+
+if [[ -f "$MANIFEST" ]] && (cd / && sha256sum -c "$MANIFEST" >/dev/null 2>&1); then
+  drift=none
+else
+  drift=detected
+  failed=1
+fi
+
+printf 'ASTERISK_PLATFORM_MONITOR status=%s asterisk=%s channels=%s calls=%s sip_auth_failures=%s rtp_failures=%s disk_percent=%s backup_age_hours=%s config_drift=%s\n' \
+  "$([[ "$failed" -eq 0 ]] && echo ok || echo alert)" "$asterisk_state" "${channels:-unknown}" \
+  "${calls:-unknown}" "$sip_auth_failures" "$rtp_failures" "$disk_percent" "$backup_age_hours" "$drift"
+exit "$failed"

@@ -1,0 +1,18 @@
+[Unit]
+Description=Check Codestra restricted VICIdial adapter readiness
+After=codestra-vicidial-restricted-adapter.service
+
+[Service]
+Type=oneshot
+User=codestra-adapter
+Group=codestra-adapter
+LoadCredential=adapter-hmac:/etc/codestra/secrets/telephony-provisioning-hmac
+ExecStart=/opt/codestra/vicidial-restricted-adapter/current/.venv/bin/python /opt/codestra/vicidial-restricted-adapter/current/scripts/read_only_probe.py %d/adapter-hmac
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=localhost

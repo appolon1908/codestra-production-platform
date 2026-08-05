@@ -1,0 +1,14 @@
+[Unit]
+Description=Encrypted Codestra VICIdial platform backup
+After=mariadb.service asterisk.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/codestra-platform-backup
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true

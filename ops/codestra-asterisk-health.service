@@ -1,0 +1,15 @@
+[Unit]
+Description=Codestra Asterisk platform health monitor
+After=asterisk.service codestra-platform-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/codestra-asterisk-health
+User=root
+Group=root
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/etc/asterisk /etc/firewalld /etc/codestra-monitor /root/codestra-platform-backups /var/log/asterisk
+
