@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import ipaddress
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 
@@ -13,7 +14,11 @@ class RequestAuthenticator:
     key: bytes
     authorized_sources: frozenset[str]
     max_clock_skew_seconds: int = 60
+    nonce_store: Callable[[str, int, int], bool] | None = None
+    rate_limit_requests: int = 120
+    rate_limit_window_seconds: int = 60
     _nonces: dict[str, int] = field(default_factory=dict)
+    _requests: dict[str, list[int]] = field(default_factory=dict)
 
     def sign(self, timestamp: int, nonce: str, body: bytes) -> str:
         digest = hashlib.sha256(body).hexdigest()
@@ -28,6 +33,12 @@ class RequestAuthenticator:
             raise PermissionError("invalid source address") from exc
         if normalized not in self.authorized_sources:
             raise PermissionError("source is not authorized")
+        recent = [seen for seen in self._requests.get(normalized, [])
+                  if seen > int(time.time()) - self.rate_limit_window_seconds]
+        if len(recent) >= self.rate_limit_requests:
+            raise PermissionError("request rate limit exceeded")
+        recent.append(int(time.time()))
+        self._requests[normalized] = recent
         if not hmac.compare_digest(identity, self.identity):
             raise PermissionError("wrong service identity")
         if required_scope not in scopes:
@@ -35,10 +46,16 @@ class RequestAuthenticator:
         current = int(time.time()) if now is None else now
         if abs(current - timestamp) > self.max_clock_skew_seconds:
             raise PermissionError("request timestamp outside window")
-        self._nonces = {key: expiry for key, expiry in self._nonces.items() if expiry >= current}
-        if nonce in self._nonces:
-            raise PermissionError("request replay")
         expected = self.sign(timestamp, nonce, body)
         if not hmac.compare_digest(expected, signature):
             raise PermissionError("invalid request signature")
-        self._nonces[nonce] = current + self.max_clock_skew_seconds
+        expiry = current + self.max_clock_skew_seconds
+        if self.nonce_store is not None:
+            if not self.nonce_store(nonce, current, expiry):
+                raise PermissionError("request replay")
+        else:
+            self._nonces = {key: value for key, value in self._nonces.items()
+                            if value >= current}
+            if nonce in self._nonces:
+                raise PermissionError("request replay")
+            self._nonces[nonce] = expiry

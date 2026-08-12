@@ -4,7 +4,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
-from .models import AgentSpec, CallbackSpec, CampaignSpec, LeadSpec
+from .models import AgentSpec, CallbackSpec, CampaignSpec, LeadSpec, LeadUpdateSpec
 
 
 class CollisionError(ValueError):
@@ -16,7 +16,7 @@ class MalformedCampaignMembership(CollisionError):
 
 
 def normalize_allowed_campaigns(value: str) -> list[str]:
-    """Parse VICIdial's `` CAMPAIGN OTHER -`` representation strictly."""
+    """Strictly parse VICIdial's `` CAMPAIGN OTHER -`` representation."""
     if not isinstance(value, str):
         raise MalformedCampaignMembership("allowed_campaigns must be text")
     stripped = value.strip()
@@ -28,10 +28,13 @@ def normalize_allowed_campaigns(value: str) -> list[str]:
     if not body:
         return []
     tokens = body.split()
-    if any(not __import__("re").fullmatch(r"[A-Z0-9_]{2,8}", token) for token in tokens):
-        raise MalformedCampaignMembership("allowed_campaigns contains malformed campaign")
+    if any(not __import__("re").fullmatch(r"[A-Z0-9_]{2,8}", token)
+           for token in tokens):
+        raise MalformedCampaignMembership(
+            "allowed_campaigns contains malformed campaign")
     if len(tokens) != len(set(tokens)):
-        raise MalformedCampaignMembership("allowed_campaigns contains duplicate campaign")
+        raise MalformedCampaignMembership(
+            "allowed_campaigns contains duplicate campaign")
     return tokens
 
 
@@ -41,17 +44,18 @@ def format_allowed_campaigns(campaigns: list[str]) -> str:
     return (" " + " ".join(campaigns) if campaigns else "") + " -"
 
 
-def additive_campaign_membership(current: str, desired_campaign: str) -> tuple[str, bool]:
+def additive_campaign_membership(current: str, desired: str) -> tuple[str, bool]:
     campaigns = normalize_allowed_campaigns(current)
-    if desired_campaign in campaigns:
+    if desired in campaigns:
         return format_allowed_campaigns(campaigns), False
-    return format_allowed_campaigns([*campaigns, desired_campaign]), True
+    return format_allowed_campaigns([*campaigns, desired]), True
 
 
 class Repository(Protocol):
     def campaign(self, actual_id: str) -> dict | None: ...
+    def campaign_report(self) -> list[dict]: ...
+    def campaign_resources(self, spec: CampaignSpec) -> dict: ...
     def provision_campaign_disabled(self, spec: CampaignSpec) -> list[dict]: ...
-    def readback_campaign(self, spec: CampaignSpec) -> dict: ...
     def disable_campaign_resources(self, spec: CampaignSpec) -> None: ...
     def disable_campaign(self, actual_id: str) -> None: ...
     def agent(self, user_id: str) -> dict | None: ...
@@ -59,6 +63,7 @@ class Repository(Protocol):
     def disable_agent(self, user_id: str) -> dict: ...
     def lead_by_external_id(self, external_id: str) -> dict | None: ...
     def publish_lead(self, spec: LeadSpec) -> dict: ...
+    def update_lead(self, spec: LeadUpdateSpec) -> dict: ...
     def callback(self, callback_id: int) -> dict | None: ...
     def callback_by_external_id(self, external_id: str) -> dict | None: ...
     def create_callback(self, spec: CallbackSpec) -> dict: ...
@@ -97,6 +102,35 @@ class MemoryRepository:
                                   if campaign == actual_id]
         return result
 
+    def campaign_report(self) -> list[dict]:
+        return [
+            {
+                "campaign_id": row["campaign_id"],
+                "campaign_name": row["campaign_name"],
+                "active": row["active"],
+                "dial_method": row["dial_method"],
+                "local_call_time": row["local_call_time"],
+            }
+            for row in sorted(
+                self.campaigns.values(), key=lambda item: item["campaign_id"]
+            )
+        ]
+
+    def campaign_resources(self, spec: CampaignSpec) -> dict:
+        return {
+            "campaign": self.campaign(spec.actual_id),
+            "groups": [
+                deepcopy(self.groups[(item.kind, item.code)])
+                for item in spec.groups
+                if (item.kind, item.code) in self.groups
+            ],
+            "scripts": [
+                deepcopy(self.scripts[item.code])
+                for item in spec.scripts
+                if item.code in self.scripts
+            ],
+        }
+
     def provision_campaign_disabled(self, spec: CampaignSpec) -> list[dict]:
         # Preflight every possible collision before the first mutation. This is
         # the compensating safety boundary used by both retry and rollback tests.
@@ -117,8 +151,7 @@ class MemoryRepository:
         )
         checks.extend(
             (self.groups, (item.kind, item.code),
-             {"name": item.name, "kind": item.kind,
-              "active": "NOT_APPLICABLE" if item.kind == "user" else "N"},
+             {"name": item.name, "kind": item.kind, "active": "N"},
              ("name", "kind", "active"))
             for item in spec.groups
         )
@@ -166,27 +199,29 @@ class MemoryRepository:
                                  ("list_name", "campaign_id", "active"))
             results.append({"type": "list", "id": item.list_id, "result": status})
         for item in spec.groups:
-            desired = {"code": item.code, "name": item.name, "kind": item.kind,
-                       "active": "N" if item.kind != "user" else "NOT_APPLICABLE"}
+            desired = {"code": item.code, "name": item.name, "kind": item.kind, "active": "N"}
             if item.kind == "user":
                 if not item.code.startswith(spec.business_unit + "_"):
                     raise CollisionError(f"incompatible ownership: {item.code}")
                 current = self.groups.get((item.kind, item.code))
                 if current is None:
-                    desired["allowed_campaigns"] = format_allowed_campaigns([spec.actual_id])
+                    desired["allowed_campaigns"] = format_allowed_campaigns(
+                        [spec.actual_id])
                     self.groups[(item.kind, item.code)] = deepcopy(desired)
                     status = "created"
                 else:
                     if any(current.get(field) != desired.get(field)
                            for field in ("name", "kind", "active")):
-                        raise CollisionError(f"incompatible collision: {item.code}")
+                        raise CollisionError(
+                            f"incompatible collision: {item.code}")
                     normalized, added = additive_campaign_membership(
                         current.get("allowed_campaigns"), spec.actual_id)
                     current["allowed_campaigns"] = normalized
                     status = "updated" if added else "adopted"
             else:
-                status = self._adopt(self.groups, (item.kind, item.code), desired,
-                                     ("name", "kind", "active"))
+                status = self._adopt(
+                    self.groups, (item.kind, item.code), desired,
+                    ("name", "kind", "active"))
             results.append({"type": item.kind + "_group", "id": item.code, "result": status})
         for item in spec.scripts:
             desired = {"script_id": item.code, "script_name": item.name, "script_text": item.text,
@@ -203,21 +238,6 @@ class MemoryRepository:
                                  ("status_name", "selectable", "human_answered", "category"))
             results.append({"type": "disposition", "id": item.code, "result": status})
         return results
-
-    def readback_campaign(self, spec: CampaignSpec) -> dict:
-        campaign = deepcopy(self.campaigns.get(spec.actual_id))
-        return {
-            "campaign": campaign,
-            "lists": [deepcopy(self.lists.get(item.list_id)) for item in spec.lists],
-            "groups": [
-                deepcopy(self.groups.get((item.kind, item.code))) for item in spec.groups
-            ],
-            "scripts": [deepcopy(self.scripts.get(item.code)) for item in spec.scripts],
-            "dispositions": [
-                deepcopy(self.dispositions.get((spec.actual_id, item.code)))
-                for item in spec.dispositions
-            ],
-        }
 
     def disable_campaign(self, actual_id: str) -> None:
         if actual_id not in self.campaigns:
@@ -271,6 +291,17 @@ class MemoryRepository:
         result = spec.model_dump(mode="json") | {"lead_id": lead_id}
         self.leads[lead_id] = result
         return deepcopy(result)
+
+    def update_lead(self, spec: LeadUpdateSpec) -> dict:
+        prior = self.lead_by_external_id(spec.external_id)
+        if not prior or int(prior["list_id"]) != spec.list_id:
+            raise ValueError("synthetic lead missing")
+        if spec.expected_status is not None and prior["status"] != spec.expected_status:
+            raise CollisionError("stale lead status")
+        prior.update(first_name=spec.first_name, last_name=spec.last_name,
+                     status=spec.status)
+        self.leads[int(prior["lead_id"])] = prior
+        return deepcopy(prior)
 
     def callback(self, callback_id: int) -> dict | None:
         return deepcopy(self.callbacks.get(callback_id))
@@ -333,6 +364,43 @@ class MySQLRepository:
             "FROM vicidial_campaign_statuses WHERE campaign_id=%s", (actual_id,))
         return row
 
+    def campaign_report(self) -> list[dict]:
+        return self._all(
+            "SELECT campaign_id,campaign_name,active,dial_method,local_call_time "
+            "FROM vicidial_campaigns ORDER BY campaign_id"
+        )
+
+    def campaign_resources(self, spec: CampaignSpec) -> dict:
+        groups = []
+        for item in spec.groups:
+            if item.kind == "user":
+                row = self._one(
+                    "SELECT user_group AS code,group_name AS name,allowed_campaigns "
+                    "FROM vicidial_user_groups WHERE user_group=%s", (item.code,))
+                if row:
+                    row["kind"] = "user"
+                    row["active"] = "N"
+            else:
+                row = self._one(
+                    "SELECT group_id AS code,group_name AS name,active "
+                    "FROM vicidial_inbound_groups WHERE group_id=%s", (item.code,))
+                if row:
+                    row["kind"] = item.kind
+            if row:
+                groups.append(row)
+        scripts = []
+        for item in spec.scripts:
+            row = self._one(
+                "SELECT script_id,script_name,script_comments,script_text,active "
+                "FROM vicidial_scripts WHERE script_id=%s", (item.code,))
+            if row:
+                scripts.append(row)
+        return {
+            "campaign": self.campaign(spec.actual_id),
+            "groups": groups,
+            "scripts": scripts,
+        }
+
     @staticmethod
     def _check(current: dict | None, desired: dict, fields: tuple[str, ...], target: str) -> bool:
         if current is None:
@@ -382,7 +450,8 @@ class MySQLRepository:
                     "SELECT user_group AS code,group_name AS name,allowed_campaigns "
                     "FROM vicidial_user_groups "
                     "WHERE user_group=%s", (item.code,))
-                self._check(current_group, {"name": item.name}, ("name",), item.code)
+                self._check(current_group, {"name": item.name},
+                            ("name",), item.code)
                 if current_group:
                     additive_campaign_membership(
                         current_group.get("allowed_campaigns"), spec.actual_id)
@@ -447,13 +516,17 @@ class MySQLRepository:
                     "SELECT user_group AS code,group_name AS name,allowed_campaigns "
                     "FROM vicidial_user_groups "
                     "WHERE user_group=%s", (item.code,))
-                adopted = self._check(current, {"code": item.code, "name": item.name},
-                                      ("name",), item.code)
+                adopted = self._check(
+                    current,
+                    {"code": item.code, "name": item.name},
+                    ("name",), item.code,
+                )
                 if not adopted:
                     self._execute(
                         "INSERT INTO vicidial_user_groups(user_group,group_name,allowed_campaigns)"
                         " VALUES(%s,%s,%s)",
-                        (item.code, item.name, format_allowed_campaigns([spec.actual_id])))
+                        (item.code, item.name,
+                         format_allowed_campaigns([spec.actual_id])))
                     group_result = "created"
                 else:
                     normalized, added = additive_campaign_membership(
@@ -511,48 +584,6 @@ class MySQLRepository:
         self.db.commit()
         return results
 
-    def readback_campaign(self, spec: CampaignSpec) -> dict:
-        campaign = self._one(
-            "SELECT campaign_id,campaign_name,active,dial_method,local_call_time,"
-            "campaign_recording,scheduled_callbacks,campaign_description "
-            "FROM vicidial_campaigns WHERE campaign_id=%s", (spec.actual_id,))
-        lists = [
-            self._one(
-                "SELECT list_id,list_name,campaign_id,active FROM vicidial_lists WHERE list_id=%s",
-                (item.list_id,))
-            for item in spec.lists
-        ]
-        groups = []
-        for item in spec.groups:
-            if item.kind == "user":
-                groups.append(self._one(
-                    "SELECT user_group AS code,group_name AS name,allowed_campaigns "
-                    "FROM vicidial_user_groups WHERE user_group=%s", (item.code,)))
-            else:
-                row = self._one(
-                    "SELECT group_id AS code,group_name AS name,active "
-                    "FROM vicidial_inbound_groups WHERE group_id=%s", (item.code,))
-                if row:
-                    row["kind"] = item.kind
-                groups.append(row)
-        scripts = [
-            self._one(
-                "SELECT script_id,script_name,script_comments,script_text,active "
-                "FROM vicidial_scripts WHERE script_id=%s", (item.code,))
-            for item in spec.scripts
-        ]
-        dispositions = [
-            self._one(
-                "SELECT campaign_id,status,status_name,selectable,human_answered,category "
-                "FROM vicidial_campaign_statuses WHERE campaign_id=%s AND status=%s",
-                (spec.actual_id, item.code))
-            for item in spec.dispositions
-        ]
-        return {
-            "campaign": campaign, "lists": lists, "groups": groups,
-            "scripts": scripts, "dispositions": dispositions,
-        }
-
     def disable_campaign(self, actual_id: str) -> None:
         if not self.campaign(actual_id):
             raise ValueError("campaign missing")
@@ -563,15 +594,16 @@ class MySQLRepository:
 
     def disable_campaign_resources(self, spec: CampaignSpec) -> None:
         self._execute(
-            "UPDATE vicidial_campaigns SET active='N',auto_dial_level='0' WHERE campaign_id=%s",
+            "UPDATE vicidial_campaigns SET active='N',auto_dial_level='0' "
+            "WHERE campaign_id=%s", (spec.actual_id,))
+        self._execute(
+            "UPDATE vicidial_lists SET active='N' WHERE campaign_id=%s",
             (spec.actual_id,))
-        self._execute("UPDATE vicidial_lists SET active='N' WHERE campaign_id=%s",
-                      (spec.actual_id,))
         for item in spec.groups:
             if item.kind != "user":
                 self._execute(
-                    "UPDATE vicidial_inbound_groups SET active='N' WHERE group_id=%s",
-                    (item.code,))
+                    "UPDATE vicidial_inbound_groups SET active='N' "
+                    "WHERE group_id=%s", (item.code,))
         for item in spec.scripts:
             self._execute(
                 "UPDATE vicidial_scripts SET active='N' WHERE script_id=%s",
@@ -606,9 +638,11 @@ class MySQLRepository:
     def lead_by_external_id(self, external_id: str) -> dict | None:
         return self._one(
             "SELECT lead_id,vendor_lead_code AS external_id,list_id,phone_code,phone_number,"
-            "first_name,last_name,status FROM vicidial_list WHERE vendor_lead_code=%s", (external_id,))
+            "first_name,last_name,status FROM codestra_test_syn_leads WHERE vendor_lead_code=%s", (external_id,))
 
     def publish_lead(self, spec: LeadSpec) -> dict:
+        if spec.list_id != 9001 or spec.phone_number != "5550100199":
+            raise PermissionError("lead is outside the TEST_SYN lane")
         prior = self.lead_by_external_id(spec.external_id)
         if prior:
             for field, value in spec.model_dump(mode="json").items():
@@ -616,11 +650,27 @@ class MySQLRepository:
                     raise CollisionError("external lead id collision")
             return prior
         self._execute(
-            "INSERT INTO vicidial_list(entry_date,status,user,vendor_lead_code,list_id,"
+            "INSERT INTO codestra_test_syn_leads(entry_date,status,user,vendor_lead_code,list_id,"
             "gmt_offset_now,called_since_last_reset,phone_code,phone_number,first_name,last_name)"
             " VALUES(%s,%s,'CODESTRA',%s,%s,'0.00','N',%s,%s,%s,%s)",
             (datetime.now(timezone.utc).replace(tzinfo=None), spec.status, spec.external_id,
              spec.list_id, spec.phone_code, spec.phone_number, spec.first_name, spec.last_name))
+        self.db.commit()
+        return self.lead_by_external_id(spec.external_id) or {}
+
+    def update_lead(self, spec: LeadUpdateSpec) -> dict:
+        prior = self.lead_by_external_id(spec.external_id)
+        if not prior or int(prior["list_id"]) != 9001:
+            raise ValueError("synthetic lead missing")
+        if spec.expected_status is not None and prior["status"] != spec.expected_status:
+            raise CollisionError("stale lead status")
+        changed = self._execute(
+            "UPDATE codestra_test_syn_leads SET first_name=%s,last_name=%s,status=%s "
+            "WHERE vendor_lead_code=%s AND list_id=9001",
+            (spec.first_name, spec.last_name, spec.status, spec.external_id))
+        if changed != 1:
+            self.db.rollback()
+            raise RuntimeError("synthetic lead update count mismatch")
         self.db.commit()
         return self.lead_by_external_id(spec.external_id) or {}
 
@@ -652,7 +702,7 @@ class MySQLRepository:
             "campaigns": "vicidial_campaigns", "lists": "vicidial_lists",
             "user_groups": "vicidial_user_groups", "inbound_groups": "vicidial_inbound_groups",
             "scripts": "vicidial_scripts", "dispositions": "vicidial_campaign_statuses",
-            "agents": "vicidial_users", "leads": "vicidial_list", "callbacks": "vicidial_callbacks",
+            "agents": "vicidial_users", "leads": "codestra_test_syn_leads", "callbacks": "vicidial_callbacks",
         }
         return {name: self._one(f"SELECT COUNT(*) AS count FROM {table}")["count"]
                 for name, table in tables.items()}

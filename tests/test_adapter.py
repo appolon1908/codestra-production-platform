@@ -9,12 +9,13 @@ import pytest
 from pydantic import ValidationError
 
 from codestra_vicidial.app import create_app
+from codestra_vicidial.curation import content_categories
 from codestra_vicidial.models import (
     AgentCommand, CallbackCommand, CampaignCommand, DisableAgentCommand,
-    LeadCommand, TransferPolicyCommand,
+    LeadCommand, LeadUpdateCommand, TransferPolicyCommand,
 )
 from codestra_vicidial.repository import (
-    CollisionError, MalformedCampaignMembership, MemoryRepository,
+    CollisionError, MemoryRepository, MySQLRepository,
     normalize_allowed_campaigns,
 )
 from codestra_vicidial.security import RequestAuthenticator
@@ -83,7 +84,7 @@ def service_for(repo: MemoryRepository, tmp_path: Path) -> AdapterService:
 def compatible_user_group(allowed_campaigns: str) -> dict:
     return {
         "code": "COD_TEST_SDR", "name": "COD test SDR", "kind": "user",
-        "active": "NOT_APPLICABLE", "allowed_campaigns": allowed_campaigns,
+        "active": "N", "allowed_campaigns": allowed_campaigns,
     }
 
 
@@ -99,9 +100,12 @@ def test_route_contract_is_present(harness):
         ("POST", "/v1/campaigns/update-disabled"),
         ("POST", "/v1/campaigns/disable"),
         ("GET", "/v1/campaigns/{campaign_id}/actual-state"),
+        ("GET", "/v1/reports/campaigns"),
+        ("GET", "/v1/reconciliation/inventory"),
         ("POST", "/v1/agents/sync"), ("POST", "/v1/agents/disable"),
         ("GET", "/v1/agents/{user_id}/actual-state"),
         ("POST", "/v1/leads/publish"), ("GET", "/v1/leads/by-idempotency/{key}"),
+        ("POST", "/v1/leads/update"),
         ("POST", "/v1/callbacks/create"), ("GET", "/v1/callbacks/{callback_id}"),
         ("POST", "/v1/scripts/sync"), ("POST", "/v1/dispositions/sync"),
         ("POST", "/v1/transfer-policies/sync"),
@@ -116,17 +120,24 @@ def test_route_contract_is_present(harness):
 def test_auth_source_identity_scope_signature_and_replay():
     auth = RequestAuthenticator(
         "codestra-middleware", b"x" * 32,
-        frozenset({"65.109.65.169"}), max_clock_skew_seconds=60,
+        frozenset({"10.40.0.1"}), max_clock_skew_seconds=60,
     )
     body = b'{"safe":true}'
     now = int(time.time())
     signature = auth.sign(now, "nonce-1234567890", body)
-    auth.verify(source="65.109.65.169", identity="codestra-middleware",
+    auth.verify(source="10.40.0.1", identity="codestra-middleware",
                 scopes={"telephony:provision"}, timestamp=now,
                 nonce="nonce-1234567890", body=body, signature=signature,
                 required_scope="telephony:provision", now=now)
+    private_nonce = "private-peer-1234567890"
+    auth.verify(
+        source="10.40.0.1", identity="codestra-middleware",
+        scopes={"telephony:provision"}, timestamp=now, nonce=private_nonce,
+        body=body, signature=auth.sign(now, private_nonce, body),
+        required_scope="telephony:provision", now=now,
+    )
     with pytest.raises(PermissionError, match="replay"):
-        auth.verify(source="65.109.65.169", identity="codestra-middleware",
+        auth.verify(source="10.40.0.1", identity="codestra-middleware",
                     scopes={"telephony:provision"}, timestamp=now,
                     nonce="nonce-1234567890", body=body, signature=signature,
                     required_scope="telephony:provision", now=now)
@@ -137,7 +148,7 @@ def test_auth_source_identity_scope_signature_and_replay():
         ({"signature": "0" * 64}, "signature"),
     ]:
         values = {
-            "source": "65.109.65.169", "identity": "codestra-middleware",
+            "source": "10.40.0.1", "identity": "codestra-middleware",
             "scopes": {"telephony:provision"}, "timestamp": now,
             "nonce": "unique-" + message + "-123456", "body": body,
             "signature": signature, "required_scope": "telephony:provision", "now": now,
@@ -146,6 +157,68 @@ def test_auth_source_identity_scope_signature_and_replay():
             values["signature"] = auth.sign(now, values["nonce"], body) if message != "signature" else "0" * 64
         with pytest.raises(PermissionError, match=message):
             auth.verify(**values)
+
+
+def test_replay_nonce_survives_authenticator_restart(tmp_path):
+    state = StateStore(tmp_path / "durable-replay.sqlite3")
+    now = int(time.time())
+    body = b'{"safe":true}'
+    nonce = "restart-persistent-nonce-1234"
+    first = RequestAuthenticator(
+        "codestra-middleware", b"x" * 32, frozenset({"10.40.0.1"}),
+        nonce_store=state.claim_nonce,
+    )
+    signature = first.sign(now, nonce, body)
+    values = {
+        "source": "10.40.0.1", "identity": "codestra-middleware",
+        "scopes": {"telephony:read"}, "timestamp": now, "nonce": nonce,
+        "body": body, "signature": signature, "required_scope": "telephony:read",
+        "now": now,
+    }
+    first.verify(**values)
+    restarted = RequestAuthenticator(
+        "codestra-middleware", b"x" * 32, frozenset({"10.40.0.1"}),
+        nonce_store=state.claim_nonce,
+    )
+    with pytest.raises(PermissionError, match="replay"):
+        restarted.verify(**values)
+
+
+def test_authenticator_rate_limit():
+    auth = RequestAuthenticator(
+        "codestra-middleware", b"x" * 32, frozenset({"10.40.0.1"}),
+        rate_limit_requests=1,
+    )
+    now = int(time.time())
+    body = b""
+    nonce = "rate-limit-first-123456"
+    auth.verify(
+        source="10.40.0.1", identity="codestra-middleware",
+        scopes={"telephony:read"}, timestamp=now, nonce=nonce, body=body,
+        signature=auth.sign(now, nonce, body), required_scope="telephony:read",
+        now=now,
+    )
+    with pytest.raises(PermissionError, match="rate limit"):
+        auth.verify(
+            source="10.40.0.1", identity="codestra-middleware",
+            scopes={"telephony:read"}, timestamp=now,
+            nonce="rate-limit-second-12345", body=body,
+            signature="0" * 64, required_scope="telephony:read", now=now,
+        )
+
+
+def test_read_only_campaign_report(harness):
+    service, repo = harness
+    command = CampaignCommand.model_validate(campaign_payload())
+    service.provision_campaign("report-fixture", command)
+    report = repo.campaign_report()
+    assert report == [{
+        "campaign_id": "CODT0001",
+        "campaign_name": "STG COD test outbound",
+        "active": "N",
+        "dial_method": "MANUAL",
+        "local_call_time": "9am-9pm",
+    }]
 
 
 def test_schema_rejects_extra_active_and_wrong_range():
@@ -188,12 +261,61 @@ def test_idempotency_conflict(harness):
         service.provision_campaign("same-key", CampaignCommand.model_validate(changed))
 
 
+def test_test_syn_lead_create_update_and_conflict(harness):
+    service, _ = harness
+    create = LeadCommand.model_validate({
+        "context": context(), "lead": {"external_id": "cert-synthetic-1",
+        "list_id": 9001, "phone_code": "1", "phone_number": "5550100199",
+        "first_name": "Synthetic", "last_name": "Original", "status": "NEW"}})
+    first = service.publish_lead("lead-create-1", create)
+    replay = service.publish_lead("lead-create-1", create)
+    assert first["actual"]["lead_id"] == replay["actual"]["lead_id"]
+    assert replay["idempotent_replay"] is True
+    update = LeadUpdateCommand.model_validate({
+        "context": context(), "lead": {"external_id": "cert-synthetic-1",
+        "list_id": 9001, "first_name": "Synthetic", "last_name": "Updated",
+        "status": "CALLBK", "expected_status": "NEW"}})
+    result = service.update_lead("lead-update-1", update)
+    assert result["actual"]["status"] == "CALLBK"
+    stale = update.model_copy(update={"lead": update.lead.model_copy(
+        update={"status": "SALE", "expected_status": "NEW"})})
+    with pytest.raises(CollisionError, match="stale"):
+        service.update_lead("lead-update-stale", stale)
+
+
+def test_test_syn_lane_denies_other_list_and_number(harness):
+    service, _ = harness
+    for list_id, phone in ((9002, "5550100199"), (9001, "2125550100")):
+        command = LeadCommand.model_validate({"context": context(), "lead": {
+            "external_id": "denied-lane", "list_id": list_id, "phone_code": "1",
+            "phone_number": phone, "first_name": "Denied",
+            "last_name": "Synthetic", "status": "NEW"}})
+        with pytest.raises(PermissionError, match="TEST_SYN"):
+            service.publish_lead("deny-%s-%s" % (list_id, phone), command)
+
+
 def test_compatible_adoption(harness):
     service, _ = harness
     command = CampaignCommand.model_validate(campaign_payload())
     service.provision_campaign("first-key", command)
     result = service.provision_campaign("second-key", command)
     assert {row["result"] for row in result["resources"]} == {"adopted"}
+
+
+def test_secret_detectors_match_real_whitespace_not_literal_backslashes():
+    assert content_categories(
+        b"Authorization: Bearer synthetic-token-value\n"
+    ) == {
+        "authorization header"
+    }
+    assert "credential assignment" in content_categories(
+        b"client_secret: synthetic-secret-value\n"
+    )
+    assert "credential assignment" in content_categories(
+        b"password=synthetic-secret-value\n"
+    )
+    assert content_categories(b"client_secret = ${PROTECTED_FILE}") == set()
+    assert content_categories(b"password=\nsynthetic-public-value\n") == set()
 
 
 def test_user_group_campaign_already_present_is_adopted(harness):
@@ -263,6 +385,118 @@ def test_user_group_incompatible_ownership_blocks(harness):
     assert repo.campaigns == {}
 
 
+def test_complete_readback_matches_every_required_resource(harness):
+    service, _ = harness
+    result = service.provision_campaign(
+        "full-readback", CampaignCommand.model_validate(campaign_payload()))
+    assert result["status"] == "complete_disabled"
+    assert all(item["match"] for item in result["readback"])
+    assert {
+        item["type"] for item in result["readback"]
+    } == {
+        "campaign", "list", "user_group", "closer_group", "script",
+        "disposition", "transfer_policy", "recording_policy_reference",
+        "callback_policy", "reporting_mapping",
+    }
+
+
+class CorruptReadbackRepository(MemoryRepository):
+    def __init__(self, kind: str):
+        super().__init__()
+        self.kind = kind
+        self.corrupt = True
+        self.armed = False
+
+    def provision_campaign_disabled(self, spec):
+        result = super().provision_campaign_disabled(spec)
+        self.armed = True
+        return result
+
+    def campaign_resources(self, spec):
+        result = super().campaign_resources(spec)
+        if not self.corrupt or not self.armed:
+            return result
+        if self.kind == "group":
+            result["groups"][1]["name"] = "Mismatched closer"
+        elif self.kind == "script":
+            result["scripts"][0]["script_text"] = (
+                result["scripts"][0]["script_text"][:4])
+        elif self.kind == "disposition":
+            result["campaign"]["dispositions"][0]["category"] = "OTHER"
+        elif self.kind == "disabled":
+            result["groups"][1]["active"] = "Y"
+        elif self.kind == "partial":
+            result["scripts"] = []
+        return result
+
+
+@pytest.mark.parametrize(("kind", "resource_type", "field"), [
+    ("group", "closer_group", "name"),
+    ("script", "script", "script_text"),
+    ("disposition", "disposition", "category"),
+    ("disabled", "closer_group", "active"),
+])
+def test_resource_mismatch_requires_reconciliation_and_preserves_evidence(
+        tmp_path, kind, resource_type, field):
+    repo = CorruptReadbackRepository(kind)
+    service = service_for(repo, tmp_path)
+    command = CampaignCommand.model_validate(campaign_payload())
+    with pytest.raises(ReadbackMismatch) as caught:
+        service.provision_campaign("mismatch-" + kind, command)
+    mismatch = next(item for item in caught.value.results
+                    if item["type"] == resource_type)
+    assert mismatch["match"] is False
+    assert field in mismatch["mismatches"]
+    assert repo.campaigns["CODT0001"]["active"] == "N"
+    assert repo.groups[("closer", "COD_TEST_CLOSERS")]["active"] == "N"
+    assert repo.scripts["COD_TEST_SDR_V1"]["active"] == "N"
+    evidence = service.state.latest_evidence("campaign.provision-disabled")
+    assert evidence["outcome"] == "reconciliation_required"
+    assert "Synthetic only" not in json.dumps(evidence)
+    assert service.state.db.execute(
+        "SELECT COUNT(*) FROM snapshots").fetchone()[0] == 1
+
+
+def test_transfer_policy_mismatch_requires_reconciliation(tmp_path):
+    repo = MemoryRepository()
+    service = service_for(repo, tmp_path)
+    original = service.state.campaign_policy
+
+    def mismatched_policy(campaign_id):
+        result = original(campaign_id)
+        if result:
+            result["transfer_targets"] = ["OTHER_GROUP"]
+        return result
+
+    service.state.campaign_policy = mismatched_policy
+    with pytest.raises(ReadbackMismatch) as caught:
+        service.provision_campaign(
+            "transfer-mismatch",
+            CampaignCommand.model_validate(campaign_payload()))
+    mismatch = next(item for item in caught.value.results
+                    if item["type"] == "transfer_policy")
+    assert mismatch["mismatches"] == ["transfer_targets"]
+
+
+def test_retry_after_partial_readback_failure_and_reconciliation(tmp_path):
+    repo = CorruptReadbackRepository("partial")
+    service = service_for(repo, tmp_path)
+    command = CampaignCommand.model_validate(campaign_payload())
+    with pytest.raises(ReadbackMismatch):
+        service.provision_campaign("partial-retry", command)
+    assert service.state.db.execute(
+        "SELECT COUNT(*) FROM requests").fetchone()[0] == 0
+    repo.corrupt = False
+    corrected = service.provision_campaign("partial-retry", command)
+    assert corrected["status"] == "complete_disabled"
+    assert all(item["match"] for item in corrected["readback"])
+    outcomes = [
+        row[0] for row in service.state.db.execute(
+            "SELECT outcome FROM evidence ORDER BY evidence_id").fetchall()
+    ]
+    assert outcomes == ["reconciliation_required", "complete_disabled"]
+
+
 def test_incompatible_collision_blocks(harness):
     service, repo = harness
     repo.campaigns["CODT0001"] = {
@@ -300,117 +534,6 @@ def test_collision_is_compensating_rollback_safe(harness):
     assert after == before
 
 
-def test_complete_readback_matches_every_required_resource(harness):
-    service, _ = harness
-    result = service.provision_campaign(
-        "full-readback", CampaignCommand.model_validate(campaign_payload()))
-    assert result["status"] == "complete_disabled"
-    assert all(item["match"] for item in result["readback"])
-    assert {
-        item["type"] for item in result["readback"]
-    } == {
-        "campaign", "list", "user_group", "closer_group", "script",
-        "disposition", "transfer_policy", "recording_policy_reference",
-        "callback_policy", "reporting_mapping",
-    }
-
-
-class CorruptReadbackRepository(MemoryRepository):
-    def __init__(self, kind: str):
-        super().__init__()
-        self.kind = kind
-        self.corrupt = True
-        self.armed = False
-
-    def provision_campaign_disabled(self, spec):
-        result = super().provision_campaign_disabled(spec)
-        self.armed = True
-        return result
-
-    def readback_campaign(self, spec):
-        result = super().readback_campaign(spec)
-        if not self.corrupt or not self.armed:
-            return result
-        if self.kind == "group":
-            result["groups"][1]["name"] = "Mismatched closer"
-        elif self.kind == "script":
-            result["scripts"][0]["script_text"] = result["scripts"][0]["script_text"][:4]
-        elif self.kind == "disposition":
-            result["dispositions"][0]["category"] = "OTHER"
-        elif self.kind == "disabled":
-            result["groups"][1]["active"] = "Y"
-        elif self.kind == "partial":
-            result["scripts"][0] = None
-        return result
-
-
-@pytest.mark.parametrize(("kind", "resource_type", "field"), [
-    ("group", "closer_group", "name"),
-    ("script", "script", "script_text"),
-    ("disposition", "disposition", "category"),
-    ("disabled", "closer_group", "active"),
-])
-def test_resource_mismatch_requires_reconciliation_and_preserves_evidence(
-        tmp_path, kind, resource_type, field):
-    repo = CorruptReadbackRepository(kind)
-    service = service_for(repo, tmp_path)
-    command = CampaignCommand.model_validate(campaign_payload())
-    with pytest.raises(ReadbackMismatch) as caught:
-        service.provision_campaign("mismatch-" + kind, command)
-    mismatch = next(item for item in caught.value.results
-                    if item["type"] == resource_type)
-    assert mismatch["match"] is False
-    assert field in mismatch["mismatches"]
-    assert repo.campaigns["CODT0001"]["active"] == "N"
-    assert repo.groups[("closer", "COD_TEST_CLOSERS")]["active"] == "N"
-    assert repo.scripts["COD_TEST_SDR_V1"]["active"] == "N"
-    evidence = service.state.latest_evidence("campaign.provision-disabled")
-    assert evidence["outcome"] == "reconciliation_required"
-    assert "Synthetic only" not in json.dumps(evidence)
-    snapshot_count = service.state.db.execute(
-        "SELECT COUNT(*) FROM snapshots").fetchone()[0]
-    assert snapshot_count == 1
-
-
-def test_transfer_policy_mismatch_requires_reconciliation(tmp_path):
-    repo = MemoryRepository()
-    service = service_for(repo, tmp_path)
-    original = service.state.campaign_policy
-
-    def mismatched_policy(campaign_id):
-        result = original(campaign_id)
-        if result:
-            result["transfer_targets"] = ["OTHER_GROUP"]
-        return result
-
-    service.state.campaign_policy = mismatched_policy
-    with pytest.raises(ReadbackMismatch) as caught:
-        service.provision_campaign(
-            "transfer-mismatch", CampaignCommand.model_validate(campaign_payload()))
-    mismatch = next(item for item in caught.value.results
-                    if item["type"] == "transfer_policy")
-    assert mismatch["mismatches"] == ["transfer_targets"]
-
-
-def test_retry_after_partial_readback_failure_and_reconciliation(tmp_path):
-    repo = CorruptReadbackRepository("partial")
-    service = service_for(repo, tmp_path)
-    command = CampaignCommand.model_validate(campaign_payload())
-    with pytest.raises(ReadbackMismatch):
-        service.provision_campaign("partial-retry", command)
-    assert service.state.db.execute(
-        "SELECT COUNT(*) FROM requests").fetchone()[0] == 0
-    repo.corrupt = False
-    corrected = service.provision_campaign("partial-retry", command)
-    assert corrected["status"] == "complete_disabled"
-    assert all(item["match"] for item in corrected["readback"])
-    outcomes = [
-        row[0] for row in service.state.db.execute(
-            "SELECT outcome FROM evidence ORDER BY evidence_id").fetchall()
-    ]
-    assert outcomes == ["reconciliation_required", "complete_disabled"]
-
-
 def test_kill_switch_blocks_mutation(tmp_path):
     repo = MemoryRepository()
     service = AdapterService(repo, StateStore(tmp_path / "state.db"),
@@ -444,8 +567,8 @@ def test_lead_publication_duplicate_retry_and_collision(harness):
     payload = {
         "context": context(),
         "lead": {
-            "external_id": "synthetic-lead-1", "list_id": 21001,
-            "phone_code": "1", "phone_number": "2025550199",
+            "external_id": "synthetic-lead-1", "list_id": 9001,
+            "phone_code": "1", "phone_number": "5550100199",
             "first_name": "Synthetic", "last_name": "Lead", "status": "NEW",
         },
     }
@@ -454,7 +577,7 @@ def test_lead_publication_duplicate_retry_and_collision(harness):
     second = service.publish_lead("lead-two", command)
     assert first["actual"]["lead_id"] == second["actual"]["lead_id"]
     assert len(repo.leads) == 1
-    payload["lead"]["phone_number"] = "2025550100"
+    payload["lead"]["first_name"] = "Changed"
     with pytest.raises(CollisionError):
         service.publish_lead("lead-three", LeadCommand.model_validate(payload))
 

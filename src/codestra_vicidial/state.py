@@ -38,8 +38,23 @@ class StateStore:
           evidence_id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at TEXT NOT NULL,
           operation TEXT NOT NULL, target_hash TEXT NOT NULL, outcome TEXT NOT NULL,
           redacted_json TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS replay_nonces(
+          nonce_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS replay_nonces_expiry
+          ON replay_nonces(expires_at);
         """)
         self.db.commit()
+
+    def claim_nonce(self, nonce: str, now: int, expires_at: int) -> bool:
+        """Atomically retain a nonce across process restarts without storing it raw."""
+        nonce_hash = hashlib.sha256(nonce.encode()).hexdigest()
+        with self.db:
+            self.db.execute("DELETE FROM replay_nonces WHERE expires_at < ?", (now,))
+            cursor = self.db.execute(
+                "INSERT OR IGNORE INTO replay_nonces(nonce_hash,expires_at) VALUES(?,?)",
+                (nonce_hash, expires_at),
+            )
+        return cursor.rowcount == 1
 
     @staticmethod
     def digest(value: object) -> str:
@@ -98,12 +113,14 @@ class StateStore:
 
     def transfer_policy(self, campaign_id: str) -> list[str] | None:
         row = self.db.execute(
-            "SELECT targets FROM transfer_policies WHERE campaign_id=?", (campaign_id,)
+            "SELECT targets FROM transfer_policies WHERE campaign_id=?",
+            (campaign_id,),
         ).fetchone()
         return json.loads(row["targets"]) if row else None
 
     def put_campaign_policy(self, campaign_id: str, transfer_targets: list[str],
-                            recording_policy_reference: str, reporting_mapping: str,
+                            recording_policy_reference: str,
+                            reporting_mapping: str,
                             callback_enabled: bool) -> None:
         now = datetime.now(timezone.utc).isoformat()
         self.db.execute(
@@ -112,7 +129,8 @@ class StateStore:
             "transfer_targets=excluded.transfer_targets,"
             "recording_policy_reference=excluded.recording_policy_reference,"
             "reporting_mapping=excluded.reporting_mapping,"
-            "callback_enabled=excluded.callback_enabled,updated_at=excluded.updated_at",
+            "callback_enabled=excluded.callback_enabled,"
+            "updated_at=excluded.updated_at",
             (campaign_id, json.dumps(sorted(transfer_targets)),
              recording_policy_reference, reporting_mapping,
              1 if callback_enabled else 0, now),
@@ -149,7 +167,12 @@ class StateStore:
             "SELECT outcome,redacted_json FROM evidence WHERE operation=? "
             "ORDER BY evidence_id DESC LIMIT 1", (operation,)
         ).fetchone()
-        return {"outcome": row["outcome"], "redacted": json.loads(row["redacted_json"])} if row else None
+        if not row:
+            return None
+        return {
+            "outcome": row["outcome"],
+            "redacted": json.loads(row["redacted_json"]),
+        }
 
     def snapshot(self, snapshot_id: str, operation: str, target: str, state: object) -> None:
         self.db.execute(

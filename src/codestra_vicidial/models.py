@@ -120,8 +120,8 @@ class DisableAgentCommand(StrictModel):
 
 
 class LeadSpec(StrictModel):
-    external_id: Annotated[str, Field(min_length=1, max_length=50)]
-    list_id: Annotated[int, Field(ge=11000, le=91999)]
+    external_id: Annotated[str, Field(min_length=1, max_length=20)]
+    list_id: Annotated[int, Field(ge=9001, le=91999)]
     phone_code: Annotated[str, Field(pattern=r"^[0-9]{1,4}$")]
     phone_number: Annotated[str, Field(pattern=r"^[0-9]{7,18}$")]
     first_name: Annotated[str, Field(max_length=30)] = ""
@@ -132,6 +132,20 @@ class LeadSpec(StrictModel):
 class LeadCommand(StrictModel):
     context: RequestContext
     lead: LeadSpec
+
+
+class LeadUpdateSpec(StrictModel):
+    external_id: Annotated[str, Field(min_length=1, max_length=20)]
+    list_id: Literal[9001]
+    first_name: Annotated[str, Field(max_length=30)]
+    last_name: Annotated[str, Field(max_length=30)]
+    status: Literal["NEW", "CALLBK", "BUSY", "NA", "NI", "DNC", "WRONG", "DISCONNECTED", "ANSWERED", "SALE"]
+    expected_status: Annotated[str, Field(pattern=r"^[A-Z0-9_]{1,6}$")] | None = None
+
+
+class LeadUpdateCommand(StrictModel):
+    context: RequestContext
+    lead: LeadUpdateSpec
 
 
 class CallbackSpec(StrictModel):
