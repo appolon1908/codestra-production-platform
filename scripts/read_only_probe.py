@@ -8,6 +8,7 @@ import hmac
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -34,8 +35,15 @@ def main() -> int:
             "X-Request-Signature": signature,
         },
     )
-    with urllib.request.urlopen(request, timeout=5) as response:
-        document = json.load(response)
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                document = json.load(response)
+            break
+        except urllib.error.URLError:
+            if attempt == 4:
+                raise
+            time.sleep(1)
     if (
         response.status != 200
         or document.get("status") != "ready"
