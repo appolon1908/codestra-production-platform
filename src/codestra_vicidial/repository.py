@@ -296,6 +296,8 @@ class MemoryRepository:
         prior = self.lead_by_external_id(spec.external_id)
         if not prior or int(prior["list_id"]) != spec.list_id:
             raise ValueError("synthetic lead missing")
+        if prior["status"] == "DNC" and spec.status != "DNC":
+            raise PermissionError("DNC status cannot be removed")
         if spec.expected_status is not None and prior["status"] != spec.expected_status:
             raise CollisionError("stale lead status")
         prior.update(first_name=spec.first_name, last_name=spec.last_name,
@@ -662,6 +664,8 @@ class MySQLRepository:
         prior = self.lead_by_external_id(spec.external_id)
         if not prior or int(prior["list_id"]) != 9001:
             raise ValueError("synthetic lead missing")
+        if prior["status"] == "DNC" and spec.status != "DNC":
+            raise PermissionError("DNC status cannot be removed")
         if spec.expected_status is not None and prior["status"] != spec.expected_status:
             raise CollisionError("stale lead status")
         changed = self._execute(

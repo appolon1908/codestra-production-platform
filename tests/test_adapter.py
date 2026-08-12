@@ -582,6 +582,28 @@ def test_lead_publication_duplicate_retry_and_collision(harness):
         service.publish_lead("lead-three", LeadCommand.model_validate(payload))
 
 
+def test_dnc_lead_cannot_be_reactivated(harness):
+    service, _ = harness
+    created = service.publish_lead("dnc-create", LeadCommand.model_validate({
+        "context": context(),
+        "lead": {
+            "external_id": "synthetic-dnc-1", "list_id": 9001,
+            "phone_code": "1", "phone_number": "5550100199",
+            "first_name": "Synthetic", "last_name": "DNC", "status": "DNC",
+        },
+    }))
+    assert created["actual"]["status"] == "DNC"
+    with pytest.raises(PermissionError, match="DNC"):
+        service.update_lead("dnc-remove", LeadUpdateCommand.model_validate({
+            "context": context(),
+            "lead": {
+                "external_id": "synthetic-dnc-1", "list_id": 9001,
+                "first_name": "Synthetic", "last_name": "DNC",
+                "status": "NEW", "expected_status": "DNC",
+            },
+        }))
+
+
 def test_callback_and_transfer_policy(harness):
     service, repo = harness
     service.provision_campaign(
