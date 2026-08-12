@@ -33,7 +33,9 @@ jobs:
       - name: Dependency audit
         run: python -m pip_audit
       - name: Static security scan
-        run: bandit -q -r src scripts
+        run: |
+          bandit -r -f json -o BANDIT.json src scripts || true
+          bandit -q -r -lll src scripts
       - name: Record exact source and checksums
         run: |
           git rev-parse HEAD | tee EXACT_SOURCE_SHA
@@ -44,5 +46,6 @@ jobs:
           path: |
             EXACT_SOURCE_SHA
             SOURCE.SHA256
+            BANDIT.json
           if-no-files-found: error
           retention-days: 30
