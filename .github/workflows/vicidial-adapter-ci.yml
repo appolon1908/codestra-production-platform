@@ -1,0 +1,44 @@
+name: VICIdial adapter exact-SHA gate
+
+on:
+  push:
+    branches:
+      - feature/voice-ai-telephony-integration
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project and audit tools
+        run: python -m pip install --disable-pip-version-check '.[test]' pip-audit bandit
+      - name: Compile
+        run: python -m compileall -q src scripts
+      - name: Test
+        run: python -m pytest -q tests
+      - name: Dependency audit
+        run: python -m pip_audit
+      - name: Static security scan
+        run: bandit -q -r src scripts
+      - name: Record exact source and checksums
+        run: |
+          git rev-parse HEAD | tee EXACT_SOURCE_SHA
+          git ls-files -z | sort -z | xargs -0 sha256sum > SOURCE.SHA256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vicidial-adapter-${{ github.sha }}
+          path: |
+            EXACT_SOURCE_SHA
+            SOURCE.SHA256
+          if-no-files-found: error
+          retention-days: 30
