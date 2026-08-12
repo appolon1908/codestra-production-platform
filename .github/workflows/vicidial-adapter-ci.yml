@@ -14,6 +14,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CODESTRA_ADAPTER_STATE: ${{ runner.temp }}/vicidial-adapter-state.sqlite3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
