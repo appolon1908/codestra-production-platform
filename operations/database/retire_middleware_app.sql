@@ -25,6 +25,34 @@ BEGIN
         RAISE EXCEPTION
             'middleware_data_owner must exist as a NOLOGIN owner role';
     END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_auth_members
+        WHERE roleid = (SELECT oid FROM pg_roles WHERE rolname = 'middleware_app')
+    ) THEN
+        RAISE EXCEPTION
+            'middleware_app must not have member roles capable of SET ROLE';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_database
+        WHERE datdba = (SELECT oid FROM pg_roles WHERE rolname = 'middleware_app')
+          AND datname <> 'codestra_middleware'
+    ) THEN
+        RAISE EXCEPTION
+            'middleware_app owns an unexpected database';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_tablespace
+        WHERE spcowner = (SELECT oid FROM pg_roles WHERE rolname = 'middleware_app')
+    ) THEN
+        RAISE EXCEPTION
+            'middleware_app owns an unexpected tablespace';
+    END IF;
 END
 $preflight$;
 
@@ -59,6 +87,19 @@ BEGIN
 END
 $migration$;
 
+DO $database_owner$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_database
+        WHERE datname = 'codestra_middleware'
+          AND datdba = (SELECT oid FROM pg_roles WHERE rolname = 'middleware_app')
+    ) THEN
+        ALTER DATABASE codestra_middleware OWNER TO middleware_data_owner;
+    END IF;
+END
+$database_owner$;
+
 REASSIGN OWNED BY middleware_app TO middleware_data_owner;
 REVOKE ALL PRIVILEGES ON DATABASE codestra_middleware FROM middleware_app;
 REVOKE ALL PRIVILEGES ON SCHEMA public, reporting FROM middleware_app;
@@ -73,19 +114,21 @@ ALTER DEFAULT PRIVILEGES FOR ROLE middleware_app
     REVOKE ALL ON FUNCTIONS FROM middleware_app;
 
 DO $postcondition$
+DECLARE
+    legacy_oid oid := (SELECT oid FROM pg_roles WHERE rolname = 'middleware_app');
 BEGIN
     IF EXISTS (
         SELECT 1
-        FROM pg_class
-        WHERE relowner = (SELECT oid FROM pg_roles WHERE rolname = 'middleware_app')
+        FROM pg_depend
+        WHERE refclassid = 'pg_authid'::regclass
+          AND refobjid = legacy_oid
+          AND deptype = 'o'
     ) OR EXISTS (
         SELECT 1
-        FROM pg_namespace
-        WHERE nspowner = (SELECT oid FROM pg_roles WHERE rolname = 'middleware_app')
-    ) OR EXISTS (
-        SELECT 1
-        FROM pg_proc
-        WHERE proowner = (SELECT oid FROM pg_roles WHERE rolname = 'middleware_app')
+        FROM pg_shdepend
+        WHERE refclassid = 'pg_authid'::regclass
+          AND refobjid = legacy_oid
+          AND deptype = 'o'
     ) THEN
         RAISE EXCEPTION
             'middleware_app still owns objects after REASSIGN OWNED';

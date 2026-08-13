@@ -14,6 +14,11 @@ def test_legacy_role_retirement_is_fail_closed_and_non_destructive():
         "REASSIGN OWNED BY middleware_app TO middleware_data_owner;",
         "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public, reporting FROM middleware_app;",
         "middleware_app still owns objects after REASSIGN OWNED",
+        "middleware_app must not have member roles capable of SET ROLE",
+        "middleware_app owns an unexpected database",
+        "middleware_app owns an unexpected tablespace",
+        "FROM pg_depend",
+        "FROM pg_shdepend",
     }
     assert all(fragment in sql for fragment in required)
     assert "middleware_app still has active sessions" in sql
@@ -34,3 +39,19 @@ def test_login_is_disabled_and_committed_before_session_drain():
 def test_reporting_owner_is_not_overwritten_unconditionally():
     sql = MIGRATION.read_text()
     assert "ALTER SCHEMA reporting OWNER" not in sql
+
+
+def test_shared_ownership_is_bounded_before_reassign_owned():
+    sql = MIGRATION.read_text()
+    reassign = sql.index("REASSIGN OWNED BY middleware_app")
+    assert sql.index("datname <> 'codestra_middleware'") < reassign
+    assert sql.index("FROM pg_tablespace") < reassign
+    assert sql.index("ALTER DATABASE codestra_middleware OWNER") < reassign
+
+
+def test_postcondition_uses_ownership_dependency_catalogs():
+    sql = MIGRATION.read_text()
+    postcondition = sql.index("DO $postcondition$")
+    assert sql.index("FROM pg_depend", postcondition) > postcondition
+    assert sql.index("FROM pg_shdepend", postcondition) > postcondition
+    assert sql.count("deptype = 'o'") == 2
