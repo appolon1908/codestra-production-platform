@@ -53,6 +53,15 @@ BEGIN
         RAISE EXCEPTION
             'middleware_app owns an unexpected tablespace';
     END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_default_acl
+        WHERE defaclrole = (SELECT oid FROM pg_roles WHERE rolname = 'middleware_app')
+    ) THEN
+        RAISE EXCEPTION
+            'middleware_app has default ACLs requiring separate reviewed cleanup';
+    END IF;
 END
 $preflight$;
 
@@ -106,13 +115,6 @@ REVOKE ALL PRIVILEGES ON SCHEMA public, reporting FROM middleware_app;
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public, reporting FROM middleware_app;
 REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public, reporting FROM middleware_app;
 REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public, reporting FROM middleware_app;
-ALTER DEFAULT PRIVILEGES FOR ROLE middleware_app
-    REVOKE ALL ON TABLES FROM middleware_app;
-ALTER DEFAULT PRIVILEGES FOR ROLE middleware_app
-    REVOKE ALL ON SEQUENCES FROM middleware_app;
-ALTER DEFAULT PRIVILEGES FOR ROLE middleware_app
-    REVOKE ALL ON FUNCTIONS FROM middleware_app;
-
 DO $postcondition$
 DECLARE
     legacy_oid oid := (SELECT oid FROM pg_roles WHERE rolname = 'middleware_app');

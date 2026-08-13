@@ -17,6 +17,8 @@ def test_legacy_role_retirement_is_fail_closed_and_non_destructive():
         "middleware_app must not have member roles capable of SET ROLE",
         "middleware_app owns an unexpected database",
         "middleware_app owns an unexpected tablespace",
+        "middleware_app has default ACLs requiring separate reviewed cleanup",
+        "FROM pg_default_acl",
         "FROM pg_depend",
         "FROM pg_shdepend",
     }
@@ -55,3 +57,11 @@ def test_postcondition_uses_ownership_dependency_catalogs():
     assert sql.index("FROM pg_depend", postcondition) > postcondition
     assert sql.index("FROM pg_shdepend", postcondition) > postcondition
     assert sql.count("deptype = 'o'") == 2
+
+
+def test_migration_does_not_create_legacy_default_acl_entries():
+    sql = MIGRATION.read_text()
+    assert "ALTER DEFAULT PRIVILEGES FOR ROLE middleware_app" not in sql
+    assert sql.index("FROM pg_default_acl") < sql.index(
+        "ALTER ROLE middleware_app NOLOGIN"
+    )
