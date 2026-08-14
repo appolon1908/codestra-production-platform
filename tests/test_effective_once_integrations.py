@@ -51,3 +51,14 @@ def test_newer_state_wins_without_duplicate_effect(tmp_path) -> None:
     assert sink.enqueue(event(1)) == "accepted"
     assert sink.deliver(event(1)) == "delivered"
     assert sink.counts() == (2, 1)
+
+
+def test_equal_sequence_conflicting_effect_is_rejected(tmp_path) -> None:
+    sink = EffectiveOnceSink(tmp_path / "equal-sequence.sqlite3", "odoo_test")
+    first = event()
+    assert sink.enqueue(first) == "accepted"
+    assert sink.deliver(first) == "delivered"
+    conflicting = {**event(2), "idempotency_key": first["idempotency_key"], "sequence": first["sequence"]}
+    assert sink.enqueue(conflicting) == "accepted"
+    with pytest.raises(IntegrationError, match="equal-sequence effect identity conflicts"):
+        sink.deliver(conflicting)

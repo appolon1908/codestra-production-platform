@@ -85,7 +85,7 @@ class EffectiveOnceSink:
             if unavailable:
                 return "retry"
             current = self.db.execute(
-                "SELECT terminal_sequence FROM effect WHERE sink=? AND idempotency_key=?",
+                "SELECT correlation_id,terminal_sequence,payload_hash FROM effect WHERE sink=? AND idempotency_key=?",
                 (self.namespace, event["idempotency_key"]),
             ).fetchone()
             if current is None:
@@ -93,11 +93,15 @@ class EffectiveOnceSink:
                     "INSERT INTO effect VALUES(?,?,?,?,?)",
                     (self.namespace, event["idempotency_key"], event["correlation_id"], event["sequence"], event["payload_hash"]),
                 )
-            elif event["sequence"] > current[0]:
+            elif event["sequence"] > current[1]:
                 self.db.execute(
                     "UPDATE effect SET terminal_sequence=?,payload_hash=? WHERE sink=? AND idempotency_key=?",
                     (event["sequence"], event["payload_hash"], self.namespace, event["idempotency_key"]),
                 )
+            elif event["sequence"] == current[1] and (
+                event["correlation_id"] != current[0] or event["payload_hash"] != current[2]
+            ):
+                raise IntegrationError("equal-sequence effect identity conflicts")
             self.db.execute(
                 "UPDATE delivery SET state='delivered' WHERE event_id=? AND sink=?",
                 (event["event_id"], self.namespace),

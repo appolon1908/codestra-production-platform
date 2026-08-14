@@ -10,7 +10,9 @@ import time
 
 import nats
 import pytest
+from nats.js import api
 
+from eventing.dead_letter import forward_max_delivery_advisory
 from tools.apply_jetstream_contract import apply_contract
 
 
@@ -123,6 +125,56 @@ def test_existing_consumer_drift_fails_closed(tmp_path):
 
             with pytest.raises(RuntimeError, match="differs from contract"):
                 await apply_contract(url)
+        finally:
+            server.terminate()
+            server.wait(timeout=5)
+            log.close()
+
+    asyncio.run(scenario())
+
+
+def test_max_delivery_advisory_is_forwarded_once_to_dlq(tmp_path):
+    async def scenario():
+        port = free_port()
+        log = (tmp_path / "dead-letter.log").open("wb")
+        server = start_server(port, tmp_path / "store-dead-letter", log)
+        url = f"nats://127.0.0.1:{port}"
+        try:
+            await apply_contract(url)
+            client = await nats.connect(url)
+            js = client.jetstream()
+            await js.delete_consumer("CODESTRA_INGRESS_V1", "middleware-ingress-v1")
+            await js.add_consumer(
+                "CODESTRA_INGRESS_V1",
+                config=api.ConsumerConfig(
+                    durable_name="middleware-ingress-v1",
+                    filter_subject="codestra.v1.*.*.events.ingress",
+                    ack_policy=api.AckPolicy.EXPLICIT,
+                    ack_wait=0.1,
+                    max_deliver=2,
+                    deliver_policy=api.DeliverPolicy.ALL,
+                ),
+            )
+            advisories = await client.subscribe(
+                "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.CODESTRA_INGRESS_V1.middleware-ingress-v1"
+            )
+            subject = "codestra.v1.synthetic-tenant.TEST_SYN.events.ingress"
+            await js.publish(subject, payload(), headers={"Nats-Msg-Id": "evt-dlq-1"})
+            subscription = await js.pull_subscribe(
+                subject, durable="middleware-ingress-v1", stream="CODESTRA_INGRESS_V1"
+            )
+            first = (await subscription.fetch(1, timeout=2))[0]
+            await first.nak()
+            second = (await subscription.fetch(1, timeout=2))[0]
+            await second.nak()
+            with pytest.raises(nats.errors.TimeoutError):
+                await subscription.fetch(1, timeout=0.5)
+            advisory = await advisories.next_msg(timeout=2)
+            assert await forward_max_delivery_advisory(js, advisory.data) == "forwarded"
+            assert await forward_max_delivery_advisory(js, advisory.data) == "duplicate"
+            info = await js.stream_info("CODESTRA_DEAD_LETTER_V1")
+            assert info.state.messages == 1
+            await client.drain()
         finally:
             server.terminate()
             server.wait(timeout=5)

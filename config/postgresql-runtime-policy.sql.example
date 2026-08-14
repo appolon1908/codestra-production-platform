@@ -1,7 +1,19 @@
 -- Reviewed least-privilege contract. Replace identifiers only via deployment manifest.
 -- The owning migration role is deliberately distinct from the NOLOGIN runtime group.
-CREATE ROLE codestra_middleware_migration_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
-CREATE ROLE codestra_middleware_runtime NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+DO $policy$
+BEGIN
+  CREATE ROLE codestra_middleware_migration_owner;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END
+$policy$;
+DO $policy$
+BEGIN
+  CREATE ROLE codestra_middleware_runtime;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END
+$policy$;
+ALTER ROLE codestra_middleware_migration_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+ALTER ROLE codestra_middleware_runtime NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA middleware TO codestra_middleware_runtime;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA middleware TO codestra_middleware_runtime;
