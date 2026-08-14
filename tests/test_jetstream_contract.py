@@ -51,6 +51,15 @@ def test_duplicate_and_conflicting_delivery(tmp_path):
     assert harness.counts() == {"event_inbox": 1, "business_effect": 1, "dead_letter": 0}
 
 
+def test_duplicate_requires_full_envelope_identity(tmp_path):
+    harness = DurableEventHarness(tmp_path / "identity.sqlite")
+    original = event()
+    assert harness.ingest(original, 1) == "accepted"
+    altered = {**original, "correlation_id": "different-correlation"}
+    with pytest.raises(ContractError, match="conflicting idempotency identity"):
+        harness.ingest(altered, 1)
+
+
 def test_restart_after_commit_and_publish_is_effectively_once(tmp_path):
     path = tmp_path / "events.sqlite"
     first = DurableEventHarness(path)

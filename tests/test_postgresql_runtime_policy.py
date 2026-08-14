@@ -6,6 +6,9 @@ def test_runtime_database_policy_is_non_owning_and_bounded() -> None:
     assert "NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS" in sql
     assert "GRANT SELECT, INSERT, UPDATE" in sql
     assert "REVOKE DELETE, TRUNCATE" in sql
+    assert "ALTER DEFAULT PRIVILEGES FOR ROLE CODESTRA_MIDDLEWARE_MIGRATION_OWNER" in sql
+    assert "ON TABLES TO CODESTRA_MIDDLEWARE_RUNTIME" in sql
+    assert "ON SEQUENCES TO CODESTRA_MIDDLEWARE_RUNTIME" in sql
     assert "GRANT ALL" not in sql
     assert "ALTER ROLE" not in sql
     assert "DROP " not in sql

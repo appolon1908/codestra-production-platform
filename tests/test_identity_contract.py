@@ -40,6 +40,7 @@ def test_valid_service_token() -> None:
 @pytest.mark.parametrize("change,signature,error", [
     ({"aud": ["wrong"]}, True, "audience"),
     ({"exp": int(NOW.timestamp()) - 1}, True, "currently valid"),
+    ({"nbf": int(NOW.timestamp()) + 60}, True, "not valid yet"),
     ({"tenant_id": "tenant-other"}, True, "tenant binding"),
     ({"realm_access": {"roles": []}}, True, "role"),
     ({}, False, "signature"),

@@ -58,9 +58,49 @@ async def apply_contract(server: str, contract_path: Path | None = None) -> None
                 deliver_policy=DELIVERY[item["deliver_policy"]],
             )
             try:
-                await manager.consumer_info(item["stream"], item["durable"])
+                before = await manager.consumer_info(item["stream"], item["durable"])
             except nats.js.errors.NotFoundError:
                 await manager.add_consumer(stream=item["stream"], config=config)
+            else:
+                existing_expected = {
+                    "filter_subject": config.filter_subject,
+                    "deliver_policy": config.deliver_policy,
+                    "replay_policy": config.replay_policy,
+                    "ack_policy": config.ack_policy,
+                    "ack_wait": config.backoff[0] if config.backoff else config.ack_wait,
+                    "max_deliver": config.max_deliver,
+                    "backoff": config.backoff,
+                }
+                existing_mismatches = {
+                    field: (wanted, getattr(before.config, field))
+                    for field, wanted in existing_expected.items()
+                    if getattr(before.config, field) != wanted
+                }
+                if existing_mismatches:
+                    raise RuntimeError(
+                        f"consumer {item['stream']}/{item['durable']} differs from contract: {existing_mismatches}"
+                    )
+            actual = (await manager.consumer_info(item["stream"], item["durable"])).config
+            expected = {
+                "filter_subject": config.filter_subject,
+                "ack_policy": config.ack_policy,
+                # JetStream defines the first backoff value as the effective
+                # acknowledgement wait whenever a backoff schedule is set.
+                "ack_wait": config.backoff[0] if config.backoff else config.ack_wait,
+                "max_deliver": config.max_deliver,
+                "backoff": config.backoff,
+                "replay_policy": config.replay_policy,
+                "deliver_policy": config.deliver_policy,
+            }
+            mismatches = {
+                field: (wanted, getattr(actual, field))
+                for field, wanted in expected.items()
+                if getattr(actual, field) != wanted
+            }
+            if mismatches:
+                raise RuntimeError(
+                    f"consumer {item['stream']}/{item['durable']} differs from contract: {mismatches}"
+                )
     finally:
         await client.drain()
 

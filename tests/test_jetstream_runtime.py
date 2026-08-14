@@ -92,3 +92,40 @@ def test_isolated_jetstream_dedup_redelivery_and_restart(tmp_path):
             log.close()
 
     asyncio.run(scenario())
+
+
+def test_existing_consumer_drift_fails_closed(tmp_path):
+    async def scenario():
+        port = free_port()
+        log = (tmp_path / "reconcile.log").open("wb")
+        server = start_server(port, tmp_path / "store-reconcile", log)
+        url = f"nats://127.0.0.1:{port}"
+        try:
+            await apply_contract(url)
+            client = await nats.connect(url)
+            js = client.jetstream()
+            from nats.js import api
+
+            await js.delete_consumer("CODESTRA_INGRESS_V1", "middleware-ingress-v1")
+            await js.add_consumer(
+                "CODESTRA_INGRESS_V1",
+                config=api.ConsumerConfig(
+                    durable_name="middleware-ingress-v1",
+                    filter_subject="codestra.v1.*.*.events.ingress",
+                    ack_policy=api.AckPolicy.EXPLICIT,
+                    ack_wait=1,
+                    max_deliver=2,
+                    deliver_policy=api.DeliverPolicy.NEW,
+                ),
+            )
+            await client.drain()
+            import pytest
+
+            with pytest.raises(RuntimeError, match="differs from contract"):
+                await apply_contract(url)
+        finally:
+            server.terminate()
+            server.wait(timeout=5)
+            log.close()
+
+    asyncio.run(scenario())

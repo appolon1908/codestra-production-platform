@@ -35,6 +35,15 @@ def test_production_namespace_is_impossible(tmp_path) -> None:
         EffectiveOnceSink(tmp_path / "unsafe.sqlite3", "odoo_production")
 
 
+def test_delivery_rejects_identity_not_durably_enqueued(tmp_path) -> None:
+    sink = EffectiveOnceSink(tmp_path / "identity.sqlite3", "odoo_test")
+    accepted = event()
+    assert sink.enqueue(accepted) == "accepted"
+    altered = {**accepted, "correlation_id": "altered"}
+    with pytest.raises(IntegrationError, match="differs from durable event"):
+        sink.deliver(altered)
+
+
 def test_newer_state_wins_without_duplicate_effect(tmp_path) -> None:
     sink = EffectiveOnceSink(tmp_path / "ordering.sqlite3", "odoo_test")
     assert sink.enqueue(event(2)) == "accepted"

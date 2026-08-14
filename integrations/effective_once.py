@@ -23,7 +23,9 @@ class EffectiveOnceSink:
               event_id TEXT NOT NULL,
               sink TEXT NOT NULL,
               correlation_id TEXT NOT NULL,
+              idempotency_key TEXT NOT NULL,
               payload_hash TEXT NOT NULL,
+              sequence INTEGER NOT NULL,
               attempts INTEGER NOT NULL DEFAULT 0,
               state TEXT NOT NULL DEFAULT 'pending',
               PRIMARY KEY(event_id, sink)
@@ -46,29 +48,36 @@ class EffectiveOnceSink:
         try:
             with self.db:
                 self.db.execute(
-                    "INSERT INTO delivery(event_id,sink,correlation_id,payload_hash) VALUES(?,?,?,?)",
-                    (event["event_id"], self.namespace, event["correlation_id"], event["payload_hash"]),
+                    "INSERT INTO delivery(event_id,sink,correlation_id,idempotency_key,payload_hash,sequence) VALUES(?,?,?,?,?,?)",
+                    (event["event_id"], self.namespace, event["correlation_id"], event["idempotency_key"], event["payload_hash"], event["sequence"]),
                 )
             return "accepted"
         except sqlite3.IntegrityError:
             row = self.db.execute(
-                "SELECT correlation_id,payload_hash FROM delivery WHERE event_id=? AND sink=?",
+                "SELECT correlation_id,idempotency_key,payload_hash,sequence FROM delivery WHERE event_id=? AND sink=?",
                 (event["event_id"], self.namespace),
             ).fetchone()
-            if row == (event["correlation_id"], event["payload_hash"]):
+            if row == (event["correlation_id"], event["idempotency_key"], event["payload_hash"], event["sequence"]):
                 return "duplicate"
             raise IntegrationError("conflicting duplicate")
 
     def deliver(self, event: dict, *, unavailable: bool = False) -> str:
         with self.db:
             row = self.db.execute(
-                "SELECT state FROM delivery WHERE event_id=? AND sink=?",
+                "SELECT state,correlation_id,idempotency_key,payload_hash,sequence FROM delivery WHERE event_id=? AND sink=?",
                 (event["event_id"], self.namespace),
             ).fetchone()
             if row is None:
                 raise IntegrationError("event was not durably enqueued")
             if row[0] == "delivered":
                 return "duplicate_suppressed"
+            durable_identity = row[1:]
+            supplied_identity = (
+                event["correlation_id"], event["idempotency_key"],
+                event["payload_hash"], event["sequence"],
+            )
+            if durable_identity != supplied_identity:
+                raise IntegrationError("delivery identity differs from durable event")
             self.db.execute(
                 "UPDATE delivery SET attempts=attempts+1 WHERE event_id=? AND sink=?",
                 (event["event_id"], self.namespace),

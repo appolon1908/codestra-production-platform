@@ -48,6 +48,9 @@ class ServiceIdentityContract:
             raise IdentityError("authorized party is invalid")
         issued = int(claims.get("iat", 0))
         expiry = int(claims.get("exp", 0))
+        not_before = int(claims.get("nbf", issued))
+        if not_before > current + 30:
+            raise IdentityError("token is not valid yet")
         if issued > current + 30 or expiry <= current:
             raise IdentityError("token is not currently valid")
         if expiry - issued > self.maximum_ttl_seconds:

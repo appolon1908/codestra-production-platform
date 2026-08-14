@@ -119,10 +119,14 @@ class DurableEventHarness:
             return "accepted"
         except sqlite3.IntegrityError:
             row = self.connection.execute(
-                "SELECT event_id,payload_hash FROM event_inbox WHERE event_id=? OR idempotency_key=?",
+                "SELECT event_id,idempotency_key,correlation_id,payload_hash FROM event_inbox WHERE event_id=? OR idempotency_key=?",
                 (event["event_id"], event["idempotency_key"]),
             ).fetchone()
-            if row and row[0] == event["event_id"] and row[1] == event["payload_hash"]:
+            expected = (
+                event["event_id"], event["idempotency_key"],
+                event["correlation_id"], event["payload_hash"],
+            )
+            if row == expected:
                 return "duplicate"
             raise ContractError("conflicting idempotency identity")
 
