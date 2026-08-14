@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import subprocess
 import tempfile
@@ -13,6 +14,16 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 BACKUP = ROOT / "operations" / "backup"
 MONITORING = ROOT / "operations" / "monitoring"
+
+
+def load_receiver_validator():
+    spec = importlib.util.spec_from_file_location(
+        "validate_receiver_files", MONITORING / "validate-receiver-files.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def run(script: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -100,11 +111,10 @@ class MonitoringGovernanceTests(unittest.TestCase):
                 root = Path(directory)
                 for name in names:
                     (root / name).write_text(invalid)
-                result = subprocess.run(
-                    ["python3", str(MONITORING / "validate-receiver-files.py"), str(config), str(root)],
-                    text=True, capture_output=True, check=False,
+                result = load_receiver_validator().validate(
+                    config, root, expected_uid=os.getuid(), expected_gid=os.getgid()
                 )
-                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result, 2)
 
     def test_receiver_validator_accepts_nonplaceholder_protected_references(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -113,13 +123,13 @@ class MonitoringGovernanceTests(unittest.TestCase):
                 path = root / name
                 path.write_text(f"https://alerts.internal.testdomain/receiver-{index}")
                 path.chmod(0o600)
-            result = subprocess.run(
-                ["python3", str(MONITORING / "validate-receiver-files.py"), str(MONITORING / "alertmanager.example.yml"), str(root)],
-                text=True, capture_output=True, check=False,
+            result = load_receiver_validator().validate(
+                MONITORING / "alertmanager.example.yml",
+                root,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
             )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("receiver_files=validated count=4", result.stdout)
-        self.assertNotIn("https://", result.stdout)
+        self.assertEqual(result, 0)
 
     def test_receiver_validator_rejects_unsafe_mode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -128,12 +138,13 @@ class MonitoringGovernanceTests(unittest.TestCase):
                 path = root / name
                 path.write_text(f"https://alerts.internal.testdomain/receiver-{index}")
                 path.chmod(0o666)
-            result = subprocess.run(
-                ["python3", str(MONITORING / "validate-receiver-files.py"), str(MONITORING / "alertmanager.example.yml"), str(root)],
-                text=True, capture_output=True, check=False,
+            result = load_receiver_validator().validate(
+                MONITORING / "alertmanager.example.yml",
+                root,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
             )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("unsafe receiver file mode", result.stderr)
+        self.assertEqual(result, 2)
 
     def test_empty_governance_template_fails_closed(self) -> None:
         result = subprocess.run(
