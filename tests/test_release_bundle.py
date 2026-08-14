@@ -44,6 +44,15 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
     deployment = json.loads((outputs[0] / "deployment-manifest.json").read_text())
     assert deployment["required_flags"]
     assert not any(deployment["required_flags"].values())
+    assert {
+        "SEND_EVENTS",
+        "ENABLE_EXTERNAL_DELIVERY",
+        "ODOO_DELIVERY_ENABLED",
+        "N8N_DELIVERY_ENABLED",
+        "CALLBACK_DISPATCH",
+        "ENABLE_VICIDIAL_WRITES",
+        "PRODUCTION_DIALING",
+    } <= deployment["required_flags"].keys()
     assert deployment["release_tuple"]["middleware_protected_sha"] == "b" * 40
     assert deployment["release_tuple"]["middleware_image_digest"] == (
         "sha256:" + "c" * 64

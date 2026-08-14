@@ -16,6 +16,9 @@ from pathlib import Path
 FAIL_CLOSED_FLAGS = {
     "SEND_EVENTS": False,
     "ENABLE_EXTERNAL_DELIVERY": False,
+    "ODOO_DELIVERY_ENABLED": False,
+    "CALLBACK_DISPATCH": False,
+    "ENABLE_VICIDIAL_WRITES": False,
     "LIVE_WRITE": False,
     "ODOO_WRITE": False,
     "N8N_DELIVERY_ENABLED": False,
