@@ -100,4 +100,3 @@ class EffectiveOnceSink:
             self.db.execute("SELECT COUNT(*) FROM delivery").fetchone()[0],
             self.db.execute("SELECT COUNT(*) FROM effect").fetchone()[0],
         )
-

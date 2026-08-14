@@ -42,4 +42,3 @@ def test_newer_state_wins_without_duplicate_effect(tmp_path) -> None:
     assert sink.enqueue(event(1)) == "accepted"
     assert sink.deliver(event(1)) == "delivered"
     assert sink.counts() == (2, 1)
-

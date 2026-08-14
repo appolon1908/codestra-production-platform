@@ -59,4 +59,3 @@ class ServiceIdentityContract:
             raise IdentityError("tenant binding is invalid")
         if not claims.get("jti"):
             raise IdentityError("token identity is missing")
-

@@ -47,4 +47,3 @@ def test_valid_service_token() -> None:
 def test_fail_closed_token_matrix(change, signature, error) -> None:
     with pytest.raises(IdentityError, match=error):
         contract().authorize(claims(**change), tenant_id="tenant-synthetic", signature_verified=signature, now=NOW)
-
