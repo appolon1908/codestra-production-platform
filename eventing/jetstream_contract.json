@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "subject_prefix": "codestra.v1",
+  "required_event_fields": [
+    "event_id",
+    "correlation_id",
+    "tenant_id",
+    "campaign_id",
+    "event_type",
+    "schema_version",
+    "producer",
+    "created_at",
+    "idempotency_key",
+    "trace_context",
+    "privacy_classification",
+    "payload_hash"
+  ],
+  "streams": [
+    {
+      "name": "CODESTRA_INGRESS_V1",
+      "subjects": ["codestra.v1.*.*.events.ingress"],
+      "retention": "limits",
+      "storage": "file",
+      "replicas": 1,
+      "max_age_seconds": 604800,
+      "duplicate_window_seconds": 120,
+      "max_message_bytes": 1048576,
+      "deny_delete": true,
+      "deny_purge": true
+    },
+    {
+      "name": "CODESTRA_PROCESSING_V1",
+      "subjects": ["codestra.v1.*.*.events.processing"],
+      "retention": "workqueue",
+      "storage": "file",
+      "replicas": 1,
+      "max_age_seconds": 604800,
+      "duplicate_window_seconds": 120,
+      "max_message_bytes": 1048576,
+      "deny_delete": true,
+      "deny_purge": true
+    },
+    {
+      "name": "CODESTRA_RESULTS_V1",
+      "subjects": ["codestra.v1.*.*.events.results"],
+      "retention": "limits",
+      "storage": "file",
+      "replicas": 1,
+      "max_age_seconds": 2592000,
+      "duplicate_window_seconds": 120,
+      "max_message_bytes": 1048576,
+      "deny_delete": true,
+      "deny_purge": true
+    },
+    {
+      "name": "CODESTRA_CALLBACKS_V1",
+      "subjects": ["codestra.v1.*.*.events.callbacks"],
+      "retention": "workqueue",
+      "storage": "file",
+      "replicas": 1,
+      "max_age_seconds": 604800,
+      "duplicate_window_seconds": 120,
+      "max_message_bytes": 262144,
+      "deny_delete": true,
+      "deny_purge": true
+    },
+    {
+      "name": "CODESTRA_RETRY_V1",
+      "subjects": ["codestra.v1.*.*.events.retry"],
+      "retention": "workqueue",
+      "storage": "file",
+      "replicas": 1,
+      "max_age_seconds": 604800,
+      "duplicate_window_seconds": 120,
+      "max_message_bytes": 1048576,
+      "deny_delete": true,
+      "deny_purge": true
+    },
+    {
+      "name": "CODESTRA_DEAD_LETTER_V1",
+      "subjects": ["codestra.v1.*.*.events.dead_letter"],
+      "retention": "limits",
+      "storage": "file",
+      "replicas": 1,
+      "max_age_seconds": 7776000,
+      "duplicate_window_seconds": 120,
+      "max_message_bytes": 1048576,
+      "deny_delete": true,
+      "deny_purge": true
+    }
+  ],
+  "consumers": [
+    {
+      "stream": "CODESTRA_INGRESS_V1",
+      "durable": "middleware-ingress-v1",
+      "filter_subject": "codestra.v1.*.*.events.ingress",
+      "ack_policy": "explicit",
+      "ack_wait_seconds": 30,
+      "max_deliver": 5,
+      "backoff_seconds": [5, 15, 60, 300],
+      "replay_policy": "instant",
+      "deliver_policy": "new"
+    },
+    {
+      "stream": "CODESTRA_PROCESSING_V1",
+      "durable": "middleware-processor-v1",
+      "filter_subject": "codestra.v1.*.*.events.processing",
+      "ack_policy": "explicit",
+      "ack_wait_seconds": 30,
+      "max_deliver": 5,
+      "backoff_seconds": [5, 15, 60, 300],
+      "replay_policy": "instant",
+      "deliver_policy": "all"
+    },
+    {
+      "stream": "CODESTRA_RESULTS_V1",
+      "durable": "odoo-result-v1",
+      "filter_subject": "codestra.v1.*.*.events.results",
+      "ack_policy": "explicit",
+      "ack_wait_seconds": 60,
+      "max_deliver": 5,
+      "backoff_seconds": [5, 30, 120, 600],
+      "replay_policy": "instant",
+      "deliver_policy": "new"
+    },
+    {
+      "stream": "CODESTRA_CALLBACKS_V1",
+      "durable": "vicidial-callback-v1",
+      "filter_subject": "codestra.v1.*.*.events.callbacks",
+      "ack_policy": "explicit",
+      "ack_wait_seconds": 30,
+      "max_deliver": 5,
+      "backoff_seconds": [5, 15, 60, 300],
+      "replay_policy": "instant",
+      "deliver_policy": "all"
+    },
+    {
+      "stream": "CODESTRA_RETRY_V1",
+      "durable": "middleware-retry-v1",
+      "filter_subject": "codestra.v1.*.*.events.retry",
+      "ack_policy": "explicit",
+      "ack_wait_seconds": 60,
+      "max_deliver": 5,
+      "backoff_seconds": [15, 60, 300, 900],
+      "replay_policy": "instant",
+      "deliver_policy": "all"
+    }
+  ],
+  "dead_letter_policy": {
+    "source": "application_after_max_deliver",
+    "target_suffix": "events.dead_letter",
+    "preserve_event_id": true,
+    "preserve_correlation_id": true,
+    "required_failure_fields": ["failure_class", "failed_at", "delivery_attempts"]
+  },
+  "historical_replay_allowed": false
+}

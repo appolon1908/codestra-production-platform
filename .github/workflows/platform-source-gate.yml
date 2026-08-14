@@ -32,7 +32,10 @@ jobs:
           cache: pip
 
       - name: Install source-test dependencies
-        run: python -m pip install pytest pytest-subtests PyYAML requests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nats-server
+          python -m pip install pytest pytest-subtests PyYAML requests "nats-py==2.15.0"
 
       - name: Verify recovered source evidence hashes
         run: |

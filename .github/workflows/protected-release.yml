@@ -34,8 +34,10 @@ jobs:
 
       - name: Run complete source tests
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nats-server
           python -m pip install --upgrade "setuptools==83.0.0"
-          python -m pip install pytest pytest-subtests PyYAML requests pip-audit
+          python -m pip install pytest pytest-subtests PyYAML requests pip-audit "nats-py==2.15.0"
           python -m pip install -e 'vicidial[test]'
           python -m pytest -q
           python -m pip_audit --local
