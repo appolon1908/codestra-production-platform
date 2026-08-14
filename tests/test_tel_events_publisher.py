@@ -93,6 +93,6 @@ def test_watermark_permission_and_schema():
     try:
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
         from tel_events.publisher import load_watermark
-        assert len(load_watermark(path)) == 2
+        assert len(load_watermark(path, allowed_owner_uid=os.getuid())) == 2
     finally:
         os.unlink(path)

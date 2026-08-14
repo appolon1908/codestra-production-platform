@@ -67,10 +67,14 @@ def _utc_epoch(value: str) -> int:
     return int(parsed.replace(tzinfo=timezone.utc).timestamp())
 
 
-def load_watermark(path: str, allowed_group: str | None = None) -> tuple[SourceBoundary, ...]:
+def load_watermark(
+    path: str,
+    allowed_group: str | None = None,
+    allowed_owner_uid: int = 0,
+) -> tuple[SourceBoundary, ...]:
     st = os.stat(path)
     group_read = bool(st.st_mode & 0o040)
-    if st.st_uid != 0 or st.st_mode & 0o007 or (group_read and not allowed_group):
+    if st.st_uid != allowed_owner_uid or st.st_mode & 0o007 or (group_read and not allowed_group):
         raise PublisherError("watermark must be root-owned and private")
     if group_read:
         import grp

@@ -25,16 +25,14 @@ def reachable(parsed: urllib.parse.ParseResult) -> None:
                 pass
 
 
-def main() -> int:
-    args = sys.argv[1:]
-    check_network = False
-    if "--check-network" in args:
-        args.remove("--check-network")
-        check_network = True
-    if len(args) != 2:
-        print("usage: validate-receiver-files.py [--check-network] ALERTMANAGER_CONFIG HOST_SECRET_DIR", file=sys.stderr)
-        return 2
-    config_path, secret_dir = map(Path, args)
+def validate(
+    config_path: Path,
+    secret_dir: Path,
+    *,
+    check_network: bool = False,
+    expected_uid: int = 0,
+    expected_gid: int = 0,
+) -> int:
     config = yaml.safe_load(config_path.read_text())
     validated = 0
     for receiver in config.get("receivers", []):
@@ -52,7 +50,7 @@ def main() -> int:
                 return 2
             metadata = actual.stat()
             mode = metadata.st_mode & 0o777
-            if metadata.st_uid != 0 or metadata.st_gid != 0:
+            if metadata.st_uid != expected_uid or metadata.st_gid != expected_gid:
                 print(f"unsafe receiver file owner: {actual}", file=sys.stderr)
                 return 2
             if mode not in ALLOWED_MODES:
@@ -79,7 +77,7 @@ def main() -> int:
             fingerprint = hashlib.sha256(value.encode()).hexdigest()
             receiver_type = receiver.get("name", "unknown").replace("approved-", "")
             print(
-                f"receiver_type={receiver_type} path={actual} owner=root:root "
+                f"receiver_type={receiver_type} path={actual} owner={metadata.st_uid}:{metadata.st_gid} "
                 f"mode={mode:o} fingerprint={fingerprint} network={'PASS' if check_network else 'NOT_CHECKED'}"
             )
             validated += 1
@@ -88,6 +86,18 @@ def main() -> int:
         return 2
     print(f"receiver_files=validated count={validated}")
     return 0
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    check_network = False
+    if "--check-network" in args:
+        args.remove("--check-network")
+        check_network = True
+    if len(args) != 2:
+        print("usage: validate-receiver-files.py [--check-network] ALERTMANAGER_CONFIG HOST_SECRET_DIR", file=sys.stderr)
+        return 2
+    return validate(*map(Path, args), check_network=check_network)
 
 
 if __name__ == "__main__":
