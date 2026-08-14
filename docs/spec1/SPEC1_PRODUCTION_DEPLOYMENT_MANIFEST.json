@@ -1,0 +1,9 @@
+{
+  "schema_version": "spec1.deployment.v1",
+  "status": "BLOCKED",
+  "protected_release_sha": null,
+  "image_digests": [],
+  "configuration_digests": [],
+  "required_fail_closed_flags": true,
+  "authorization_reference": null
+}

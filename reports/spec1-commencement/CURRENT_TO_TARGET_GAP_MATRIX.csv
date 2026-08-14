@@ -1,0 +1,15 @@
+domain,current,target,status,blocking_input
+Network,Single 10.40/24 VLAN,Six default-deny zones,BLOCKED,Approved Hetzner network and routing plan
+Edge,Server A reverse proxy,EDGE-01/02 plus load balancer,BLOCKED,Billable infrastructure and DNS authority
+Odoo,Single app and local PostgreSQL/filestore,Two app nodes HA DB shared filestore,BLOCKED,Storage and HA database decision
+Middleware,Consolidated APIs and workers,Two API two worker nodes,BLOCKED,Infrastructure and immutable images
+Control PostgreSQL,Single consolidated database,Three-node HA cluster,BLOCKED,HA technology and failure-domain approval
+Redis,Single node,Three-node HA,BLOCKED,Quorum and persistence decision
+NATS,Single loopback service,Three-node JetStream,BLOCKED,Stream and tenant subject approval
+n8n,Consolidated main/workers,Isolated main and two workers,BLOCKED,Infrastructure and external workflow authorization
+Keycloak,Single production runtime,Two HA nodes,BLOCKED,HA database/discovery design
+Telephony,Single Server B,Redundant web dialer DB adapters,BLOCKED,Telephony maintenance/cutover authority
+AI,Disabled,Redundant edge and gateway,TARGET_PHASE_2,Separate AI authorization and provider capacity
+Monitoring,Consolidated,OBS-01/02,BLOCKED,Alert transport and owner assignments
+Release,PR source validation,Signed immutable component images,BLOCKED,Registry and CI signing credentials
+Backups,Encrypted snapshot and restore evidence,Cross-zone DR and recurring rehearsals,IMPLEMENTED,Target repositories pending infrastructure

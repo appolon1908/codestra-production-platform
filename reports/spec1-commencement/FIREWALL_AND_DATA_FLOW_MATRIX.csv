@@ -1,0 +1,21 @@
+source_zone,destination,protocol_ports,purpose,decision
+Internet,EDGE VIP,tcp/443,Public Odoo and middleware ingress,ALLOW_WAF_ONLY
+DMZ,Odoo VIP,tcp/8069 or approved proxy port,Proxied Odoo traffic,ALLOW
+DMZ,Middleware API VIP,tcp/8443 or approved API port,Proxied API traffic,ALLOW
+DMZ,Database Redis NATS Telephony AI admin,any,No direct access,DENY
+Application,Odoo PostgreSQL,tcp/5432,Odoo database,ALLOW_IDENTITY_SCOPED
+Application,Control PostgreSQL,tcp/5432,Middleware Keycloak n8n databases,ALLOW_IDENTITY_SCOPED
+Application,Redis,tcp/6379,Fast state,ALLOW_MTLS_OR_ACL
+Application,NATS,tcp/4222,Durable events,ALLOW_MTLS_SUBJECT_SCOPED
+Middleware API/worker,VICIdial adapter VIP,tcp/8443,Restricted control/readback,ALLOW_MTLS_HMAC
+VICIdial adapter,MariaDB,tcp/3306 local/private,Approved narrow local operations,ALLOW_LEAST_PRIVILEGE
+Odoo n8n browser AI,VICIdial MariaDB,any,Bypass prohibited,DENY
+AI Gateway,Middleware tool gateway,tcp/8443,Authorized business tools,ALLOW_MTLS_OIDC
+AI zone,Databases Redis NATS admin SIP credentials,any,Direct privileged access,DENY
+Monitoring,All private nodes,approved scrape/syslog/OTLP,Metrics logs traces,ALLOW_SOURCE_SCOPED
+Management,All nodes,tcp/22 and admin ports,Named admin/break-glass,ALLOW_PRIVATE_MFA
+Any,Private databases/adapters from Internet,any,Public exposure prohibited,DENY
+
+All omitted flows default deny. Stateful return traffic is allowed only for an
+approved initiating flow. Firewall implementation requires a rollback timer and
+out-of-band recovery validation.

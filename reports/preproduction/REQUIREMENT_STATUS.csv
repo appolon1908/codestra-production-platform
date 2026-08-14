@@ -1,4 +1,5 @@
 requirement,status,evidence_or_blocker
+SPEC-1 infrastructure commencement package,EVIDENCE_ATTACHED,reports/spec1-commencement/MANIFEST.sha256
 SPEC-1 target architecture,IMPLEMENTED,specs/SPEC-1_SERVER_ALLOCATION_AND_SYSTEM_MISSIONS.md
 Global production mission,IMPLEMENTED,specs/GLOBAL_CALL_CENTER_PRODUCTION_MISSION.md
 Current-versus-target topology,IMPLEMENTED,docs/CURRENT_VS_TARGET_TOPOLOGY.md
