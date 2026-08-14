@@ -171,3 +171,28 @@ def test_dead_letter_final_size_bound_fails_closed() -> None:
     from eventing.dead_letter import forward_max_delivery_advisory
 
     asyncio.run(scenario())
+
+
+def test_compact_numeric_json_is_not_expanded_during_dead_lettering() -> None:
+    async def scenario():
+        js = JetStream(Subscription([]))
+        compact_numbers = b"[" + b",".join([b"1e1"] * 190_000) + b"]"
+        original_data = b'{"event_id":"numeric-event","payload":' + compact_numbers + b"}"
+        assert len(original_data) < 983040
+
+        async def get_msg(stream, seq):
+            class Original:
+                subject = "codestra.v1.synthetic.TEST_SYN.events.ingress"
+                data = original_data
+
+            return Original()
+
+        js.get_msg = get_msg
+        assert await forward_max_delivery_advisory(js, advisory()) == "forwarded"
+        assert compact_numbers in js.published_data
+        assert len(js.published_data) <= 1048576
+        assert json.loads(js.published_data)["failure"]["delivery_attempts"] == 5
+
+    from eventing.dead_letter import forward_max_delivery_advisory
+
+    asyncio.run(scenario())

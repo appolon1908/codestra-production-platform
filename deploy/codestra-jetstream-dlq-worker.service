@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/codestra/jetstream-dlq-worker.env
-ExecStartPre=/usr/bin/python3 /opt/codestra/production-platform/tools/verify_jetstream_worker_image.py --manifest /etc/codestra/deployment-manifest.json --environment /etc/codestra/jetstream-dlq-worker.env
+ExecStartPre=/usr/bin/python3 /opt/codestra/production-platform/tools/verify_jetstream_worker_image.py --manifest /etc/codestra/release/deployment-manifest.json --environment /etc/codestra/jetstream-dlq-worker.env --checksums /etc/codestra/release/manifest.sha256 --signature /etc/codestra/release/manifest.sha256.sig --allowed-signers /etc/codestra/release/allowed_signers --identity codestra-release
 ExecStart=/usr/bin/docker run --rm --name codestra-jetstream-dlq-worker --network host --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,size=16m --env-file /etc/codestra/jetstream-dlq-worker.env --mount type=bind,src=/run/codestra/nats,dst=/run/codestra/nats,readonly ${MIDDLEWARE_IMAGE} python -m app.entrypoints.jetstream_dlq_worker
 ExecStop=/usr/bin/docker stop --time 30 codestra-jetstream-dlq-worker
 Restart=on-failure

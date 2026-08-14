@@ -11,5 +11,8 @@ def test_dlq_worker_is_deployable_and_fail_closed() -> None:
     assert "--cap-drop ALL" in unit
     assert "--mount type=bind,src=/run/codestra/nats" in unit
     assert "tools/verify_jetstream_worker_image.py" in unit
-    assert "--manifest /etc/codestra/deployment-manifest.json" in unit
+    assert "--manifest /etc/codestra/release/deployment-manifest.json" in unit
+    assert "--checksums /etc/codestra/release/manifest.sha256" in unit
+    assert "--signature /etc/codestra/release/manifest.sha256.sig" in unit
+    assert "--allowed-signers /etc/codestra/release/allowed_signers" in unit
     assert "JETSTREAM_DLQ_WORKER_ENABLED=false" in environment

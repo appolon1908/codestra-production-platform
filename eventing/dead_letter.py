@@ -34,17 +34,28 @@ async def forward_max_delivery_advisory(js, advisory_payload: bytes) -> str:
         raise DeadLetterError("original subject is outside the Codestra event contract")
     dead_letter_subject = ".".join([*segments[:5], "dead_letter"])
     envelope = json.loads(original.data)
+    if not isinstance(envelope, dict):
+        raise DeadLetterError("original event envelope must be a JSON object")
     event_id = envelope.get("event_id")
     if not event_id:
         raise DeadLetterError("original event identity is missing")
-    envelope["failure"] = {
+    if "failure" in envelope:
+        raise DeadLetterError("original event already contains failure metadata")
+    failure = {
         "failure_class": "max_deliver_exhausted",
         "failed_at": datetime.now(timezone.utc).isoformat(),
         "delivery_attempts": deliveries,
     }
-    dead_letter_data = json.dumps(
-        envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    original_data = original.data.rstrip()
+    if not original_data.endswith(b"}"):
+        raise DeadLetterError("original event envelope must be a JSON object")
+    failure_data = json.dumps(
+        failure, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode()
+    separator = b"," if envelope else b""
+    dead_letter_data = (
+        original_data[:-1] + separator + b'"failure":' + failure_data + b"}"
+    )
     if len(dead_letter_data) > MAX_DEAD_LETTER_BYTES:
         raise DeadLetterError("dead-letter envelope exceeds stream message bound")
     headers = {
