@@ -81,5 +81,17 @@ def test_newer_sequence_cannot_change_correlation_identity(tmp_path) -> None:
     assert sink.deliver(first) == "delivered"
     conflicting = {**event(2), "correlation_id": "different-correlation"}
     assert sink.enqueue(conflicting) == "accepted"
-    with pytest.raises(IntegrationError, match="newer effect correlation identity conflicts"):
+    with pytest.raises(IntegrationError, match="effect correlation identity conflicts"):
         sink.deliver(conflicting)
+
+
+def test_stale_sequence_cannot_change_correlation_identity(tmp_path) -> None:
+    sink = EffectiveOnceSink(tmp_path / "stale-correlation.sqlite3", "odoo_test")
+    newest = event(2)
+    assert sink.enqueue(newest) == "accepted"
+    assert sink.deliver(newest) == "delivered"
+    stale = {**event(1), "correlation_id": "different-correlation"}
+    assert sink.enqueue(stale) == "accepted"
+    with pytest.raises(IntegrationError, match="effect correlation identity conflicts"):
+        sink.deliver(stale)
+    assert sink.counts() == (2, 1)
