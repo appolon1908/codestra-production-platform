@@ -94,6 +94,8 @@ class EffectiveOnceSink:
                     (self.namespace, event["idempotency_key"], event["correlation_id"], event["sequence"], event["payload_hash"]),
                 )
             elif event["sequence"] > current[1]:
+                if event["correlation_id"] != current[0]:
+                    raise IntegrationError("newer effect correlation identity conflicts")
                 self.db.execute(
                     "UPDATE effect SET terminal_sequence=?,payload_hash=? WHERE sink=? AND idempotency_key=?",
                     (event["sequence"], event["payload_hash"], self.namespace, event["idempotency_key"]),

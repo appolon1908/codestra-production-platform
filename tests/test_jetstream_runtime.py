@@ -12,7 +12,7 @@ import nats
 import pytest
 from nats.js import api
 
-from eventing.dead_letter import forward_max_delivery_advisory
+from eventing.dead_letter import subscribe_dead_letter_forwarder
 from tools.apply_jetstream_contract import apply_contract
 
 
@@ -155,9 +155,7 @@ def test_max_delivery_advisory_is_forwarded_once_to_dlq(tmp_path):
                     deliver_policy=api.DeliverPolicy.ALL,
                 ),
             )
-            advisories = await client.subscribe(
-                "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.CODESTRA_INGRESS_V1.middleware-ingress-v1"
-            )
+            worker = await subscribe_dead_letter_forwarder(client, js)
             subject = "codestra.v1.synthetic-tenant.TEST_SYN.events.ingress"
             await js.publish(subject, payload(), headers={"Nats-Msg-Id": "evt-dlq-1"})
             subscription = await js.pull_subscribe(
@@ -169,11 +167,18 @@ def test_max_delivery_advisory_is_forwarded_once_to_dlq(tmp_path):
             await second.nak()
             with pytest.raises(nats.errors.TimeoutError):
                 await subscription.fetch(1, timeout=0.5)
-            advisory = await advisories.next_msg(timeout=2)
-            assert await forward_max_delivery_advisory(js, advisory.data) == "forwarded"
-            assert await forward_max_delivery_advisory(js, advisory.data) == "duplicate"
-            info = await js.stream_info("CODESTRA_DEAD_LETTER_V1")
+            for _ in range(20):
+                info = await js.stream_info("CODESTRA_DEAD_LETTER_V1")
+                if info.state.messages == 1:
+                    break
+                await asyncio.sleep(0.1)
             assert info.state.messages == 1
+            message = await js.get_msg("CODESTRA_DEAD_LETTER_V1", seq=1)
+            envelope = json.loads(message.data)
+            assert envelope["failure"]["failure_class"] == "max_deliver_exhausted"
+            assert envelope["failure"]["delivery_attempts"] == 2
+            assert envelope["failure"]["failed_at"].endswith("+00:00")
+            await worker.unsubscribe()
             await client.drain()
         finally:
             server.terminate()

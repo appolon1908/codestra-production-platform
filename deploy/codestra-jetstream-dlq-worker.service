@@ -1,0 +1,23 @@
+[Unit]
+Description=Codestra JetStream dead-letter forwarding worker
+After=network-online.target nats-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=codestra-middleware
+Group=codestra-middleware
+EnvironmentFile=/etc/codestra/jetstream-dlq-worker.env
+ExecStart=/opt/codestra/production-platform/venv/bin/python /opt/codestra/production-platform/tools/run_jetstream_dlq_worker.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
