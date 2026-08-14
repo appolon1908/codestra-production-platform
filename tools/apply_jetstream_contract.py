@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from pathlib import Path
+import ssl
 
 import nats
 from nats.js import api
@@ -23,9 +24,21 @@ DELIVERY = {
 }
 
 
-async def apply_contract(server: str, contract_path: Path | None = None) -> None:
+def tls_context(ca_file: Path, cert_file: Path, key_file: Path) -> ssl.SSLContext:
+    """Build the mutually authenticated TLS context required in production."""
+    context = ssl.create_default_context(cafile=ca_file)
+    context.load_cert_chain(cert_file, key_file)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
+async def apply_contract(
+    server: str,
+    contract_path: Path | None = None,
+    tls: ssl.SSLContext | None = None,
+) -> None:
     contract = load_contract(contract_path)
-    client = await nats.connect(server, connect_timeout=2)
+    client = await nats.connect(server, connect_timeout=2, tls=tls)
     try:
         manager = client.jetstream()
         for item in contract["streams"]:
@@ -46,6 +59,27 @@ async def apply_contract(server: str, contract_path: Path | None = None) -> None
                 await manager.update_stream(config=config)
             except nats.js.errors.NotFoundError:
                 await manager.add_stream(config=config)
+            actual = (await manager.stream_info(item["name"])).config
+            expected = {
+                "subjects": config.subjects,
+                "retention": config.retention,
+                "storage": config.storage,
+                "num_replicas": config.num_replicas,
+                "max_age": config.max_age,
+                "duplicate_window": config.duplicate_window,
+                "max_msg_size": config.max_msg_size,
+                "deny_delete": config.deny_delete,
+                "deny_purge": config.deny_purge,
+            }
+            mismatches = {
+                field: (wanted, getattr(actual, field))
+                for field, wanted in expected.items()
+                if getattr(actual, field) != wanted
+            }
+            if mismatches:
+                raise RuntimeError(
+                    f"stream {item['name']} differs from contract: {mismatches}"
+                )
         for item in contract["consumers"]:
             config = api.ConsumerConfig(
                 durable_name=item["durable"],
@@ -109,10 +143,19 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--server", required=True)
     parser.add_argument("--contract", type=Path)
+    parser.add_argument("--tls-ca", type=Path)
+    parser.add_argument("--tls-cert", type=Path)
+    parser.add_argument("--tls-key", type=Path)
     args = parser.parse_args()
-    if not args.server.startswith("nats://"):
-        parser.error("an explicit nats:// URL is required")
-    asyncio.run(apply_contract(args.server, args.contract))
+    if not args.server.startswith(("nats://", "tls://")):
+        parser.error("an explicit nats:// or tls:// URL is required")
+    tls_files = (args.tls_ca, args.tls_cert, args.tls_key)
+    if args.server.startswith("tls://") and not all(tls_files):
+        parser.error("tls:// requires --tls-ca, --tls-cert, and --tls-key")
+    if args.server.startswith("nats://") and any(tls_files):
+        parser.error("TLS credentials require an explicit tls:// URL")
+    context = tls_context(*tls_files) if all(tls_files) else None
+    asyncio.run(apply_contract(args.server, args.contract, context))
     print("jetstream_contract=applied")
     return 0
 

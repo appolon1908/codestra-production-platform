@@ -41,10 +41,28 @@ def test_contract_is_durable_bounded_and_non_replaying():
     assert streams["CODESTRA_DEAD_LETTER_V1"]["duplicate_window_seconds"] == (
         streams["CODESTRA_DLQ_ADVISORIES_V1"]["max_age_seconds"]
     )
+    source_sizes = [
+        streams[item["stream"]]["max_message_bytes"]
+        for item in contract["consumers"]
+        if item["stream"] != "CODESTRA_DLQ_ADVISORIES_V1"
+    ]
+    assert streams["CODESTRA_DEAD_LETTER_V1"]["max_message_bytes"] >= (
+        max(source_sizes) + 65536
+    )
     assert all(
         "CODESTRA_DLQ_ADVISORIES_V1" not in subject
         for subject in streams["CODESTRA_DLQ_ADVISORIES_V1"]["subjects"]
     )
+
+
+def test_contract_rejects_missing_dead_letter_metadata_headroom():
+    contract = load_contract()
+    streams = {item["name"]: item for item in contract["streams"]}
+    streams["CODESTRA_INGRESS_V1"]["max_message_bytes"] = 1048576
+    with pytest.raises(ContractError, match="headroom"):
+        from eventing.contract import validate_contract
+
+        validate_contract(contract)
 
 
 def test_duplicate_and_conflicting_delivery(tmp_path):

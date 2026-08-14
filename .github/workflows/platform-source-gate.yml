@@ -3,13 +3,15 @@ name: Platform source validation
 on:
   pull_request:
     paths:
-      - ".github/workflows/platform-source-gate.yml"
+      - ".github/workflows/**"
       - "campaign_provisioning/**"
       - "control_plane/**"
       - "eventing/**"
       - "identity/**"
       - "integrations/**"
       - "config/**"
+      - "deploy/**"
+      - "docs/**"
       - "scripts/**"
       - "tel_events/**"
       - "tools/**"

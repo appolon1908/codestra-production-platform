@@ -18,6 +18,7 @@ REQUIRED_EVENT_FIELDS = {
     "schema_version", "producer", "created_at", "idempotency_key",
     "trace_context", "privacy_classification", "payload_hash",
 }
+DLQ_FAILURE_METADATA_RESERVE_BYTES = 65536
 
 
 def load_contract(path: Path | None = None) -> dict[str, Any]:
@@ -36,6 +37,7 @@ def validate_contract(contract: dict[str, Any]) -> None:
     if len({stream["name"] for stream in streams}) != len(streams):
         raise ContractError("stream names must be unique")
     subjects: set[str] = set()
+    stream_sizes = {stream["name"]: stream["max_message_bytes"] for stream in streams}
     for stream in streams:
         if stream["storage"] != "file" or stream["replicas"] < 1:
             raise ContractError("streams must be durable")
@@ -55,6 +57,16 @@ def validate_contract(contract: dict[str, Any]) -> None:
             ) or subject in subjects:
                 raise ContractError("subjects must be tenant/campaign scoped and non-overlapping")
             subjects.add(subject)
+    source_streams = {
+        consumer["stream"]
+        for consumer in contract.get("consumers", ())
+        if consumer["stream"] != "CODESTRA_DLQ_ADVISORIES_V1"
+    }
+    largest_source = max(stream_sizes[name] for name in source_streams)
+    if stream_sizes["CODESTRA_DEAD_LETTER_V1"] < (
+        largest_source + DLQ_FAILURE_METADATA_RESERVE_BYTES
+    ):
+        raise ContractError("dead-letter stream lacks failure metadata headroom")
     names = {stream["name"] for stream in streams}
     retention = {stream["name"]: stream["retention"] for stream in streams}
     consumers = contract.get("consumers", ())
