@@ -25,6 +25,16 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
                 "fixture-run",
                 "--workflow-ref",
                 "fixture-workflow",
+                "--middleware-sha",
+                "b" * 40,
+                "--middleware-image-digest",
+                "sha256:" + "c" * 64,
+                "--middleware-signature-status",
+                "PASS",
+                "--middleware-provenance-status",
+                "PASS",
+                "--migration-revision",
+                "fixture-revision-1",
             ],
             check=True,
         )
@@ -34,6 +44,10 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
     deployment = json.loads((outputs[0] / "deployment-manifest.json").read_text())
     assert deployment["required_flags"]
     assert not any(deployment["required_flags"].values())
+    assert deployment["release_tuple"]["middleware_protected_sha"] == "b" * 40
+    assert deployment["release_tuple"]["middleware_image_digest"] == (
+        "sha256:" + "c" * 64
+    )
     sbom = json.loads((outputs[0] / "sbom.cdx.json").read_text())
     assert sbom["bomFormat"] == "CycloneDX"
     assert sbom["components"]
@@ -42,3 +56,28 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
     assert provenance["predicateType"] == "https://slsa.dev/provenance/v1"
     assert provenance["predicate"]["buildDefinition"]["externalParameters"]["commit"] == "a" * 40
     assert provenance["predicate"]["runDetails"]["metadata"]["invocationId"] == "fixture-run"
+
+
+def test_release_bundle_rejects_staging_only_middleware_digest(tmp_path: Path) -> None:
+    root = Path(__file__).parents[1]
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(root / "tools/build_release_bundle.py"),
+            "--root", str(root),
+            "--output", str(tmp_path / "blocked"),
+            "--commit", "a" * 40,
+            "--run-id", "fixture-run",
+            "--workflow-ref", "fixture-workflow",
+            "--middleware-sha", "b" * 40,
+            "--middleware-image-digest",
+            "sha256:2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff",
+            "--middleware-signature-status", "PASS",
+            "--middleware-provenance-status", "PASS",
+            "--migration-revision", "fixture-revision-1",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "staging-only middleware digest is prohibited" in result.stderr

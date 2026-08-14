@@ -25,3 +25,18 @@ def test_staging_only_digest_is_not_production_manifest_authority() -> None:
         "2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff"
     )
     assert staging_digest not in manifest
+
+
+def test_protected_release_gate_requires_completed_middleware_tuple() -> None:
+    workflow = Path(".github/workflows/protected-release.yml").read_text()
+    builder = Path("tools/build_release_bundle.py").read_text()
+    for name in (
+        "CODESTRA_MIDDLEWARE_PROTECTED_SHA",
+        "CODESTRA_MIDDLEWARE_PRODUCTION_IMAGE_DIGEST",
+        "CODESTRA_MIDDLEWARE_PRODUCTION_SIGNATURE_STATUS",
+        "CODESTRA_MIDDLEWARE_PRODUCTION_PROVENANCE_STATUS",
+        "CODESTRA_MIDDLEWARE_MIGRATION_REVISION",
+    ):
+        assert name in workflow
+    assert "staging-only middleware digest is prohibited" in builder
+    assert '"release_tuple"' in builder

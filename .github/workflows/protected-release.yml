@@ -43,14 +43,35 @@ jobs:
           python -m pip_audit --local
 
       - name: Build deterministic release, SBOM and provenance
+        env:
+          MIDDLEWARE_PROTECTED_SHA: ${{ vars.CODESTRA_MIDDLEWARE_PROTECTED_SHA }}
+          MIDDLEWARE_IMAGE_DIGEST: ${{ vars.CODESTRA_MIDDLEWARE_PRODUCTION_IMAGE_DIGEST }}
+          MIDDLEWARE_SIGNATURE_STATUS: ${{ vars.CODESTRA_MIDDLEWARE_PRODUCTION_SIGNATURE_STATUS }}
+          MIDDLEWARE_PROVENANCE_STATUS: ${{ vars.CODESTRA_MIDDLEWARE_PRODUCTION_PROVENANCE_STATUS }}
+          MIDDLEWARE_MIGRATION_REVISION: ${{ vars.CODESTRA_MIDDLEWARE_MIGRATION_REVISION }}
         run: |
           python tools/build_release_bundle.py \
             --root . \
             --output dist \
             --commit "${GITHUB_SHA}" \
             --run-id "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" \
-            --workflow-ref "${GITHUB_WORKFLOW_REF}"
+            --workflow-ref "${GITHUB_WORKFLOW_REF}" \
+            --middleware-sha "${MIDDLEWARE_PROTECTED_SHA}" \
+            --middleware-image-digest "${MIDDLEWARE_IMAGE_DIGEST}" \
+            --middleware-signature-status "${MIDDLEWARE_SIGNATURE_STATUS}" \
+            --middleware-provenance-status "${MIDDLEWARE_PROVENANCE_STATUS}" \
+            --migration-revision "${MIDDLEWARE_MIGRATION_REVISION}"
           (cd dist && sha256sum --check manifest.sha256)
+          python - <<'PY'
+          import json
+          import os
+          manifest = json.load(open("dist/deployment-manifest.json"))
+          release = manifest["release_tuple"]
+          assert release["middleware_protected_sha"] == os.environ["MIDDLEWARE_PROTECTED_SHA"]
+          assert release["middleware_image_digest"] == os.environ["MIDDLEWARE_IMAGE_DIGEST"]
+          assert release["middleware_signature_verification"] == "PASS"
+          assert release["middleware_provenance_verification"] == "PASS"
+          PY
 
       - name: Sign and independently verify release manifest
         env:
