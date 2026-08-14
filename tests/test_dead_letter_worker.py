@@ -57,6 +57,8 @@ class JetStream:
         return Original()
 
     async def publish(self, subject, data, headers):
+        self.published_data = data
+
         class Ack:
             duplicate = False
 
@@ -118,5 +120,54 @@ def test_worker_restart_rebinds_existing_durable_consumer() -> None:
             ("middleware-dlq-advisory-v1", "CODESTRA_DLQ_ADVISORIES_V1"),
             ("middleware-dlq-advisory-v1", "CODESTRA_DLQ_ADVISORIES_V1"),
         ]
+
+    asyncio.run(scenario())
+
+
+def test_unicode_dead_letter_serialization_preserves_stream_headroom() -> None:
+    async def scenario():
+        js = JetStream(Subscription([]))
+        text = "界" * 250_000
+
+        async def get_msg(stream, seq):
+            class Original:
+                subject = "codestra.v1.synthetic.TEST_SYN.events.ingress"
+                data = json.dumps(
+                    {"event_id": "unicode-event", "payload": text},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode()
+
+            return Original()
+
+        js.get_msg = get_msg
+        assert await forward_max_delivery_advisory(js, advisory()) == "forwarded"
+        assert len(js.published_data) <= 1048576
+        assert json.loads(js.published_data)["payload"] == text
+
+    from eventing.dead_letter import forward_max_delivery_advisory
+
+    asyncio.run(scenario())
+
+
+def test_dead_letter_final_size_bound_fails_closed() -> None:
+    async def scenario():
+        js = JetStream(Subscription([]))
+
+        async def get_msg(stream, seq):
+            class Original:
+                subject = "codestra.v1.synthetic.TEST_SYN.events.ingress"
+                data = json.dumps(
+                    {"event_id": "oversize-event", "payload": "x" * 1_048_500},
+                    separators=(",", ":"),
+                ).encode()
+
+            return Original()
+
+        js.get_msg = get_msg
+        with pytest.raises(DeadLetterError, match="exceeds stream message bound"):
+            await forward_max_delivery_advisory(js, advisory())
+
+    from eventing.dead_letter import forward_max_delivery_advisory
 
     asyncio.run(scenario())

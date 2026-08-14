@@ -69,8 +69,6 @@ class EffectiveOnceSink:
             ).fetchone()
             if row is None:
                 raise IntegrationError("event was not durably enqueued")
-            if row[0] == "delivered":
-                return "duplicate_suppressed"
             durable_identity = row[1:]
             supplied_identity = (
                 event["correlation_id"], event["idempotency_key"],
@@ -78,6 +76,8 @@ class EffectiveOnceSink:
             )
             if durable_identity != supplied_identity:
                 raise IntegrationError("delivery identity differs from durable event")
+            if row[0] == "delivered":
+                return "duplicate_suppressed"
             self.db.execute(
                 "UPDATE delivery SET attempts=attempts+1 WHERE event_id=? AND sink=?",
                 (event["event_id"], self.namespace),

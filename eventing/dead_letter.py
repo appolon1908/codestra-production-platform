@@ -10,6 +10,9 @@ class DeadLetterError(RuntimeError):
     pass
 
 
+MAX_DEAD_LETTER_BYTES = 1048576
+
+
 async def forward_max_delivery_advisory(js, advisory_payload: bytes) -> str:
     """Persist the exhausted original message in the tenant/campaign DLQ.
 
@@ -40,8 +43,10 @@ async def forward_max_delivery_advisory(js, advisory_payload: bytes) -> str:
         "delivery_attempts": deliveries,
     }
     dead_letter_data = json.dumps(
-        envelope, sort_keys=True, separators=(",", ":")
+        envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode()
+    if len(dead_letter_data) > MAX_DEAD_LETTER_BYTES:
+        raise DeadLetterError("dead-letter envelope exceeds stream message bound")
     headers = {
         "Nats-Msg-Id": f"dead-letter:{stream}:{consumer}:{event_id}",
         "Codestra-Original-Stream": stream,

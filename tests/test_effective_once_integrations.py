@@ -44,6 +44,16 @@ def test_delivery_rejects_identity_not_durably_enqueued(tmp_path) -> None:
         sink.deliver(altered)
 
 
+def test_delivered_retry_still_requires_exact_durable_identity(tmp_path) -> None:
+    sink = EffectiveOnceSink(tmp_path / "delivered-identity.sqlite3", "odoo_test")
+    accepted = event()
+    assert sink.enqueue(accepted) == "accepted"
+    assert sink.deliver(accepted) == "delivered"
+    altered = {**accepted, "payload_hash": "0" * 64}
+    with pytest.raises(IntegrationError, match="differs from durable event"):
+        sink.deliver(altered)
+
+
 def test_newer_state_wins_without_duplicate_effect(tmp_path) -> None:
     sink = EffectiveOnceSink(tmp_path / "ordering.sqlite3", "odoo_test")
     assert sink.enqueue(event(2)) == "accepted"
