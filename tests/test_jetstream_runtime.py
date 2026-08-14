@@ -12,7 +12,10 @@ import nats
 import pytest
 from nats.js import api
 
-from eventing.dead_letter import process_next_dead_letter_advisory
+from eventing.dead_letter import (
+    bind_dead_letter_advisory_consumer,
+    process_next_dead_letter_advisory,
+)
 from tools.apply_jetstream_contract import apply_contract
 
 
@@ -170,7 +173,10 @@ def test_max_delivery_advisory_is_forwarded_once_to_dlq(tmp_path):
             # was emitted. The persistent advisory stream must retain it.
             advisory_info = await js.stream_info("CODESTRA_DLQ_ADVISORIES_V1")
             assert advisory_info.state.messages == 1
-            assert await process_next_dead_letter_advisory(js, timeout=2) == "forwarded"
+            worker = await bind_dead_letter_advisory_consumer(js)
+            assert await process_next_dead_letter_advisory(
+                js, worker, timeout=2
+            ) == "forwarded"
             info = await js.stream_info("CODESTRA_DEAD_LETTER_V1")
             assert info.state.messages == 1
             message = await js.get_msg("CODESTRA_DEAD_LETTER_V1", seq=1)

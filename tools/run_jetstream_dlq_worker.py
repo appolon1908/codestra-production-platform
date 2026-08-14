@@ -11,7 +11,10 @@ from pathlib import Path
 
 import nats
 
-from eventing.dead_letter import process_next_dead_letter_advisory
+from eventing.dead_letter import (
+    bind_dead_letter_advisory_consumer,
+    process_next_dead_letter_advisory,
+)
 
 
 def protected_value(path: str) -> str:
@@ -40,6 +43,7 @@ async def run() -> None:
         reconnect_time_wait=2,
     )
     jetstream = connection.jetstream()
+    subscription = await bind_dead_letter_advisory_consumer(jetstream)
     stopped = asyncio.Event()
     loop = asyncio.get_running_loop()
     for event in (signal.SIGINT, signal.SIGTERM):
@@ -47,7 +51,9 @@ async def run() -> None:
     try:
         while not stopped.is_set():
             try:
-                await process_next_dead_letter_advisory(jetstream, timeout=1)
+                await process_next_dead_letter_advisory(
+                    jetstream, subscription, timeout=1
+                )
             except nats.errors.TimeoutError:
                 continue
     finally:
