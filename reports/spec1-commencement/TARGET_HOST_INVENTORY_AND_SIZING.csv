@@ -1,0 +1,21 @@
+role,count,vCPU_each,RAM_GiB_each,storage,phase
+EDGE,2,4,8,80GB,TARGET_PHASE_2
+ODOO_APP,2,8,16,100GB,TARGET_PHASE_2
+ODOO_DB,2,16,32,NVMe sized by dataset growth,TARGET_PHASE_2
+MW_API,2,8,16,100GB,TARGET_PHASE_2
+MW_WORKER,2,8,16,100GB,TARGET_PHASE_2
+CTRL_PG,3,16,32,fast NVMe,TARGET_PHASE_2
+REDIS,3,8,16,encrypted local,TARGET_PHASE_2
+NATS,3,8,16,fast durable disk,TARGET_PHASE_2
+N8N,3,8,16,application only,TARGET_PHASE_2
+KEYCLOAK,2,8,16,application only,TARGET_PHASE_2
+VICI_WEB,2,8,16,100GB,TARGET_PHASE_2
+VICI_DIALER,2,16,32,fast network,TARGET_PHASE_2
+VICI_DB,2,16,64,NVMe,TARGET_PHASE_2
+VICI_ADAPTER,2,4,8,encrypted spool,TARGET_PHASE_2
+AI_EDGE,2,16,16,fast network,TARGET_PHASE_2
+AI_GATEWAY,3,16,32,provider dependent,TARGET_PHASE_2
+OBSERVABILITY,2,8,32,retention-sized storage,TARGET_PHASE_2
+
+Sizing is a planning baseline only. Procurement requires measured storage,
+codec, workload, retention, provider and failure-domain inputs.

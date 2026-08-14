@@ -1,0 +1,9 @@
+{
+  "schema_version": "spec1.rollback.v1",
+  "status": "PREPARED_NOT_AUTHORIZED",
+  "previous_verified_digests": [],
+  "preserve_events": true,
+  "preserve_audit": true,
+  "restore_all_activation_flags_false": true,
+  "rollback_authority": null
+}
