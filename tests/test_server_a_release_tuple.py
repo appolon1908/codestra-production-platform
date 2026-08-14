@@ -1,0 +1,27 @@
+import json
+from pathlib import Path
+
+
+def test_release_tuple_has_distinct_authorities_and_fails_closed() -> None:
+    manifest = json.loads(
+        Path("config/server-a-production-release-manifest.json.example").read_text()
+    )
+    assert manifest["orchestration"]["repository"] == (
+        "appolon1908-hue/codestra-production-platform"
+    )
+    assert manifest["middleware"]["repository"] == (
+        "Codestra-SRL/codestra-middleware"
+    )
+    assert manifest["middleware"]["production_signature_verified"] is False
+    assert manifest["middleware"]["production_provenance_verified"] is False
+    assert all(value is False for value in manifest["required_false_flags"].values())
+
+
+def test_staging_only_digest_is_not_production_manifest_authority() -> None:
+    manifest = Path(
+        "config/server-a-production-release-manifest.json.example"
+    ).read_text()
+    staging_digest = (
+        "2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff"
+    )
+    assert staging_digest not in manifest
