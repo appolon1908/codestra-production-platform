@@ -18,11 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.11"
           cache: pip
@@ -82,6 +82,9 @@ jobs:
           "${RUNNER_TEMP}/cosign" verify-attestation --type slsaprovenance1 \
             --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" \
             "${subject}" > middleware-provenance-verification.json
+          "${RUNNER_TEMP}/cosign" verify-attestation --type cyclonedx \
+            --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" \
+            "${subject}" > middleware-sbom-verification.json
           docker pull "${subject}"
           test "$(docker image inspect "${subject}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "${MIDDLEWARE_PROTECTED_SHA}"
           migration_revision="$(docker run --rm --network none "${subject}" alembic heads | awk 'NR == 1 {print $1}')"
@@ -105,12 +108,20 @@ jobs:
             dist/middleware-signature-verification.json
           install -m 0644 middleware-provenance-verification.json \
             dist/middleware-provenance-verification.json
+          install -m 0644 middleware-sbom-verification.json \
+            dist/middleware-sbom-verification.json
           install -m 0644 middleware-release/RELEASE.env \
             dist/middleware-RELEASE.env
+          install -m 0644 middleware-release/sbom.cdx.json \
+            dist/middleware-sbom.cdx.json
+          install -m 0644 middleware-release/provenance.json \
+            dist/middleware-provenance.json
           (cd dist && sha256sum \
             middleware-signature-verification.json \
             middleware-provenance-verification.json \
-            middleware-RELEASE.env >> manifest.sha256)
+            middleware-sbom-verification.json \
+            middleware-RELEASE.env middleware-sbom.cdx.json \
+            middleware-provenance.json >> manifest.sha256)
           (cd dist && sha256sum --check manifest.sha256)
           python - <<'PY'
           import json
@@ -141,7 +152,7 @@ jobs:
             -s dist/manifest.sha256.sig < dist/manifest.sha256
           shred -u "${RUNNER_TEMP}/release-signing/key"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: protected-release-${{ github.sha }}
           path: dist/
