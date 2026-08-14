@@ -36,3 +36,21 @@ approval, absent signatures, or any mismatch found by runtime readback.
 | Odoo/n8n/callback effective-once implementation | canonical middleware | business integration behavior | middleware image | canonical integration suite |
 
 Production flags remain false throughout candidate construction and staging.
+
+## Out-of-band release trust anchor
+
+Before the canonical middleware worker can be enabled, a security owner must
+deliver the approved SSH signing public key and its SHA-256 fingerprint through
+independent protected channels. The public key is deliberately not trusted from
+the release bundle that it authenticates. A host administrator provisions it
+idempotently before installing the signed release:
+
+```text
+sudo python3 tools/provision_release_trust_anchor.py \
+  --public-key /secure-bootstrap/codestra-release.pub \
+  --expected-sha256 <independently-verified-64-hex-fingerprint> \
+  --destination /etc/codestra/release/allowed_signers
+```
+
+The DLQ worker remains fail closed while this protected trust anchor, the signed
+checksum manifest, or its signature is absent or inconsistent.

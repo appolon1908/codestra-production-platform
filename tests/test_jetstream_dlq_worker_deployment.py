@@ -15,4 +15,10 @@ def test_dlq_worker_is_deployable_and_fail_closed() -> None:
     assert "--checksums /etc/codestra/release/manifest.sha256" in unit
     assert "--signature /etc/codestra/release/manifest.sha256.sig" in unit
     assert "--allowed-signers /etc/codestra/release/allowed_signers" in unit
+    trust = Path("tools/provision_release_trust_anchor.py").read_text()
+    authority = Path("docs/SERVER_A_PRODUCTION_RELEASE_TUPLE.md").read_text()
+    assert "expected-sha256" in trust
+    assert "different release trust anchor is already installed" in trust
+    assert "Out-of-band release trust anchor" in authority
+    assert "/etc/codestra/release/allowed_signers" in authority
     assert "JETSTREAM_DLQ_WORKER_ENABLED=false" in environment
