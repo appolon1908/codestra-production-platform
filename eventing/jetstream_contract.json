@@ -83,14 +83,20 @@
       "storage": "file",
       "replicas": 1,
       "max_age_seconds": 7776000,
-      "duplicate_window_seconds": 120,
+      "duplicate_window_seconds": 604800,
       "max_message_bytes": 1048576,
       "deny_delete": true,
       "deny_purge": true
     },
     {
       "name": "CODESTRA_DLQ_ADVISORIES_V1",
-      "subjects": ["$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>"],
+      "subjects": [
+        "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.CODESTRA_INGRESS_V1.middleware-ingress-v1",
+        "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.CODESTRA_PROCESSING_V1.middleware-processor-v1",
+        "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.CODESTRA_RESULTS_V1.odoo-result-v1",
+        "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.CODESTRA_CALLBACKS_V1.vicidial-callback-v1",
+        "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.CODESTRA_RETRY_V1.middleware-retry-v1"
+      ],
       "retention": "workqueue",
       "storage": "file",
       "replicas": 1,
@@ -160,7 +166,7 @@
     {
       "stream": "CODESTRA_DLQ_ADVISORIES_V1",
       "durable": "middleware-dlq-advisory-v1",
-      "filter_subject": "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>",
+      "filter_subject": null,
       "ack_policy": "explicit",
       "ack_wait_seconds": 30,
       "max_deliver": 20,

@@ -37,6 +37,14 @@ def test_contract_is_durable_bounded_and_non_replaying():
     }
     assert all(item["ack_policy"] == "explicit" for item in contract["consumers"])
     assert {item["deliver_policy"] for item in contract["consumers"]} == {"all", "new"}
+    streams = {item["name"]: item for item in contract["streams"]}
+    assert streams["CODESTRA_DEAD_LETTER_V1"]["duplicate_window_seconds"] == (
+        streams["CODESTRA_DLQ_ADVISORIES_V1"]["max_age_seconds"]
+    )
+    assert all(
+        "CODESTRA_DLQ_ADVISORIES_V1" not in subject
+        for subject in streams["CODESTRA_DLQ_ADVISORIES_V1"]["subjects"]
+    )
 
 
 def test_duplicate_and_conflicting_delivery(tmp_path):

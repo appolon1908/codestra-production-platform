@@ -54,8 +54,7 @@ async def forward_max_delivery_advisory(js, advisory_payload: bytes) -> str:
 
 async def process_next_dead_letter_advisory(js, timeout: float = 1.0) -> str:
     """Forward and acknowledge one durably captured advisory."""
-    subscription = await js.pull_subscribe(
-        "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>",
+    subscription = await js.pull_subscribe_bind(
         durable="middleware-dlq-advisory-v1",
         stream="CODESTRA_DLQ_ADVISORIES_V1",
     )

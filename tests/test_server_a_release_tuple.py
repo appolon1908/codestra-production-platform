@@ -39,5 +39,7 @@ def test_protected_release_gate_requires_completed_middleware_tuple() -> None:
     assert "cosign\" verify" in workflow
     assert "verify-attestation --type slsaprovenance1" in workflow
     assert "alembic heads" in workflow
+    assert "dist/middleware-signature-verification.json" in workflow
+    assert "dist/middleware-provenance-verification.json" in workflow
     assert "staging-only middleware digest is prohibited" in builder
     assert '"release_tuple"' in builder

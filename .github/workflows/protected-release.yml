@@ -101,6 +101,16 @@ jobs:
             --middleware-signature-status "PASS" \
             --middleware-provenance-status "PASS" \
             --migration-revision "${MIDDLEWARE_MIGRATION_REVISION}"
+          install -m 0644 middleware-signature-verification.json \
+            dist/middleware-signature-verification.json
+          install -m 0644 middleware-provenance-verification.json \
+            dist/middleware-provenance-verification.json
+          install -m 0644 middleware-release/RELEASE.env \
+            dist/middleware-RELEASE.env
+          (cd dist && sha256sum \
+            middleware-signature-verification.json \
+            middleware-provenance-verification.json \
+            middleware-RELEASE.env >> manifest.sha256)
           (cd dist && sha256sum --check manifest.sha256)
           python - <<'PY'
           import json

@@ -44,10 +44,11 @@ def validate_contract(contract: dict[str, Any]) -> None:
         if stream["duplicate_window_seconds"] < 120 or stream["max_message_bytes"] > 1048576:
             raise ContractError("deduplication or message-size bound is unsafe")
         for subject in stream["subjects"]:
-            allowed_system_advisory = (
-                stream["name"] == "CODESTRA_DLQ_ADVISORIES_V1"
-                and subject == "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>"
-            )
+            allowed_system_advisory = stream["name"] == (
+                "CODESTRA_DLQ_ADVISORIES_V1"
+            ) and subject.startswith(
+                "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.CODESTRA_"
+            ) and "*" not in subject and ">" not in subject
             if (
                 not subject.startswith("codestra.v1.*.*.events.")
                 and not allowed_system_advisory
@@ -56,7 +57,19 @@ def validate_contract(contract: dict[str, Any]) -> None:
             subjects.add(subject)
     names = {stream["name"] for stream in streams}
     retention = {stream["name"]: stream["retention"] for stream in streams}
-    for consumer in contract.get("consumers", ()):
+    consumers = contract.get("consumers", ())
+    expected_advisories = {
+        "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES."
+        f"{consumer['stream']}.{consumer['durable']}"
+        for consumer in consumers
+        if consumer["stream"] != "CODESTRA_DLQ_ADVISORIES_V1"
+    }
+    advisory_stream = next(
+        stream for stream in streams if stream["name"] == "CODESTRA_DLQ_ADVISORIES_V1"
+    )
+    if set(advisory_stream["subjects"]) != expected_advisories:
+        raise ContractError("advisory stream must cover only Codestra source consumers")
+    for consumer in consumers:
         if consumer["stream"] not in names or consumer["ack_policy"] != "explicit":
             raise ContractError("consumer stream or ACK policy is invalid")
         if consumer["max_deliver"] < 2 or consumer["ack_wait_seconds"] < 1:
