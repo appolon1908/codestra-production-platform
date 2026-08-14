@@ -117,7 +117,7 @@ class PolicyEngine:
             raise AuthorizationError("requested mode is not authorized for campaign")
         if policy.mode == CampaignMode.AI_ONLY:
             raise AuthorizationError("AI origination requires separate authorization")
-        if lead.requested_mode == CampaignMode.AI_ONLY:
+        if lead.requested_mode in {CampaignMode.AI_ONLY, CampaignMode.HYBRID}:
             raise AuthorizationError("AI origination requires separate authorization")
         checks = (
             (lead.country in policy.countries, "country_not_allowed"),

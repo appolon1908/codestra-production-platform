@@ -59,6 +59,9 @@ def test_campaign_modes_are_fail_closed_for_ai() -> None:
     hybrid = PolicyEngine([policy(CampaignMode.HYBRID)], OriginationSafety())
     with pytest.raises(AuthorizationError, match="AI origination"):
         hybrid.evaluate(lead(requested_mode=CampaignMode.AI_ONLY))
+    with pytest.raises(AuthorizationError, match="AI origination"):
+        hybrid.evaluate(lead(requested_mode=CampaignMode.HYBRID))
+    assert hybrid.evaluate(lead(requested_mode=CampaignMode.HUMAN_ONLY)).eligible
 
 
 def test_origination_flags_must_remain_false() -> None:

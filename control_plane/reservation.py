@@ -109,13 +109,22 @@ class ReservationStore:
 
     def mark_delivered(self, event_id: str) -> None:
         with sqlite3.connect(self.path) as db:
+            row = db.execute(
+                "SELECT state FROM durable_outbox WHERE event_id=?", (event_id,)
+            ).fetchone()
+            if row is None:
+                raise ReservationConflict("event is missing")
+            if row[0] == "DELIVERED":
+                return
+            if row[0] != "PENDING":
+                raise ReservationConflict("event is not pending")
             changed = db.execute(
                 "UPDATE durable_outbox SET state='DELIVERED',attempts=attempts+1 "
                 "WHERE event_id=? AND state='PENDING'",
                 (event_id,),
             ).rowcount
             if changed != 1:
-                raise ReservationConflict("event is missing or not pending")
+                raise ReservationConflict("event delivery state changed concurrently")
 
     def reconcile(self) -> dict[str, int | str]:
         with sqlite3.connect(self.path) as db:

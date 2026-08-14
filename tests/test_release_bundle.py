@@ -37,3 +37,8 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
     sbom = json.loads((outputs[0] / "sbom.cdx.json").read_text())
     assert sbom["bomFormat"] == "CycloneDX"
     assert sbom["components"]
+    provenance = json.loads((outputs[0] / "provenance.json").read_text())
+    assert provenance["_type"] == "https://in-toto.io/Statement/v1"
+    assert provenance["predicateType"] == "https://slsa.dev/provenance/v1"
+    assert provenance["predicate"]["buildDefinition"]["externalParameters"]["commit"] == "a" * 40
+    assert provenance["predicate"]["runDetails"]["metadata"]["invocationId"] == "fixture-run"

@@ -24,6 +24,7 @@ def test_idempotent_reservation_and_outbox_are_atomic(tmp_path) -> None:
         "missing_outbox": 0,
     }
     store.mark_delivered("lead.reserved:reservation-1")
+    store.mark_delivered("lead.reserved:reservation-1")
     assert store.reconcile()["delivered"] == 1
 
 

@@ -84,13 +84,21 @@ def build(root: Path, output: Path, commit: str, run_id: str, workflow_ref: str)
     write_json(
         output / "provenance.json",
         {
-            "predicateType": "https://slsa.dev/provenance/v1",
+            "_type": "https://in-toto.io/Statement/v1",
             "subject": [{"name": archive.name, "digest": {"sha256": sha256(archive)}}],
-            "buildDefinition": {
-                "buildType": "https://github.com/codestra/release-bundle/v1",
-                "externalParameters": {"commit": commit, "workflow_ref": workflow_ref},
+            "predicateType": "https://slsa.dev/provenance/v1",
+            "predicate": {
+                "buildDefinition": {
+                    "buildType": "https://github.com/codestra/release-bundle/v1",
+                    "externalParameters": {"commit": commit, "workflow_ref": workflow_ref},
+                    "internalParameters": {},
+                    "resolvedDependencies": [],
+                },
+                "runDetails": {
+                    "builder": {"id": workflow_ref},
+                    "metadata": {"invocationId": run_id},
+                },
             },
-            "runDetails": {"builder": {"id": workflow_ref}, "metadata": {"invocationId": run_id}},
         },
     )
     write_json(
