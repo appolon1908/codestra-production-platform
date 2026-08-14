@@ -7,7 +7,7 @@ import argparse
 import gzip
 import hashlib
 import json
-import os
+import re
 import subprocess
 import tarfile
 from pathlib import Path
@@ -16,6 +16,9 @@ from pathlib import Path
 FAIL_CLOSED_FLAGS = {
     "SEND_EVENTS": False,
     "ENABLE_EXTERNAL_DELIVERY": False,
+    "ODOO_DELIVERY_ENABLED": False,
+    "CALLBACK_DISPATCH": False,
+    "ENABLE_VICIDIAL_WRITES": False,
     "LIVE_WRITE": False,
     "ODOO_WRITE": False,
     "N8N_DELIVERY_ENABLED": False,
@@ -23,6 +26,11 @@ FAIL_CLOSED_FLAGS = {
     "LIVE_CALL_CONTROL": False,
     "GENERAL_AI_DIALING": False,
 }
+STAGING_ONLY_MIDDLEWARE_DIGEST = (
+    "sha256:2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff"
+)
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def sha256(path: Path) -> str:
@@ -58,7 +66,30 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
-def build(root: Path, output: Path, commit: str, run_id: str, workflow_ref: str) -> None:
+def build(
+    root: Path,
+    output: Path,
+    commit: str,
+    run_id: str,
+    workflow_ref: str,
+    middleware_sha: str,
+    middleware_image_digest: str,
+    middleware_signature_status: str,
+    middleware_provenance_status: str,
+    migration_revision: str,
+) -> None:
+    if not SHA_RE.fullmatch(commit) or not SHA_RE.fullmatch(middleware_sha):
+        raise ValueError("platform and middleware protected SHAs must be exact")
+    if not DIGEST_RE.fullmatch(middleware_image_digest):
+        raise ValueError("middleware image digest must be immutable sha256")
+    if middleware_image_digest == STAGING_ONLY_MIDDLEWARE_DIGEST:
+        raise ValueError("staging-only middleware digest is prohibited in production")
+    if middleware_signature_status != "PASS":
+        raise ValueError("middleware production signature verification is required")
+    if middleware_provenance_status != "PASS":
+        raise ValueError("middleware production provenance verification is required")
+    if not migration_revision or migration_revision == "REQUIRED":
+        raise ValueError("exact migration revision is required")
     output.mkdir(parents=True, exist_ok=True)
     files = tracked_files(root)
     archive = output / f"codestra-production-platform-{commit}.tar.gz"
@@ -110,6 +141,28 @@ def build(root: Path, output: Path, commit: str, run_id: str, workflow_ref: str)
             "artifact_sha256": sha256(archive),
             "required_flags": FAIL_CLOSED_FLAGS,
             "deployment_mode": "digest-only-fail-closed",
+            "release_tuple": {
+                "orchestration_repository": (
+                    "appolon1908-hue/codestra-production-platform"
+                ),
+                "orchestration_protected_sha": commit,
+                "middleware_repository": "Codestra-SRL/codestra-middleware",
+                "middleware_protected_sha": middleware_sha,
+                "middleware_image": "ghcr.io/codestra-srl/codestra-middleware",
+                "middleware_image_digest": middleware_image_digest,
+                "middleware_signature_verification": middleware_signature_status,
+                "middleware_provenance_verification": middleware_provenance_status,
+                "migration_revision": migration_revision,
+                "jetstream_contract_sha256": sha256(
+                    root / "eventing/jetstream_contract.json"
+                ),
+                "keycloak_contract_sha256": sha256(
+                    root / "config/keycloak-production-contract.env.example"
+                ),
+                "release_tuple_authority_sha256": sha256(
+                    root / "docs/SERVER_A_PRODUCTION_RELEASE_TUPLE.md"
+                ),
+            },
         },
     )
     write_json(
@@ -135,8 +188,24 @@ def main() -> int:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--workflow-ref", required=True)
+    parser.add_argument("--middleware-sha", required=True)
+    parser.add_argument("--middleware-image-digest", required=True)
+    parser.add_argument("--middleware-signature-status", required=True)
+    parser.add_argument("--middleware-provenance-status", required=True)
+    parser.add_argument("--migration-revision", required=True)
     args = parser.parse_args()
-    build(args.root.resolve(), args.output.resolve(), args.commit, args.run_id, args.workflow_ref)
+    build(
+        args.root.resolve(),
+        args.output.resolve(),
+        args.commit,
+        args.run_id,
+        args.workflow_ref,
+        args.middleware_sha,
+        args.middleware_image_digest,
+        args.middleware_signature_status,
+        args.middleware_provenance_status,
+        args.migration_revision,
+    )
     return 0
 
 

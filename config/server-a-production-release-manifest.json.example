@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "activation_authority": "none",
+  "environment": "production-candidate-fail-closed",
+  "orchestration": {
+    "repository": "appolon1908-hue/codestra-production-platform",
+    "protected_merge_sha": "REQUIRED",
+    "configuration_bundle_sha256": "REQUIRED"
+  },
+  "middleware": {
+    "repository": "Codestra-SRL/codestra-middleware",
+    "protected_merge_sha": "REQUIRED",
+    "image": "ghcr.io/codestra-srl/codestra-middleware",
+    "image_digest": "sha256:REQUIRED",
+    "production_signature_verified": false,
+    "production_provenance_verified": false
+  },
+  "versions": {
+    "migration_revision": "REQUIRED",
+    "jetstream_contract_sha256": "REQUIRED",
+    "keycloak_contract_sha256": "REQUIRED",
+    "odoo_integration_source_sha": "REQUIRED",
+    "n8n_integration_source_sha": "REQUIRED",
+    "callback_adapter_source_sha": "REQUIRED",
+    "deployment_manifest_version": "1"
+  },
+  "required_false_flags": {
+    "SEND_EVENTS": false,
+    "ENABLE_EXTERNAL_DELIVERY": false,
+    "ODOO_DELIVERY_ENABLED": false,
+    "N8N_DELIVERY_ENABLED": false,
+    "CALLBACK_DISPATCH": false,
+    "ENABLE_VICIDIAL_WRITES": false,
+    "PRODUCTION_DIALING": false
+  }
+}
