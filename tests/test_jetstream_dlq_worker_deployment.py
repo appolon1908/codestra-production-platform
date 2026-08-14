@@ -10,4 +10,6 @@ def test_dlq_worker_is_deployable_and_fail_closed() -> None:
     assert "--read-only" in unit
     assert "--cap-drop ALL" in unit
     assert "--mount type=bind,src=/run/codestra/nats" in unit
+    assert "tools/verify_jetstream_worker_image.py" in unit
+    assert "--manifest /etc/codestra/deployment-manifest.json" in unit
     assert "JETSTREAM_DLQ_WORKER_ENABLED=false" in environment

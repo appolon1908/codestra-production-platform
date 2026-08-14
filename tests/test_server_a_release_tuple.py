@@ -39,6 +39,8 @@ def test_protected_release_gate_requires_completed_middleware_tuple() -> None:
     assert "cosign\" verify" in workflow
     assert "verify-attestation --type slsaprovenance1" in workflow
     assert "alembic heads" in workflow
+    assert 'test "${#migration_heads[@]}" -eq 1' in workflow
+    assert 'migration_revision="${migration_heads[0]}"' in workflow
     assert "dist/middleware-signature-verification.json" in workflow
     assert "dist/middleware-provenance-verification.json" in workflow
     assert "dist/middleware-sbom-verification.json" in workflow

@@ -93,7 +93,12 @@ jobs:
             --predicate middleware-release/provenance.json
           docker pull "${subject}"
           test "$(docker image inspect "${subject}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "${MIDDLEWARE_PROTECTED_SHA}"
-          migration_revision="$(docker run --rm --network none "${subject}" alembic heads | awk 'NR == 1 {print $1}')"
+          mapfile -t migration_heads < <(
+            docker run --rm --network none "${subject}" alembic heads |
+              awk 'NF {print $1}'
+          )
+          test "${#migration_heads[@]}" -eq 1
+          migration_revision="${migration_heads[0]}"
           test -n "${migration_revision}"
           printf 'MIDDLEWARE_MIGRATION_REVISION=%s\n' "${migration_revision}" >> "${GITHUB_ENV}"
 
