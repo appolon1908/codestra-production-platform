@@ -1,0 +1,1 @@
+"""Isolated downstream integration contracts."""
