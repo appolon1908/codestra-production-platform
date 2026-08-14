@@ -8,4 +8,4 @@ def test_dlq_worker_is_deployable_and_fail_closed() -> None:
     assert "tools/run_jetstream_dlq_worker.py" in unit
     assert "JETSTREAM_DLQ_WORKER_ENABLED=false" in environment
     assert "production NATS transport must use TLS" in worker
-    assert "subscribe_dead_letter_forwarder" in worker
+    assert "process_next_dead_letter_advisory" in worker

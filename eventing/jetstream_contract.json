@@ -87,6 +87,18 @@
       "max_message_bytes": 1048576,
       "deny_delete": true,
       "deny_purge": true
+    },
+    {
+      "name": "CODESTRA_DLQ_ADVISORIES_V1",
+      "subjects": ["$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>"],
+      "retention": "workqueue",
+      "storage": "file",
+      "replicas": 1,
+      "max_age_seconds": 604800,
+      "duplicate_window_seconds": 120,
+      "max_message_bytes": 65536,
+      "deny_delete": true,
+      "deny_purge": true
     }
   ],
   "consumers": [
@@ -142,6 +154,17 @@
       "ack_wait_seconds": 60,
       "max_deliver": 5,
       "backoff_seconds": [15, 60, 300, 900],
+      "replay_policy": "instant",
+      "deliver_policy": "all"
+    },
+    {
+      "stream": "CODESTRA_DLQ_ADVISORIES_V1",
+      "durable": "middleware-dlq-advisory-v1",
+      "filter_subject": "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>",
+      "ack_policy": "explicit",
+      "ack_wait_seconds": 30,
+      "max_deliver": 20,
+      "backoff_seconds": [5, 15, 60, 300, 900],
       "replay_policy": "instant",
       "deliver_policy": "all"
     }

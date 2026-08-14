@@ -52,12 +52,18 @@ async def forward_max_delivery_advisory(js, advisory_payload: bytes) -> str:
     return "duplicate" if acknowledgement.duplicate else "forwarded"
 
 
-async def subscribe_dead_letter_forwarder(connection, js):
-    """Subscribe the runtime connection to all maximum-delivery advisories."""
-
-    async def handler(message):
-        await forward_max_delivery_advisory(js, message.data)
-
-    return await connection.subscribe(
-        "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>", cb=handler
+async def process_next_dead_letter_advisory(js, timeout: float = 1.0) -> str:
+    """Forward and acknowledge one durably captured advisory."""
+    subscription = await js.pull_subscribe(
+        "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>",
+        durable="middleware-dlq-advisory-v1",
+        stream="CODESTRA_DLQ_ADVISORIES_V1",
     )
+    message = (await subscription.fetch(1, timeout=timeout))[0]
+    try:
+        result = await forward_max_delivery_advisory(js, message.data)
+    except Exception:
+        await message.nak()
+        raise
+    await message.ack()
+    return result

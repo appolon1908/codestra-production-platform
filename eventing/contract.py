@@ -44,7 +44,14 @@ def validate_contract(contract: dict[str, Any]) -> None:
         if stream["duplicate_window_seconds"] < 120 or stream["max_message_bytes"] > 1048576:
             raise ContractError("deduplication or message-size bound is unsafe")
         for subject in stream["subjects"]:
-            if not subject.startswith("codestra.v1.*.*.events.") or subject in subjects:
+            allowed_system_advisory = (
+                stream["name"] == "CODESTRA_DLQ_ADVISORIES_V1"
+                and subject == "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>"
+            )
+            if (
+                not subject.startswith("codestra.v1.*.*.events.")
+                and not allowed_system_advisory
+            ) or subject in subjects:
                 raise ContractError("subjects must be tenant/campaign scoped and non-overlapping")
             subjects.add(subject)
     names = {stream["name"] for stream in streams}

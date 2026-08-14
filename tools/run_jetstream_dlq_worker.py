@@ -11,7 +11,7 @@ from pathlib import Path
 
 import nats
 
-from eventing.dead_letter import subscribe_dead_letter_forwarder
+from eventing.dead_letter import process_next_dead_letter_advisory
 
 
 def protected_value(path: str) -> str:
@@ -39,17 +39,18 @@ async def run() -> None:
         max_reconnect_attempts=-1,
         reconnect_time_wait=2,
     )
-    subscription = await subscribe_dead_letter_forwarder(
-        connection, connection.jetstream()
-    )
+    jetstream = connection.jetstream()
     stopped = asyncio.Event()
     loop = asyncio.get_running_loop()
     for event in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(event, stopped.set)
     try:
-        await stopped.wait()
+        while not stopped.is_set():
+            try:
+                await process_next_dead_letter_advisory(jetstream, timeout=1)
+            except nats.errors.TimeoutError:
+                continue
     finally:
-        await subscription.unsubscribe()
         await connection.drain()
 
 

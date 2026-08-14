@@ -31,12 +31,13 @@ def test_protected_release_gate_requires_completed_middleware_tuple() -> None:
     workflow = Path(".github/workflows/protected-release.yml").read_text()
     builder = Path("tools/build_release_bundle.py").read_text()
     for name in (
-        "CODESTRA_MIDDLEWARE_PROTECTED_SHA",
-        "CODESTRA_MIDDLEWARE_PRODUCTION_IMAGE_DIGEST",
-        "CODESTRA_MIDDLEWARE_PRODUCTION_SIGNATURE_STATUS",
-        "CODESTRA_MIDDLEWARE_PRODUCTION_PROVENANCE_STATUS",
-        "CODESTRA_MIDDLEWARE_MIGRATION_REVISION",
+        "CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN",
+        "CODESTRA_MIDDLEWARE_PRODUCTION_RELEASE_RUN_ID",
+        "CODESTRA_MIDDLEWARE_PRODUCTION_RELEASE_ARTIFACT",
     ):
         assert name in workflow
+    assert "cosign\" verify" in workflow
+    assert "verify-attestation --type slsaprovenance1" in workflow
+    assert "alembic heads" in workflow
     assert "staging-only middleware digest is prohibited" in builder
     assert '"release_tuple"' in builder

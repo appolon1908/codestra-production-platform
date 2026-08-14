@@ -42,13 +42,53 @@ jobs:
           python -m pytest -q
           python -m pip_audit --local
 
-      - name: Build deterministic release, SBOM and provenance
+      - name: Install checksum-verified Cosign
         env:
-          MIDDLEWARE_PROTECTED_SHA: ${{ vars.CODESTRA_MIDDLEWARE_PROTECTED_SHA }}
-          MIDDLEWARE_IMAGE_DIGEST: ${{ vars.CODESTRA_MIDDLEWARE_PRODUCTION_IMAGE_DIGEST }}
-          MIDDLEWARE_SIGNATURE_STATUS: ${{ vars.CODESTRA_MIDDLEWARE_PRODUCTION_SIGNATURE_STATUS }}
-          MIDDLEWARE_PROVENANCE_STATUS: ${{ vars.CODESTRA_MIDDLEWARE_PRODUCTION_PROVENANCE_STATUS }}
-          MIDDLEWARE_MIGRATION_REVISION: ${{ vars.CODESTRA_MIDDLEWARE_MIGRATION_REVISION }}
+          COSIGN_VERSION: v3.1.2
+          COSIGN_SHA256: f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" \
+            --output "${RUNNER_TEMP}/cosign"
+          echo "${COSIGN_SHA256}  ${RUNNER_TEMP}/cosign" | sha256sum --check --strict
+          chmod 0700 "${RUNNER_TEMP}/cosign"
+
+      - name: Verify canonical middleware production evidence
+        env:
+          GH_TOKEN: ${{ secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN }}
+          MIDDLEWARE_RELEASE_RUN_ID: ${{ vars.CODESTRA_MIDDLEWARE_PRODUCTION_RELEASE_RUN_ID }}
+          MIDDLEWARE_RELEASE_ARTIFACT: ${{ vars.CODESTRA_MIDDLEWARE_PRODUCTION_RELEASE_ARTIFACT }}
+        run: |
+          test -n "${GH_TOKEN}"
+          [[ "${MIDDLEWARE_RELEASE_RUN_ID}" =~ ^[1-9][0-9]*$ ]]
+          test -n "${MIDDLEWARE_RELEASE_ARTIFACT}"
+          mkdir middleware-release
+          gh run download "${MIDDLEWARE_RELEASE_RUN_ID}" \
+            --repo Codestra-SRL/codestra-middleware \
+            --name "${MIDDLEWARE_RELEASE_ARTIFACT}" \
+            --dir middleware-release
+          (cd middleware-release && sha256sum --check --strict SHA256SUMS)
+          python tools/verify_middleware_release_evidence.py \
+            --directory middleware-release --github-env middleware-release-verified.env
+          cat middleware-release-verified.env >> "${GITHUB_ENV}"
+          source middleware-release-verified.env
+          subject="ghcr.io/codestra-srl/codestra-middleware@${MIDDLEWARE_IMAGE_DIGEST}"
+          identity="https://github.com/Codestra-SRL/codestra-middleware/.github/workflows/exact-main-production-release.yml@refs/heads/main"
+          issuer="https://token.actions.githubusercontent.com"
+          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          "${RUNNER_TEMP}/cosign" verify \
+            --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" \
+            "${subject}" > middleware-signature-verification.json
+          "${RUNNER_TEMP}/cosign" verify-attestation --type slsaprovenance1 \
+            --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" \
+            "${subject}" > middleware-provenance-verification.json
+          docker pull "${subject}"
+          test "$(docker image inspect "${subject}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "${MIDDLEWARE_PROTECTED_SHA}"
+          migration_revision="$(docker run --rm --network none "${subject}" alembic heads | awk 'NR == 1 {print $1}')"
+          test -n "${migration_revision}"
+          printf 'MIDDLEWARE_MIGRATION_REVISION=%s\n' "${migration_revision}" >> "${GITHUB_ENV}"
+
+      - name: Build deterministic release, SBOM and provenance
         run: |
           python tools/build_release_bundle.py \
             --root . \
@@ -58,8 +98,8 @@ jobs:
             --workflow-ref "${GITHUB_WORKFLOW_REF}" \
             --middleware-sha "${MIDDLEWARE_PROTECTED_SHA}" \
             --middleware-image-digest "${MIDDLEWARE_IMAGE_DIGEST}" \
-            --middleware-signature-status "${MIDDLEWARE_SIGNATURE_STATUS}" \
-            --middleware-provenance-status "${MIDDLEWARE_PROVENANCE_STATUS}" \
+            --middleware-signature-status "PASS" \
+            --middleware-provenance-status "PASS" \
             --migration-revision "${MIDDLEWARE_MIGRATION_REVISION}"
           (cd dist && sha256sum --check manifest.sha256)
           python - <<'PY'
