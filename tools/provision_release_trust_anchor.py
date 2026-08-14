@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import os
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -19,7 +21,17 @@ def normalized_key(source: Path) -> bytes:
     fields = value.split()
     if len(fields) < 2 or not fields[0].startswith("ssh-"):
         raise ValueError("release signing public key is invalid")
-    return f"{fields[0]} {fields[1]}".encode()
+    key = f"{fields[0]} {fields[1]}".encode()
+    with tempfile.NamedTemporaryFile() as handle:
+        handle.write(key + b"\n")
+        handle.flush()
+        subprocess.run(
+            ["ssh-keygen", "-l", "-f", handle.name],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    return key
 
 
 def provision(source: Path, expected_sha256: str, destination: Path) -> str:
@@ -30,25 +42,32 @@ def provision(source: Path, expected_sha256: str, destination: Path) -> str:
     if actual != expected_sha256:
         raise ValueError("release signing public key fingerprint mismatch")
     content = b"codestra-release " + key + b"\n"
-    if destination.exists():
-        if destination.read_bytes() != content:
-            raise ValueError("a different release trust anchor is already installed")
-        os.chmod(destination, 0o644)
-        return actual
     destination.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(
-        prefix=".allowed_signers.", dir=destination.parent
-    )
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temporary, 0o644)
-        os.replace(temporary, destination)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    lock_path = destination.parent / f".{destination.name}.lock"
+    with lock_path.open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if destination.exists():
+            if destination.read_bytes() != content:
+                raise ValueError(
+                    "a different release trust anchor is already installed"
+                )
+            os.chmod(destination, 0o644)
+            return actual
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=".allowed_signers.", dir=destination.parent
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, 0o644)
+            os.replace(temporary, destination)
+            if destination.read_bytes() != content:
+                raise ValueError("installed release trust anchor read-back failed")
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
     return actual
 
 
