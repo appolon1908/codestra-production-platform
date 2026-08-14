@@ -1,4 +1,5 @@
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -8,15 +9,19 @@ from tools.verify_middleware_release_evidence import validate
 
 def evidence(tmp_path: Path, digest: str = "sha256:" + "c" * 64) -> Path:
     source = "b" * 40
+    sbom = {"bomFormat": "CycloneDX", "components": []}
+    (tmp_path / "sbom.cdx.json").write_text(json.dumps(sbom))
+    sbom_hash = hashlib.sha256((tmp_path / "sbom.cdx.json").read_bytes()).hexdigest()
     (tmp_path / "RELEASE.env").write_text(
         f"SOURCE_SHA={source}\n"
         f"IMAGE_REFERENCE=ghcr.io/codestra-srl/codestra-middleware@{digest}\n"
         f"IMAGE_DIGEST={digest}\n"
-        f"SBOM_SHA256={'d' * 64}\n"
+        f"SBOM_SHA256={sbom_hash}\n"
     )
     (tmp_path / "provenance.json").write_text(json.dumps({
         "buildDefinition": {"externalParameters": {"sourceSha": source}},
         "subject": {"digest": digest},
+        "evidence": {"sbomSha256": sbom_hash},
         "runDetails": {"builder": {"id": (
             "https://github.com/Codestra-SRL/codestra-middleware/"
             ".github/workflows/exact-main-production-release.yml@refs/heads/main"
@@ -39,3 +44,10 @@ def test_staging_only_evidence_is_rejected(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="staging-only"):
         validate(evidence(tmp_path, staging))
+
+
+def test_mismatched_sbom_is_rejected(tmp_path: Path) -> None:
+    directory = evidence(tmp_path)
+    (directory / "sbom.cdx.json").write_text('{"changed":true}\n')
+    with pytest.raises(ValueError, match="SBOM hash differs"):
+        validate(directory)

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -42,12 +43,17 @@ def release_environment(path: Path) -> dict[str, str]:
 
 def validate(directory: Path) -> dict[str, str]:
     values = release_environment(directory / "RELEASE.env")
+    sbom_hash = hashlib.sha256((directory / "sbom.cdx.json").read_bytes()).hexdigest()
+    if values["SBOM_SHA256"] != sbom_hash:
+        raise ValueError("middleware SBOM hash differs from RELEASE.env")
     provenance = json.loads((directory / "provenance.json").read_text())
     build = provenance["buildDefinition"]
     if build["externalParameters"]["sourceSha"] != values["SOURCE_SHA"]:
         raise ValueError("middleware provenance source SHA differs")
     if provenance["subject"]["digest"] != values["IMAGE_DIGEST"]:
         raise ValueError("middleware provenance digest differs")
+    if provenance["evidence"]["sbomSha256"] != sbom_hash:
+        raise ValueError("middleware provenance SBOM binding differs")
     builder = provenance["runDetails"]["builder"]["id"]
     if builder != (
         "https://github.com/Codestra-SRL/codestra-middleware/"

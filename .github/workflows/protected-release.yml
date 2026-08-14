@@ -85,6 +85,12 @@ jobs:
           "${RUNNER_TEMP}/cosign" verify-attestation --type cyclonedx \
             --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" \
             "${subject}" > middleware-sbom-verification.json
+          python tools/verify_attestation_predicate.py \
+            --verification middleware-sbom-verification.json \
+            --predicate middleware-release/sbom.cdx.json
+          python tools/verify_attestation_predicate.py \
+            --verification middleware-provenance-verification.json \
+            --predicate middleware-release/provenance.json
           docker pull "${subject}"
           test "$(docker image inspect "${subject}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "${MIDDLEWARE_PROTECTED_SHA}"
           migration_revision="$(docker run --rm --network none "${subject}" alembic heads | awk 'NR == 1 {print $1}')"
