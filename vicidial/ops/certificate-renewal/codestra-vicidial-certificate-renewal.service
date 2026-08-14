@@ -17,4 +17,4 @@ ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ReadOnlyPaths=/opt/codestra/vicidial /etc/codestra
-ReadWritePaths=/etc/codestra/agents/vicidial-observer/pki
+ReadWritePaths=/etc/codestra/agents/vicidial-observer/pki /etc/codestra/secrets/middleware-event-mtls
