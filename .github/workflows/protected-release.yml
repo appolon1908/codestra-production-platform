@@ -1,0 +1,84 @@
+name: Exact protected release
+
+on:
+  push:
+    branches: ["release/production-activation"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: protected-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/release/production-activation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Require protected exact SHA
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+
+      - name: Run complete source tests
+        run: |
+          python -m pip install pytest pytest-subtests PyYAML requests pip-audit
+          python -m pip install -e 'vicidial[test]'
+          python -m pytest -q
+          python -m pip_audit --local
+
+      - name: Build deterministic release, SBOM and provenance
+        run: |
+          python tools/build_release_bundle.py \
+            --root . \
+            --output dist \
+            --commit "${GITHUB_SHA}" \
+            --run-id "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" \
+            --workflow-ref "${GITHUB_WORKFLOW_REF}"
+          (cd dist && sha256sum --check manifest.sha256)
+
+      - name: Sign and independently verify release manifest
+        env:
+          SIGNING_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_KEY }}
+          SIGNING_PUBLIC_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_PUBLIC_KEY }}
+        run: |
+          test -n "${SIGNING_KEY}"
+          test -n "${SIGNING_PUBLIC_KEY}"
+          install -m 0700 -d "${RUNNER_TEMP}/release-signing"
+          printf '%s\n' "${SIGNING_KEY}" > "${RUNNER_TEMP}/release-signing/key"
+          chmod 0600 "${RUNNER_TEMP}/release-signing/key"
+          printf 'codestra-release %s\n' "${SIGNING_PUBLIC_KEY}" > "${RUNNER_TEMP}/release-signing/allowed_signers"
+          ssh-keygen -Y sign -q -f "${RUNNER_TEMP}/release-signing/key" -n codestra-release dist/manifest.sha256
+          ssh-keygen -Y verify -q \
+            -f "${RUNNER_TEMP}/release-signing/allowed_signers" \
+            -I codestra-release -n codestra-release \
+            -s dist/manifest.sha256.sig < dist/manifest.sha256
+          shred -u "${RUNNER_TEMP}/release-signing/key"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: protected-release-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "protected-${GITHUB_SHA}" dist/* \
+            --target "${GITHUB_SHA}" \
+            --title "Protected release ${GITHUB_SHA}" \
+            --notes "Exact protected release. Production features remain fail closed."

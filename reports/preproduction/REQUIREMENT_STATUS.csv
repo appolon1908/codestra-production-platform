@@ -1,0 +1,27 @@
+requirement,status,evidence_or_blocker
+SPEC-1 target architecture,IMPLEMENTED,specs/SPEC-1_SERVER_ALLOCATION_AND_SYSTEM_MISSIONS.md
+Global production mission,IMPLEMENTED,specs/GLOBAL_CALL_CENTER_PRODUCTION_MISSION.md
+Current-versus-target topology,IMPLEMENTED,docs/CURRENT_VS_TARGET_TOPOLOGY.md
+Immutable CI release workflow,IMPLEMENTED,.github/workflows/protected-release.yml
+Tenant and campaign authorization,TESTED,tests/test_control_plane_policy.py
+HUMAN_ONLY AI_ONLY HYBRID policy,TESTED,tests/test_control_plane_policy.py
+Consent DNC timezone jurisdiction engine,TESTED,tests/test_control_plane_policy.py
+Idempotency and atomic lead reservation,TESTED,tests/test_control_plane_reservation.py
+Durable outbox and reconciliation,TESTED,tests/test_control_plane_reservation.py and tests/test_tel_events_publisher.py
+NATS production delivery,BLOCKED,Requires isolated NATS JetStream runtime certification
+Private mTLS/HMAC adapter contract,TESTED,vicidial tests and server-a connectivity evidence
+Certificate renewal rollback,TESTED,vicidial/tests/test_certificate_renewal.py
+Backup restore and Odoo filestore,TESTED,evidence/final-production-completion-20260814T151030Z/ODOO_DATABASE_FILESTORE_RESTORE_ACCEPTANCE.md
+Monitoring and origination kill switch,TESTED,tests/test_control_plane_policy.py and tests/test_monitoring_failure_handling.py
+Secrets and PKI management,IMPLEMENTED,docs/PLATFORM_RESPONSIBILITIES.md
+Artifact registry and verification,IMPLEMENTED,.github/workflows/protected-release.yml
+Odoo shared-filestore HA strategy,TARGET_PHASE_2,Infrastructure migration plan required
+Recording object-storage controls,IMPLEMENTED,docs/PLATFORM_RESPONSIBILITIES.md
+RPO RTO disaster recovery,IMPLEMENTED,docs/PLATFORM_RESPONSIBILITIES.md
+Service discovery time firewall policy,IMPLEMENTED,docs/PLATFORM_RESPONSIBILITIES.md
+Signed immutable release publication,BLOCKED,Requires protected merge and CI signing secrets
+Immutable digest deployment,BLOCKED,Requires published verified artifact
+Staging TEST_SYN recovery certification,BLOCKED,Requires immutable deployment first
+24-hour exact-runtime soak,BLOCKED,Requires final immutable runtime tuple
+Human canary,BLOCKED,Requires separate signed authorization after soak
+AI canary and limited rollout,BLOCKED,Requires separate authorization
