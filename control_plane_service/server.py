@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from .core import ControlPlaneError, Store, credential_matches, validate_envelope, verify_signature
-from .providers import ProviderError, submit_crawler
+from .providers import ProviderError, crawler_action, submit_crawler
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
 STORE = Store(DB)
@@ -17,7 +17,8 @@ MAX_BODY = int(os.getenv("CONTROL_PLANE_MAX_BODY", "524288"))
 
 def identity(source: str) -> tuple[str, str]:
     prefix = source.upper()
-    return os.getenv(f"{prefix}_MIDDLEWARE_API_KEY", ""), os.getenv(f"{prefix}_WEBHOOK_SECRET", "")
+    secret = os.getenv("N8N_MIDDLEWARE_HMAC_SECRET", "") if source == "n8n" else ""
+    return os.getenv(f"{prefix}_MIDDLEWARE_API_KEY", ""), secret or os.getenv(f"{prefix}_WEBHOOK_SECRET", "")
 
 
 def operator(token: str) -> tuple[str, str, str | None] | None:
@@ -87,8 +88,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200,STORE.get_preferences(tenant,parsed.path.split("/")[3]))
         if parsed.path.startswith("/v1/crawler/jobs/"):
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
-            try: return self.send_json(200, STORE.get_crawler_job(parsed.path.rsplit("/",1)[-1],tenant))
+            parts=parsed.path.strip("/").split("/"); job_id=parts[3]
+            try:
+                job=STORE.get_crawler_job(job_id,tenant)
+                if len(parts)>4 and parts[4]=="results":
+                    result=crawler_action("results",job); items=STORE.save_crawler_results(job_id,tenant,list(result.get("items") or []))
+                    STORE.transition_crawler_job(job_id,tenant,str(result.get("status") or "completed"))
+                    return self.send_json(200,{"job_id":job_id,"items":items})
+                result=crawler_action("status",job)
+                if result.get("status"): job=STORE.transition_crawler_job(job_id,tenant,str(result["status"]))
+                return self.send_json(200,job)
             except ControlPlaneError as exc: return self.send_json(404,{"error":str(exc)})
+            except ProviderError as exc: return self.send_json(503,{"error":str(exc)})
         if parsed.path == "/api/v1/ops/summary": return self.send_json(200, STORE.summary(tenant))
         if parsed.path == "/api/v1/ops/events": return self.send_json(200, {"items": STORE.list_events(tenant, query.get("state", [None])[0])})
         if parsed.path.startswith("/api/v1/ops/correlations/"): return self.send_json(200, {"items": STORE.correlation(parsed.path.rsplit("/", 1)[-1], tenant)})
@@ -145,6 +156,16 @@ class Handler(BaseHTTPRequestHandler):
             except ProviderError as exc: return self.send_json(503,{"error":str(exc)})
             STORE.audit(op[0],op[1],"crawler.job.created","crawler_job",job["job_id"],tenant,job["correlation_id"],{"duplicate":duplicate})
             return self.send_json(200 if duplicate else 202,job)
+        if parsed.path.startswith("/v1/crawler/jobs/") and parsed.path.endswith(("/cancel","/retry")):
+            if not tenant: return self.send_json(422,{"error":"tenant_required"})
+            parts=parsed.path.strip("/").split("/"); job_id=parts[3]; action=parts[4]
+            try:
+                job=STORE.get_crawler_job(job_id,tenant); result=crawler_action(action,job)
+                job=STORE.transition_crawler_job(job_id,tenant,str(result.get("status") or ("cancelled" if action=="cancel" else "accepted")))
+            except ControlPlaneError as exc: return self.send_json(404,{"error":str(exc)})
+            except ProviderError as exc: return self.send_json(503,{"error":str(exc)})
+            STORE.audit(op[0],op[1],"crawler.job."+action,"crawler_job",job_id,tenant,job["correlation_id"])
+            return self.send_json(200,job)
         if parsed.path.startswith("/v1/messages/") and parsed.path.endswith(("/cancel","/retry")):
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
             message_id=parsed.path.split("/")[3]

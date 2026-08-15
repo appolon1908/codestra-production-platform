@@ -10,7 +10,6 @@ services:
       CONTROL_PLANE_BIND: 0.0.0.0
       CONTROL_PLANE_PORT: 8096
       CONTROL_PLANE_DB: /data/control-plane.db
-      CONTROL_PLANE_OUTBOUND_ENABLED: "false"
     ports: ["127.0.0.1:8096:8096"]
     volumes: [control_plane_data:/data]
     read_only: true
@@ -32,7 +31,6 @@ services:
     env_file: ${CONTROL_PLANE_ENV_FILE:-/etc/codestra/secrets/control-plane.env}
     environment:
       CONTROL_PLANE_DB: /data/control-plane.db
-      CONTROL_PLANE_OUTBOUND_ENABLED: "false"
     volumes: [control_plane_data:/data]
     read_only: true
     tmpfs: [/tmp]
