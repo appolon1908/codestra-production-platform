@@ -1,0 +1,111 @@
+{
+  "schema": "codestra.connectivity-audit.v1",
+  "safe_mode": true,
+  "results": [
+    {
+      "check": "host.public_identity",
+      "status": "FAIL",
+      "evidence": "expected 65.109.65.169; observed 49.12.145.107"
+    },
+    {
+      "check": "host.private_identity",
+      "status": "FAIL",
+      "evidence": "expected 10.40.0.1; observed 10.40.0.3"
+    },
+    {
+      "check": "network.middleware_peer",
+      "status": "PASS",
+      "evidence": "10.40.0.1 ICMP reply"
+    },
+    {
+      "check": "runtime.middleware_health",
+      "status": "PASS",
+      "evidence": "10.40.0.1:8095/health HTTP 200 status ok"
+    },
+    {
+      "check": "ssh.middleware_operator",
+      "status": "BLOCKED",
+      "evidence": "available operator key rejected by 10.40.0.1"
+    },
+    {
+      "check": "source.integration_suite",
+      "status": "PASS",
+      "evidence": "24 passed, 1 warning in 6.53s"
+    },
+    {
+      "check": "inbound.hmac_replay",
+      "status": "PASS",
+      "evidence": "valid/invalid/stale HMAC and duplicate/conflict tests passed"
+    },
+    {
+      "check": "outbound.telnexa_simulator",
+      "status": "PASS",
+      "evidence": "simulator returned sim-* and worker accepted message"
+    },
+    {
+      "check": "outbound.klyrow_safe",
+      "status": "PASS",
+      "evidence": "test adapter returned test-* without network delivery"
+    },
+    {
+      "check": "outbound.kyqra_safe",
+      "status": "PASS",
+      "evidence": "test job returned test-job-*; unsafe target rejected"
+    },
+    {
+      "check": "resilience.idempotency",
+      "status": "PASS",
+      "evidence": "event, message, and crawler duplicate/conflict tests passed"
+    },
+    {
+      "check": "resilience.retry_dlq",
+      "status": "PASS",
+      "evidence": "bounded retry, dead-letter, replay, and audit tests passed"
+    },
+    {
+      "check": "resilience.circuit_breaker",
+      "status": "PASS",
+      "evidence": "threshold/open behavior test passed"
+    },
+    {
+      "check": "trace.correlation",
+      "status": "PASS",
+      "evidence": "tenant-scoped correlation lookup and downstream header tests passed"
+    },
+    {
+      "check": "exposure.5432",
+      "status": "PASS",
+      "evidence": "127.0.0.1:5432 not listening"
+    },
+    {
+      "check": "exposure.6379",
+      "status": "PASS",
+      "evidence": "127.0.0.1:6379 not listening"
+    },
+    {
+      "check": "exposure.5672",
+      "status": "PASS",
+      "evidence": "127.0.0.1:5672 not listening"
+    },
+    {
+      "check": "runtime.control_plane",
+      "status": "BLOCKED",
+      "evidence": "no deployed listener on 8096 on this host"
+    },
+    {
+      "check": "runtime.odoo",
+      "status": "BLOCKED",
+      "evidence": "no Odoo runtime discovered on this host"
+    },
+    {
+      "check": "runtime.n8n",
+      "status": "BLOCKED",
+      "evidence": "no n8n runtime discovered on this host"
+    }
+  ],
+  "summary": {
+    "PASS": 14,
+    "FAIL": 2,
+    "BLOCKED": 4
+  }
+}

@@ -48,3 +48,23 @@ def submit(message: dict[str, object]) -> ProviderResult:
     with urllib.request.urlopen(request, timeout=5) as response:
         result = json.loads(response.read())
     return ProviderResult(str(result["id"]), "accepted", str(result.get("status", "accepted")))
+
+
+def submit_crawler(job: dict[str, object]) -> ProviderResult:
+    mode = os.getenv("KYQRA_MODE", "test")
+    if mode in {"test", "safe", "simulator"}:
+        return ProviderResult("test-job-" + str(uuid.uuid4()), "accepted", "test_accepted")
+    if mode != "production" or os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") != "true":
+        raise ProviderError("production_delivery_not_authorized")
+    url = _private_url("KYQRA")
+    token = os.getenv("KYQRA_OUTBOUND_API_KEY", "")
+    if not token:
+        raise ProviderError("provider_credentials_missing")
+    payload = {k: job[k] for k in ("job_id", "tenant_id", "correlation_id", "idempotency_key", "target_url")}
+    request = urllib.request.Request(url, json.dumps(payload).encode(), {
+        "Content-Type": "application/json", "Authorization": "Bearer " + token,
+        "X-Correlation-Id": str(job["correlation_id"]), "Idempotency-Key": str(job["idempotency_key"]),
+    }, method="POST")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        result = json.loads(response.read())
+    return ProviderResult(str(result["id"]), "accepted", str(result.get("status", "accepted")))
