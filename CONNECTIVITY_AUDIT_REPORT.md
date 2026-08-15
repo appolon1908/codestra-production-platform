@@ -35,7 +35,7 @@ Live correlation `final-pass-0121173014` delivered all required Telnexa, Klyrow,
 - Telnexa: simulator outbound and signed inbound/DLR paths passed. No carrier submission occurred.
 - Klyrow: safe/test outbound and signed delivered/bounced/unsubscribed paths passed. Only `.invalid`/tagged test data was used; no bulk delivery occurred.
 - Kyqra: safe adapter passed create/status/results/cancel/retry, correlation/request/idempotency propagation, duplicate replay, and invalid auth. Results normalized once and were delivered to n8n and Odoo.
-- Failure controls: n8n -> Middleware live evidence returned 202 for valid bearer/HMAC, 401 for invalid bearer, invalid HMAC, and stale replay, and 200/`duplicate=true` for an idempotent retry. Middleware -> n8n live evidence returned 200 for all governed endpoints and 403 for invalid auth. Automated timeout evidence proves five bounded attempts followed by `dead_letter`.
+- Failure controls: n8n -> Middleware live evidence returned 202 for valid bearer/HMAC, 401 for invalid bearer, invalid HMAC, and stale replay, and 200/`duplicate=true` for an idempotent retry. Middleware -> n8n live evidence returned 200 for all governed endpoints and 403 for invalid auth; deployed worker correlation `live-worker-corr-d21d2d4fbbee4909b40c88fdb59464fe` was read back delivered with zero retries. Automated timeout evidence proves five bounded attempts followed by `dead_letter`.
 
 ## Explicit delivery targets
 
