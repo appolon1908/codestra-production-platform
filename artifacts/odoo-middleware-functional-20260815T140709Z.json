@@ -1,0 +1,42 @@
+{
+  "captured_at": "2026-08-15T14:07:09Z",
+  "scope": "synthetic-only Odoo middleware functional verification",
+  "middleware_to_odoo": {
+    "correlation_id": "odoo-bridge-live-6d78699ccbbd43f69e32768085ca7122",
+    "synthetic_tag": "CODESTRA-INTEGRATION-TEST-6d78699ccbbd43f69e32768085ca7122",
+    "partner_id": 115,
+    "activity_id": 17,
+    "health": 200,
+    "create": 201,
+    "read": 200,
+    "update": 200,
+    "activity": 201,
+    "status_update": 200,
+    "idempotent_retry": 200,
+    "replay_rejection": 409,
+    "invalid_auth": 401
+  },
+  "odoo_to_middleware": {
+    "correlation_id": "odoo-outbound-live-6e68aa3b63aa43b081b6f02fd2fa0ae9",
+    "odoo_event_id": 308,
+    "accepted": 202,
+    "idempotent_retry": 200,
+    "replay_rejection": 409,
+    "invalid_bearer": 401,
+    "invalid_hmac": 401
+  },
+  "odoo_orm_readback": {
+    "partner_count": 1,
+    "request_count": 5,
+    "activity_count": 1,
+    "event_count": 6,
+    "audit_count": 6,
+    "tenant_ids": ["codestra-production"],
+    "service_user_id": 59,
+    "service_identity": "codestra.middleware@service.internal",
+    "final_status": "inactive"
+  },
+  "bounded_retry_test": "PASS: five attempts then dead_letter",
+  "direct_odoo_database_writes": false,
+  "secrets_recorded": false
+}
