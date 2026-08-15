@@ -4,6 +4,12 @@
 
 Status on 2026-08-15: **functional PASS in both directions**.
 
+Fresh live verification at `2026-08-15T14:07:09Z` is recorded in
+`artifacts/odoo-middleware-functional-20260815T140709Z.json`. The repeatable,
+secret-redacting runners are `scripts/verify_live_odoo_bridge.py`,
+`scripts/verify_live_odoo_outbound.py`, and
+`scripts/verify_live_odoo_readback.py`.
+
 ### Runtime identity and routing
 
 - Middleware -> Odoo uses the dedicated Odoo user `codestra.middleware@service.internal` (database user ID 59) and the least-privilege `Codestra Middleware Bridge` group. It does not reuse any n8n, Telnexa, Klyrow, or Kyqra identity.
@@ -20,10 +26,10 @@ The live suite ran from the control-plane API container against production Odoo,
 | Check | Result | Live evidence |
 |---|---|---|
 | Health | PASS | `/web/health` returned 200 |
-| Authenticated create | PASS | HTTP 201, synthetic partner 114 |
+| Authenticated create | PASS | HTTP 201, synthetic partner 115 |
 | Authenticated read | PASS | HTTP 200, returned the tagged partner |
 | Authenticated update | PASS | HTTP 200, synthetic phone update only |
-| Communication/activity | PASS | HTTP 201, synthetic activity 16 |
+| Communication/activity | PASS | HTTP 201, synthetic activity 17 |
 | Status update | PASS | HTTP 200, `test -> active -> inactive` |
 | Correlation | PASS | Every response echoed the request correlation ID; Odoo event/audit entries were written |
 | Idempotency | PASS | Same key/body with a fresh event ID returned 200 and `duplicate: true` without a second mutation |
@@ -32,6 +38,12 @@ The live suite ran from the control-plane API container against production Odoo,
 | Timeout/retry/DLQ | PASS | Isolated unreachable Odoo target reached `dead_letter` after exactly 5 bounded attempts (`URLError`) |
 
 The contact API refuses untagged contacts and will not read or mutate unrelated partners. Its ACL grants read/write/create only where required and no unlink permission.
+
+The fresh ORM read-back found exactly one partner and one activity for the new
+tag, five immutable request records, six correlated integration events, and six
+audit entries. Every request record was tenant-pinned to `codestra-production`;
+the service identity remained active as user 59 in only its dedicated bridge
+group, and the synthetic contact was left `inactive`.
 
 ### Odoo -> Middleware evidence
 

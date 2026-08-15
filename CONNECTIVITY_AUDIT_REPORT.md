@@ -5,6 +5,7 @@ Branch: `agent/middleware-n8n-control-plane`
 Safe audit evidence: `artifacts/connectivity-audit-mission6-20260815.json` (`20260815T140518Z-5c1e9899`, 93 PASS / 0 FAIL)
 Repository validation: 198 tests and 9 subtests PASS.
 Secret validation: Gitleaks 8.30.1 scanned 157 commits with no leaks.
+Fresh Odoo functional evidence: `artifacts/odoo-middleware-functional-20260815T140709Z.json`.
 
 Mission 2 was revalidated live at 2026-08-15 14:08 UTC. A fresh safe audit (`20260815T140813Z-b2579672`) passed 93/93 with zero failures, and the focused n8n/control-plane suite passed 14/14. A direct runtime export showed 34 workflows: only the 13 required governed event workflows and the common error workflow were active; all 20 unrelated pre-existing workflows remained inactive. The two external secret files remained root-owned mode 0600 with the required n8n identity variables configured; no secret value was printed or committed.
 
@@ -29,6 +30,15 @@ Every locally repairable integration path is PASS in the non-production scope. T
 Live correlation `final-pass-0121173014` delivered all required Telnexa, Klyrow, Kyqra, and customer events to their applicable Odoo and n8n targets with zero retries. Odoo JSON-RPC evidence created/read/updated tagged partner `CODESTRA_CONNECTIVITY_TEST_e6bc729f65` and activity 15 through the dedicated service user. Odoo -> Middleware returned 202 under correlation `odoo-live-232958819a9044ce8aa2d347276bf030`; n8n -> Middleware returned 202 under correlation `n8n-live-5148cef9-4b4b-4310-85cc-1b665d22d725`. Kyqra safe job `c6957821-7e9a-4a49-949b-bfac23e64165` passed create, duplicate replay, status, results, cancel, retry, and invalid-auth tests.
 
 The Odoo functional follow-up additionally exercised the dedicated ORM bridge: tagged contact create/read/update, activity and status changes, correlation/audit persistence, invalid authentication, exact event-ID replay rejection, fresh-event idempotent retry, and isolated five-attempt DLQ exhaustion all passed live.
+
+The `2026-08-15T14:07:09Z` rerun created only synthetic partner 115 and activity
+17, then left the partner inactive. Middleware -> Odoo returned
+`201/200/200/201/200` for create/read/update/activity/status, `200` for the
+idempotent retry, `409` for event replay, and `401` for invalid HMAC. Odoo ->
+Middleware returned `202`, `200`, `409`, `401`, and `401` for acceptance,
+idempotent retry, replay, invalid bearer, and invalid HMAC respectively. ORM
+read-back confirmed the exact tenant, correlation records, six events, and six
+audit rows without a direct PostgreSQL write.
 
 ## Final matrix
 
