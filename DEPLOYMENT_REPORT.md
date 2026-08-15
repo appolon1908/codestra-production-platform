@@ -42,10 +42,18 @@ The Codestra Provisioning Staging CA and its server leaf expire on 2026-08-25. T
 
 Verification passed: all five renewable private profiles completed forced safe dry-run issuance with no deployed changes; the lifecycle and public-monitor timers are enabled with future triggers; the first lifecycle service run exited successfully; Prometheus accepted three lifecycle rules; all eight public leaf/hostname checks passed; the reverse proxy restarted and recovered health; private ingress rejected a missing client certificate and accepted the approved client certificate before applying route authorization. Repository validation passed 198 tests and 9 subtests.
 
-## Final provider activation readiness — 2026-08-15
+## Final provider readiness after identity/TLS remediation — 2026-08-15
 
-A refreshed live safe audit produced 93 PASS / 0 FAIL (`20260815T140234Z-f5355911`), and the focused unit suite produced 59 PASS. Telnexa remained in simulator mode, Klyrow and Kyqra remained in test mode, and the independent production-delivery authorization gate remained unset.
+The stale deployment-account blocker is closed. All three dedicated deployment identities authenticate to `37.27.128.39`, and four mismatched user/key combinations are explicitly rejected with `IdentitiesOnly=yes`. The three SSH aliases were repaired locally from the non-listening private target to the already verified public transport; no working key was replaced. The accounts remain least-privilege: no unrestricted sudo and no Docker-socket membership, with fixed read-only/status wrappers for the owned stack.
 
-Final dispositions are Telnexa **BLOCKED-EXTERNAL**, Klyrow **BLOCKED-EXTERNAL**, and Kyqra **BLOCKED-EXTERNAL**. Their distinct deployment keys exist and are correctly permissioned, but all three deployment accounts rejected public-key authentication. Read-only inspection through the approved peer administrator found no observable provider application runtimes beyond the existing restricted adapter. Jasmin/SMPP routes and DLR/MO, Postal/Mautic and mail DNS/PTR/TLS, and the real Kyqra worker/API and target-policy enforcement therefore lack live provider-side proof.
+Live inventory confirms the real provider software boundaries. Kyqra has healthy API, HTTP/Playwright/callback workers, Redis and PostgreSQL; Telnexa has healthy Jasmin, RabbitMQ, Redis and PostgreSQL; Klyrow has healthy gateway, Mautic, Postal, queues, databases and monitoring. Databases/queues are internal, management endpoints are loopback/private, and public exposure remains limited to SSH and Nginx HTTP/TLS. The intended Kyqra, Telnexa and Klyrow certificates validate and expire in November 2026; Certbot dry-run renewal, reload hooks and certificate monitoring were previously proven.
 
-The non-production paths remain PASS-SAFE evidence, not provider readiness: simulator SMS and synthetic DLR, test email and synthetic delivery, and a bounded safe Kyqra job traversed middleware and the governed n8n/Odoo targets with reverse signed ingress. No real SMS, bulk campaign, SMTP delivery, production crawl, provider activation, firewall change, or provider secret change occurred.
+The fresh middleware safe audit `20260815T142830Z-a1037f76` passed 93/93 and the repository suite passed 198 tests plus 9 subtests. Safe signed reverse tests for Kyqra jobs/results and Telnexa inbound/DLR passed authentication, HMAC, replay and deduplication controls. Klyrow remains in safe mode and no real email was submitted. Unrestricted production delivery remains disabled.
+
+Final dispositions:
+
+- Telnexa — **READY-FOR-PROVIDER**: software, isolation, public TLS, Jasmin health, simulator route and billing safety are ready. Real SMPP credentials/configuration and owner approval are still required before any carrier bind or billable SMS.
+- Klyrow — **BLOCKED-EXTERNAL**: application infrastructure and web TLS are ready, but `mail.klyrow.com`, MX, SPF, published Postal DKIM, matching PTR, SMTP TLS/STARTTLS and owner approval remain absent.
+- Kyqra — **BLOCKED-EXTERNAL**: the real crawler stack is healthy, but middleware lacks an accepted outbound Kyqra API credential and cannot currently reach private port 3100. The real worker-backed callback through middleware to n8n/Odoo was therefore not claimed; provider-owner credential distribution/private-path repair and approval are required.
+
+No real SMS, bulk email, unrestricted crawl, provider activation, database exposure, server-key replacement, or production-gate change occurred.
