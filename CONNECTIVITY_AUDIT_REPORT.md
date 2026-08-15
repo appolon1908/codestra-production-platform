@@ -6,6 +6,8 @@ Safe audit evidence: `artifacts/connectivity-audit-mission6-20260815.json` (`202
 Repository validation: 198 tests and 9 subtests PASS.
 Secret validation: Gitleaks 8.30.1 scanned 157 commits with no leaks.
 
+Mission 2 was revalidated live at 2026-08-15 14:08 UTC. A fresh safe audit (`20260815T140813Z-b2579672`) passed 93/93 with zero failures, and the focused n8n/control-plane suite passed 14/14. A direct runtime export showed 34 workflows: only the 13 required governed event workflows and the common error workflow were active; all 20 unrelated pre-existing workflows remained inactive. The two external secret files remained root-owned mode 0600 with the required n8n identity variables configured; no secret value was printed or committed.
+
 ## Final provider-activation readiness recheck — 2026-08-15 14:02 UTC
 
 | System | Safe integration evidence | Missing live provider evidence | Final status |

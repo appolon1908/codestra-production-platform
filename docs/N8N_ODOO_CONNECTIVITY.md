@@ -49,6 +49,7 @@ No code in the bridge opens a PostgreSQL connection. All Odoo reads and writes u
 
 ## n8n
 
+- Mission 2 live revalidation (2026-08-15 14:08 UTC): the runtime export contained 34 workflows, with exactly the 13 required event workflows and `CP-90-STANDARD-ERROR-V1` active. All 20 pre-existing workflows remained preserved and inactive. Focused integration tests passed 14/14 and the safe connectivity audit run `20260815T140813Z-b2579672` passed 93/93 with zero failures.
 - Middleware -> n8n network PASS: live 200 to `/healthz`.
 - n8n -> Middleware network PASS: live 200 from n8n to `/health`.
 - Middleware -> n8n functional PASS (2026-08-15): the private target is `http://codestra-n8n-1:5678/webhook/codestra-{event_type}`. All 13 governed endpoints returned 200 with the dedicated header credential, rejected invalid auth with 403, preserved correlation/tenant/customer IDs, and suppressed a duplicate delivery. A fresh event under correlation `live-worker-corr-d21d2d4fbbee4909b40c88fdb59464fe` traversed the deployed middleware worker and was read back `delivered` with zero retries.
