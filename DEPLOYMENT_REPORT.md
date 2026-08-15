@@ -32,6 +32,16 @@ Final validation: 93/93 safe live audit checks PASS; 196 tests and 9 subtests PA
 
 Deployment status is PASS for the non-production control-plane scope. Production provider activation remains BLOCKED-EXTERNAL pending separate provider credentials/approval, public TLS ownership, and remote deployment accounts.
 
+# TLS/mTLS lifecycle automation addendum — 2026-08-15
+
+All eight public endpoints were inventoried from their served certificates. They use valid Let's Encrypt leaves, terminate on the Caddy reverse proxy, and are automatically renewed/hot-reloaded by Caddy. The independent six-hour hostname/expiry monitor remains the safe external renewal check.
+
+Middleware-owned private roots and leaves were inventoried without printing or committing key material. Daily leaf renewal automation now has explicit subjects/SANs, issuer paths, renewal windows, scoped reload targets, owner assignments, overlap backups, rollback behavior, expiry metrics, and warning/critical alerts. The current private CA is deliberately preserved. Safe forced dry-run issuance validates the full signing path without changing deployed material.
+
+The Codestra Provisioning Staging CA and its server leaf expire on 2026-08-25. They are monitor-only and require an approved dual-root CA rotation; automation intentionally refuses to replace that CA. This is a critical staging PKI action but does not invalidate the separately verified middleware↔VICIdial private ingress.
+
+Verification passed: all five renewable private profiles completed forced safe dry-run issuance with no deployed changes; the lifecycle and public-monitor timers are enabled with future triggers; the first lifecycle service run exited successfully; Prometheus accepted three lifecycle rules; all eight public leaf/hostname checks passed; the reverse proxy restarted and recovered health; private ingress rejected a missing client certificate and accepted the approved client certificate before applying route authorization. Repository validation passed 198 tests and 9 subtests.
+
 ## Final provider activation readiness — 2026-08-15
 
 A refreshed live safe audit produced 93 PASS / 0 FAIL (`20260815T140234Z-f5355911`), and the focused unit suite produced 59 PASS. Telnexa remained in simulator mode, Klyrow and Kyqra remained in test mode, and the independent production-delivery authorization gate remained unset.
