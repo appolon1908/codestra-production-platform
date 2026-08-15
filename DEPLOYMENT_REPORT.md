@@ -31,3 +31,11 @@ Thirteen governed event workflows plus the common error workflow were imported a
 Final validation: 93/93 safe live audit checks PASS; 196 tests and 9 subtests PASS; all 18 target deliveries under `final-pass-0121173014` were read back as delivered with zero retries. Odoo contact CRUD/activity, Odoo -> Middleware, n8n -> Middleware, all required Middleware -> n8n webhooks, and safe Kyqra job control passed live. No real SMS, bulk email, or production crawl was submitted.
 
 Deployment status is PASS for the non-production control-plane scope. Production provider activation remains BLOCKED-EXTERNAL pending separate provider credentials/approval, public TLS ownership, and remote deployment accounts.
+
+## Final provider activation readiness — 2026-08-15
+
+A refreshed live safe audit produced 93 PASS / 0 FAIL (`20260815T140234Z-f5355911`), and the focused unit suite produced 59 PASS. Telnexa remained in simulator mode, Klyrow and Kyqra remained in test mode, and the independent production-delivery authorization gate remained unset.
+
+Final dispositions are Telnexa **BLOCKED-EXTERNAL**, Klyrow **BLOCKED-EXTERNAL**, and Kyqra **BLOCKED-EXTERNAL**. Their distinct deployment keys exist and are correctly permissioned, but all three deployment accounts rejected public-key authentication. Read-only inspection through the approved peer administrator found no observable provider application runtimes beyond the existing restricted adapter. Jasmin/SMPP routes and DLR/MO, Postal/Mautic and mail DNS/PTR/TLS, and the real Kyqra worker/API and target-policy enforcement therefore lack live provider-side proof.
+
+The non-production paths remain PASS-SAFE evidence, not provider readiness: simulator SMS and synthetic DLR, test email and synthetic delivery, and a bounded safe Kyqra job traversed middleware and the governed n8n/Odoo targets with reverse signed ingress. No real SMS, bulk campaign, SMTP delivery, production crawl, provider activation, firewall change, or provider secret change occurred.

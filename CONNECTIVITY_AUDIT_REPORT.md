@@ -6,6 +6,20 @@ Safe audit evidence: `artifacts/connectivity-audit-mission6-20260815.json` (`202
 Repository validation: 198 tests and 9 subtests PASS.
 Secret validation: Gitleaks 8.30.1 scanned 157 commits with no leaks.
 
+## Final provider-activation readiness recheck — 2026-08-15 14:02 UTC
+
+| System | Safe integration evidence | Missing live provider evidence | Final status |
+|---|---|---|---|
+| Telnexa | Simulator dispatch, DLR normalization, signed reverse ingress, and Odoo/n8n delivery passed without carrier submission | `telnexa-deploy` SSH is rejected; no live Jasmin process, SMPP bind/credentials/approval, route-table read-back, MO/DLR read-back, or provider-side billing proof | **BLOCKED-EXTERNAL** |
+| Klyrow | Test dispatch, delivery normalization, signed reverse ingress, and Odoo/n8n delivery passed using `.invalid` addresses | `klyrow-deploy` SSH is rejected; no live Postal/Mautic process or SPF/DKIM/DMARC/PTR/TLS proof | **BLOCKED-EXTERNAL** |
+| Kyqra | Safe create/status/results/cancel/retry and Odoo/n8n delivery passed for job `c6957821-7e9a-4a49-949b-bfac23e64165` | `kyqra-deploy` SSH is rejected; no independently reachable Crawlee/Playwright worker/API or approved-target-policy inspection | **BLOCKED-EXTERNAL** |
+
+The refreshed safe audit is `artifacts/connectivity-audit-final-provider-20260815.json` (`20260815T140234Z-f5355911`, 93 PASS / 0 FAIL); the focused unit run passed 59/59. All six per-service API/HMAC values are present, length-valid, and pairwise distinct within their credential class, without printing their values. The three ED25519 SSH keys are mode 0600 and have distinct public fingerprints, but live `BatchMode` authentication failed for every deployment account, so key presence is not counted as readiness.
+
+Runtime remained fail-closed: `TELNEXA_MODE=simulator`, `KLYROW_MODE=test`, `KYQRA_MODE=test`, and `CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED` is unset. The control-plane API, worker, and private gateway are non-privileged read-only-root containers on `codestra_edge`; Odoo and n8n use the intended edge/backend networks. Provider-side per-service containers, networks, and runtime-secret boundaries could not be verified through the rejected identities.
+
+The already-approved `codestra-admin` identity connected to `10.40.0.2` and observed SSH, HTTPS, and the restricted adapter on 8443, but no observable Jasmin, Postal, Mautic, Kyqra, Crawlee, or Playwright runtime. No real SMS, SMTP campaign, provider activation, or uncontrolled crawl occurred. An audit-harness integration fix now expects immutable Odoo event replay to return 409 and uses only event types present in the governed n8n catalog.
+
 ## Outcome
 
 Every locally repairable integration path is PASS in the non-production scope. The live private stack now has separate Odoo and n8n service identities, signed inbound requests, authenticated outbound delivery, 13 required event workflows plus one common error workflow, explicit private delivery targets, and the complete Kyqra job-control adapter. No real SMS, bulk email, production crawl, direct database write, or unrelated production-record mutation occurred.
