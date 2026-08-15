@@ -1,2 +1,1 @@
 path,bytes,git_policy,classification
-"config/postgresql-runtime-policy.sql.example",1348,"not-ignored","sensitive-extension"
