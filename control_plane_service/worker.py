@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import os
 import time
 import urllib.request
@@ -9,6 +11,22 @@ from .core import Store
 from .providers import submit
 
 MAX_ATTEMPTS = int(os.getenv("CONTROL_PLANE_MAX_ATTEMPTS", "5"))
+
+
+def delivery_request(target_name: str, target: str, row: object) -> urllib.request.Request:
+    raw = str(row["envelope"]).encode()
+    correlation = str(row["correlation_id"]); event_id = str(row["event_id"]); stamp = str(int(time.time()))
+    headers = {"Content-Type": "application/json", "X-Correlation-Id": correlation, "X-Event-Id": event_id, "X-Timestamp": stamp, "Idempotency-Key": event_id}
+    if target_name == "odoo":
+        secret = os.getenv("ODOO_OUTBOUND_HMAC_SECRET", "")
+        if not secret: raise RuntimeError("odoo_outbound_secret_missing")
+        headers.update({"X-Codestra-Timestamp": stamp, "X-Codestra-Event-ID": event_id, "X-Codestra-Signature": hmac.new(secret.encode(), stamp.encode() + b"." + raw, hashlib.sha256).hexdigest()})
+    elif target_name == "n8n":
+        token = os.getenv("N8N_OUTBOUND_API_KEY", ""); secret = os.getenv("N8N_MIDDLEWARE_HMAC_SECRET", "")
+        if not token or not secret: raise RuntimeError("n8n_outbound_credentials_missing")
+        signature = hmac.new(secret.encode(), b"\n".join((stamp.encode(), event_id.encode(), b"middleware", raw)), hashlib.sha256).hexdigest()
+        headers.update({"Authorization": "Bearer " + token, "X-Event-Source": "middleware", "X-Signature": "sha256=" + signature})
+    return urllib.request.Request(target, raw, headers, method="POST")
 
 
 def store() -> Store:
@@ -24,16 +42,28 @@ def once() -> int:
     processed = 0
     for row in rows:
         envelope = json.loads(row["envelope"]); target_name = row["target"]; target = os.getenv("CONTROL_PLANE_" + target_name.upper() + "_URL", "")
+        event_slug = {"kyqra.record.created": "crawler-result-created", "kyqra.job.completed": "crawler-job-completed", "kyqra.job.failed": "crawler-job-failed"}.get(str(envelope.get("event_type")))
+        if not event_slug: event_slug = str(envelope.get("event_type", "")).removeprefix("telnexa.").removeprefix("klyrow.").replace(".", "-")
+        target = target.replace("{event_type}", event_slug)
         if not target: continue
+        if not current.circuit_allows(target_name, int(os.getenv("CONTROL_PLANE_CIRCUIT_COOLDOWN", "30"))):
+            attempts = row["delivery_attempts"] + 1; state = "dead_letter" if attempts >= MAX_ATTEMPTS else "retrying"; delay = min(300, 2 ** attempts)
+            with current.connect() as db:
+                db.execute("UPDATE event_deliveries SET state=?,attempts=?,next_attempt=?,last_error=? WHERE event_id=? AND target=?",(state,attempts,time.time()+delay,"CircuitOpen",row["event_id"],target_name))
+                db.execute("UPDATE events SET state=?,attempts=max(attempts,?),next_attempt=?,last_error=? WHERE event_id=?",(state,attempts,time.time()+delay,"CircuitOpen",row["event_id"]))
+            processed += 1
+            continue
         try:
-            req = urllib.request.Request(target, row["envelope"].encode(), {"Content-Type": "application/json", "X-Correlation-Id": row["correlation_id"]}, method="POST")
+            req = delivery_request(target_name, target, row)
             with urllib.request.urlopen(req, timeout=5) as response:
                 if response.status >= 300: raise RuntimeError("downstream_status")
             with current.connect() as db:
                 db.execute("UPDATE event_deliveries SET state='delivered',last_error=NULL WHERE event_id=? AND target=?", (row["event_id"],target_name))
                 pending=db.execute("SELECT count(*) FROM event_deliveries WHERE event_id=? AND state!='delivered'",(row["event_id"],)).fetchone()[0]
                 if pending==0: db.execute("UPDATE events SET state='delivered',last_error=NULL WHERE event_id=?",(row["event_id"],))
+            current.circuit_result(target_name, True)
         except Exception as exc:
+            current.circuit_result(target_name, False, int(os.getenv("CONTROL_PLANE_CIRCUIT_THRESHOLD", "3")))
             attempts = row["delivery_attempts"] + 1; state = "dead_letter" if attempts >= MAX_ATTEMPTS else "retrying"; delay = min(300, 2 ** attempts)
             with current.connect() as db:
                 db.execute("UPDATE event_deliveries SET state=?,attempts=?,next_attempt=?,last_error=? WHERE event_id=? AND target=?",(state,attempts,time.time()+delay,type(exc).__name__,row["event_id"],target_name))

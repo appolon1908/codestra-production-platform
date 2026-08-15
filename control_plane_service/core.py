@@ -165,6 +165,9 @@ class Store:
               job_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, correlation_id TEXT NOT NULL,
               idempotency_key TEXT NOT NULL, target_url TEXT NOT NULL, status TEXT NOT NULL,
               provider_job_id TEXT, created_at TEXT NOT NULL, UNIQUE(tenant_id,idempotency_key));
+            CREATE TABLE IF NOT EXISTS crawler_results(
+              job_id TEXT NOT NULL, result_key TEXT NOT NULL, payload TEXT NOT NULL,
+              created_at TEXT NOT NULL, PRIMARY KEY(job_id,result_key));
             """)
             for name in ("odoo", "n8n", "kyqra", "telnexa", "klyrow"):
                 db.execute("INSERT OR IGNORE INTO integrations VALUES(?,0,?)", (name, now_iso()))
@@ -211,6 +214,23 @@ class Store:
         if not row:
             raise ControlPlaneError("crawler_job_not_found")
         return dict(row)
+
+    def transition_crawler_job(self, job_id: str, tenant: str, status: str) -> dict[str, Any]:
+        if status not in {"queued", "accepted", "running", "completed", "failed", "cancelled"}:
+            raise ControlPlaneError("invalid_crawler_status")
+        with self.connect() as db:
+            changed = db.execute("UPDATE crawler_jobs SET status=? WHERE job_id=? AND tenant_id=?", (status, job_id, tenant)).rowcount
+        if not changed: raise ControlPlaneError("crawler_job_not_found")
+        return self.get_crawler_job(job_id, tenant)
+
+    def save_crawler_results(self, job_id: str, tenant: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        self.get_crawler_job(job_id, tenant)
+        with self.connect() as db:
+            for item in items:
+                raw = json.dumps(item, sort_keys=True, separators=(",", ":")); key = hashlib.sha256(raw.encode()).hexdigest()
+                db.execute("INSERT OR IGNORE INTO crawler_results VALUES(?,?,?,?)", (job_id, key, raw, now_iso()))
+            rows = db.execute("SELECT payload FROM crawler_results WHERE job_id=? ORDER BY created_at,result_key", (job_id,)).fetchall()
+        return [json.loads(row["payload"]) for row in rows]
 
     def ingest(self, envelope: dict[str, Any], reject_event_replay: bool = False) -> IngestResult:
         raw = json.dumps(envelope, sort_keys=True, separators=(",", ":"))

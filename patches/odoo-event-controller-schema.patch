@@ -1,0 +1,11 @@
+--- a/codestra_vicidial_crm/controllers/api.py
++++ b/codestra_vicidial_crm/controllers/api.py
+@@
+         record = model.create({
+             "event_type": payload["event_type"],
++            "source": "middleware",
++            "destination": "odoo",
+             "source_system": "external",
+             "destination_system": "odoo",
++            "correlation_id": payload.get("correlation_id"),
+             "idempotency_key": key,

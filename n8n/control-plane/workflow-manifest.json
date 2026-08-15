@@ -1,17 +1,21 @@
 {
   "schema_version": "codestra.n8n.manifest.v1",
-  "environment": "production",
-  "defaults": {"active": false, "error_workflow": "CP-90-STANDARD-ERROR-V1"},
+  "generated_at": "2026-08-15T00:00:00Z",
+  "defaults": {"active": false, "error_workflow": "CP-90-STANDARD-ERROR-V1", "max_delivery_attempts": 5},
   "workflows": [
-    {"name": "CP-10-KYQRA-JOB-COMPLETED-V1", "owner": "data-platform", "events": ["kyqra.job.completed", "kyqra.record.created"], "purpose": "normalize-enrich-and-update-odoo", "source": "middleware-validated", "active": false},
-    {"name": "CP-11-KYQRA-FAILURE-V1", "owner": "data-platform", "events": ["kyqra.job.failed"], "purpose": "bounded-retry-and-alert", "source": "middleware-validated", "active": false},
-    {"name": "CP-12-KYQRA-HIGH-VALUE-LEAD-V1", "owner": "sales-operations", "events": ["kyqra.lead.qualified"], "purpose": "governed-sales-handoff", "source": "middleware-validated", "active": false},
-    {"name": "CP-20-TELNEXA-INBOUND-SMS-V1", "owner": "communications", "events": ["telnexa.sms.received"], "purpose": "identify-contact-and-create-odoo-activity", "source": "middleware-validated", "active": false},
-    {"name": "CP-21-TELNEXA-DLR-V1", "owner": "communications", "events": ["telnexa.sms.delivered", "telnexa.sms.failed"], "purpose": "delivery-state-and-escalation", "source": "middleware-validated", "active": false},
-    {"name": "CP-22-TELNEXA-OPTOUT-V1", "owner": "compliance", "events": ["telnexa.sms.opted_out"], "purpose": "suppression-and-consent-update", "source": "middleware-validated", "active": false},
-    {"name": "CP-30-KLYROW-SUPPRESSION-V1", "owner": "compliance", "events": ["klyrow.email.bounced", "klyrow.email.complained", "klyrow.email.unsubscribed"], "purpose": "suppress-update-and-notify", "source": "middleware-validated", "active": false},
-    {"name": "CP-31-KLYROW-ENGAGEMENT-V1", "owner": "marketing-operations", "events": ["klyrow.email.delivered", "klyrow.email.opened", "klyrow.email.clicked"], "purpose": "engagement-scoring", "source": "middleware-validated", "active": false},
-    {"name": "CP-32-KLYROW-CAMPAIGN-COMPLETED-V1", "owner": "marketing-operations", "events": ["klyrow.campaign.completed"], "purpose": "campaign-reporting", "source": "middleware-validated", "active": false},
-    {"name": "CP-90-STANDARD-ERROR-V1", "owner": "platform-operations", "events": ["workflow.failed"], "purpose": "standard-error-dlq-and-alert", "source": "middleware-validated", "active": false}
+    {"id":"CodestraCP20","name":"CP-20-SMS.RECEIVED-V1","owner":"communications","events":["telnexa.sms.received"],"endpoint":"/webhook/codestra-sms-received","active":false},
+    {"id":"CodestraCP21","name":"CP-21-SMS.DELIVERED-V1","owner":"communications","events":["telnexa.sms.delivered"],"endpoint":"/webhook/codestra-sms-delivered","active":false},
+    {"id":"CodestraCP22","name":"CP-22-SMS.FAILED-V1","owner":"communications","events":["telnexa.sms.failed"],"endpoint":"/webhook/codestra-sms-failed","active":false},
+    {"id":"CodestraCP23","name":"CP-23-SMS.OPTED_OUT-V1","owner":"compliance","events":["telnexa.sms.opted_out"],"endpoint":"/webhook/codestra-sms-opted_out","active":false},
+    {"id":"CodestraCP24","name":"CP-24-EMAIL.DELIVERED-V1","owner":"communications","events":["klyrow.email.delivered"],"endpoint":"/webhook/codestra-email-delivered","active":false},
+    {"id":"CodestraCP25","name":"CP-25-EMAIL.BOUNCED-V1","owner":"compliance","events":["klyrow.email.bounced"],"endpoint":"/webhook/codestra-email-bounced","active":false},
+    {"id":"CodestraCP26","name":"CP-26-EMAIL.COMPLAINED-V1","owner":"compliance","events":["klyrow.email.complained"],"endpoint":"/webhook/codestra-email-complained","active":false},
+    {"id":"CodestraCP27","name":"CP-27-EMAIL.UNSUBSCRIBED-V1","owner":"compliance","events":["klyrow.email.unsubscribed"],"endpoint":"/webhook/codestra-email-unsubscribed","active":false},
+    {"id":"CodestraCP28","name":"CP-28-CRAWLER.RESULT.CREATED-V1","owner":"data-platform","events":["kyqra.record.created"],"endpoint":"/webhook/codestra-crawler-result-created","active":false},
+    {"id":"CodestraCP29","name":"CP-29-CRAWLER.JOB.COMPLETED-V1","owner":"data-platform","events":["kyqra.job.completed"],"endpoint":"/webhook/codestra-crawler-job-completed","active":false},
+    {"id":"CodestraCP30","name":"CP-30-CRAWLER.JOB.FAILED-V1","owner":"data-platform","events":["kyqra.job.failed"],"endpoint":"/webhook/codestra-crawler-job-failed","active":false},
+    {"id":"CodestraCP31","name":"CP-31-CUSTOMER.CREATED-V1","owner":"sales-operations","events":["customer.created"],"endpoint":"/webhook/codestra-customer-created","active":false},
+    {"id":"CodestraCP32","name":"CP-32-CUSTOMER.UPDATED-V1","owner":"sales-operations","events":["customer.updated"],"endpoint":"/webhook/codestra-customer-updated","active":false},
+    {"id":"CodestraCP90","name":"CP-90-STANDARD-ERROR-V1","owner":"platform-operations","events":["workflow.failed"],"endpoint":null,"active":false}
   ]
 }

@@ -19,6 +19,13 @@ class ProviderResult:
     raw_status: str
 
 
+def _request_json(method: str, url: str, payload: dict[str, object] | None, headers: dict[str, str]) -> dict[str, object]:
+    raw = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
+    request = urllib.request.Request(url, raw, {"Accept": "application/json", **headers}, method=method)
+    with urllib.request.urlopen(request, timeout=float(os.getenv("CONTROL_PLANE_HTTP_TIMEOUT", "5"))) as response:
+        return json.loads(response.read() or b"{}")
+
+
 def _private_url(name: str) -> str:
     url = os.getenv(name + "_URL", "")
     if not url:
@@ -68,3 +75,27 @@ def submit_crawler(job: dict[str, object]) -> ProviderResult:
     with urllib.request.urlopen(request, timeout=5) as response:
         result = json.loads(response.read())
     return ProviderResult(str(result["id"]), "accepted", str(result.get("status", "accepted")))
+
+
+def crawler_action(action: str, job: dict[str, object]) -> dict[str, object]:
+    """Call only Kyqra's authenticated API; safe mode remains fully local."""
+    if action not in {"status", "results", "cancel", "retry"}:
+        raise ProviderError("unsupported_crawler_action")
+    mode = os.getenv("KYQRA_MODE", "test")
+    if mode in {"test", "safe", "simulator"}:
+        states = {"status": "completed", "results": "completed", "cancel": "cancelled", "retry": "accepted"}
+        result: dict[str, object] = {"id": job.get("provider_job_id"), "status": states[action], "safe_test": True}
+        if action == "results":
+            result["items"] = [{"url": job["target_url"], "title": "Codestra connectivity test", "test_record": True}]
+        return result
+    if mode != "production" or os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") != "true":
+        raise ProviderError("production_delivery_not_authorized")
+    base = _private_url("KYQRA").rstrip("/")
+    provider_id = urllib.parse.quote(str(job.get("provider_job_id") or ""), safe="")
+    token = os.getenv("KYQRA_OUTBOUND_API_KEY", "")
+    if not provider_id or not token:
+        raise ProviderError("provider_credentials_missing")
+    suffix = {"status": "", "results": "/results", "cancel": "/cancel", "retry": "/retry"}[action]
+    method = "GET" if action in {"status", "results"} else "POST"
+    headers = {"Authorization": "Bearer " + token, "X-Correlation-Id": str(job["correlation_id"]), "X-Request-Id": str(job["job_id"]), "Idempotency-Key": str(job["idempotency_key"]) + ":" + action}
+    return _request_json(method, f"{base}/{provider_id}{suffix}", {} if method == "POST" else None, headers)

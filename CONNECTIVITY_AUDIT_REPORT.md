@@ -1,65 +1,56 @@
 # Middleware API Connectivity Audit Report
 
-Audit date: 2026-08-15 UTC
-
+Final validation: 2026-08-15 UTC
 Branch: `agent/middleware-n8n-control-plane`
-
-Live evidence: `artifacts/connectivity-audit.json` (`20260815T130649Z-c629903b`)
-
-Safety: no bulk SMS/email, carrier submission, real email delivery, production crawler job, direct Odoo PostgreSQL write, or destructive workflow/data action occurred.
+Safe audit evidence: `artifacts/connectivity-audit.json` (`20260815T132137Z-82b67ab3`, 93 PASS / 0 FAIL)
+Repository validation: 198 tests and 9 subtests PASS.
 
 ## Outcome
 
-The locally executable safe suite completed with **93 PASS / 0 FAIL**, and the repository suite completed with **194 tests plus 9 subtests PASS**. Telnexa simulator, Klyrow test mode, all inbound service identities, HMAC negative cases, replay/idempotency behavior, correlation lookup, private routes, health, metrics, and mTLS were observed live.
+Every locally repairable integration path is PASS in the non-production scope. The live private stack now has separate Odoo and n8n service identities, signed inbound requests, authenticated outbound delivery, 13 required event workflows plus one common error workflow, explicit private delivery targets, and the complete Kyqra job-control adapter. No real SMS, bulk email, production crawl, direct database write, or unrelated production-record mutation occurred.
 
-The Odoo functional follow-up is complete: both Odoo directions now have dedicated credentials, live authenticated business-path evidence, replay/idempotency enforcement, correlation/audit evidence, and bounded retry evidence. The broader platform remains **NO-GO for production integration activation** because public HTTPS is unreachable, n8n functional wiring is not activated, Kyqra egress/worker is absent, and three remote deployment identities do not exist.
+Live correlation `final-pass-0121173014` delivered all required Telnexa, Klyrow, Kyqra, and customer events to their applicable Odoo and n8n targets with zero retries. Odoo JSON-RPC evidence created/read/updated tagged partner `CODESTRA_CONNECTIVITY_TEST_e6bc729f65` and activity 15 through the dedicated service user. Odoo -> Middleware returned 202 under correlation `odoo-live-232958819a9044ce8aa2d347276bf030`; n8n -> Middleware returned 202 under correlation `n8n-live-5148cef9-4b4b-4310-85cc-1b665d22d725`. Kyqra safe job `c6957821-7e9a-4a49-949b-bfac23e64165` passed create, duplicate replay, status, results, cancel, retry, and invalid-auth tests.
 
-## Required matrix
+The Odoo functional follow-up additionally exercised the dedicated ORM bridge: tagged contact create/read/update, activity and status changes, correlation/audit persistence, invalid authentication, exact event-ID replay rejection, fresh-event idempotent retry, and isolated five-attempt DLQ exhaustion all passed live.
 
-| Integration | Direction | Network | Auth | Functional | Idempotency | Retry/DLQ | Overall |
-|---|---|---|---|---|---|---|---|
-| Odoo | Middleware -> Odoo | PASS: `/web/health` 200 and private API live | PASS: dedicated user 59 + HMAC | PASS: tagged contact create/read/update, activity, status | PASS: duplicate suppressed; exact replay 409 | PASS: isolated 5-attempt exhaustion to DLQ | PASS |
-| Odoo | Odoo -> Middleware | PASS: `/health` 200 from Odoo | PASS: dedicated bearer + HMAC | PASS: live signed `customer.updated` returned 202 | PASS: exact replay 409; fresh-event retry duplicate 200 | PASS: middleware bounded delivery policy | PASS |
-| n8n | Middleware -> n8n | PASS: `/healthz` 200 | FAIL: no target credential/wiring | BLOCKED | N/A | N/A | BLOCKED |
-| n8n | n8n -> Middleware | PASS: `/health` 200 from n8n | FAIL: no credential/webhook | BLOCKED: zero active webhooks | PASS: server-side n8n identity test | N/A | BLOCKED |
-| Telnexa | Middleware -> Telnexa | PASS: local simulator | PASS: simulator safety gate | PASS: `simulator_accepted`, no carrier submit | PASS: same message read back | PASS: isolated retry/circuit suite | PASS (simulator scope) |
-| Telnexa | Telnexa -> Middleware | PASS: control-plane and private gateway | PASS: live bearer/HMAC | PASS: signed DLR and all private routes | PASS: replay rejected | N/A on successful callback | PASS |
-| Klyrow | Middleware -> Klyrow | PASS: local test adapter | PASS: test-mode safety gate | PASS: `test_accepted`, `.invalid` recipient | PASS: same message read back | PASS: isolated retry/circuit suite | PASS (test scope) |
-| Klyrow | Klyrow -> Middleware | PASS: control-plane and private gateway | PASS: live bearer/HMAC | PASS: delivered event and all private routes | PASS: replay rejected | N/A on successful callback | PASS |
-| Kyqra | Middleware -> Kyqra | FAIL: no live Kyqra service endpoint | BLOCKED: no deployed egress credential | PASS source safe-job contract; FAIL live worker | PASS source | N/A | BLOCKED |
-| Kyqra | Kyqra -> Middleware | PASS: private ingress | PASS: live bearer/HMAC | PASS: jobs/results/progress/failures | PASS: replay/entity duplicate protection | N/A on successful callback | PASS |
+## Final matrix
 
-## Evidence and controls
+`PASS` is based on live execution plus read-back, not configuration presence. Private Docker HTTP is marked PASS where it is an intentionally isolated same-host network boundary; public exposure was not added.
 
-| Area | Result | Evidence / remaining action |
+| Integration | NETWORK | AUTH | TLS/mTLS | API | HMAC | IDEMPOTENCY | CORRELATION ID | RETRY | DLQ | CIRCUIT BREAKER | END-TO-END TEST | FINAL STATUS |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Odoo -> Middleware | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Middleware -> Odoo | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| n8n -> Middleware | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Middleware -> n8n | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Telnexa -> Middleware | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Middleware -> Telnexa | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Klyrow -> Middleware | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Middleware -> Klyrow | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Kyqra -> Middleware | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Middleware -> Kyqra | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+
+## Live workflow evidence
+
+- Odoo: dedicated active service user, HMAC event receiver fixed for the installed model schema, contact CRUD and activity creation read back live. Tagged records remain identifiable for controlled cleanup.
+- n8n: all 13 required event workflows plus `CP-90-STANDARD-ERROR-V1` were imported with a credential reference and published. Every event webhook returned HTTP 200 for valid auth and duplicate replay while preserving correlation, tenant, and customer context. Invalid auth returned 403. The 20 unrelated workflows remain preserved and inactive. Endpoint details are in `docs/N8N_ODOO_CONNECTIVITY.md`.
+- Telnexa: simulator outbound and signed inbound/DLR paths passed. No carrier submission occurred.
+- Klyrow: safe/test outbound and signed delivered/bounced/unsubscribed paths passed. Only `.invalid`/tagged test data was used; no bulk delivery occurred.
+- Kyqra: safe adapter passed create/status/results/cancel/retry, correlation/request/idempotency propagation, duplicate replay, and invalid auth. Results normalized once and were delivered to n8n and Odoo.
+- Failure controls: n8n -> Middleware live evidence returned 202 for valid bearer/HMAC, 401 for invalid bearer, invalid HMAC, and stale replay, and 200/`duplicate=true` for an idempotent retry. Middleware -> n8n live evidence returned 200 for all governed endpoints and 403 for invalid auth; deployed worker correlation `live-worker-corr-d21d2d4fbbee4909b40c88fdb59464fe` was read back delivered with zero retries. Automated timeout evidence proves five bounded attempts followed by `dead_letter`.
+
+## Explicit delivery targets
+
+| Target | Runtime address | Exposure |
 |---|---|---|
-| Service identities | PARTIAL | `codestra-vicidial` PASS. `kyqra-deploy`, `telnexa-deploy`, `klyrow-deploy` BLOCKED because accounts/authorized keys are absent on `10.40.0.2`. |
-| Private vSwitch | PASS | VLAN 4001, MTU 1400, ARP live; private TCP 22/8443 live. Peer intentionally blocks ICMP. |
-| Private port exposure | PASS | 8095 exact-source UFW; 8096/NATS loopback; Redis/PostgreSQL/Odoo/n8n Docker-private; public probes blocked. |
-| Public ingress | FAIL | DNS points to this host, but ports 80/443 refuse connections and HTTPS checks are unreachable. |
-| TLS/mTLS | PARTIAL | Remote adapter mTLS health/readiness 200 and missing-client rejection observed. Certificates valid; private renewal automation not observed. Public TLS unavailable. |
-| HMAC | PASS | Valid/invalid/stale signatures live-tested for all five control-plane identities and all three private-gateway identities. |
-| Replay protection | PASS | Odoo event-ID reuse is rejected with 409 in both directions. A fresh event ID with the same idempotency key remains a safe retry. Private gateway also rejects event-ID replay. |
-| Idempotency | PASS for tested endpoints | Odoo contact/status and Odoo event retries suppressed duplicate effects; SMS/email repeated requests returned the same message. Real crawler records remain BLOCKED. |
-| Retry/DLQ | PASS for Odoo / PARTIAL platform-wide | An isolated unreachable Odoo endpoint reached DLQ after exactly 5 attempts. No production dependency was disrupted. Other production restart/failure exhaustion remains BLOCKED-SAFETY. |
-| Circuit breaker | PASS in tests / BLOCKED live outage | Threshold 3, cooldown 30 seconds, half-open recovery tested in suite. No real dependency was taken down. |
-| Correlation ID | PASS locally | Odoo contact responses, middleware ledger entries, and Odoo outbound results preserved their correlation IDs; prior cross-provider evidence remains valid. |
-| Odoo integrity | PASS | No direct application Odoo PostgreSQL connection/write found. Read-only audit query only. |
-| n8n governance | FAIL activation | 20 workflows, all inactive; zero webhooks and credentials. No hard-coded production credential was found. |
-| Health/readiness | PASS locally | Control plane, gateway, Odoo, n8n, Redis, PostgreSQL, containers, and remote adapter healthy. No local Jasmin/Mautic/Postal/Kyqra process exists. |
-| Monitoring | PASS for deployed targets | Prometheus reported 28/28 active targets UP, including middleware quarantine probes, Odoo, PostgreSQL, Redis, containers, node, TLS/HTTPS probes. Provider-specific Kyqra/Klyrow/Telnexa business metrics are absent. |
-| Queues | PARTIAL | SQLite delivery queues, Redis, NATS JetStream, and DLQ contracts observed. No RabbitMQ. Live production restart survival not forced. |
-| DNS | PARTIAL | `crm`, `api`, `n8n`, `auth.codestra.agency` resolve correctly to `65.109.65.169`; HTTPS is unreachable. No active `10.40.0.3` use was introduced. |
+| Odoo | `http://codestra-odoo-1:8069` | private Docker network |
+| n8n | `http://codestra-n8n-1:5678` | private Docker network |
+| Telnexa | `https://10.40.0.2/telnexa` | private vSwitch, simulator remains selected |
+| Klyrow | `https://10.40.0.2/klyrow` | private vSwitch, safe/test remains selected |
+| Kyqra | `http://kyqra:3100` | private service DNS contract, safe adapter selected |
 
-## Repairs completed
+## BLOCKED-EXTERNAL
 
-1. Pulled branch head `b0902d5` before auditing.
-2. Repaired the stale `10.40.0.2` known-host entry only after matching its ED25519 fingerprint to the independently pinned public endpoint; retained a backup.
-3. Added a repeatable, secret-redacting safe audit harness covering the live control plane and every legacy private-gateway route.
-4. Integrated the concurrent safe Kyqra job API repair: private/test-only target policy, fail-closed production authorization, idempotency/correlation persistence, OpenAPI, and tests. It is source-validated but not claimed live until deployed with an approved Kyqra worker.
-5. Added the required inventory, endpoint, service identity, network, TLS, system-specific, testing, retry/DLQ, and deployment documentation.
-6. Added and deployed `codestra_middleware_bridge`, a synthetic-only Odoo ORM API with a dedicated least-privilege service identity, immutable idempotency evidence, and Odoo audit events.
-7. Configured distinct Odoo-direction credentials outside Git and wired the discovered Docker-private endpoints.
-8. Hardened Odoo ingress so exact signed event-ID reuse is rejected while legitimate fresh-event idempotent retries remain safe.
-
-No safe local change can invent remote Kyqra/Klyrow/Telnexa accounts or services, activate n8n production workflows, restore public ingress, or establish certificate lifecycle ownership without external intent/credentials. Those actions require the owners identified above. Odoo is no longer among the blocked integrations.
+- Production provider credentials/owner approval for real Telnexa, Klyrow, and Kyqra traffic are unavailable. Safe simulator/test integrations are PASS and production delivery remains authorization-gated.
+- Public HTTPS on ports 80/443 and certificate lifecycle ownership remain outside this private control-plane change. No internal API was exposed publicly to satisfy testing.
+- Remote `kyqra-deploy`, `telnexa-deploy`, and `klyrow-deploy` operating-system identities/authorized keys still require their server owner.
