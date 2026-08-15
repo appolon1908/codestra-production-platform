@@ -6,12 +6,15 @@ on:
       - ".github/workflows/**"
       - "campaign_provisioning/**"
       - "control_plane/**"
+      - "control_plane_service/**"
       - "eventing/**"
       - "identity/**"
       - "integrations/**"
       - "config/**"
       - "deploy/**"
       - "docs/**"
+      - "n8n/**"
+      - "schemas/**"
       - "scripts/**"
       - "tel_events/**"
       - "tools/**"
@@ -99,6 +102,27 @@ jobs:
               compile(path.read_text(), str(path), "exec", dont_inherit=True)
           print(f"compiled {len(paths)} tracked Python sources")
           PY
+
+      - name: Validate control-plane contracts and deployment
+        run: |
+          python -m pip install jsonschema openapi-spec-validator
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft202012Validator
+          from openapi_spec_validator import validate_spec
+          import yaml
+
+          schema = json.loads(Path("schemas/integration-event-envelope-v1.schema.json").read_text())
+          Draft202012Validator.check_schema(schema)
+          manifest = json.loads(Path("n8n/control-plane/workflow-manifest.json").read_text())
+          assert manifest["defaults"]["active"] is False
+          names = [item["name"] for item in manifest["workflows"]]
+          assert len(names) == len(set(names)) and len(names) >= 4
+          validate_spec(yaml.safe_load(Path("docs/openapi/control-plane-v1.yaml").read_text()))
+          PY
+          docker compose -f deploy/control-plane/compose.yaml config --quiet
+          docker build -f deploy/control-plane/Dockerfile -t codestra-control-plane:ci .
 
       - name: Validate Git whitespace
         run: git diff --check "${{ github.event.pull_request.base.sha }}..HEAD"

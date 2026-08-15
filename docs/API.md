@@ -7,3 +7,5 @@
 - `POST /api/v1/preferences`, `POST /api/v1/preferences/check`
 
 Errors are JSON `{ "error": "stable_code" }`. Rate-limited production ingress should return 429 and `Retry-After`; the existing ingress retains its current source/firewall controls while migration is staged.
+
+The machine-readable OpenAPI 3.1 contract is `docs/openapi/control-plane-v1.yaml`. HMAC signs `timestamp + newline + event_id + newline + source + newline + exact request body`; timestamps outside the configured tolerance are rejected.

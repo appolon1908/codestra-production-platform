@@ -1,0 +1,116 @@
+openapi: 3.1.0
+info:
+  title: Codestra Integration Control Plane
+  version: 1.0.0
+  description: Authoritative authenticated ingress and operations API. Outbound delivery is fail-closed by default.
+servers:
+  - url: http://127.0.0.1:8096
+    description: Private/local deployment
+paths:
+  /health:
+    get:
+      operationId: getLiveness
+      responses:
+        "200": {description: Process is alive, content: {application/json: {schema: {$ref: "#/components/schemas/Health"}}}}
+  /ready:
+    get:
+      operationId: getReadiness
+      responses:
+        "200": {description: State store is ready, content: {application/json: {schema: {$ref: "#/components/schemas/Health"}}}}
+        "503": {$ref: "#/components/responses/Error"}
+  /metrics:
+    get:
+      operationId: getMetrics
+      responses:
+        "200": {description: Prometheus metrics, content: {text/plain: {schema: {type: string}}}}
+  /api/v1/events/{source}:
+    post:
+      operationId: ingestEvent
+      security: [{serviceKey: [], webhookHmac: []}]
+      parameters:
+        - {name: source, in: path, required: true, schema: {type: string, enum: [kyqra, telnexa, klyrow, n8n, odoo]}}
+        - {name: X-Event-Id, in: header, required: true, schema: {type: string, minLength: 1}}
+        - {name: X-Timestamp, in: header, required: true, schema: {type: string, pattern: "^[0-9]+$"}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EventEnvelope"}
+      responses:
+        "202": {description: Accepted}
+        "200": {description: Exact duplicate; original result returned}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/v1/preferences/check:
+    post:
+      operationId: checkCommunicationPreference
+      security: [{operatorToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, contact_id, channel]
+              properties:
+                tenant_id: {type: string}
+                contact_id: {type: string}
+                channel: {type: string, enum: [sms, email]}
+      responses:
+        "200": {description: Default-deny preference decision}
+        "403": {$ref: "#/components/responses/Error"}
+  /api/v1/ops/summary:
+    get:
+      operationId: getOperationsSummary
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: tenant_id, in: query, schema: {type: string}}
+      responses:
+        "200": {description: Tenant-filtered operational state}
+        "403": {$ref: "#/components/responses/Error"}
+  /api/v1/ops/events:
+    get:
+      operationId: listEvents
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: tenant_id, in: query, schema: {type: string}}
+        - {name: state, in: query, schema: {type: string, enum: [queued, retrying, delivered, dead_letter, quarantined]}}
+      responses:
+        "200": {description: Tenant-filtered events}
+        "403": {$ref: "#/components/responses/Error"}
+components:
+  securitySchemes:
+    serviceKey: {type: http, scheme: bearer}
+    operatorToken: {type: http, scheme: bearer}
+    webhookHmac: {type: apiKey, in: header, name: X-Signature}
+  responses:
+    Error:
+      description: Stable machine-readable error
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties: {status: {type: string}}
+    Error:
+      type: object
+      required: [error]
+      properties: {error: {type: string}}
+    EventEnvelope:
+      type: object
+      additionalProperties: false
+      required: [event_type, event_version, occurred_at, tenant_id, idempotency_key, payload]
+      properties:
+        event_type: {type: string, minLength: 3}
+        event_version: {type: string, const: "1.0"}
+        occurred_at: {type: string, format: date-time}
+        tenant_id: {type: string, minLength: 1}
+        customer_id: {type: [string, "null"]}
+        correlation_id: {type: string}
+        causation_id: {type: [string, "null"]}
+        idempotency_key: {type: string, minLength: 1}
+        payload: {type: object}
+        metadata: {type: object}

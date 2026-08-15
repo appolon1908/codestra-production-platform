@@ -42,6 +42,16 @@ def canonical(timestamp: str, event_id: str, source: str, body: bytes) -> bytes:
     return b"\n".join((timestamp.encode(), event_id.encode(), source.encode(), body))
 
 
+def credential_matches(supplied: str, plaintext: str, digest: str = "") -> bool:
+    """Accept a legacy runtime secret or a preferred SHA-256 digest."""
+    if not supplied:
+        return False
+    if digest:
+        calculated = hashlib.sha256(supplied.encode()).hexdigest()
+        return hmac.compare_digest(calculated, digest.lower())
+    return bool(plaintext) and hmac.compare_digest(supplied, plaintext)
+
+
 def verify_signature(secret: str, timestamp: str, event_id: str, source: str, body: bytes, supplied: str, ttl: int = 300) -> None:
     try:
         age = abs(int(time.time()) - int(timestamp))

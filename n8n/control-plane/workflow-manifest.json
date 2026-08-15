@@ -3,9 +3,15 @@
   "environment": "production",
   "defaults": {"active": false, "error_workflow": "CP-90-STANDARD-ERROR-V1"},
   "workflows": [
-    {"name": "CP-10-KYQRA-EVENT-ROUTER-V1", "owner": "data-platform", "source": "middleware-validated", "active": false},
-    {"name": "CP-20-TELNEXA-EVENT-ROUTER-V1", "owner": "communications", "source": "middleware-validated", "active": false},
-    {"name": "CP-30-KLYROW-EVENT-ROUTER-V1", "owner": "communications", "source": "middleware-validated", "active": false},
-    {"name": "CP-90-STANDARD-ERROR-V1", "owner": "platform-operations", "source": "middleware-validated", "active": false}
+    {"name": "CP-10-KYQRA-JOB-COMPLETED-V1", "owner": "data-platform", "events": ["kyqra.job.completed", "kyqra.record.created"], "purpose": "normalize-enrich-and-update-odoo", "source": "middleware-validated", "active": false},
+    {"name": "CP-11-KYQRA-FAILURE-V1", "owner": "data-platform", "events": ["kyqra.job.failed"], "purpose": "bounded-retry-and-alert", "source": "middleware-validated", "active": false},
+    {"name": "CP-12-KYQRA-HIGH-VALUE-LEAD-V1", "owner": "sales-operations", "events": ["kyqra.lead.qualified"], "purpose": "governed-sales-handoff", "source": "middleware-validated", "active": false},
+    {"name": "CP-20-TELNEXA-INBOUND-SMS-V1", "owner": "communications", "events": ["telnexa.sms.received"], "purpose": "identify-contact-and-create-odoo-activity", "source": "middleware-validated", "active": false},
+    {"name": "CP-21-TELNEXA-DLR-V1", "owner": "communications", "events": ["telnexa.sms.delivered", "telnexa.sms.failed"], "purpose": "delivery-state-and-escalation", "source": "middleware-validated", "active": false},
+    {"name": "CP-22-TELNEXA-OPTOUT-V1", "owner": "compliance", "events": ["telnexa.sms.opted_out"], "purpose": "suppression-and-consent-update", "source": "middleware-validated", "active": false},
+    {"name": "CP-30-KLYROW-SUPPRESSION-V1", "owner": "compliance", "events": ["klyrow.email.bounced", "klyrow.email.complained", "klyrow.email.unsubscribed"], "purpose": "suppress-update-and-notify", "source": "middleware-validated", "active": false},
+    {"name": "CP-31-KLYROW-ENGAGEMENT-V1", "owner": "marketing-operations", "events": ["klyrow.email.delivered", "klyrow.email.opened", "klyrow.email.clicked"], "purpose": "engagement-scoring", "source": "middleware-validated", "active": false},
+    {"name": "CP-32-KLYROW-CAMPAIGN-COMPLETED-V1", "owner": "marketing-operations", "events": ["klyrow.campaign.completed"], "purpose": "campaign-reporting", "source": "middleware-validated", "active": false},
+    {"name": "CP-90-STANDARD-ERROR-V1", "owner": "platform-operations", "events": ["workflow.failed"], "purpose": "standard-error-dlq-and-alert", "source": "middleware-validated", "active": false}
   ]
 }

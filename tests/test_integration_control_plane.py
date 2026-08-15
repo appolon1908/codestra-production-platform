@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 
-from control_plane_service.core import ControlPlaneError, Store, canonical, validate_envelope, verify_signature
+from control_plane_service.core import ControlPlaneError, Store, canonical, credential_matches, validate_envelope, verify_signature
 from control_plane_service.worker import once
 
 
@@ -41,6 +41,13 @@ class ControlPlaneTests(unittest.TestCase):
             verify_signature(secret, ts, event_id, "klyrow", body, "bad")
         with self.assertRaisesRegex(ControlPlaneError, "expired_timestamp"):
             verify_signature(secret, str(int(ts) - 600), event_id, "klyrow", body, signature)
+
+    def test_plaintext_and_hashed_service_credentials(self):
+        secret = "synthetic-service-key"
+        digest = hashlib.sha256(secret.encode()).hexdigest()
+        self.assertTrue(credential_matches(secret, "", digest))
+        self.assertFalse(credential_matches("wrong", "", digest))
+        self.assertTrue(credential_matches(secret, secret))
 
     def test_contract_and_version_rejection(self):
         value = validate_envelope(envelope(), "klyrow", "event-1")

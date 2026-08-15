@@ -6,7 +6,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .core import ControlPlaneError, Store, validate_envelope, verify_signature
+from .core import ControlPlaneError, Store, credential_matches, validate_envelope, verify_signature
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
 STORE = Store(DB)
@@ -78,8 +78,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/v1/events/"):
             source = parsed.path.rsplit("/", 1)[-1]
             if source not in {"kyqra", "telnexa", "klyrow", "n8n", "odoo"}: return self.send_json(404, {"error": "unknown_source"})
-            api_key, secret = identity(source); supplied = self.headers.get("Authorization", "")
-            if not api_key or not hmac.compare_digest(supplied, "Bearer " + api_key): return self.send_json(401, {"error": "invalid_api_key"})
+            api_key, secret = identity(source); supplied = self.headers.get("Authorization", "").removeprefix("Bearer ")
+            digest = os.getenv(f"{source.upper()}_MIDDLEWARE_API_KEY_SHA256", "")
+            if not credential_matches(supplied, api_key, digest): return self.send_json(401, {"error": "invalid_api_key"})
             event_id = self.headers.get("X-Event-Id", ""); timestamp = self.headers.get("X-Timestamp", ""); signature = self.headers.get("X-Signature", "")
             try:
                 verify_signature(secret, timestamp, event_id, source, body, signature, TTL)

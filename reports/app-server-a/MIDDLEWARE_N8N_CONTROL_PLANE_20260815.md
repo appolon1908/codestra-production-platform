@@ -25,3 +25,12 @@
 ## Gate
 
 Recommendation: STAGING-ONLY. Odoo/n8n production adapter URLs and credentials require owner approval. Kyqra/Klyrow peer health timed out; Telnexa requires its approved client certificate. Existing production routes continue unchanged.
+
+## Follow-up validation
+
+- Local complete pytest suite: PASS after branch refresh.
+- Container build and Compose validation: PASS.
+- JSON Schema, OpenAPI 3.1, and inactive n8n catalog validation: PASS; 10 governed workflows.
+- Pull-request source gate path coverage: fixed for `control_plane_service`, `schemas`, and `n8n`; Docker/Compose/contract validation added.
+- Service identity hardening: SHA-256-digested API keys supported with constant-time comparison; plaintext variables retained only for controlled migration.
+- Live revalidation/deployment from this execution host: BLOCKED because SSH authentication to `65.109.65.169` was rejected. No live configuration was changed and no SMS/email was sent.
