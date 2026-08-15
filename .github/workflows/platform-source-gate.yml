@@ -121,7 +121,8 @@ jobs:
           assert len(names) == len(set(names)) and len(names) >= 4
           validate_spec(yaml.safe_load(Path("docs/openapi/control-plane-v1.yaml").read_text()))
           PY
-          docker compose -f deploy/control-plane/compose.yaml config --quiet
+          CONTROL_PLANE_ENV_FILE="$PWD/config/control-plane.env.example" \
+            docker compose -f deploy/control-plane/compose.yaml config --quiet
           docker build -f deploy/control-plane/Dockerfile -t codestra-control-plane:ci .
 
       - name: Validate Git whitespace

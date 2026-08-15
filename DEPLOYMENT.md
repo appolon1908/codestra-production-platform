@@ -2,7 +2,7 @@
 
 1. Back up `/opt/middleware`, `/opt/codestra/compose`, n8n workflow exports, reverse-proxy configuration, and current container/firewall inventories.
 2. Generate independent random values from `config/control-plane.env.example` into `/etc/codestra/secrets/control-plane.env`; set mode 0600.
-3. Run `docker compose -f deploy/control-plane/compose.yaml config`, build, and start.
+3. Run `docker compose -f deploy/control-plane/compose.yaml config`, build, and start. CI may point `CONTROL_PLANE_ENV_FILE` at the committed example for syntax validation; production defaults to `/etc/codestra/secrets/control-plane.env`.
 4. Verify `http://127.0.0.1:8096/health`, `/ready`, authenticated `/api/v1/ops/summary`, and `/metrics`.
 5. Keep `CONTROL_PLANE_OUTBOUND_ENABLED=false` until Odoo adapter and n8n workflow URLs/credentials are approved and synthetic acceptance passes.
 
