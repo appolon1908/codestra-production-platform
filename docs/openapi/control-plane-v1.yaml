@@ -7,6 +7,52 @@ servers:
   - url: http://127.0.0.1:8096
     description: Private/local deployment
 paths:
+  /v1/messages/sms:
+    post:
+      operationId: sendSms
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: X-Request-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Correlation-Id, in: header, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/MessageRequest"}}}}
+      responses:
+        "202": {description: Queued in Telnexa simulator or authorized adapter}
+        "200": {description: Idempotent replay}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /v1/messages/email:
+    post:
+      operationId: sendEmail
+      security: [{operatorToken: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/MessageRequest"}}}}
+      responses:
+        "202": {description: Queued in Klyrow test mode or authorized adapter}
+        "200": {description: Idempotent replay}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /v1/messages:
+    get:
+      operationId: listMessages
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: tenant_id, in: query, schema: {type: string}}
+        - {name: channel, in: query, schema: {type: string, enum: [sms, email]}}
+        - {name: status, in: query, schema: {type: string}}
+      responses:
+        "200": {description: Tenant-scoped communications ledger}
+  /v1/messages/{message_id}:
+    get:
+      operationId: getMessage
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: message_id, in: path, required: true, schema: {type: string}}
+        - {name: tenant_id, in: query, schema: {type: string}}
+      responses:
+        "200": {description: Tenant-scoped message}
+        "404": {$ref: "#/components/responses/Error"}
   /health:
     get:
       operationId: getLiveness
@@ -91,6 +137,21 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    MessageRequest:
+      type: object
+      required: [tenant_id, customer_id, sender, recipient, source_application, classification]
+      properties:
+        tenant_id: {type: string}
+        customer_id: {type: string}
+        sender: {type: string}
+        recipient: {type: string}
+        source_application: {type: string}
+        classification: {type: string, enum: [marketing, transactional]}
+        campaign_id: {type: string}
+        workflow_id: {type: string}
+        content_metadata: {type: object}
+        estimated_cost_minor: {type: integer}
+        currency: {type: string}
     Health:
       type: object
       required: [status]

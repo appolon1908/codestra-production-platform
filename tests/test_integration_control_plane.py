@@ -66,6 +66,8 @@ class ControlPlaneTests(unittest.TestCase):
         conflicting = dict(item); conflicting["payload"] = {"message_id": "different"}
         with self.assertRaisesRegex(ControlPlaneError, "idempotency_conflict"):
             self.store.ingest(conflicting)
+        with self.store.connect() as db:
+            self.assertEqual({r["target"] for r in db.execute("SELECT target FROM event_deliveries WHERE event_id='event-1'")}, {"odoo", "n8n"})
 
     def test_tenant_isolation_and_correlation(self):
         first = validate_envelope(envelope(correlation_id="trace", tenant_id="tenant-a"), "klyrow", "event-a")
