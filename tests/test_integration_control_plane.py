@@ -69,6 +69,20 @@ class ControlPlaneTests(unittest.TestCase):
         with self.store.connect() as db:
             self.assertEqual({r["target"] for r in db.execute("SELECT target FROM event_deliveries WHERE event_id='event-1'")}, {"odoo", "n8n"})
 
+    def test_event_exists_tracks_accepted_event_id(self):
+        item = validate_envelope(envelope(), "klyrow", "event-1")
+        self.assertFalse(self.store.event_exists(item["event_id"]))
+        self.store.ingest(item)
+        self.assertTrue(self.store.event_exists(item["event_id"]))
+
+    def test_strict_event_replay_rejects_same_id_but_allows_idempotent_retry(self):
+        item = validate_envelope(envelope(event_type="customer.updated"), "odoo", "event-1")
+        self.store.ingest(item, reject_event_replay=True)
+        with self.assertRaisesRegex(ControlPlaneError, "replayed_event_id"):
+            self.store.ingest(item, reject_event_replay=True)
+        retry = validate_envelope(envelope(event_type="customer.updated"), "odoo", "event-2")
+        self.assertTrue(self.store.ingest(retry, reject_event_replay=True).duplicate)
+
     def test_tenant_isolation_and_correlation(self):
         first = validate_envelope(envelope(correlation_id="trace", tenant_id="tenant-a"), "klyrow", "event-a")
         second = validate_envelope(envelope(correlation_id="trace", tenant_id="tenant-b", idempotency_key="other"), "klyrow", "event-b")

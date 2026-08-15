@@ -212,7 +212,7 @@ class Store:
             raise ControlPlaneError("crawler_job_not_found")
         return dict(row)
 
-    def ingest(self, envelope: dict[str, Any]) -> IngestResult:
+    def ingest(self, envelope: dict[str, Any], reject_event_replay: bool = False) -> IngestResult:
         raw = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
         try:
             with self.connect() as db:
@@ -222,12 +222,24 @@ class Store:
             return IngestResult(envelope["event_id"], envelope["correlation_id"], False, "queued")
         except sqlite3.IntegrityError:
             with self.connect() as db:
+                if reject_event_replay and db.execute(
+                    "SELECT 1 FROM events WHERE event_id=? LIMIT 1",
+                    (envelope["event_id"],),
+                ).fetchone():
+                    raise ControlPlaneError("replayed_event_id")
                 row = db.execute("SELECT event_id,correlation_id,envelope,state FROM events WHERE event_id=? OR (tenant_id=? AND source=? AND idempotency_key=?)", (envelope["event_id"], envelope["tenant_id"], envelope["source"], envelope["idempotency_key"])).fetchone()
             def producer_content(item: dict[str, Any]) -> dict[str, Any]:
                 return {key: item.get(key) for key in ("event_type", "event_version", "occurred_at", "tenant_id", "customer_id", "causation_id", "idempotency_key", "payload", "metadata")}
             if row and producer_content(json.loads(row["envelope"])) == producer_content(envelope):
                 return IngestResult(row["event_id"], row["correlation_id"], True, row["state"])
             raise ControlPlaneError("idempotency_conflict")
+
+    def event_exists(self, event_id: str) -> bool:
+        """Return whether an immutable producer event ID was already accepted."""
+        with self.connect() as db:
+            return db.execute(
+                "SELECT 1 FROM events WHERE event_id=? LIMIT 1", (event_id,)
+            ).fetchone() is not None
 
     def set_preference(self, tenant: str, contact: str, channel: str, status: str, source: str, reason: str | None = None) -> None:
         if channel not in {"sms", "email"} or status not in {"subscribed", "unsubscribed", "suppressed"}:

@@ -110,11 +110,14 @@ class Handler(BaseHTTPRequestHandler):
                 value = validate_envelope(json.loads(body), source, event_id)
                 if source == "telnexa" and value["event_type"] == "telnexa.sms.received" and not value["payload"].get("message_id"):
                     inbound,_ = STORE.create_inbound_sms(value); value["payload"]["message_id"] = inbound["message_id"]
-                result = STORE.ingest(value)
+                # Odoo signs a unique immutable event ID. Reject its reuse
+                # atomically; legitimate retries use a fresh event ID with the
+                # same tenant-scoped idempotency key.
+                result = STORE.ingest(value, reject_event_replay=source == "odoo")
                 if not result.duplicate and source in {"telnexa","klyrow"} and value.get("payload",{}).get("message_id"):
                     STORE.apply_provider_event(source,value)
             except (ControlPlaneError, json.JSONDecodeError) as exc:
-                code = 409 if str(exc) in {"idempotency_conflict"} else 401 if "signature" in str(exc) or "timestamp" in str(exc) else 422
+                code = 409 if str(exc) in {"idempotency_conflict", "replayed_event_id"} else 401 if "signature" in str(exc) or "timestamp" in str(exc) else 422
                 return self.send_json(code, {"error": str(exc)})
             return self.send_json(200 if result.duplicate else 202, result.__dict__)
         op = self.auth_operator({"platform_admin", "operations", "support", "tenant_admin"})
