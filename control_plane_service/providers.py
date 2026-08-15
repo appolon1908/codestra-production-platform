@@ -21,7 +21,10 @@ class ProviderResult:
 
 def _request_json(method: str, url: str, payload: dict[str, object] | None, headers: dict[str, str]) -> dict[str, object]:
     raw = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
-    request = urllib.request.Request(url, raw, {"Accept": "application/json", **headers}, method=method)
+    values = {"Accept": "application/json", **headers}
+    if raw is not None:
+        values["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, raw, values, method=method)
     with urllib.request.urlopen(request, timeout=float(os.getenv("CONTROL_PLANE_HTTP_TIMEOUT", "5"))) as response:
         return json.loads(response.read() or b"{}")
 
@@ -31,7 +34,7 @@ def _private_url(name: str) -> str:
     if not url:
         raise ProviderError("provider_url_missing")
     host = urllib.parse.urlparse(url).hostname
-    if host not in {"10.40.0.2", "localhost", "127.0.0.1"}:
+    if host not in {"10.40.0.2", "10.40.0.4", "localhost", "127.0.0.1"}:
         raise ProviderError("provider_url_not_private")
     return url
 
@@ -61,16 +64,23 @@ def submit_crawler(job: dict[str, object]) -> ProviderResult:
     mode = os.getenv("KYQRA_MODE", "test")
     if mode in {"test", "safe", "simulator"}:
         return ProviderResult("test-job-" + str(uuid.uuid4()), "accepted", "test_accepted")
-    if mode != "production" or os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") != "true":
+    if mode not in {"private_safe", "production"}:
+        raise ProviderError("production_delivery_not_authorized")
+    if mode == "production" and os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") != "true":
         raise ProviderError("production_delivery_not_authorized")
     url = _private_url("KYQRA")
     token = os.getenv("KYQRA_OUTBOUND_API_KEY", "")
     if not token:
         raise ProviderError("provider_credentials_missing")
-    payload = {k: job[k] for k in ("job_id", "tenant_id", "correlation_id", "idempotency_key", "target_url")}
+    payload = {
+        "startUrls": [job["target_url"]], "mode": "single", "maxPages": 1,
+        "maxDepth": 0, "browser": "http", "extract": [],
+        "includePatterns": [], "excludePatterns": [], "requestsPerSecond": 0.1,
+    }
     request = urllib.request.Request(url, json.dumps(payload).encode(), {
         "Content-Type": "application/json", "Authorization": "Bearer " + token,
-        "X-Correlation-Id": str(job["correlation_id"]), "Idempotency-Key": str(job["idempotency_key"]),
+        "X-Correlation-Id": str(job["correlation_id"]), "X-Tenant-Id": str(job["tenant_id"]),
+        "Idempotency-Key": str(job["idempotency_key"]),
     }, method="POST")
     with urllib.request.urlopen(request, timeout=5) as response:
         result = json.loads(response.read())
@@ -88,7 +98,9 @@ def crawler_action(action: str, job: dict[str, object]) -> dict[str, object]:
         if action == "results":
             result["items"] = [{"url": job["target_url"], "title": "Codestra connectivity test", "test_record": True}]
         return result
-    if mode != "production" or os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") != "true":
+    if mode not in {"private_safe", "production"}:
+        raise ProviderError("production_delivery_not_authorized")
+    if mode == "production" and os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") != "true":
         raise ProviderError("production_delivery_not_authorized")
     base = _private_url("KYQRA").rstrip("/")
     provider_id = urllib.parse.quote(str(job.get("provider_job_id") or ""), safe="")
@@ -97,5 +109,10 @@ def crawler_action(action: str, job: dict[str, object]) -> dict[str, object]:
         raise ProviderError("provider_credentials_missing")
     suffix = {"status": "", "results": "/results", "cancel": "/cancel", "retry": "/retry"}[action]
     method = "GET" if action in {"status", "results"} else "POST"
-    headers = {"Authorization": "Bearer " + token, "X-Correlation-Id": str(job["correlation_id"]), "X-Request-Id": str(job["job_id"]), "Idempotency-Key": str(job["idempotency_key"]) + ":" + action}
-    return _request_json(method, f"{base}/{provider_id}{suffix}", {} if method == "POST" else None, headers)
+    headers = {"Authorization": "Bearer " + token, "X-Correlation-Id": str(job["correlation_id"]),
+               "X-Tenant-Id": str(job["tenant_id"]), "X-Request-Id": str(job["job_id"]),
+               "Idempotency-Key": str(job["idempotency_key"]) + ":" + action}
+    result = _request_json(method, f"{base}/{provider_id}{suffix}", {} if method == "POST" else None, headers)
+    if action == "results" and "results" in result:
+        result["items"] = [row.get("data", {}) for row in result.get("results", []) if isinstance(row, dict)]
+    return result

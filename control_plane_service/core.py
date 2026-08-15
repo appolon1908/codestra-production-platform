@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -181,7 +182,8 @@ class Store:
         parsed = urllib.parse.urlparse(target)
         hostname = parsed.hostname or ""
         safe_local = parsed.scheme == "http" and hostname in {"127.0.0.1", "localhost"}
-        safe_reserved = parsed.scheme == "https" and (hostname == "example.test" or hostname.endswith(".example.test"))
+        configured = {item.strip().lower() for item in os.getenv("KYQRA_SAFE_TARGET_HOSTS", "example.test").split(",") if item.strip()}
+        safe_reserved = parsed.scheme == "https" and any(hostname == item or hostname.endswith("." + item) for item in configured)
         if not parsed.path or not (safe_local or safe_reserved):
             raise ControlPlaneError("unsafe_crawler_target")
         job = {
