@@ -109,10 +109,13 @@ def live_audit() -> dict:
         check(results, "control-plane " + path, status, 200, {"response": payload})
 
     event_types = {
-        "odoo": "campaign.audit.completed",
+        # Use only routes present in the governed n8n workflow catalog. Sending
+        # arbitrary prefix-valid audit types would test ingress but then queue
+        # delivery to a webhook that intentionally does not exist.
+        "odoo": "customer.updated",
         "n8n": "workflow.audit.completed",
-        "telnexa": "telnexa.provider.status",
-        "klyrow": "klyrow.provider.status",
+        "telnexa": "telnexa.sms.delivered",
+        "klyrow": "klyrow.email.delivered",
         "kyqra": "kyqra.job.completed",
     }
     event_ids: dict[str, str] = {}
@@ -124,7 +127,12 @@ def live_audit() -> dict:
         status, payload = request("POST", f"/api/v1/events/{source}", body, headers)
         check(results, f"{source} valid auth/HMAC ingress", status, 202, {"event_id": event_id, "correlation_id": correlation, "response": payload})
         status, payload = request("POST", f"/api/v1/events/{source}", body, headers)
-        check(results, f"{source} exact replay idempotency", status, 200, {"event_id": event_id, "response": payload})
+        # Odoo producer event IDs are immutable and their exact reuse must be
+        # rejected. Other integrations retain the legacy duplicate response;
+        # all sources still enforce tenant-scoped idempotency below.
+        replay_status = 409 if source == "odoo" else 200
+        replay_name = "immutable event replay rejected" if source == "odoo" else "exact replay idempotency"
+        check(results, f"{source} {replay_name}", status, replay_status, {"event_id": event_id, "response": payload})
         changed = dict(body)
         changed["payload"] = {"safe_test": True, "changed": True}
         status, payload = request("POST", f"/api/v1/events/{source}", changed, signed_headers(source, event_id, changed))

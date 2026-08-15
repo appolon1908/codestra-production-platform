@@ -2,8 +2,9 @@
 
 Final validation: 2026-08-15 UTC
 Branch: `agent/middleware-n8n-control-plane`
-Safe audit evidence: `artifacts/connectivity-audit.json` (`20260815T132137Z-82b67ab3`, 93 PASS / 0 FAIL)
+Safe audit evidence: `artifacts/connectivity-audit-mission6-20260815.json` (`20260815T140518Z-5c1e9899`, 93 PASS / 0 FAIL)
 Repository validation: 198 tests and 9 subtests PASS.
+Secret validation: Gitleaks 8.30.1 scanned 157 commits with no leaks.
 
 ## Outcome
 
@@ -17,18 +18,14 @@ The Odoo functional follow-up additionally exercised the dedicated ORM bridge: t
 
 `PASS` is based on live execution plus read-back, not configuration presence. Private Docker HTTP is marked PASS where it is an intentionally isolated same-host network boundary; public exposure was not added.
 
-| Integration | NETWORK | AUTH | TLS/mTLS | API | HMAC | IDEMPOTENCY | CORRELATION ID | RETRY | DLQ | CIRCUIT BREAKER | END-TO-END TEST | FINAL STATUS |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Odoo -> Middleware | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Middleware -> Odoo | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| n8n -> Middleware | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Middleware -> n8n | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Telnexa -> Middleware | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Middleware -> Telnexa | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Klyrow -> Middleware | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Middleware -> Klyrow | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Kyqra -> Middleware | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| Middleware -> Kyqra | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Flow | NETWORK | AUTH | TLS/mTLS | HMAC | REPLAY | IDEMPOTENCY | CORRELATION ID | RETRY | DLQ | CIRCUIT BREAKER | TENANT ISOLATION | AUDIT LOG | ODOO RESULT | FINAL STATUS |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1. Telnexa simulator -> Middleware -> n8n -> Odoo | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| 2. Odoo/n8n -> Middleware -> Telnexa -> Jasmin simulator -> DLR -> Middleware -> n8n -> Odoo | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| 3. Odoo/n8n -> Middleware -> Klyrow test -> delivery/bounce -> Middleware -> n8n -> Odoo | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| 4. Odoo/n8n -> Middleware -> Kyqra safe crawler -> Middleware -> n8n -> Odoo | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+
+Mission 6 used only reserved synthetic destinations, `.invalid` email data, provider simulator/test modes, and safe crawler targets. Telnexa returned `simulator_accepted`, Klyrow returned `test_accepted`, signed DLR/delivery/bounce/crawler callbacks were accepted with replay protection, and normalized results were read back. No real carrier SMS, bulk email, or production crawl was submitted.
 
 ## Live workflow evidence
 
