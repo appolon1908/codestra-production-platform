@@ -19,5 +19,5 @@ Production activation remains gated on approved Odoo/n8n endpoint credentials an
 - No production container image, compose stack, database, workflow, or firewall policy was redeployed.
 - One local operational repair updated the stale `10.40.0.2` SSH host-key cache after independent fingerprint equality proof; backup retained.
 - New audit scripts execute against current containers in safe mode and produced 93/93 PASS evidence without provider delivery.
-- Repository validation passed: 191 tests and 9 subtests.
+- Repository validation passed after integrating the concurrent safe Kyqra job repair: 192 tests and 9 subtests.
 - Deployment/activation recommendation remains **NO-GO** until public ingress, Odoo/n8n credentials and endpoint wiring, active governed workflows, Kyqra egress/worker, remote service accounts, and private certificate renewal ownership are resolved.

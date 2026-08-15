@@ -6,6 +6,7 @@ import json
 import sqlite3
 import time
 import uuid
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -160,10 +161,56 @@ class Store:
               units INTEGER NOT NULL, estimated_cost_minor INTEGER NOT NULL, final_cost_minor INTEGER,
               customer_charge_minor INTEGER, currency TEXT NOT NULL, status TEXT NOT NULL, billing_period TEXT NOT NULL,
               created_at TEXT NOT NULL, UNIQUE(message_id,status));
+            CREATE TABLE IF NOT EXISTS crawler_jobs(
+              job_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, correlation_id TEXT NOT NULL,
+              idempotency_key TEXT NOT NULL, target_url TEXT NOT NULL, status TEXT NOT NULL,
+              provider_job_id TEXT, created_at TEXT NOT NULL, UNIQUE(tenant_id,idempotency_key));
             """)
             for name in ("odoo", "n8n", "kyqra", "telnexa", "klyrow"):
                 db.execute("INSERT OR IGNORE INTO integrations VALUES(?,0,?)", (name, now_iso()))
                 db.execute("INSERT OR IGNORE INTO circuits(name) VALUES(?)", (name,))
+
+    def create_crawler_job(self, value: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        required = ("tenant_id", "correlation_id", "idempotency_key", "target_url")
+        if any(not value.get(key) for key in required):
+            raise ControlPlaneError("missing_crawler_job_fields")
+        target = str(value["target_url"])
+        parsed = urllib.parse.urlparse(target)
+        hostname = parsed.hostname or ""
+        safe_local = parsed.scheme == "http" and hostname in {"127.0.0.1", "localhost"}
+        safe_reserved = parsed.scheme == "https" and (hostname == "example.test" or hostname.endswith(".example.test"))
+        if not parsed.path or not (safe_local or safe_reserved):
+            raise ControlPlaneError("unsafe_crawler_target")
+        job = {
+            "job_id": str(uuid.uuid4()), "tenant_id": str(value["tenant_id"]),
+            "correlation_id": str(value["correlation_id"]), "idempotency_key": str(value["idempotency_key"]),
+            "target_url": target, "status": "queued", "provider_job_id": None, "created_at": now_iso(),
+        }
+        try:
+            with self.connect() as db:
+                db.execute("INSERT INTO crawler_jobs VALUES(?,?,?,?,?,?,?,?)", tuple(job.values()))
+            return job, False
+        except sqlite3.IntegrityError:
+            with self.connect() as db:
+                row = db.execute("SELECT * FROM crawler_jobs WHERE tenant_id=? AND idempotency_key=?", (job["tenant_id"], job["idempotency_key"])).fetchone()
+            if row and row["target_url"] == target:
+                return dict(row), True
+            raise ControlPlaneError("idempotency_conflict")
+
+    def accept_crawler_job(self, job_id: str, tenant: str, provider_job_id: str) -> dict[str, Any]:
+        with self.connect() as db:
+            db.execute("UPDATE crawler_jobs SET status='accepted',provider_job_id=? WHERE job_id=? AND tenant_id=?", (provider_job_id, job_id, tenant))
+            row = db.execute("SELECT * FROM crawler_jobs WHERE job_id=? AND tenant_id=?", (job_id, tenant)).fetchone()
+        if not row:
+            raise ControlPlaneError("crawler_job_not_found")
+        return dict(row)
+
+    def get_crawler_job(self, job_id: str, tenant: str) -> dict[str, Any]:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM crawler_jobs WHERE job_id=? AND tenant_id=?", (job_id, tenant)).fetchone()
+        if not row:
+            raise ControlPlaneError("crawler_job_not_found")
+        return dict(row)
 
     def ingest(self, envelope: dict[str, Any]) -> IngestResult:
         raw = json.dumps(envelope, sort_keys=True, separators=(",", ":"))

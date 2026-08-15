@@ -7,6 +7,20 @@ servers:
   - url: http://127.0.0.1:8096
     description: Private/local deployment
 paths:
+  /v1/crawler/jobs:
+    post:
+      operationId: createCrawlerJob
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: X-Correlation-Id, in: header, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/CrawlerJobRequest"}}}}
+      responses:
+        "202": {description: Accepted by Kyqra safe/test adapter}
+        "200": {description: Idempotent replay}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
   /v1/messages/sms:
     post:
       operationId: sendSms
@@ -137,6 +151,12 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    CrawlerJobRequest:
+      type: object
+      required: [tenant_id, target_url]
+      properties:
+        tenant_id: {type: string}
+        target_url: {type: string, format: uri, description: Safe local/test URL only}
     MessageRequest:
       type: object
       required: [tenant_id, customer_id, sender, recipient, source_application, classification]

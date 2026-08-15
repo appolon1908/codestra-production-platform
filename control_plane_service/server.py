@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from .core import ControlPlaneError, Store, credential_matches, validate_envelope, verify_signature
+from .providers import ProviderError, submit_crawler
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
 STORE = Store(DB)
@@ -84,6 +85,10 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/v1/customers/") and parsed.path.endswith("/preferences"):
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
             return self.send_json(200,STORE.get_preferences(tenant,parsed.path.split("/")[3]))
+        if parsed.path.startswith("/v1/crawler/jobs/"):
+            if not tenant: return self.send_json(422,{"error":"tenant_required"})
+            try: return self.send_json(200, STORE.get_crawler_job(parsed.path.rsplit("/",1)[-1],tenant))
+            except ControlPlaneError as exc: return self.send_json(404,{"error":str(exc)})
         if parsed.path == "/api/v1/ops/summary": return self.send_json(200, STORE.summary(tenant))
         if parsed.path == "/api/v1/ops/events": return self.send_json(200, {"items": STORE.list_events(tenant, query.get("state", [None])[0])})
         if parsed.path.startswith("/api/v1/ops/correlations/"): return self.send_json(200, {"items": STORE.correlation(parsed.path.rsplit("/", 1)[-1], tenant)})
@@ -127,6 +132,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(code,{"error":str(exc)})
             STORE.audit(op[0],op[1],"message.created","message",message["message_id"],tenant,message["correlation_id"],{"channel":message["channel"],"duplicate":duplicate})
             return self.send_json(200 if duplicate else 202,message)
+        if parsed.path == "/v1/crawler/jobs":
+            if not tenant: return self.send_json(422,{"error":"tenant_required"})
+            value["tenant_id"]=tenant
+            value.setdefault("correlation_id",self.headers.get("X-Correlation-Id"))
+            value.setdefault("idempotency_key",self.headers.get("Idempotency-Key"))
+            try:
+                job,duplicate=STORE.create_crawler_job(value)
+                if not duplicate:
+                    result=submit_crawler(job); job=STORE.accept_crawler_job(job["job_id"],tenant,result.provider_message_id)
+            except ControlPlaneError as exc: return self.send_json(409 if str(exc)=="idempotency_conflict" else 422,{"error":str(exc)})
+            except ProviderError as exc: return self.send_json(503,{"error":str(exc)})
+            STORE.audit(op[0],op[1],"crawler.job.created","crawler_job",job["job_id"],tenant,job["correlation_id"],{"duplicate":duplicate})
+            return self.send_json(200 if duplicate else 202,job)
         if parsed.path.startswith("/v1/messages/") and parsed.path.endswith(("/cancel","/retry")):
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
             message_id=parsed.path.split("/")[3]

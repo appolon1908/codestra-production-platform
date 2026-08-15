@@ -10,4 +10,4 @@ It writes `artifacts/connectivity-audit.json`, runs inside deployed containers s
 
 It validates every control-plane identity and private-gateway route, positive/negative bearer auth, valid/invalid/stale HMAC, replay, idempotency conflict, correlation lookup, Telnexa simulator and DLR read-back, Klyrow test dispatch and callback read-back, metrics, and operator rejection.
 
-Latest: **93 PASS, 0 FAIL** (`20260815T130357Z-6138a207`). Repository suite: **191 tests and 9 subtests PASS**. This proves deployed local paths only; absent workers, credentials, provider accounts, and workflows remain FAIL/BLOCKED.
+Latest: **93 PASS, 0 FAIL** (`20260815T130649Z-c629903b`). Repository suite: **192 tests and 9 subtests PASS**. This proves deployed local paths only; absent workers, credentials, provider accounts, and workflows remain FAIL/BLOCKED.

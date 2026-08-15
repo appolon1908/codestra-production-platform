@@ -4,13 +4,13 @@ Audit date: 2026-08-15 UTC
 
 Branch: `agent/middleware-n8n-control-plane`
 
-Live evidence: `artifacts/connectivity-audit.json` (`20260815T130357Z-6138a207`)
+Live evidence: `artifacts/connectivity-audit.json` (`20260815T130649Z-c629903b`)
 
 Safety: no bulk SMS/email, carrier submission, real email delivery, production crawler job, direct Odoo PostgreSQL write, or destructive workflow/data action occurred.
 
 ## Outcome
 
-The locally executable safe suite completed with **93 PASS / 0 FAIL**, and the repository suite completed with **191 tests plus 9 subtests PASS**. Telnexa simulator, Klyrow test mode, all inbound service identities, HMAC negative cases, replay/idempotency behavior, correlation lookup, private routes, health, metrics, and mTLS were observed live.
+The locally executable safe suite completed with **93 PASS / 0 FAIL**, and the repository suite completed with **192 tests plus 9 subtests PASS**. Telnexa simulator, Klyrow test mode, all inbound service identities, HMAC negative cases, replay/idempotency behavior, correlation lookup, private routes, health, metrics, and mTLS were observed live.
 
 The platform is **NO-GO for production integration activation**. Public HTTPS is unreachable; Odoo and n8n lack production control-plane credentials and outbound target wiring; all 20 n8n workflows are inactive with no webhook registrations; Kyqra egress/worker is absent; and three remote deployment identities do not exist. These are reported below as FAIL/BLOCKED rather than inferred PASS.
 
@@ -26,7 +26,7 @@ The platform is **NO-GO for production integration activation**. Public HTTPS is
 | Telnexa | Telnexa -> Middleware | PASS: control-plane and private gateway | PASS: live bearer/HMAC | PASS: signed DLR and all private routes | PASS: replay rejected | N/A on successful callback | PASS |
 | Klyrow | Middleware -> Klyrow | PASS: local test adapter | PASS: test-mode safety gate | PASS: `test_accepted`, `.invalid` recipient | PASS: same message read back | PASS: isolated retry/circuit suite | PASS (test scope) |
 | Klyrow | Klyrow -> Middleware | PASS: control-plane and private gateway | PASS: live bearer/HMAC | PASS: delivered event and all private routes | PASS: replay rejected | N/A on successful callback | PASS |
-| Kyqra | Middleware -> Kyqra | FAIL: no Kyqra service endpoint | FAIL: no egress credential | FAIL: job adapter/worker absent | N/A | N/A | FAIL |
+| Kyqra | Middleware -> Kyqra | FAIL: no live Kyqra service endpoint | BLOCKED: no deployed egress credential | PASS source safe-job contract; FAIL live worker | PASS source | N/A | BLOCKED |
 | Kyqra | Kyqra -> Middleware | PASS: private ingress | PASS: live bearer/HMAC | PASS: jobs/results/progress/failures | PASS: replay/entity duplicate protection | N/A on successful callback | PASS |
 
 ## Evidence and controls
@@ -56,6 +56,7 @@ The platform is **NO-GO for production integration activation**. Public HTTPS is
 1. Pulled branch head `b0902d5` before auditing.
 2. Repaired the stale `10.40.0.2` known-host entry only after matching its ED25519 fingerprint to the independently pinned public endpoint; retained a backup.
 3. Added a repeatable, secret-redacting safe audit harness covering the live control plane and every legacy private-gateway route.
-4. Added the required inventory, endpoint, service identity, network, TLS, system-specific, testing, retry/DLQ, and deployment documentation.
+4. Integrated the concurrent safe Kyqra job API repair: private/test-only target policy, fail-closed production authorization, idempotency/correlation persistence, OpenAPI, and tests. It is source-validated but not claimed live until deployed with an approved Kyqra worker.
+5. Added the required inventory, endpoint, service identity, network, TLS, system-specific, testing, retry/DLQ, and deployment documentation.
 
 No safe local change can invent remote Kyqra/Klyrow/Telnexa accounts or services, choose Odoo/n8n business endpoints, activate workflows, restore public ingress, or establish certificate lifecycle ownership without external intent/credentials. Those actions require the owners identified above.

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 from control_plane_service.core import ControlPlaneError, Store, normalize_destination, sms_segments, validate_envelope
-from control_plane_service.providers import ProviderError, submit
+from control_plane_service.providers import ProviderError, submit, submit_crawler
 from control_plane_service.worker import dispatch_messages
 from control_plane_service.routing import select_channel
 
@@ -111,6 +111,15 @@ class CommunicationsTests(unittest.TestCase):
         self.store.upsert_contact("tenant-a","customer-1","odoo-42",["+18095550101"],["person@example.test"],{"telnexa":"sms-1","klyrow":"email-1"})
         with self.store.connect() as db: row=db.execute("SELECT odoo_partner_id FROM contacts WHERE tenant_id=? AND customer_id=?",("tenant-a","customer-1")).fetchone()
         self.assertEqual(row["odoo_partner_id"],"odoo-42")
+
+    def test_safe_crawler_job_idempotency_and_target_policy(self):
+        value={"tenant_id":"tenant-a","correlation_id":"crawl-correlation","idempotency_key":"crawl-1","target_url":"https://example.test/audit"}
+        first,duplicate=self.store.create_crawler_job(value); second,replayed=self.store.create_crawler_job(value)
+        self.assertFalse(duplicate); self.assertTrue(replayed); self.assertEqual(first["job_id"],second["job_id"])
+        result=submit_crawler(first); accepted=self.store.accept_crawler_job(first["job_id"],"tenant-a",result.provider_message_id)
+        self.assertEqual(accepted["status"],"accepted"); self.assertTrue(accepted["provider_job_id"].startswith("test-job-"))
+        with self.assertRaisesRegex(ControlPlaneError,"unsafe_crawler_target"):
+            self.store.create_crawler_job(dict(value,idempotency_key="crawl-2",target_url="https://www.google.com/"))
 
     def test_operations_summary_and_metrics_cover_both_channels(self):
         self.store.create_message(request()); self.store.create_message(request("email",key="email-metric"))
