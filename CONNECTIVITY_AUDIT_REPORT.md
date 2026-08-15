@@ -9,6 +9,8 @@ Fresh Odoo functional evidence: `artifacts/odoo-middleware-functional-20260815T1
 
 Mission 2 was revalidated live at 2026-08-15 14:08 UTC. A fresh safe audit (`20260815T140813Z-b2579672`) passed 93/93 with zero failures, and the focused n8n/control-plane suite passed 14/14. A direct runtime export showed 34 workflows: only the 13 required governed event workflows and the common error workflow were active; all 20 unrelated pre-existing workflows remained inactive. The two external secret files remained root-owned mode 0600 with the required n8n identity variables configured; no secret value was printed or committed.
 
+Mission 3 deployed the approved crawler-job adapter to the live control-plane API and worker. Safe job `5fb4cb66-dabf-4951-a800-34a17d5dfe52` passed create, duplicate replay, status, one-result read-back, cancel, retry, invalid credential, signed callback, normalization, and Odoo/n8n fan-out under correlation `kyqra-m3-6a778644ac`. Odoo delivered with zero retries; n8n recovered from an open circuit after the configured 30-second cooldown and delivered on bounded attempt four. The post-deployment safe audit `20260815T141335Z-ec272b7e` passed 93/93, and the repository suite passed 198 tests plus 9 subtests. This is live middleware evidence, not live Kyqra worker evidence: the provider ID remained `test-job-*`, no Kyqra/Crawlee/Playwright service was present, and the discovered `10.40.0.2:3100` endpoint timed out. The full provider-worker lifecycle is therefore **BLOCKED-EXTERNAL**.
+
 ## Final provider-activation readiness recheck — 2026-08-15 14:02 UTC
 
 | System | Safe integration evidence | Missing live provider evidence | Final status |
@@ -49,7 +51,7 @@ audit rows without a direct PostgreSQL write.
 | 1. Telnexa simulator -> Middleware -> n8n -> Odoo | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | 2. Odoo/n8n -> Middleware -> Telnexa -> Jasmin simulator -> DLR -> Middleware -> n8n -> Odoo | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | 3. Odoo/n8n -> Middleware -> Klyrow test -> delivery/bounce -> Middleware -> n8n -> Odoo | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| 4. Odoo/n8n -> Middleware -> Kyqra safe crawler -> Middleware -> n8n -> Odoo | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| 4. Odoo/n8n -> Middleware -> Kyqra safe crawler -> Middleware -> n8n -> Odoo | BLOCKED-EXTERNAL | BLOCKED-EXTERNAL | BLOCKED-EXTERNAL | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | BLOCKED-EXTERNAL |
 
 Mission 6 used only reserved synthetic destinations, `.invalid` email data, provider simulator/test modes, and safe crawler targets. Telnexa returned `simulator_accepted`, Klyrow returned `test_accepted`, signed DLR/delivery/bounce/crawler callbacks were accepted with replay protection, and normalized results were read back. No real carrier SMS, bulk email, or production crawl was submitted.
 
@@ -70,10 +72,11 @@ Mission 6 used only reserved synthetic destinations, `.invalid` email data, prov
 | n8n | `http://codestra-n8n-1:5678` | private Docker network |
 | Telnexa | `https://10.40.0.2/telnexa` | private vSwitch, simulator remains selected |
 | Klyrow | `https://10.40.0.2/klyrow` | private vSwitch, safe/test remains selected |
-| Kyqra | `http://kyqra:3100` | private service DNS contract, safe adapter selected |
+| Kyqra | `http://10.40.0.2:3100` | discovered private configuration; endpoint currently unreachable |
 
 ## BLOCKED-EXTERNAL
 
 - Production provider credentials/owner approval for real Telnexa, Klyrow, and Kyqra traffic are unavailable. Safe simulator/test integrations are PASS and production delivery remains authorization-gated.
 - Public HTTPS on ports 80/443 and certificate lifecycle ownership remain outside this private control-plane change. No internal API was exposed publicly to satisfy testing.
 - Remote `kyqra-deploy`, `telnexa-deploy`, and `klyrow-deploy` operating-system identities/authorized keys still require their server owner.
+- Kyqra service owner must deploy/recover the API and worker on the already configured private endpoint and register a dedicated outbound middleware credential before the worker-backed path can be marked PASS.

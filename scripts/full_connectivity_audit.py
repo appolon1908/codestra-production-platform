@@ -47,7 +47,8 @@ def request(method: str, path: str, body: object | None = None, headers: dict[st
 def signed_headers(source: str, event_id: str, body: object, timestamp: int | None = None, *, bad_signature: bool = False) -> dict[str, str]:
     stamp = str(timestamp if timestamp is not None else int(time.time()))
     raw = json.dumps(body, separators=(",", ":")).encode()
-    secret = os.environ[source.upper() + "_WEBHOOK_SECRET"]
+    secret_name = "N8N_MIDDLEWARE_HMAC_SECRET" if source == "n8n" else source.upper() + "_WEBHOOK_SECRET"
+    secret = os.environ[secret_name]
     canonical = b"\n".join((stamp.encode(), event_id.encode(), source.encode(), raw))
     signature = hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
     if bad_signature:
