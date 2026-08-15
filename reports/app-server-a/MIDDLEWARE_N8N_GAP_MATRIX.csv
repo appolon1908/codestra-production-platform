@@ -1,0 +1,17 @@
+requirement,status,evidence_or_gate
+existing private ingress preserved,PASS,10.40.0.1:8095 healthy
+unified event envelope,PASS,schemas/integration-event-envelope-v1.schema.json
+independent identities,PASS,root-readable runtime env with per-service variables
+HMAC and replay,PASS,focused and deployed smoke tests
+tenant idempotency,PASS,exact retry and conflict tests
+queue retry DLQ replay,PASS,durable state and RBAC replay API
+Odoo adapter,PARTIAL,HTTP-only contract implemented; production URL/credential approval required
+n8n governance,PASS,inactive versioned catalog and governance runbook
+Kyqra private health,BLOCKED,10.40.0.2:3100 timed out
+Telnexa private health,BLOCKED,mTLS client certificate required
+Klyrow private health,BLOCKED,10.40.0.2:18000 timed out
+consent preferences,PASS,tenant/channel default-deny and unsubscribe test
+operations console,PASS,RBAC summary events correlation replay pause APIs
+observability,PASS,Prometheus event and circuit metrics
+backup restore validation,PASS,checksum and SQLite integrity
+production external delivery,BLOCKED,approved Odoo/n8n credentials and owner activation required

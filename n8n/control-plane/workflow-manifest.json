@@ -1,0 +1,11 @@
+{
+  "schema_version": "codestra.n8n.manifest.v1",
+  "environment": "production",
+  "defaults": {"active": false, "error_workflow": "CP-90-STANDARD-ERROR-V1"},
+  "workflows": [
+    {"name": "CP-10-KYQRA-EVENT-ROUTER-V1", "owner": "data-platform", "source": "middleware-validated", "active": false},
+    {"name": "CP-20-TELNEXA-EVENT-ROUTER-V1", "owner": "communications", "source": "middleware-validated", "active": false},
+    {"name": "CP-30-KLYROW-EVENT-ROUTER-V1", "owner": "communications", "source": "middleware-validated", "active": false},
+    {"name": "CP-90-STANDARD-ERROR-V1", "owner": "platform-operations", "source": "middleware-validated", "active": false}
+  ]
+}
