@@ -82,6 +82,33 @@ class EmailDeliveryStatus(models.Model):
         raise AccessError("Email delivery evidence is immutable.")
 
 
+class CrmExternalMapping(models.Model):
+    _name = "codestra.crm.external.mapping"
+    _description = "Codestra CRM External Object Mapping"
+    _order = "id desc"
+
+    customer_key = fields.Char(required=True, index=True, readonly=True)
+    external_id = fields.Char(required=True, index=True, readonly=True)
+    middleware_id = fields.Char(required=True, index=True, readonly=True)
+    model = fields.Selection([("crm.lead", "CRM Lead")], required=True, readonly=True)
+    record_id = fields.Integer(required=True, index=True, readonly=True)
+    company_id = fields.Many2one("res.company", required=True, readonly=True)
+    business_unit_id = fields.Many2one("call.center.business.unit", required=True, readonly=True)
+    service_user_id = fields.Many2one("res.users", required=True, readonly=True)
+    created_at = fields.Datetime(default=fields.Datetime.now, required=True, readonly=True)
+
+    _customer_external_unique = models.Constraint(
+        "UNIQUE(customer_key,external_id,model)", "External CRM object IDs are tenant scoped and unique."
+    )
+    _middleware_unique = models.Constraint("UNIQUE(middleware_id)", "Middleware object IDs are unique.")
+
+    def write(self, values):
+        raise AccessError("CRM mappings are immutable.")
+
+    def unlink(self):
+        raise AccessError("CRM mappings are immutable.")
+
+
 class MiddlewareOutbound(models.AbstractModel):
     _name = "codestra.middleware.outbound"
     _description = "Odoo to Codestra Middleware Event Client"

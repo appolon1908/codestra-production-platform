@@ -12,13 +12,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-SOURCES = {"kyqra", "telnexa", "klyrow", "n8n", "odoo"}
+SOURCES = {"kyqra", "telnexa", "klyrow", "n8n", "odoo", "crm"}
 EVENT_PREFIXES = {
     "kyqra": ("kyqra.",),
     "telnexa": ("telnexa.",),
     "klyrow": ("klyrow.",),
     "n8n": ("workflow.",),
     "odoo": ("customer.", "campaign."),
+    "crm": ("crm.",),
 }
 CHANNEL_EVENTS = {
     "telnexa.sms.received": "sms",
@@ -188,10 +189,80 @@ class Store:
             CREATE TABLE IF NOT EXISTS crawler_results(
               job_id TEXT NOT NULL, result_key TEXT NOT NULL, payload TEXT NOT NULL,
               created_at TEXT NOT NULL, PRIMARY KEY(job_id,result_key));
+            CREATE TABLE IF NOT EXISTS crm_customers(
+              customer_id TEXT PRIMARY KEY, kong_consumer_id TEXT NOT NULL UNIQUE,
+              kong_custom_id TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 0,
+              company_label TEXT NOT NULL, business_unit_label TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS crm_objects(
+              customer_id TEXT NOT NULL, external_id TEXT NOT NULL, middleware_id TEXT NOT NULL UNIQUE,
+              odoo_model TEXT NOT NULL, odoo_record_ref TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+              PRIMARY KEY(customer_id,external_id), FOREIGN KEY(customer_id) REFERENCES crm_customers(customer_id));
+            CREATE TABLE IF NOT EXISTS crm_idempotency(
+              customer_id TEXT NOT NULL, operation TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+              request_hash TEXT NOT NULL, response_json TEXT NOT NULL, status_code INTEGER NOT NULL,
+              created_at TEXT NOT NULL, PRIMARY KEY(customer_id,operation,idempotency_key));
+            CREATE TABLE IF NOT EXISTS crm_audit(
+              id TEXT PRIMARY KEY, customer_id TEXT, action TEXT NOT NULL, external_id TEXT,
+              permitted_fields TEXT NOT NULL, result TEXT NOT NULL, http_status INTEGER NOT NULL,
+              correlation_id TEXT NOT NULL, created_at TEXT NOT NULL);
             """)
             for name in ("odoo", "n8n", "kyqra", "telnexa", "klyrow"):
                 db.execute("INSERT OR IGNORE INTO integrations VALUES(?,0,?)", (name, now_iso()))
                 db.execute("INSERT OR IGNORE INTO circuits(name) VALUES(?)", (name,))
+
+    def crm_register_customer(self, customer_id: str, kong_consumer_id: str, kong_custom_id: str,
+                              enabled: bool, company_label: str, business_unit_label: str) -> None:
+        with self.connect() as db:
+            db.execute("""INSERT INTO crm_customers VALUES(?,?,?,?,?,?,?)
+              ON CONFLICT(customer_id) DO UPDATE SET kong_consumer_id=excluded.kong_consumer_id,
+              kong_custom_id=excluded.kong_custom_id,enabled=excluded.enabled,
+              company_label=excluded.company_label,business_unit_label=excluded.business_unit_label""",
+              (customer_id, kong_consumer_id, kong_custom_id, int(enabled), company_label, business_unit_label, now_iso()))
+
+    def crm_customer(self, kong_consumer_id: str, kong_custom_id: str) -> dict[str, Any]:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM crm_customers WHERE kong_consumer_id=? AND kong_custom_id=?",
+                             (kong_consumer_id, kong_custom_id)).fetchone()
+        if not row: raise ControlPlaneError("crm_customer_unknown")
+        if not row["enabled"]: raise ControlPlaneError("crm_customer_disabled")
+        return dict(row)
+
+    def crm_object(self, customer_id: str, external_id: str) -> dict[str, Any]:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM crm_objects WHERE customer_id=? AND external_id=?",
+                             (customer_id, external_id)).fetchone()
+        if not row: raise ControlPlaneError("crm_object_not_found")
+        return dict(row)
+
+    def crm_save_object(self, customer_id: str, external_id: str, middleware_id: str,
+                        model: str, record_ref: str | None = None) -> None:
+        stamp = now_iso()
+        with self.connect() as db:
+            db.execute("INSERT INTO crm_objects VALUES(?,?,?,?,?,?,?)",
+                       (customer_id, external_id, middleware_id, model, record_ref, stamp, stamp))
+
+    def crm_idempotency(self, customer_id: str, operation: str, key: str,
+                        request_hash: str) -> tuple[dict[str, Any], int] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM crm_idempotency WHERE customer_id=? AND operation=? AND idempotency_key=?",
+                             (customer_id, operation, key)).fetchone()
+        if not row: return None
+        if row["request_hash"] != request_hash: raise ControlPlaneError("idempotency_conflict")
+        return json.loads(row["response_json"]), int(row["status_code"])
+
+    def crm_save_idempotency(self, customer_id: str, operation: str, key: str,
+                             request_hash: str, response: dict[str, Any], status: int) -> None:
+        with self.connect() as db:
+            db.execute("INSERT INTO crm_idempotency VALUES(?,?,?,?,?,?,?)",
+                       (customer_id, operation, key, request_hash,
+                        json.dumps(response, sort_keys=True, separators=(",", ":")), status, now_iso()))
+
+    def crm_audit(self, customer_id: str | None, action: str, external_id: str | None,
+                  fields_used: list[str], result: str, status: int, correlation_id: str) -> None:
+        with self.connect() as db:
+            db.execute("INSERT INTO crm_audit VALUES(?,?,?,?,?,?,?,?,?)", (
+                str(uuid.uuid4()), customer_id, action, external_id,
+                json.dumps(sorted(fields_used)), result, status, correlation_id, now_iso()))
 
     def create_crawler_job(self, value: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         required = ("tenant_id", "correlation_id", "idempotency_key", "target_url")
@@ -258,7 +329,7 @@ class Store:
         try:
             with self.connect() as db:
                 db.execute("INSERT INTO events(event_id,tenant_id,source,event_type,idempotency_key,correlation_id,envelope,created_at) VALUES(?,?,?,?,?,?,?,?)", (envelope["event_id"], envelope["tenant_id"], envelope["source"], envelope["event_type"], envelope["idempotency_key"], envelope["correlation_id"], raw, time.time()))
-                targets=("n8n",) if envelope["source"]=="odoo" else ("odoo",) if envelope["source"]=="n8n" else ("odoo","n8n")
+                targets=("n8n",) if envelope["source"] in {"odoo", "crm"} else ("odoo",) if envelope["source"]=="n8n" else ("odoo","n8n")
                 db.executemany("INSERT INTO event_deliveries(event_id,target) VALUES(?,?)",((envelope["event_id"],target) for target in targets))
             return IngestResult(envelope["event_id"], envelope["correlation_id"], False, "queued")
         except sqlite3.IntegrityError:

@@ -4,7 +4,7 @@
     "summary": "Authenticated, idempotent Odoo middleware service API",
     "author": "Codestra",
     "license": "LGPL-3",
-    "depends": ["contacts", "mail", "codestra_integration_hub"],
+    "depends": ["contacts", "mail", "crm", "call_center_core", "codestra_integration_hub"],
     "data": ["security/security.xml", "security/ir.model.access.csv"],
     "installable": True,
     "application": False,

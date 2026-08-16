@@ -20,6 +20,9 @@ SPECS = [
     (31, "customer.created", "customer.created"),
     (32, "customer.updated", "customer.updated"),
     (33, "email.deferred", "klyrow.email.deferred"),
+    (34, "crm.lead.created", "crm.lead.created"),
+    (35, "crm.lead.updated", "crm.lead.updated"),
+    (36, "crm.activity.created", "crm.activity.created"),
 ]
 
 

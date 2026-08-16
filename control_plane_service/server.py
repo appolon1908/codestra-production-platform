@@ -3,11 +3,15 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import uuid
+import sqlite3
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from .core import ControlPlaneError, Store, credential_matches, validate_envelope, verify_signature
 from .providers import ProviderError, crawler_action, submit_crawler
+from .crm import ACTIVITY_FIELDS, CREATE_FIELDS, PATCH_FIELDS, CrmService, request_hash
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
 STORE = Store(DB)
@@ -67,6 +71,94 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(403, {"error": "forbidden"}); return None
         return value
 
+    def crm_customer(self):
+        expected = os.getenv("CRM_KONG_SHARED_SECRET", "")
+        supplied = self.headers.get("X-Codestra-Crm-Gateway-Secret", "")
+        consumer_id = self.headers.get("X-Consumer-ID", "")
+        custom_id = self.headers.get("X-Consumer-Custom-ID", "")
+        if not expected or not hmac.compare_digest(expected, supplied) or not consumer_id or not custom_id:
+            self.send_json(401, {"error": "unauthorized"}); return None
+        try: return STORE.crm_customer(consumer_id, custom_id)
+        except ControlPlaneError as exc:
+            self.send_json(403, {"error": str(exc)}); return None
+
+    def crm_error(self, exc: Exception, correlation: str) -> None:
+        message = str(exc)
+        code = 409 if message == "idempotency_conflict" else 422 if message.startswith("unsupported_fields") else 503 if message in {"odoo_unavailable", "crm_odoo_not_configured"} else 404 if message.endswith("not_found") else 403
+        self.send_json(code, {"error": message.split(":", 1)[0], "correlation_id": correlation})
+
+    def crm_get(self, parsed) -> bool:
+        if not parsed.path.startswith("/v1/crm/"): return False
+        customer = self.crm_customer()
+        if not customer: return True
+        crm = CrmService(STORE); correlation = crm.correlation(self.headers)
+        if parsed.path == "/v1/crm/account":
+            STORE.crm_audit(customer["customer_id"], "account.read", None, [], "success", 200, correlation)
+            self.send_json(200, {**crm.account(customer), "correlation_id": correlation}); return True
+        prefix = "/v1/crm/leads/"
+        if not parsed.path.startswith(prefix): self.send_json(404, {"error": "not_found"}); return True
+        external_id = urllib.parse.unquote(parsed.path[len(prefix):])
+        try:
+            STORE.crm_object(customer["customer_id"], external_id)
+            status, result = crm.call(customer, "GET", "/leads/" + urllib.parse.quote(external_id, safe=""), {}, correlation, "read:" + correlation)
+        except ControlPlaneError as exc:
+            STORE.crm_audit(customer["customer_id"], "lead.read", external_id, [], "denied", 404, correlation)
+            self.crm_error(exc, correlation); return True
+        STORE.crm_audit(customer["customer_id"], "lead.read", external_id, [], "success" if status < 300 else "failed", status, correlation)
+        result["correlation_id"] = correlation; self.send_json(status, result); return True
+
+    def crm_mutation(self, method: str) -> bool:
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith("/v1/crm/"): return False
+        customer = self.crm_customer()
+        if not customer: return True
+        correlation = CrmService.correlation(self.headers)
+        try: payload = json.loads(self.body())
+        except (json.JSONDecodeError, ControlPlaneError): self.send_json(422, {"error": "invalid_json", "correlation_id": correlation}); return True
+        if not isinstance(payload, dict): self.send_json(422, {"error": "object_required", "correlation_id": correlation}); return True
+        crm = CrmService(STORE); external_id = None; operation = ""; allowed: set[str]
+        if method == "POST" and parsed.path == "/v1/crm/leads":
+            operation, allowed = "lead.create", CREATE_FIELDS; external_id = str(payload.get("customer_reference", ""))
+            if not external_id or not payload.get("name"):
+                self.send_json(422, {"error": "missing_required_fields", "correlation_id": correlation}); return True
+        elif method == "POST" and parsed.path == "/v1/crm/activities":
+            operation, allowed = "activity.create", ACTIVITY_FIELDS; external_id = str(payload.get("lead_external_id", ""))
+        elif method == "PATCH" and parsed.path.startswith("/v1/crm/leads/"):
+            operation, allowed = "lead.update", PATCH_FIELDS; external_id = urllib.parse.unquote(parsed.path[len("/v1/crm/leads/"):])
+        else: self.send_json(404, {"error": "not_found"}); return True
+        key = self.headers.get("Idempotency-Key", "")
+        if not key: self.send_json(422, {"error": "idempotency_key_required", "correlation_id": correlation}); return True
+        digest = request_hash(payload)
+        try:
+            crm.validate_fields(payload, allowed)
+            prior = STORE.crm_idempotency(customer["customer_id"], operation, key, digest)
+            if prior:
+                result, status = prior; result["duplicate"] = True; result["correlation_id"] = correlation
+                self.send_json(status, result); return True
+            if operation != "lead.create": STORE.crm_object(customer["customer_id"], external_id)
+            outbound = dict(payload)
+            if operation == "lead.create":
+                outbound.update({"external_id": external_id, "middleware_id": str(uuid.uuid4())})
+                path = "/leads"
+            elif operation == "lead.update": path = "/leads/" + urllib.parse.quote(external_id, safe="")
+            else:
+                outbound["middleware_id"] = str(uuid.uuid4()); path = "/activities"
+            status, result = crm.call(customer, method, path, outbound, correlation, key)
+            if status >= 300:
+                STORE.crm_audit(customer["customer_id"], operation, external_id, list(payload), "failed", status, correlation)
+                result["correlation_id"] = correlation; self.send_json(status, result); return True
+            if operation == "lead.create": STORE.crm_save_object(customer["customer_id"], external_id, outbound["middleware_id"], "crm.lead")
+            elif operation == "activity.create":
+                STORE.crm_save_object(customer["customer_id"], result["external_id"], outbound["middleware_id"], "mail.activity")
+            result["duplicate"] = False; result["correlation_id"] = correlation
+            STORE.crm_save_idempotency(customer["customer_id"], operation, key, digest, result, status)
+            STORE.crm_audit(customer["customer_id"], operation, external_id, list(payload), "success", status, correlation)
+            crm.emit(customer, {"lead.create":"crm.lead.created", "lead.update":"crm.lead.updated", "activity.create":"crm.activity.created"}[operation], external_id, correlation)
+            self.send_json(status, result); return True
+        except (ControlPlaneError, sqlite3.IntegrityError) as exc:
+            STORE.crm_audit(customer["customer_id"], operation, external_id, list(payload), "denied", 409 if "idempotency" in str(exc) else 422, correlation)
+            self.crm_error(exc, correlation); return True
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/health": return self.send_json(200, {"status": "ok"})
@@ -82,6 +174,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, {"status":"ready","providers":{"telnexa":os.getenv("TELNEXA_MODE","simulator"),"klyrow":os.getenv("KLYROW_MODE","test")},"production_delivery_enabled":production_enabled})
         if parsed.path == "/metrics":
             raw = STORE.metrics().encode(); self.send_response(200); self.send_header("Content-Type", "text/plain; version=0.0.4"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); return self.wfile.write(raw)
+        if self.crm_get(parsed): return
         op = self.auth_operator({"platform_admin", "operations", "support", "auditor", "tenant_admin"})
         if not op: return
         query = parse_qs(parsed.query); tenant = op[2] or query.get("tenant_id", [None])[0]
@@ -118,6 +211,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/v1/crm/"):
+            self.crm_mutation("POST"); return
         try: body = self.body()
         except ControlPlaneError as exc: return self.send_json(413, {"error": str(exc)})
         if parsed.path.startswith("/api/v1/events/") or parsed.path == "/v1/events":
@@ -203,6 +298,10 @@ class Handler(BaseHTTPRequestHandler):
             event_id = parsed.path.split("/")[-2]; changed = STORE.retry(event_id); STORE.audit(op[0], op[1], "event.replayed", "event", event_id, tenant, value.get("correlation_id")); return self.send_json(200 if changed else 409, {"queued": changed})
         if parsed.path.startswith("/api/v1/ops/integrations/") and parsed.path.endswith(("/pause", "/resume")):
             name = parsed.path.split("/")[-2]; paused = parsed.path.endswith("/pause"); changed = STORE.pause(name, paused); STORE.audit(op[0], op[1], "integration.paused" if paused else "integration.resumed", "integration", name, tenant, value.get("correlation_id")); return self.send_json(200 if changed else 404, {"paused": paused})
+        self.send_json(404, {"error": "not_found"})
+
+    def do_PATCH(self) -> None:
+        if self.crm_mutation("PATCH"): return
         self.send_json(404, {"error": "not_found"})
 
     def do_PUT(self) -> None:

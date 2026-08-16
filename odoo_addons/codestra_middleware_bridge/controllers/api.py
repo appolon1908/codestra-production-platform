@@ -5,13 +5,21 @@ import hmac
 import json
 import time
 
-from odoo import http
+from odoo import fields, http
 from odoo.http import request
 
 PREFIX = "CODESTRA-INTEGRATION-TEST-"
 
 
 class CodestraMiddlewareBridge(http.Controller):
+    CRM_LEAD_CREATE_FIELDS = {
+        "name", "contact_name", "email", "phone", "company_name", "source",
+        "campaign", "description", "customer_reference", "external_id", "middleware_id",
+    }
+    CRM_LEAD_PATCH_FIELDS = {
+        "name", "contact_name", "email", "phone", "company_name", "source",
+        "campaign", "description",
+    }
     def _json(self, status, value):
         return request.make_json_response(value, status=status)
 
@@ -29,7 +37,7 @@ class CodestraMiddlewareBridge(http.Controller):
             return None, self._json(422, {"error": "object_required"})
         return value, None
 
-    def _authenticate(self, body, tenant_allowlist_parameter=None):
+    def _authenticate(self, body, tenant_allowlist_parameter=None, service_user_parameter="codestra.middleware.service_user_id"):
         headers = request.httprequest.headers
         timestamp = headers.get("X-Codestra-Timestamp", "")
         event_id = headers.get("X-Codestra-Event-ID", "")
@@ -60,20 +68,24 @@ class CodestraMiddlewareBridge(http.Controller):
         expected = hmac.new((secret or "").encode(), canonical, hashlib.sha256).hexdigest()
         if not secret or not hmac.compare_digest(expected, supplied):
             return None, self._json(401, {"error": "invalid_signature"})
-        user_id = int(params.get_param("codestra.middleware.service_user_id", "0"))
+        user_id = int(params.get_param(service_user_parameter, "0"))
         user = request.env["res.users"].sudo().browse(user_id).exists()
-        group = request.env.ref("codestra_middleware_bridge.group_codestra_middleware_bridge")
+        group_xmlid = "codestra_middleware_bridge.group_codestra_crm_api" if service_user_parameter == "codestra.crm.service_user_id" else "codestra_middleware_bridge.group_codestra_middleware_bridge"
+        group = request.env.ref(group_xmlid)
         if not user or group not in user.group_ids or not user.active:
             return None, self._json(403, {"error": "service_identity_rejected"})
+        # auth="none" starts without an ORM user in Odoo 19. Establish the
+        # verified service identity for the whole request/flush lifecycle.
+        request.update_env(user=user.id)
         return {
             "event_id": event_id, "tenant_id": tenant,
             "correlation_id": correlation, "idempotency_key": idempotency,
             "request_hash": hashlib.sha256(body).hexdigest(), "user": user,
         }, None
 
-    def _begin(self, operation, allow_event_replay=False, tenant_allowlist_parameter=None):
+    def _begin(self, operation, allow_event_replay=False, tenant_allowlist_parameter=None, service_user_parameter="codestra.middleware.service_user_id"):
         body = request.httprequest.get_data()
-        auth, error = self._authenticate(body, tenant_allowlist_parameter)
+        auth, error = self._authenticate(body, tenant_allowlist_parameter, service_user_parameter)
         if error:
             return None, None, error
         evidence = request.env["codestra.middleware.request"].with_user(auth["user"])
@@ -124,6 +136,120 @@ class CodestraMiddlewareBridge(http.Controller):
         if not partner or not (partner.name or "").startswith(PREFIX):
             return None
         return partner
+
+    def _crm_scope(self, auth):
+        user = auth["user"]
+        group = request.env.ref("codestra_middleware_bridge.group_codestra_crm_api")
+        units = user.call_center_business_unit_ids
+        if group not in user.group_ids or len(units) != 1 or len(user.company_ids) != 1:
+            return None
+        unit = units[0]
+        if unit.company_id != user.company_ids[0]:
+            return None
+        return unit
+
+    def _crm_mapping(self, auth, external_id):
+        return request.env["codestra.crm.external.mapping"].with_user(auth["user"]).search([
+            ("customer_key", "=", auth["tenant_id"]), ("external_id", "=", external_id),
+            ("model", "=", "crm.lead"),
+        ], limit=1)
+
+    @staticmethod
+    def _crm_lead_value(lead, mapping):
+        return {
+            "external_id": mapping.external_id, "middleware_id": mapping.middleware_id,
+            "name": lead.name, "contact_name": lead.contact_name,
+            "email": lead.email_from, "phone": lead.phone,
+            "company_name": lead.partner_name, "description": lead.description,
+            "source": lead.source_id.name if lead.source_id else None,
+            "campaign": lead.campaign_id.name if lead.campaign_id else None,
+            "status": "active" if lead.active else "archived",
+            "created_at": lead.create_date.isoformat() if lead.create_date else None,
+            "updated_at": lead.write_date.isoformat() if lead.write_date else None,
+        }
+
+    def _crm_values(self, payload, allowed, unit, user):
+        unsupported = sorted(set(payload) - allowed)
+        if unsupported:
+            return None, self._json(422, {"error": "unsupported_fields", "fields": unsupported})
+        values = {}
+        mapping = {
+            "name": "name", "contact_name": "contact_name", "email": "email_from",
+            "phone": "phone", "company_name": "partner_name", "description": "description",
+        }
+        for source, target in mapping.items():
+            if source in payload:
+                values[target] = payload[source]
+        for source, model in (("source", "utm.source"), ("campaign", "utm.campaign")):
+            if source in payload:
+                record = request.env[model].with_user(user).search([("name", "=", payload[source])], limit=1)
+                if not record:
+                    return None, self._json(422, {"error": "unknown_" + source})
+                values[source + "_id"] = record.id
+        values.update({"company_id": unit.company_id.id, "business_unit_id": unit.id})
+        return values, None
+
+    @http.route("/codestra/middleware/v1/crm/leads", type="http", auth="none", methods=["POST"], csrf=False)
+    def crm_lead_create(self):
+        auth, payload, error = self._begin("crm.lead.create", allow_event_replay=True, tenant_allowlist_parameter="codestra.crm.tenant_ids", service_user_parameter="codestra.crm.service_user_id")
+        if error: return error
+        unit = self._crm_scope(auth)
+        if not unit: return self._json(403, {"error": "crm_service_scope_rejected"})
+        values, error = self._crm_values(payload, self.CRM_LEAD_CREATE_FIELDS, unit, auth["user"])
+        if error: return error
+        if not payload.get("name") or not payload.get("external_id") or not payload.get("middleware_id"):
+            return self._json(422, {"error": "missing_required_fields"})
+        values.update({"type": "lead", "user_id": auth["user"].id})
+        lead = request.env["crm.lead"].with_user(auth["user"]).with_company(unit.company_id).create(values)
+        mapping = request.env["codestra.crm.external.mapping"].with_user(auth["user"]).create({
+            "customer_key": auth["tenant_id"], "external_id": payload["external_id"],
+            "middleware_id": payload["middleware_id"], "model": "crm.lead", "record_id": lead.id,
+            "company_id": unit.company_id.id, "business_unit_id": unit.id,
+            "service_user_id": auth["user"].id,
+        })
+        return self._complete(auth, "crm.lead.create", self._crm_lead_value(lead, mapping), status=201)
+
+    @http.route("/codestra/middleware/v1/crm/leads/<string:external_id>", type="http", auth="none", methods=["GET", "PATCH"], csrf=False)
+    def crm_lead(self, external_id):
+        operation = "crm.lead.read" if request.httprequest.method == "GET" else "crm.lead.update"
+        auth, payload, error = self._begin(operation, allow_event_replay=True, tenant_allowlist_parameter="codestra.crm.tenant_ids", service_user_parameter="codestra.crm.service_user_id")
+        if error: return error
+        unit = self._crm_scope(auth)
+        mapping = unit and self._crm_mapping(auth, external_id)
+        if not mapping: return self._json(404, {"error": "lead_not_found"})
+        lead = request.env["crm.lead"].with_user(auth["user"]).browse(mapping.record_id).exists()
+        if not lead or lead.company_id != unit.company_id or lead.business_unit_id != unit:
+            return self._json(404, {"error": "lead_not_found"})
+        if operation.endswith("update"):
+            values, error = self._crm_values(payload, self.CRM_LEAD_PATCH_FIELDS, unit, auth["user"])
+            if error: return error
+            lead.write(values)
+        return self._complete(auth, operation, self._crm_lead_value(lead, mapping))
+
+    @http.route("/codestra/middleware/v1/crm/activities", type="http", auth="none", methods=["POST"], csrf=False)
+    def crm_activity_create(self):
+        auth, payload, error = self._begin("crm.activity.create", allow_event_replay=True, tenant_allowlist_parameter="codestra.crm.tenant_ids", service_user_parameter="codestra.crm.service_user_id")
+        if error: return error
+        allowed = {"lead_external_id", "activity_type", "summary", "note", "due_date", "middleware_id"}
+        unsupported = sorted(set(payload) - allowed)
+        if unsupported: return self._json(422, {"error": "unsupported_fields", "fields": unsupported})
+        unit = self._crm_scope(auth); mapping = unit and self._crm_mapping(auth, str(payload.get("lead_external_id", "")))
+        if not mapping: return self._json(404, {"error": "lead_not_found"})
+        activity_refs = {"todo": "mail.mail_activity_data_todo", "call": "mail.mail_activity_data_call", "email": "mail.mail_activity_data_email"}
+        ref = activity_refs.get(str(payload.get("activity_type", "todo")))
+        if not ref or not payload.get("summary"): return self._json(422, {"error": "invalid_activity"})
+        lead = request.env["crm.lead"].with_user(auth["user"]).browse(mapping.record_id).exists()
+        if not lead or lead.business_unit_id != unit: return self._json(404, {"error": "lead_not_found"})
+        activity = request.env["mail.activity"].with_user(auth["user"]).create({
+            "activity_type_id": request.env.ref(ref).id, "summary": payload["summary"],
+            "note": payload.get("note"), "date_deadline": payload.get("due_date") or fields.Date.today(),
+            "res_model_id": request.env["ir.model"]._get_id("crm.lead"),
+            "res_id": lead.id, "user_id": auth["user"].id,
+        })
+        return self._complete(auth, "crm.activity.create", {
+            "external_id": payload.get("middleware_id"), "lead_external_id": mapping.external_id,
+            "status": "scheduled", "created_at": activity.create_date.isoformat(),
+        }, status=201)
 
     @http.route("/codestra/middleware/v1/email-events", type="http", auth="none", methods=["POST"], csrf=False)
     def email_event(self):
