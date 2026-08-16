@@ -15,6 +15,17 @@ event type in the payload. Callback `453bc7af-4367-454c-b80f-5ac01eea9b18`
 was re-driven without SMTP activity and completed through n8n execution `120`
 to Odoo delivery-status record `5` with correlation preserved and no duplicate
 Odoo record.
+
+The terminal callback for the same Postal message is immutable event
+`a0dd93b6-5708-43b5-9fdc-d9c076a904d6`. Private-gateway downstream
+idempotency now includes the provider event ID rather than only the message ID,
+so lifecycle events for one message cannot suppress each other. The existing
+terminal event was governed-re-driven without email activity and completed as
+`klyrow.email.delivered` through n8n execution `121` to Odoo status record `6`.
+Odoo retains record `5` as deferred history and has exactly one delivered row
+for the terminal event. Callbacks for Odoo-originated messages also skip only
+the optional local message-ledger projection when no middleware-originated
+message exists, preventing a false HTTP 422 after successful immutable ingest.
 | 8096 | loopback/Docker control plane | loopback bind; live health | PASS |
 | 8443 on `10.40.0.2` | remote adapter | mTLS health/readiness 200 | PASS |
 | 4222/8222 | NATS/monitoring loopback | loopback listeners | PASS |

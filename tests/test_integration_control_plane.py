@@ -7,6 +7,7 @@ import time
 import unittest
 
 from control_plane_service.core import ControlPlaneError, Store, canonical, credential_matches, validate_envelope, verify_signature
+from control_plane_service.server import apply_provider_projection
 from control_plane_service.worker import once
 
 
@@ -74,6 +75,13 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(item["payload"]["event_type"], "klyrow.email.deferred")
         self.assertEqual(item["payload"]["provider_event_type"], "klyrow.email.held")
         self.assertEqual(item["payload"]["status"], "deferred")
+
+    def test_external_odoo_message_callback_skips_missing_local_projection(self):
+        item = validate_envelope(envelope(
+            event_type="klyrow.email.event",
+            payload={"event_type": "klyrow.email.delivered", "message_id": "odoo-mail-2"},
+        ), "klyrow", "external-odoo-terminal")
+        apply_provider_projection(self.store, "klyrow", item)
 
     def test_private_klyrow_gateway_rejects_unknown_inner_status(self):
         with self.assertRaisesRegex(ControlPlaneError, "unsupported_klyrow_email_status"):

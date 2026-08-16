@@ -33,6 +33,17 @@ def operator(token: str) -> tuple[str, str, str | None] | None:
     return None
 
 
+def apply_provider_projection(store: Store, source: str, value: dict) -> None:
+    try:
+        store.apply_provider_event(source, value)
+    except ControlPlaneError as exc:
+        # Provider callbacks can describe messages created by Odoo rather than
+        # by this control plane. Keep immutable event fan-out and skip only the
+        # optional local projection when the originating message is absent.
+        if str(exc) != "message_not_found":
+            raise
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "CodestraControlPlane/1.0"
 
@@ -126,7 +137,7 @@ class Handler(BaseHTTPRequestHandler):
                 # same tenant-scoped idempotency key.
                 result = STORE.ingest(value, reject_event_replay=source == "odoo")
                 if not result.duplicate and source in {"telnexa","klyrow"} and value.get("payload",{}).get("message_id"):
-                    STORE.apply_provider_event(source,value)
+                    apply_provider_projection(STORE, source, value)
             except (ControlPlaneError, json.JSONDecodeError) as exc:
                 code = 409 if str(exc) in {"idempotency_conflict", "replayed_event_id"} else 401 if "signature" in str(exc) or "timestamp" in str(exc) else 422
                 return self.send_json(code, {"error": str(exc)})
