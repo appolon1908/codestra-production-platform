@@ -65,6 +65,16 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(item["event_type"], "klyrow.email.delivered")
         self.assertEqual(item["metadata"]["transport_event_type"], "klyrow.email.event")
 
+    def test_private_klyrow_gateway_held_status_is_deferred(self):
+        item = validate_envelope(envelope(
+            event_type="klyrow.email.event",
+            payload={"event_type": "klyrow.email.held", "status": "Held", "message_id": "message-2"},
+        ), "klyrow", "event-transport-held")
+        self.assertEqual(item["event_type"], "klyrow.email.deferred")
+        self.assertEqual(item["payload"]["event_type"], "klyrow.email.deferred")
+        self.assertEqual(item["payload"]["provider_event_type"], "klyrow.email.held")
+        self.assertEqual(item["payload"]["status"], "deferred")
+
     def test_private_klyrow_gateway_rejects_unknown_inner_status(self):
         with self.assertRaisesRegex(ControlPlaneError, "unsupported_klyrow_email_status"):
             validate_envelope(envelope(

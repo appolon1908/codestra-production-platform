@@ -84,6 +84,13 @@ def validate_envelope(value: dict[str, Any], source: str, event_id: str) -> dict
         raise ControlPlaneError("invalid_payload")
     if source == "klyrow" and value["event_type"] == "klyrow.email.event":
         inner_type = str(value["payload"].get("event_type", ""))
+        if inner_type == "klyrow.email.held":
+            value = dict(value)
+            value["payload"] = dict(value["payload"])
+            value["payload"]["provider_event_type"] = inner_type
+            value["payload"]["event_type"] = "klyrow.email.deferred"
+            value["payload"]["status"] = "deferred"
+            inner_type = "klyrow.email.deferred"
         if inner_type not in KLYROW_EMAIL_STATUS_EVENTS:
             raise ControlPlaneError("unsupported_klyrow_email_status")
         value = dict(value)
