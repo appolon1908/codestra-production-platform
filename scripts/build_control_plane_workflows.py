@@ -19,6 +19,7 @@ SPECS = [
     (30, "crawler.job.failed", "kyqra.job.failed"),
     (31, "customer.created", "customer.created"),
     (32, "customer.updated", "customer.updated"),
+    (33, "email.deferred", "klyrow.email.deferred"),
 ]
 
 

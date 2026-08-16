@@ -16,6 +16,7 @@
     {"id":"CodestraCP30","name":"CP-30-CRAWLER.JOB.FAILED-V1","owner":"data-platform","events":["kyqra.job.failed"],"endpoint":"/webhook/codestra-crawler-job-failed","active":false},
     {"id":"CodestraCP31","name":"CP-31-CUSTOMER.CREATED-V1","owner":"sales-operations","events":["customer.created"],"endpoint":"/webhook/codestra-customer-created","active":false},
     {"id":"CodestraCP32","name":"CP-32-CUSTOMER.UPDATED-V1","owner":"sales-operations","events":["customer.updated"],"endpoint":"/webhook/codestra-customer-updated","active":false},
+    {"id":"CodestraCP33","name":"CP-33-EMAIL.DEFERRED-V1","owner":"communications","events":["klyrow.email.deferred"],"endpoint":"/webhook/codestra-email-deferred","active":false},
     {"id":"CodestraCP90","name":"CP-90-STANDARD-ERROR-V1","owner":"platform-operations","events":["workflow.failed"],"endpoint":null,"active":false}
   ]
 }

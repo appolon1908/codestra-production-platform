@@ -6,6 +6,7 @@ import hmac
 import os
 import time
 import urllib.request
+import urllib.parse
 
 from .core import Store
 from .providers import submit
@@ -20,7 +21,10 @@ def delivery_request(target_name: str, target: str, row: object) -> urllib.reque
     if target_name == "odoo":
         secret = os.getenv("ODOO_OUTBOUND_HMAC_SECRET", "")
         if not secret: raise RuntimeError("odoo_outbound_secret_missing")
-        headers.update({"X-Codestra-Timestamp": stamp, "X-Codestra-Event-ID": event_id, "X-Codestra-Signature": hmac.new(secret.encode(), stamp.encode() + b"." + raw, hashlib.sha256).hexdigest()})
+        path = urllib.parse.urlsplit(target).path
+        canonical = b"\n".join((stamp.encode(), event_id.encode(), b"POST", path.encode(), raw)) if path.endswith("/email-events") else stamp.encode() + b"." + raw
+        signature = hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
+        headers.update({"X-Codestra-Timestamp": stamp, "X-Codestra-Event-ID": event_id, "X-Codestra-Signature": signature, "X-Tenant-ID": str(row["tenant_id"])})
     elif target_name == "n8n":
         token = os.getenv("N8N_OUTBOUND_API_KEY", ""); secret = os.getenv("N8N_MIDDLEWARE_HMAC_SECRET", "")
         if not token or not secret: raise RuntimeError("n8n_outbound_credentials_missing")
@@ -41,7 +45,18 @@ def once() -> int:
         rows = db.execute("SELECT e.*,d.target,d.attempts delivery_attempts FROM events e JOIN event_deliveries d ON d.event_id=e.event_id WHERE d.state IN ('queued','retrying') AND d.next_attempt<=? ORDER BY e.created_at LIMIT 50", (time.time(),)).fetchall()
     processed = 0
     for row in rows:
-        envelope = json.loads(row["envelope"]); target_name = row["target"]; target = os.getenv("CONTROL_PLANE_" + target_name.upper() + "_URL", "")
+        envelope = json.loads(row["envelope"])
+        if envelope.get("source") == "klyrow" and envelope.get("event_type") == "klyrow.email.event":
+            inner_type = str((envelope.get("payload") or {}).get("event_type", ""))
+            if inner_type in {"klyrow.email.delivered", "klyrow.email.bounced", "klyrow.email.deferred"}:
+                envelope["metadata"] = dict(envelope.get("metadata") or {})
+                envelope["metadata"]["transport_event_type"] = envelope["event_type"]
+                envelope["event_type"] = inner_type
+        delivery_row = dict(row)
+        delivery_row["envelope"] = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
+        target_name = row["target"]; target = os.getenv("CONTROL_PLANE_" + target_name.upper() + "_URL", "")
+        if target_name == "odoo" and str(envelope.get("event_type")) in {"klyrow.email.delivered", "klyrow.email.bounced", "klyrow.email.deferred"}:
+            target = os.getenv("CONTROL_PLANE_ODOO_EMAIL_STATUS_URL", target)
         event_slug = {"kyqra.record.created": "crawler-result-created", "kyqra.job.completed": "crawler-job-completed", "kyqra.job.failed": "crawler-job-failed"}.get(str(envelope.get("event_type")))
         if not event_slug: event_slug = str(envelope.get("event_type", "")).removeprefix("telnexa.").removeprefix("klyrow.").replace(".", "-")
         target = target.replace("{event_type}", event_slug)
@@ -54,7 +69,7 @@ def once() -> int:
             processed += 1
             continue
         try:
-            req = delivery_request(target_name, target, row)
+            req = delivery_request(target_name, target, delivery_row)
             with urllib.request.urlopen(req, timeout=5) as response:
                 if response.status >= 300: raise RuntimeError("downstream_status")
             with current.connect() as db:

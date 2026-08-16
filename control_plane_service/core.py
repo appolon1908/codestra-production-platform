@@ -26,9 +26,13 @@ CHANNEL_EVENTS = {
     "telnexa.sms.failed": "sms",
     "klyrow.email.sent": "email",
     "klyrow.email.delivered": "email",
+    "klyrow.email.deferred": "email",
     "klyrow.email.bounced": "email",
     "klyrow.email.complained": "email",
     "klyrow.email.unsubscribed": "email",
+}
+KLYROW_EMAIL_STATUS_EVENTS = {
+    "klyrow.email.delivered", "klyrow.email.bounced", "klyrow.email.deferred",
 }
 MESSAGE_STATES = {"created", "validated", "blocked", "queued", "accepted", "sent", "delivered", "failed", "rejected", "cancelled", "expired", "undeliverable", "inbound_received", "deferred", "bounced", "complained", "opened", "clicked", "unsubscribed"}
 
@@ -78,6 +82,14 @@ def validate_envelope(value: dict[str, Any], source: str, event_id: str) -> dict
         raise ControlPlaneError("unsupported_event_version")
     if not isinstance(value["payload"], dict):
         raise ControlPlaneError("invalid_payload")
+    if source == "klyrow" and value["event_type"] == "klyrow.email.event":
+        inner_type = str(value["payload"].get("event_type", ""))
+        if inner_type not in KLYROW_EMAIL_STATUS_EVENTS:
+            raise ControlPlaneError("unsupported_klyrow_email_status")
+        value = dict(value)
+        value["metadata"] = dict(value.get("metadata") or {})
+        value["metadata"]["transport_event_type"] = value["event_type"]
+        value["event_type"] = inner_type
     result = dict(value)
     result.update(
         event_id=event_id,
@@ -406,8 +418,8 @@ class Store:
 
     def retry(self, event_id: str) -> bool:
         with self.connect() as db:
-            cur = db.execute("UPDATE events SET state='queued',next_attempt=0,last_error=NULL WHERE event_id=? AND state='dead_letter'", (event_id,))
-            if cur.rowcount: db.execute("UPDATE event_deliveries SET state='queued',next_attempt=0,last_error=NULL WHERE event_id=? AND state='dead_letter'",(event_id,))
+            cur = db.execute("UPDATE events SET state='queued',attempts=0,next_attempt=0,last_error=NULL WHERE event_id=? AND state IN ('dead_letter','delivered')", (event_id,))
+            if cur.rowcount: db.execute("UPDATE event_deliveries SET state='queued',attempts=0,next_attempt=0,last_error=NULL WHERE event_id=?",(event_id,))
             return cur.rowcount == 1
 
     def pause(self, name: str, paused: bool) -> bool:

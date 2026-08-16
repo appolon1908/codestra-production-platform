@@ -57,6 +57,20 @@ class ControlPlaneTests(unittest.TestCase):
         with self.assertRaisesRegex(ControlPlaneError, "unsupported_event_type"):
             validate_envelope(envelope(event_type="telnexa.sms.received"), "klyrow", "event-3")
 
+    def test_private_klyrow_gateway_status_is_normalized_for_dispatch(self):
+        item = validate_envelope(envelope(
+            event_type="klyrow.email.event",
+            payload={"event_type": "klyrow.email.delivered", "message_id": "message-1"},
+        ), "klyrow", "event-transport-1")
+        self.assertEqual(item["event_type"], "klyrow.email.delivered")
+        self.assertEqual(item["metadata"]["transport_event_type"], "klyrow.email.event")
+
+    def test_private_klyrow_gateway_rejects_unknown_inner_status(self):
+        with self.assertRaisesRegex(ControlPlaneError, "unsupported_klyrow_email_status"):
+            validate_envelope(envelope(
+                event_type="klyrow.email.event", payload={"event_type": "klyrow.email.opened"},
+            ), "klyrow", "event-transport-2")
+
     def test_idempotency_replay_and_conflict(self):
         item = validate_envelope(envelope(correlation_id="correlation-1"), "klyrow", "event-1")
         self.assertFalse(self.store.ingest(item).duplicate)

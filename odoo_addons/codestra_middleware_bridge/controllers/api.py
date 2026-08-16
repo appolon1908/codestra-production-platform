@@ -29,7 +29,7 @@ class CodestraMiddlewareBridge(http.Controller):
             return None, self._json(422, {"error": "object_required"})
         return value, None
 
-    def _authenticate(self, body):
+    def _authenticate(self, body, tenant_allowlist_parameter=None):
         headers = request.httprequest.headers
         timestamp = headers.get("X-Codestra-Timestamp", "")
         event_id = headers.get("X-Codestra-Event-ID", "")
@@ -48,7 +48,10 @@ class CodestraMiddlewareBridge(http.Controller):
             return None, self._json(401, {"error": "missing_authentication"})
         if not fresh:
             return None, self._json(401, {"error": "expired_timestamp"})
-        if not expected_tenant or not hmac.compare_digest(tenant, expected_tenant):
+        allowed_tenants = {expected_tenant} if expected_tenant else set()
+        if tenant_allowlist_parameter:
+            allowed_tenants.update(item.strip() for item in (params.get_param(tenant_allowlist_parameter) or "").split(",") if item.strip())
+        if not any(hmac.compare_digest(tenant, item) for item in allowed_tenants):
             return None, self._json(403, {"error": "tenant_rejected"})
         canonical = b"\n".join((
             timestamp.encode(), event_id.encode(), request.httprequest.method.encode(),
@@ -68,13 +71,18 @@ class CodestraMiddlewareBridge(http.Controller):
             "request_hash": hashlib.sha256(body).hexdigest(), "user": user,
         }, None
 
-    def _begin(self, operation):
+    def _begin(self, operation, allow_event_replay=False, tenant_allowlist_parameter=None):
         body = request.httprequest.get_data()
-        auth, error = self._authenticate(body)
+        auth, error = self._authenticate(body, tenant_allowlist_parameter)
         if error:
             return None, None, error
         evidence = request.env["codestra.middleware.request"].with_user(auth["user"])
-        if evidence.search([("event_id", "=", auth["event_id"])], limit=1):
+        replay = evidence.search([("event_id", "=", auth["event_id"])], limit=1)
+        if replay:
+            if allow_event_replay and replay.request_hash == auth["request_hash"] and replay.operation == operation:
+                value = json.loads(replay.response_json)
+                value["duplicate"] = True
+                return None, None, self._json(200, value)
             return None, None, self._json(409, {"error": "replayed_event_id"})
         prior = evidence.search([
             ("tenant_id", "=", auth["tenant_id"]),
@@ -94,7 +102,8 @@ class CodestraMiddlewareBridge(http.Controller):
         event = event_model.register_event(
             "middleware.odoo." + operation, "middleware", "odoo",
             {"synthetic_test": True, "partner_id": partner.id if partner else None},
-            correlation_id=auth["correlation_id"], idempotency_key=auth["idempotency_key"],
+            correlation_id=auth["correlation_id"],
+            idempotency_key="middleware:%s:%s" % (operation, auth["idempotency_key"]),
         )
         request.env["codestra.integration.audit"].with_user(auth["user"])._append(
             event, "middleware." + operation, "success",
@@ -115,6 +124,34 @@ class CodestraMiddlewareBridge(http.Controller):
         if not partner or not (partner.name or "").startswith(PREFIX):
             return None
         return partner
+
+    @http.route("/codestra/middleware/v1/email-events", type="http", auth="none", methods=["POST"], csrf=False)
+    def email_event(self):
+        auth, payload, error = self._begin("email.status", allow_event_replay=True, tenant_allowlist_parameter="codestra.middleware.email_tenant_ids")
+        if error: return error
+        status_by_type = {
+            "klyrow.email.delivered": "delivered",
+            "klyrow.email.bounced": "bounced",
+            "klyrow.email.deferred": "deferred",
+        }
+        event_type = str(payload.get("event_type", ""))
+        status = status_by_type.get(event_type)
+        detail = payload.get("payload") or {}
+        message_id = str(detail.get("message_id", ""))
+        occurred_at = payload.get("occurred_at") or detail.get("timestamp")
+        if not status or not message_id or not occurred_at:
+            return self._json(422, {"error": "invalid_email_status_event"})
+        occurred_at = str(occurred_at).replace("T", " ").removesuffix("Z").split(".", 1)[0]
+        record = request.env["codestra.email.delivery.status"].with_user(auth["user"]).create({
+            "event_id": auth["event_id"], "correlation_id": auth["correlation_id"],
+            "message_id": message_id, "tenant_id": auth["tenant_id"],
+            "customer_id": payload.get("customer_id"), "provider": "klyrow",
+            "event_type": event_type, "status": status, "occurred_at": occurred_at,
+        })
+        return self._complete(auth, "email.status", {
+            "record_id": record.id, "model": record._name, "status": record.status,
+            "event_id": record.event_id, "message_id": record.message_id,
+        }, status=201)
 
     @http.route("/codestra/middleware/v1/contacts", type="http", auth="none", methods=["POST"], csrf=False)
     def create_contact(self):

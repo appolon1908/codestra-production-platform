@@ -55,6 +55,33 @@ class MiddlewareRequest(models.Model):
         raise AccessError("Middleware request evidence is immutable.")
 
 
+class EmailDeliveryStatus(models.Model):
+    _name = "codestra.email.delivery.status"
+    _description = "Codestra Email Delivery Status"
+    _order = "occurred_at desc, id desc"
+
+    event_id = fields.Char(required=True, index=True, readonly=True)
+    correlation_id = fields.Char(required=True, index=True, readonly=True)
+    message_id = fields.Char(required=True, index=True, readonly=True)
+    tenant_id = fields.Char(required=True, index=True, readonly=True)
+    customer_id = fields.Char(index=True, readonly=True)
+    provider = fields.Char(required=True, readonly=True, default="klyrow")
+    event_type = fields.Char(required=True, readonly=True)
+    status = fields.Selection(
+        [("delivered", "Delivered"), ("bounced", "Bounced"), ("deferred", "Deferred")],
+        required=True, readonly=True, index=True,
+    )
+    occurred_at = fields.Datetime(required=True, readonly=True)
+
+    _event_unique = models.Constraint("UNIQUE(event_id)", "Email delivery event IDs must be unique.")
+
+    def write(self, values):
+        raise AccessError("Email delivery evidence is immutable.")
+
+    def unlink(self):
+        raise AccessError("Email delivery evidence is immutable.")
+
+
 class MiddlewareOutbound(models.AbstractModel):
     _name = "codestra.middleware.outbound"
     _description = "Odoo to Codestra Middleware Event Client"
