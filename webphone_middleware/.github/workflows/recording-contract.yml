@@ -1,0 +1,31 @@
+name: recording-contract
+on:
+  pull_request:
+    paths:
+      - "app/recording/**"
+      - "schemas/recording/**"
+      - "deploy/recording-storage/**"
+      - "tests/recording/**"
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  recording-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r requirements-test.lock
+      - run: python scripts/check_recording_contract.py
+      - run: python -m pytest -q tests/recording
+      - run: python scripts/check_pr_b_recording_remediation.py
+      - run: ruff check app/recording app/api/v1/recordings.py tests/recording
+      - name: Dependency vulnerability gate
+        uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+          inputs: requirements.lock
+      - name: secret and prohibited-data scan
+        run: |
+          ! git grep -Ei '(BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|AKIA[0-9A-Z]{16})'
+          ! git grep -Ei '(public-read|telephone_number|customer_name)' -- app/recording deploy/recording-storage

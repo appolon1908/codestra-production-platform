@@ -1,0 +1,7 @@
+# Isolated-staging security governance
+/.github/workflows/security-owner-decision-*.yml @kazan555
+/security/ @kazan555
+/scripts/security/ @kazan555
+/tests/security/ @kazan555
+/docs/security/ @kazan555
+/SECURITY.md @kazan555

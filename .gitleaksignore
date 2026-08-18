@@ -4,3 +4,14 @@ evidence/SYNTHETIC-IDENTITY-ACCEPTANCE-20260726T0225Z.md:generic-api-key:12
 tools/odoo_vertical_staging_acceptance.py:generic-api-key:108
 reports/github/SECRET_SCAN_FINDINGS.csv:generic-api-key:18
 reports/github/SECRET_SCAN_FINDINGS.csv:generic-api-key:27
+# Reviewed synthetic fixture identifiers; none are credentials or usable tokens.
+webphone_middleware/deploy/n8n/lead-automation/schema-provenance-v1.json:generic-api-key:6
+webphone_middleware/deploy/n8n/lead-automation/schemas/provenance-manifest-v1.json:generic-api-key:6
+webphone_middleware/deploy/n8n/lead-automation/callback-auth-manifest-v2.json:generic-api-key:26
+webphone_middleware/deploy/n8n/lead-automation/workflow-manifest-v1.json:generic-api-key:10
+webphone_middleware/deploy/n8n/lead-automation/lead-automation-generic-v1.json:generic-api-key:13
+webphone_middleware/tests/test_agent_realtime.py:generic-api-key:16
+webphone_middleware/tests/test_provider_adapters.py:generic-api-key:27
+webphone_middleware/tests/test_notifications.py:generic-api-key:128
+webphone_middleware/tests/test_telephony_command_client.py:generic-api-key:149
+webphone_middleware/tests/test_telephony_command_client.py:generic-api-key:175
