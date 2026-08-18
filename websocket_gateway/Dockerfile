@@ -1,14 +1,12 @@
-FROM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
+FROM python:3.12-alpine@sha256:d09d15e60962ca365d1cd544a48773bac9d33f2fb1b00f2aa0deec78ade7dc31
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.source="https://github.com/appolon1908-hue/codestra-production-platform" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.title="Codestra WebSocket Gateway"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN apt-get update \
- && apt-get upgrade -y \
- && rm -rf /var/lib/apt/lists/* \
- && groupadd --gid 10001 codestra \
- && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin codestra
+RUN apk upgrade --no-cache \
+ && addgroup -S -g 10001 codestra \
+ && adduser -S -D -H -u 10001 -G codestra codestra
 WORKDIR /app
 COPY requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock \
