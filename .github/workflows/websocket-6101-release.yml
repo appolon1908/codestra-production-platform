@@ -50,6 +50,7 @@ jobs:
           test -s webphone_middleware/requirements.lock
           git diff --check
           python -m compileall -q websocket_gateway
+          python -m pip install pytest==9.0.2
           python -m pytest -q websocket_gateway/test_migrations.py
       - name: Test Agent Desktop
         working-directory: agent_desktop

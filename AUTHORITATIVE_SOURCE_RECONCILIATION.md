@@ -1,7 +1,8 @@
 # Authoritative WebSocket + 6101 source reconciliation
 
-Timestamp: 2026-08-18T04:28:00Z  
-Server: Server A (`65.109.65.169`, `10.40.0.1`)  
+Timestamp: 2026-08-18T04:28:00Z
+
+Server: Server A (`65.109.65.169`, `10.40.0.1`)
 Release branch: `agent/websocket-6101-immutable`
 
 The prior local-only SHA `5b38765ff606ecbba2e0a9c9ace1af5752350e0f`

@@ -43,4 +43,3 @@ source control, Server C, or browser JavaScript.
    delivery.
 5. Preserve sanitized failure evidence. Never include prompts, responses, user
    identifiers, API keys, or safety-identifier salts.
-
