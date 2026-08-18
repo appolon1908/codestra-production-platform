@@ -1,0 +1,8 @@
+HOST=api.codestra.agency
+SUBJECT_CN=api.codestra.agency
+SAN=DNS:api.codestra.agency
+ISSUER=Let's Encrypt YE1
+NOT_BEFORE=2026-07-20T17:15:37Z
+NOT_AFTER=2026-10-18T17:15:36Z
+TRUST_CHAIN=PASS
+TLS_WSS=PASS

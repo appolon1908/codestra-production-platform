@@ -1,0 +1,9 @@
+{
+  "BROWSER_TEST": "PASS",
+  "LOGIN_KEYCLOAK_TOKEN": "PASS",
+  "REALTIME_CONNECTED": "PASS",
+  "SCREEN_POP_UI": "PASS",
+  "RECORDING_ON_UI": "PASS",
+  "RECORDING_AVAILABLE_UI": "PASS",
+  "screenshot": "/root/codestra-production-completion/evidence/websocket-gateway-20260817/browser-screen-pop-recording.png"
+}
