@@ -4,7 +4,11 @@ LABEL org.opencontainers.image.source="https://github.com/appolon1908-hue/codest
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.title="Codestra WebSocket Gateway"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN groupadd --gid 10001 codestra && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin codestra
+RUN apt-get update \
+ && apt-get upgrade -y \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --gid 10001 codestra \
+ && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin codestra
 WORKDIR /app
 COPY requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock \

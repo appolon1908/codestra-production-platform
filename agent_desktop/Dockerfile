@@ -5,12 +5,18 @@ COPY package*.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY . .
 RUN npm run build
-FROM caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+FROM golang:1.26-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83 AS caddy-build
+RUN CGO_ENABLED=0 go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4
+
+FROM alpine:3.24
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.source="https://github.com/appolon1908-hue/codestra-production-platform" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.title="Codestra Agent Desktop"
-RUN setcap -r /usr/bin/caddy
+RUN apk upgrade --no-cache \
+ && addgroup -S -g 10001 caddy \
+ && adduser -S -D -H -u 10001 -G caddy caddy
+COPY --from=caddy-build /go/bin/caddy /usr/bin/caddy
 COPY --from=build /app/dist /usr/share/caddy
 COPY Caddyfile /etc/caddy/Caddyfile
 USER caddy

@@ -168,11 +168,10 @@ jobs:
         env:
           SUBJECT: ${{ steps.identity.outputs.image }}@${{ steps.build.outputs.digest }}
         run: |
-          docker run --rm "${TRIVY_IMAGE}" image \
+          mkdir -p "artifacts/${{ matrix.image }}"
+          docker run --rm -v "${PWD}/artifacts/${{ matrix.image }}:/evidence" "${TRIVY_IMAGE}" image \
             --severity HIGH,CRITICAL --exit-code 1 --format json \
-            --output /tmp/trivy.json "${SUBJECT}"
-          docker run --rm "${TRIVY_IMAGE}" image \
-            --severity HIGH,CRITICAL --exit-code 1 "${SUBJECT}"
+            --output /evidence/trivy-image.json "${SUBJECT}"
       - name: Install checksum-verified Cosign
         env:
           COSIGN_VERSION: v3.1.2
