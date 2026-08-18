@@ -9,10 +9,11 @@ const tokenResponse = await fetch("https://auth.codestra.agency/realms/codestra/
 if (!tokenResponse.ok) throw new Error(`Keycloak login failed: ${tokenResponse.status}`);
 const accessToken = (await tokenResponse.json()).access_token;
 const claims = JSON.parse(Buffer.from(accessToken.split(".")[1], "base64url").toString("utf8"));
+const runCallId = `BROWSER-CALL-${crypto.randomUUID()}`;
 
 const publish = event => execFileSync("docker", ["exec", "-e", `EVENT_JSON=${JSON.stringify(event)}`, "codestra-websocket-certifier", "python", "-c",
   "import os,httpx; t=open('/run/secrets/internal_token').read().strip(); r=httpx.post('http://codestra-websocket-gateway-gateway-1:8080/internal/v1/realtime/events',headers={'X-Codestra-Internal-Token':t},json=__import__('json').loads(os.environ['EVENT_JSON'])); r.raise_for_status()"], {stdio:"pipe"});
-const makeEvent = (type, sequence, payload) => ({event_id:`browser-${type}-${crypto.randomUUID()}`,schema_version:"1.0",type,correlation_id:`browser-${crypto.randomUUID()}`,timestamp:new Date().toISOString(),tenant_id:"synthetic-tenant",business_unit_id:"TEST",campaign_id:"TEST_SYN",user_id:claims.sub,agent_id:"CERT-AGENT-A",call_id:"BROWSER-CALL-6101",sequence,payload});
+const makeEvent = (type, sequence, payload) => ({event_id:`browser-${type}-${crypto.randomUUID()}`,schema_version:"1.0",type,correlation_id:`browser-${crypto.randomUUID()}`,timestamp:new Date().toISOString(),tenant_id:"synthetic-tenant",business_unit_id:"TEST",campaign_id:"TEST_SYN",user_id:claims.sub,agent_id:"CERT-AGENT-A",call_id:runCallId,sequence,payload});
 
 const browser = await chromium.launch({headless:true, executablePath:"/root/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome"});
 const page = await browser.newPage({viewport:{width:1440,height:1000}});
