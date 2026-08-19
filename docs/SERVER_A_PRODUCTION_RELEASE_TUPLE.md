@@ -10,7 +10,9 @@ repositories. It is an ownership contract, not production activation.
 | Database migrations | canonical middleware image and its Alembic revision | read from the exact image | migration owner executes; runtime roles never own schemas |
 | JetStream server contract | production-platform `eventing/jetstream_contract.json` | checksum from protected configuration bundle | applied and read back by `tools/apply_jetstream_contract.py` |
 | JetStream publisher and DLQ worker | canonical middleware image | PR 219 protected merge SHA | `app.eventing.jetstream` and `app.entrypoints.jetstream_dlq_worker` |
-| Keycloak contract | production-platform production identity contract plus canonical middleware runtime settings | checksums from both protected artifacts | production issuer/client only; staging identity rejected |
+| Keycloak production middleware contract | `config/keycloak-production-contract.env.example` | checksum from the protected configuration bundle | production middleware issuer/client; not a webphone credential |
+| Keycloak internal staging contract | `config/keycloak-staging-contract.env.example` | checksum from the protected configuration bundle | internal staging issuer/client/secret only; production delivery prohibited |
+| Canonical TEST_SYN webphone machine contract | `config/keycloak-webphone-machine-contract.env.example`, `config/keycloak-webphone-machine-client.json`, and `config/keycloak-webphone-allowed-tenants.json` | checksums from the protected configuration bundle | canonical `.co` issuer, `codestra-provisioning-service-staging`, least-privilege service account, no production delivery |
 | Odoo and n8n integration logic | canonical middleware image | exact protected middleware SHA | versioned image digest |
 | Callback adapter contract | production-platform policy plus canonical middleware image | exact checksums and image digest | private authenticated adapter only |
 
@@ -36,6 +38,13 @@ approval, absent signatures, or any mismatch found by runtime readback.
 | Odoo/n8n/callback effective-once implementation | canonical middleware | business integration behavior | middleware image | canonical integration suite |
 
 Production flags remain false throughout candidate construction and staging.
+
+The canonical webphone machine contract is authoritative for Keycloak client
+creation only after its protected merge SHA is recorded. It does not activate
+the client or repair runtime drift by itself. In particular, the provisioning
+verifier must reject its currently deployed legacy `.agency` issuer setting and
+be reconciled to the contract's canonical `.co` issuer in a separate approved
+release before machine-token certification.
 
 ## Out-of-band release trust anchor
 
