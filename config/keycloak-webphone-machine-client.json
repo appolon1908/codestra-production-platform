@@ -1,0 +1,93 @@
+{
+  "realm": "codestra",
+  "client": {
+    "clientId": "codestra-provisioning-service-staging",
+    "enabled": true,
+    "protocol": "openid-connect",
+    "publicClient": false,
+    "bearerOnly": false,
+    "clientAuthenticatorType": "client-secret",
+    "serviceAccountsEnabled": true,
+    "standardFlowEnabled": false,
+    "directAccessGrantsEnabled": false,
+    "implicitFlowEnabled": false,
+    "frontchannelLogout": false,
+    "fullScopeAllowed": false,
+    "defaultClientScopes": [],
+    "optionalClientScopes": [],
+    "attributes": {
+      "access.token.lifespan": "300"
+    },
+    "protocolMappers": [
+      {
+        "name": "codestra-provisioning-service-audience",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "consentRequired": false,
+        "config": {
+          "included.client.audience": "codestra-provisioning-service",
+          "access.token.claim": "true",
+          "id.token.claim": "false"
+        }
+      },
+      {
+        "name": "codestra-webphone-machine-scopes",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-hardcoded-claim-mapper",
+        "consentRequired": false,
+        "config": {
+          "claim.name": "codestra_scopes",
+          "claim.value": "identity:rotate provisioning:execute provisioning:read",
+          "jsonType.label": "String",
+          "access.token.claim": "true",
+          "id.token.claim": "false",
+          "userinfo.token.claim": "false"
+        }
+      }
+    ]
+  },
+  "serviceAccountRoleAssignments": {
+    "realmRoles": [],
+    "clientRoles": {
+      "realm-management": [
+        "view-users"
+      ]
+    }
+  },
+  "tokenContract": {
+    "grantType": "client_credentials",
+    "issuer": "https://auth.codestra.co/realms/codestra",
+    "audience": "codestra-provisioning-service",
+    "authorizedParty": "codestra-provisioning-service-staging",
+    "requiredClaims": [
+      "iss",
+      "aud",
+      "sub",
+      "exp",
+      "iat",
+      "jti",
+      "azp",
+      "typ",
+      "codestra_scopes"
+    ],
+    "requiredScopes": [
+      "identity:rotate",
+      "provisioning:execute",
+      "provisioning:read"
+    ],
+    "maximumLifetimeSeconds": 300,
+    "singleUseJti": true
+  },
+  "tenantBinding": {
+    "required": true,
+    "machineTokenClaimRequired": false,
+    "authority": "canonical-browser-subject-and-odoo-identity-lookup",
+    "allowedTenantsFile": "/etc/codestra/contracts/keycloak-webphone-allowed-tenants.json"
+  },
+  "delivery": {
+    "containerSecretFile": "/run/secrets/provisioning/client_secret",
+    "secretGeneration": "keycloak-confidential-client",
+    "secretInSource": false,
+    "productionDeliveryAllowed": false
+  }
+}

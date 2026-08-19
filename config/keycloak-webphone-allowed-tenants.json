@@ -1,0 +1,12 @@
+{
+  "tenants": [
+    "COD"
+  ],
+  "campaigns": [
+    "TEST_SYN"
+  ],
+  "extensions": [
+    "6101"
+  ],
+  "production": false
+}
