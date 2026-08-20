@@ -91,9 +91,13 @@ jobs:
           python tools/verify_attestation_predicate.py \
             --verification middleware-sbom-verification.json \
             --predicate middleware-release/sbom.cdx.json
-          python tools/verify_attestation_predicate.py \
+          python tools/verify_slsa_provenance_attestation.py \
             --verification middleware-provenance-verification.json \
-            --predicate middleware-release/provenance.json
+            --provenance middleware-release/provenance.json \
+            --release-env middleware-release/RELEASE.env \
+            --sbom middleware-release/sbom.cdx.json \
+            --trivy middleware-release/trivy.json \
+            --grype middleware-release/grype-vex.json
           docker pull "${subject}"
           test "$(docker image inspect "${subject}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "${MIDDLEWARE_PROTECTED_SHA}"
           mapfile -t migration_heads < <(
@@ -130,12 +134,20 @@ jobs:
             dist/middleware-sbom.cdx.json
           install -m 0644 middleware-release/provenance.json \
             dist/middleware-provenance.json
+          install -m 0644 middleware-release/trivy.json \
+            dist/middleware-trivy.json
+          install -m 0644 middleware-release/grype-vex.json \
+            dist/middleware-grype-vex.json
+          install -m 0644 middleware-release/SHA256SUMS \
+            dist/middleware-source-SHA256SUMS
           (cd dist && sha256sum \
             middleware-signature-verification.json \
             middleware-provenance-verification.json \
             middleware-sbom-verification.json \
             middleware-RELEASE.env middleware-sbom.cdx.json \
-            middleware-provenance.json >> manifest.sha256)
+            middleware-provenance.json middleware-trivy.json \
+            middleware-grype-vex.json middleware-source-SHA256SUMS \
+            >> manifest.sha256)
           (cd dist && sha256sum --check manifest.sha256)
           python - <<'PY'
           import json
