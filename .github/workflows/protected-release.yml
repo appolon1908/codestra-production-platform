@@ -91,9 +91,13 @@ jobs:
           python tools/verify_attestation_predicate.py \
             --verification middleware-sbom-verification.json \
             --predicate middleware-release/sbom.cdx.json
-          python tools/verify_attestation_predicate.py \
+          python tools/verify_slsa_provenance_attestation.py \
             --verification middleware-provenance-verification.json \
-            --predicate middleware-release/provenance.json
+            --provenance middleware-release/provenance.json \
+            --release-env middleware-release/RELEASE.env \
+            --sbom middleware-release/sbom.cdx.json \
+            --trivy middleware-release/trivy.json \
+            --grype middleware-release/grype-vex.json
           docker pull "${subject}"
           test "$(docker image inspect "${subject}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "${MIDDLEWARE_PROTECTED_SHA}"
           mapfile -t migration_heads < <(
