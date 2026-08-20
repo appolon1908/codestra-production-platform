@@ -66,16 +66,18 @@ def main():
     expect("REQUEST_SIZE_REJECTION", 413, call("/v1/sms", b"x" * 70000, {**auth, "Idempotency-Key": "oversize"}))
 
     now = str(int(time.time()))
-    event = "standby-event-1"
+    nonce = str(time.time_ns())
+    event = "standby-event-" + nonce + "-1"
     webhook_body = b'{"fixture":true}'
     signature = hmac.new(HMAC_KEY, f"v1.{now}.{event}.".encode() + webhook_body, hashlib.sha256).hexdigest()
     webhook_headers = {"Content-Type": "application/json", "X-Signature-Version": "v1", "X-Key-ID": "standby-v1", "X-Timestamp": now, "X-Event-ID": event, "X-Signature": signature}
     expect("SMS_WEBHOOK_HMAC", 200, call("/v1/webhooks/sms", webhook_body, webhook_headers))
     expect("DUPLICATE_EVENT_REJECTION", 409, call("/v1/webhooks/sms", webhook_body, webhook_headers))
-    expect("WRONG_HMAC_REJECTION", 401, call("/v1/webhooks/email", webhook_body, {**webhook_headers, "X-Event-ID": "standby-event-2", "X-Signature": "0" * 64}))
+    expect("WRONG_HMAC_REJECTION", 401, call("/v1/webhooks/email", webhook_body, {**webhook_headers, "X-Event-ID": "standby-event-" + nonce + "-2", "X-Signature": "0" * 64}))
     stale = str(int(time.time()) - 600)
-    stale_sig = hmac.new(HMAC_KEY, f"v1.{stale}.standby-event-3.".encode() + webhook_body, hashlib.sha256).hexdigest()
-    expect("STALE_TIMESTAMP_REJECTION", 401, call("/v1/webhooks/email", webhook_body, {**webhook_headers, "X-Timestamp": stale, "X-Event-ID": "standby-event-3", "X-Signature": stale_sig}))
+    stale_event = "standby-event-" + nonce + "-3"
+    stale_sig = hmac.new(HMAC_KEY, f"v1.{stale}.{stale_event}.".encode() + webhook_body, hashlib.sha256).hexdigest()
+    expect("STALE_TIMESTAMP_REJECTION", 401, call("/v1/webhooks/email", webhook_body, {**webhook_headers, "X-Timestamp": stale, "X-Event-ID": stale_event, "X-Signature": stale_sig}))
     print("EXTERNAL_ACTIONS=0")
 
 

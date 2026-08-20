@@ -8,8 +8,8 @@
   "audience": "codestra-api",
   "algorithms": ["RS256"],
   "trustedHeadersToStrip": [
-    "X-Codestra-Subject", "X-Codestra-Tenant", "X-Codestra-Roles",
-    "X-Codestra-Scopes", "X-Authenticated-User"
+    "x-codestra-subject", "x-codestra-tenant", "x-codestra-roles",
+    "x-codestra-scopes", "x-authenticated-user"
   ],
   "services": [
     {
