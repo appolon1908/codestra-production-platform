@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "codestra.kong.production-route-hardening.v1",
+  "defaultPublicHostname": "api.codestra.agency",
+  "routes": {
+    "website-form-sales-contact": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["POST", "OPTIONS"]},
+    "website-form-pricing-request": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["POST", "OPTIONS"]},
+    "website-form-electronic-billing": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["POST", "OPTIONS"]},
+    "website-form-electronic-billing-registration": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["POST", "OPTIONS"]},
+    "website-form-demo-request": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["POST", "OPTIONS"]},
+    "codestra-website-api-route": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["GET", "POST", "OPTIONS"]},
+    "sms-dlr-telnexa-route": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["POST"]},
+    "sms-route": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["GET", "POST"]},
+    "email-route": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["GET", "POST"]},
+    "webhooks-route": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["POST"]},
+    "crm-route": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["GET", "POST", "PATCH"]},
+    "gateway-test-route": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["GET"]},
+    "codestra-token-validation-certification": {"hosts": ["api.codestra.agency"], "protocols": ["https"], "methods": ["GET"]},
+    "codestra-sms-standby-route": {"hosts": ["kong-standby.internal.codestra.agency"], "protocols": ["https"], "methods": ["POST"]},
+    "codestra-email-standby-route": {"hosts": ["kong-standby.internal.codestra.agency"], "protocols": ["https"], "methods": ["POST"]},
+    "codestra-sms-webhook-standby-route": {"hosts": ["kong-standby.internal.codestra.agency"], "protocols": ["https"], "methods": ["POST"]},
+    "codestra-email-webhook-standby-route": {"hosts": ["kong-standby.internal.codestra.agency"], "protocols": ["https"], "methods": ["POST"]},
+    "breero-production-api-route": {
+      "hosts": ["api.breero.com"],
+      "protocols": ["https"],
+      "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      "authenticationAuthority": "breero-application-oidc",
+      "stripSpoofableIdentityHeaders": true
+    }
+  }
+}
