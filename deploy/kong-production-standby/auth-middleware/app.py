@@ -13,6 +13,8 @@ import psycopg
 from fastapi import FastAPI, Header, HTTPException, Request
 from jwt import PyJWKClient
 
+from body_limit import RequestBodyLimitMiddleware, configured_max_body_bytes
+
 ISSUER = "https://auth.codestra.co/realms/codestra"
 AUDIENCE = "codestra-api"
 AUTHORIZED_PARTY = "codestra-cert-machine"
@@ -36,6 +38,10 @@ def state() -> sqlite3.Connection:
 
 state().close()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(
+    RequestBodyLimitMiddleware,
+    max_body_bytes=configured_max_body_bytes(),
+)
 
 
 def deny(code: int, reason: str):
