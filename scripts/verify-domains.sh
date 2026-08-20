@@ -41,9 +41,9 @@ check_host() {
   check_host crm.codestra.agency
   check_host api.codestra.agency
   check_host n8n.codestra.agency
-  check_host auth.codestra.agency
+  check_host auth.codestra.co
   printf '\n'
-  printf 'Public Keycloak activation is blocked unless `auth.codestra.agency` resolves to `%s`.\n' "$EXPECTED_IP"
+  printf 'Public Keycloak activation is blocked unless `auth.codestra.co` resolves to `%s`.\n' "$EXPECTED_IP"
 } > "$OUTPUT"
 
 cat "$OUTPUT"

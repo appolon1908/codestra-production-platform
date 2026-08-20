@@ -13,8 +13,11 @@ import psycopg
 from fastapi import FastAPI, Header, HTTPException, Request
 from jwt import PyJWKClient
 
-ISSUER = "https://auth.codestra.agency/realms/codestra"
+from body_limit import RequestBodyLimitMiddleware, configured_max_body_bytes
+
+ISSUER = "https://auth.codestra.co/realms/codestra"
 AUDIENCE = "codestra-api"
+AUTHORIZED_PARTY = "codestra-cert-machine"
 JWKS = ISSUER + "/protocol/openid-connect/certs"
 DATABASE_URL = Path(os.environ["DATABASE_URL_FILE"]).read_text().strip()
 HMAC_KEY = Path(os.environ["WEBHOOK_HMAC_FILE"]).read_bytes().strip()
@@ -35,6 +38,10 @@ def state() -> sqlite3.Connection:
 
 state().close()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(
+    RequestBodyLimitMiddleware,
+    max_body_bytes=configured_max_body_bytes(),
+)
 
 
 def deny(code: int, reason: str):
@@ -54,7 +61,11 @@ def identity(request: Request, required_scope: str) -> dict:
             deny(401, "algorithm_or_kid_denied")
         claims = jwt.decode(token, jwks.get_signing_key_from_jwt(token).key,
                             algorithms=["RS256"], issuer=ISSUER, audience=AUDIENCE,
-                            options={"require": ["iss", "aud", "sub", "iat", "exp"]}, leeway=0)
+                            options={"require": ["iss", "aud", "azp", "sub", "iat", "exp"]}, leeway=0)
+        if claims["azp"] != AUTHORIZED_PARTY:
+            deny(401, "authorized_party_denied")
+        if claims["exp"] <= claims["iat"]:
+            deny(401, "token_lifetime_denied")
     except HTTPException:
         raise
     except Exception:

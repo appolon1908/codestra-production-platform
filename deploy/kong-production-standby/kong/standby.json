@@ -4,7 +4,7 @@
   "publicHostname": "api.codestra.co",
   "publicRoutesEnabled": false,
   "stagingHostname": "kong-standby.internal.codestra.agency",
-  "issuer": "https://auth.codestra.agency/realms/codestra",
+  "issuer": "https://auth.codestra.co/realms/codestra",
   "audience": "codestra-api",
   "algorithms": ["RS256"],
   "trustedHeadersToStrip": [
