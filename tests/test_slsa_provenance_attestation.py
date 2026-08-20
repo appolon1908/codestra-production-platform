@@ -9,6 +9,7 @@ import pytest
 
 from tools.verify_slsa_provenance_attestation import (
     AUTHORIZED_BUILDER,
+    EXPECTED_BUILD_TYPE,
     PREDICATE_TYPE,
     STATEMENT_TYPE,
     validate,
@@ -38,9 +39,14 @@ def fixture(tmp_path: Path):
     }
     predicate = {
         "buildDefinition": {
-            "buildType": "https://codestra.example/buildtypes/exact-main-middleware-production/v1",
+            "buildType": EXPECTED_BUILD_TYPE,
             "externalParameters": {"sourceSha": SOURCE_SHA, "platform": "linux/amd64"},
-            "resolvedDependencies": [],
+            "resolvedDependencies": [
+                {
+                    "uri": f"git+https://github.com/Codestra-SRL/codestra-middleware@{SOURCE_SHA}",
+                    "digest": {"gitCommit": SOURCE_SHA},
+                }
+            ],
         },
         "runDetails": {"builder": {"id": AUTHORIZED_BUILDER}},
     }
@@ -113,7 +119,7 @@ def test_wrong_signed_slsa_predicate_fails(tmp_path: Path, field: str) -> None:
     files, _, provenance = fixture(tmp_path)
     provenance[field]["tampered"] = True
     files["provenance.json"].write_text(json.dumps(provenance))
-    with pytest.raises(ValueError, match="signed SLSA predicate"):
+    with pytest.raises(ValueError, match="unauthorized"):
         run(files)
 
 
@@ -144,7 +150,27 @@ def test_source_sha_tampering_fails(tmp_path: Path) -> None:
     files, _, provenance = fixture(tmp_path)
     provenance["buildDefinition"]["externalParameters"]["sourceSha"] = "c" * 40
     files["provenance.json"].write_text(json.dumps(provenance))
-    with pytest.raises(ValueError, match="source SHA"):
+    with pytest.raises(ValueError, match="build definition"):
+        run(files)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("buildType",), "https://attacker.invalid/build"),
+        (("externalParameters", "platform"), "linux/arm64"),
+        (("resolvedDependencies", 0, "uri"), "git+https://attacker.invalid/repo"),
+        (("resolvedDependencies", 0, "digest", "gitCommit"), "c" * 40),
+    ],
+)
+def test_unexpected_build_definition_fails(tmp_path: Path, path: tuple, value: str) -> None:
+    files, _, provenance = fixture(tmp_path)
+    target = provenance["buildDefinition"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    files["provenance.json"].write_text(json.dumps(provenance))
+    with pytest.raises(ValueError, match="build definition"):
         run(files)
 
 

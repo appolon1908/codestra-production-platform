@@ -24,6 +24,10 @@ AUTHORIZED_BUILDER = (
     "https://github.com/Codestra-SRL/codestra-middleware/"
     ".github/workflows/exact-main-production-release.yml@refs/heads/main"
 )
+EXPECTED_BUILD_TYPE = (
+    "https://codestra.example/buildtypes/exact-main-middleware-production/v1"
+)
+SOURCE_REPOSITORY = "https://github.com/Codestra-SRL/codestra-middleware"
 HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 SLSA_FIELDS = ("buildDefinition", "runDetails")
 EVIDENCE_FILES = {
@@ -110,16 +114,24 @@ def validate(
         raise ValueError("copied middleware provenance fields are not exact")
 
     expected_predicate = {field: provenance[field] for field in SLSA_FIELDS}
-    build = expected_predicate["buildDefinition"]
-    run_details = expected_predicate["runDetails"]
-    try:
-        source_sha = build["externalParameters"]["sourceSha"]
-        builder = run_details["builder"]["id"]
-    except (KeyError, TypeError) as exc:
-        raise ValueError("copied middleware SLSA provenance is incomplete") from exc
-    if source_sha != release["SOURCE_SHA"]:
-        raise ValueError("middleware provenance source SHA differs from RELEASE.env")
-    if builder != AUTHORIZED_BUILDER:
+    expected_build = {
+        "buildType": EXPECTED_BUILD_TYPE,
+        "externalParameters": {
+            "sourceSha": release["SOURCE_SHA"],
+            "platform": "linux/amd64",
+        },
+        "resolvedDependencies": [
+            {
+                "uri": f"git+{SOURCE_REPOSITORY}@{release['SOURCE_SHA']}",
+                "digest": {"gitCommit": release["SOURCE_SHA"]},
+            }
+        ],
+    }
+    if expected_predicate["buildDefinition"] != expected_build:
+        raise ValueError("middleware SLSA build definition is unauthorized")
+    if expected_predicate["runDetails"] != {
+        "builder": {"id": AUTHORIZED_BUILDER}
+    }:
         raise ValueError("middleware provenance builder is unauthorized")
     if provenance["subject"] != {"digest": release["IMAGE_DIGEST"]}:
         raise ValueError("copied middleware provenance subject differs from RELEASE.env")
