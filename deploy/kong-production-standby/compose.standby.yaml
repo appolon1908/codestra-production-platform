@@ -7,6 +7,7 @@ services:
     environment:
       DATABASE_URL_FILE: /run/secrets/identity_registry_database_url
       WEBHOOK_HMAC_FILE: /run/secrets/kong_standby_webhook_hmac
+      WEBHOOK_KEY_ID_FILE: /run/secrets/kong_standby_webhook_key_id
       STATE_DB: /data/state.sqlite3
       AUTH_MIDDLEWARE_MAX_BODY_BYTES: "65536"
       LIVE_SMS_DELIVERY: "false"
@@ -15,6 +16,7 @@ services:
     volumes:
       - /etc/codestra/secrets/identity-registry/database-url:/run/secrets/identity_registry_database_url:ro
       - /etc/codestra/secrets/kong-standby/webhook-hmac:/run/secrets/kong_standby_webhook_hmac:ro
+      - /etc/codestra/secrets/kong-standby/webhook-key-id:/run/secrets/kong_standby_webhook_key_id:ro
       - standby_state:/data
     networks:
       kong_frontend:

@@ -21,6 +21,9 @@ AUTHORIZED_PARTY = "codestra-cert-machine"
 JWKS = ISSUER + "/protocol/openid-connect/certs"
 DATABASE_URL = Path(os.environ["DATABASE_URL_FILE"]).read_text().strip()
 HMAC_KEY = Path(os.environ["WEBHOOK_HMAC_FILE"]).read_bytes().strip()
+WEBHOOK_KEY_ID = Path(os.environ["WEBHOOK_KEY_ID_FILE"]).read_text().strip()
+if not WEBHOOK_KEY_ID or len(WEBHOOK_KEY_ID) > 128:
+    raise RuntimeError("invalid webhook key identifier")
 TRUSTED_HEADERS = {"x-codestra-subject", "x-codestra-tenant", "x-codestra-roles", "x-codestra-scopes", "x-authenticated-user"}
 SCOPES = {"sms": "sms.send", "email": "email.send"}
 jwks = PyJWKClient(JWKS, cache_keys=True, lifespan=300)
@@ -151,6 +154,8 @@ async def webhook(family: str, request: Request,
         deny(415, "content_type_denied")
     if x_signature_version != "v1" or not all((x_key_id, x_timestamp, x_event_id, x_signature)):
         deny(401, "signature_missing")
+    if not hmac.compare_digest(x_key_id, WEBHOOK_KEY_ID):
+        deny(401, "key_id_invalid")
     try:
         timestamp = int(x_timestamp)
     except ValueError:

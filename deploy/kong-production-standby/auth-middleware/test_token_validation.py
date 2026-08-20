@@ -26,10 +26,13 @@ def load_app():
     root = Path(temp.name)
     database = root / "database-url"
     hmac_key = root / "hmac"
+    webhook_key_id = root / "webhook-key-id"
     database.write_text("postgresql://unused")
     hmac_key.write_bytes(b"test-only-hmac-key")
+    webhook_key_id.write_text("test-webhook-key-v1")
     os.environ["DATABASE_URL_FILE"] = str(database)
     os.environ["WEBHOOK_HMAC_FILE"] = str(hmac_key)
+    os.environ["WEBHOOK_KEY_ID_FILE"] = str(webhook_key_id)
     os.environ["STATE_DB"] = str(root / "state.sqlite3")
     spec = importlib.util.spec_from_file_location("standby_auth_under_test", Path(__file__).with_name("app.py"))
     module = importlib.util.module_from_spec(spec)
@@ -147,3 +150,7 @@ def test_canonical_jwks_is_the_only_key_endpoint():
     assert APP.ISSUER == CANONICAL_ISSUER
     assert APP.JWKS == CANONICAL_ISSUER + "/protocol/openid-connect/certs"
     assert "agency" not in APP.JWKS
+
+
+def test_webhook_key_identifier_is_loaded_explicitly():
+    assert APP.WEBHOOK_KEY_ID == "test-webhook-key-v1"
