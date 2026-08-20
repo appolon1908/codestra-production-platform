@@ -62,6 +62,7 @@
     "requiredForCommands": true,
     "tenantScoped": true,
     "changedBodyConflict": true,
+    "retentionSeconds": 2592000,
     "failClosed": true
   },
   "webhookSecurity": {

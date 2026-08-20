@@ -7,6 +7,7 @@ provider. It is safe to rerun and tags every object for exact rollback.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -69,6 +70,7 @@ def main():
         plugin(route["id"], "request-transformer", {
             "remove": {"headers": CONFIG["trustedHeadersToStrip"]},
         })
+        plugin(route["id"], "ip-restriction", {"allow": ["127.0.0.1", "172.19.0.1"], "deny": None, "status": 403})
         plugin(route["id"], "request-size-limiting", {
             "allowed_payload_size": item["bodyLimitBytes"], "size_unit": "bytes",
             "require_content_length": True,
@@ -78,6 +80,33 @@ def main():
             "fault_tolerant": False, "hide_client_headers": False,
         })
         applied.append(route_name)
+    expected_plugins = {"request-transformer", "ip-restriction", "request-size-limiting", "rate-limiting"}
+    for route_name in applied:
+        routes = request("GET", "/routes?" + urllib.parse.urlencode({"name": route_name})).get("data", [])
+        if len(routes) != 1:
+            raise RuntimeError(f"route read-back failed: {route_name}")
+        route = routes[0]
+        if route.get("hosts") != [HOST] or TAG not in (route.get("tags") or []):
+            raise RuntimeError(f"route isolation read-back failed: {route_name}")
+        names = {item["name"] for item in request("GET", f"/routes/{route['id']}/plugins").get("data", []) if item.get("enabled")}
+        if not expected_plugins.issubset(names):
+            raise RuntimeError(f"plugin read-back failed: {route_name}: {sorted(names)}")
+    # Kong workers update their router/plugin cache asynchronously.  Wait until
+    # the data plane observes the newly applied policy before reporting PASS.
+    for attempt in range(10):
+        probe = urllib.request.Request(
+            "http://127.0.0.1:8000/v1/sms",
+            data=b'{}', method="POST",
+            headers={"Host": HOST, "Content-Type": "application/json", "Idempotency-Key": "apply-probe"},
+        )
+        try:
+            urllib.request.urlopen(probe, timeout=2)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                break
+        if attempt == 9:
+            raise RuntimeError("Kong data-plane policy synchronization failed")
+        time.sleep(0.5)
     print("KONG_PRIVATE_STANDBY_APPLY=PASS")
     print("ROUTES=" + ",".join(applied))
     print("PUBLIC_HOST_ATTACHED=NO")

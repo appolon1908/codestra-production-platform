@@ -15,7 +15,6 @@ HOST = "kong-standby.internal.codestra.agency"
 CLIENT_ID = Path("/etc/codestra/secrets/identity-platform/clients/codestra-cert-machine/client-id").read_text().strip()
 CLIENT_SECRET = Path("/etc/codestra/secrets/identity-platform/clients/codestra-cert-machine/client-secret").read_text().strip()
 HMAC_KEY = Path("/etc/codestra/secrets/kong-standby/webhook-hmac").read_bytes().strip()
-RUN_IP = "198.18.%d.%d" % ((time.time_ns() >> 8) % 250 + 1, time.time_ns() % 250 + 1)
 
 
 def token() -> str:
@@ -32,9 +31,7 @@ def token() -> str:
 
 
 def call(path: str, body: bytes, headers: dict[str, str]) -> tuple[int, bytes]:
-    # 198.18.0.0/15 is benchmark-only address space. Kong trusts the loopback
-    # caller as the test proxy, so each run receives an isolated rate bucket.
-    all_headers = {"Host": HOST, "X-Forwarded-For": RUN_IP, **headers}
+    all_headers = {"Host": HOST, **headers}
     request = urllib.request.Request(BASE + path, data=body, headers=all_headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=10) as response:

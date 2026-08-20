@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import sqlite3
 import time
 from pathlib import Path
 
@@ -20,8 +21,19 @@ HMAC_KEY = Path(os.environ["WEBHOOK_HMAC_FILE"]).read_bytes().strip()
 TRUSTED_HEADERS = {"x-codestra-subject", "x-codestra-tenant", "x-codestra-roles", "x-codestra-scopes", "x-authenticated-user"}
 SCOPES = {"sms": "sms.send", "email": "email.send"}
 jwks = PyJWKClient(JWKS, cache_keys=True, lifespan=300)
-idempotency: dict[tuple[str, str, str], tuple[str, dict]] = {}
-replays: dict[str, int] = {}
+STATE_DB = os.environ.get("STATE_DB", "/data/state.sqlite3")
+IDEMPOTENCY_RETENTION_SECONDS = 30 * 24 * 60 * 60
+
+
+def state() -> sqlite3.Connection:
+    conn = sqlite3.connect(STATE_DB, timeout=5, isolation_level=None)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("CREATE TABLE IF NOT EXISTS idempotency (tenant TEXT, family TEXT, key TEXT, digest TEXT, response TEXT, created_at INTEGER, PRIMARY KEY(tenant,family,key))")
+    conn.execute("CREATE TABLE IF NOT EXISTS webhook_replay (event_id TEXT PRIMARY KEY, accepted_at INTEGER)")
+    return conn
+
+
+state().close()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -60,6 +72,15 @@ def identity(request: Request, required_scope: str) -> dict:
 
 @app.get("/health")
 def health():
+    try:
+        with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            assert cur.fetchone()[0] == 1
+        db = state()
+        db.execute("SELECT 1").fetchone()
+        db.close()
+    except Exception:
+        deny(503, "dependency_unavailable")
     return {"status": "healthy", "mode": "mock-only", "external_actions": False}
 
 
@@ -77,16 +98,32 @@ async def command(family: str, request: Request, idempotency_key: str | None = H
         payload = json.loads(body)
     except Exception:
         deny(400, "malformed_json")
+    if not isinstance(payload, dict):
+        deny(400, "json_object_required")
     if payload.get("tenant") != context["tenant"]:
         deny(404, "tenant_not_found")
     digest = hashlib.sha256(body).hexdigest()
     key = (context["tenant"], family, idempotency_key)
-    if key in idempotency:
-        if idempotency[key][0] != digest:
-            deny(409, "idempotency_conflict")
-        return idempotency[key][1]
     result = {"status": "accepted_mock", "external_action": False, "request_digest": digest[:16]}
-    idempotency[key] = (digest, result)
+    db = state()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("DELETE FROM idempotency WHERE created_at < ?", (int(time.time()) - IDEMPOTENCY_RETENTION_SECONDS,))
+        row = db.execute("SELECT digest,response FROM idempotency WHERE tenant=? AND family=? AND key=?", key).fetchone()
+        if row:
+            db.execute("COMMIT")
+            if row[0] != digest:
+                deny(409, "idempotency_conflict")
+            return json.loads(row[1])
+        db.execute("INSERT INTO idempotency VALUES (?,?,?,?,?,?)", (*key, digest, json.dumps(result, separators=(",", ":")), int(time.time())))
+        db.execute("COMMIT")
+    except HTTPException:
+        raise
+    except Exception:
+        db.execute("ROLLBACK")
+        deny(503, "idempotency_unavailable")
+    finally:
+        db.close()
     return result
 
 
@@ -110,12 +147,23 @@ async def webhook(family: str, request: Request,
     now = int(time.time())
     if abs(now - timestamp) > 300:
         deny(401, "timestamp_stale")
-    if x_event_id in replays and replays[x_event_id] >= now - 300:
-        deny(409, "event_replay")
     body = await request.body()
     signed = f"v1.{x_timestamp}.{x_event_id}.".encode() + body
     expected = hmac.new(HMAC_KEY, signed, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, x_signature):
         deny(401, "signature_invalid")
-    replays[x_event_id] = now
+    db = state()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("DELETE FROM webhook_replay WHERE accepted_at < ?", (now - 300,))
+        db.execute("INSERT INTO webhook_replay(event_id,accepted_at) VALUES (?,?)", (x_event_id, now))
+        db.execute("COMMIT")
+    except sqlite3.IntegrityError:
+        db.execute("ROLLBACK")
+        deny(409, "event_replay")
+    except Exception:
+        db.execute("ROLLBACK")
+        deny(503, "replay_cache_unavailable")
+    finally:
+        db.close()
     return {"status": "accepted_mock", "external_action": False}

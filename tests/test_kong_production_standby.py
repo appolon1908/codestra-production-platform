@@ -49,3 +49,9 @@ def test_no_native_protocol_upstream():
     config = data("kong/standby.json")
     forbidden = set(config["nativeProtocolPortsExcluded"])
     assert all(int(item["upstream"].rsplit(":", 1)[1]) not in forbidden for item in config["services"])
+
+
+def test_audience_mapper_is_versioned():
+    mapper = data("keycloak/codestra-api-audience.json")
+    assert mapper["name"] == "codestra-api-audience"
+    assert mapper["protocolMappers"][0]["config"]["included.client.audience"] == "codestra-api"
