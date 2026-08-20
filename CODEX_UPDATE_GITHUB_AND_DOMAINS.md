@@ -10,7 +10,7 @@
 - Odoo: `crm.codestra.agency`
 - Middleware: `api.codestra.agency`
 - n8n: `n8n.codestra.agency`
-- Keycloak: `auth.codestra.agency`
+- Keycloak: `auth.codestra.co`
 
 GitHub authentication is active and `origin` points to the repository.
 
@@ -268,7 +268,7 @@ Use:
 crm.codestra.agency   → Odoo
 api.codestra.agency   → Middleware
 n8n.codestra.agency   → n8n
-auth.codestra.agency  → Keycloak
+auth.codestra.co      → Keycloak
 ```
 
 Validate each hostname independently.
@@ -280,8 +280,8 @@ Do not request or renew a public certificate for a hostname until it resolves to
 For Keycloak:
 
 ```bash
-dig +short auth.codestra.agency A
-getent ahostsv4 auth.codestra.agency
+dig +short auth.codestra.co A
+getent ahostsv4 auth.codestra.co
 ```
 
 Expected address:
@@ -326,7 +326,7 @@ GITHUB_REPOSITORY=https://github.com/appolon1908-hue/codestra-production-platfor
 ODOO_DOMAIN=crm.codestra.agency
 MIDDLEWARE_DOMAIN=api.codestra.agency
 N8N_DOMAIN=n8n.codestra.agency
-KEYCLOAK_DOMAIN=auth.codestra.agency
+KEYCLOAK_DOMAIN=auth.codestra.co
 ```
 
 Preserve all secret-file references and all unknown existing values.

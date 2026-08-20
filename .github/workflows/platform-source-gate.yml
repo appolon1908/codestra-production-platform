@@ -43,7 +43,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends nats-server
-          python -m pip install pytest pytest-subtests PyYAML requests "nats-py==2.15.0"
+          python -m pip install pytest pytest-subtests PyYAML requests "nats-py==2.15.0" \
+            "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9"
 
       - name: Verify recovered source evidence hashes
         run: |
@@ -60,6 +61,8 @@ jobs:
           sudo --preserve-env=PATH \
             "$(command -v python)" -m pytest -q |
             tee "${RUNNER_TEMP}/pytest-output.txt"
+          python -m pytest -q \
+            deploy/kong-production-standby/auth-middleware/test_token_validation.py
           python - "${RUNNER_TEMP}/pytest-output.txt" <<'PY'
           import re
           import sys

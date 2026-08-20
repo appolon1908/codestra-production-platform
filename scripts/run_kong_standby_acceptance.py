@@ -24,7 +24,7 @@ def token() -> str:
         "scope": "codestra-api-audience sms.send email.send",
     }).encode()
     request = urllib.request.Request(
-        "https://auth.codestra.agency/realms/codestra/protocol/openid-connect/token",
+        "https://auth.codestra.co/realms/codestra/protocol/openid-connect/token",
         data=body, method="POST")
     with urllib.request.urlopen(request, timeout=15) as response:
         return json.load(response)["access_token"]

@@ -59,10 +59,8 @@ stdin installer, and atomic replacement pattern.
 
 ## Known runtime drift and activation gate
 
-At the time this contract was published, the running provisioning verifier
-still declared the legacy issuer `https://auth.codestra.agency/realms/codestra`.
-That is deployment drift, not authority for this client. Before creating or
-using the client, a separate approved runtime mission must reconcile the
-verifier to `https://auth.codestra.co/realms/codestra`, rebuild/release its
-immutable image if required, and prove the token contract end to end. This
-contract alone changes no runtime, Keycloak, or telephony state.
+The middleware and standby release must both declare only the canonical issuer
+`https://auth.codestra.co/realms/codestra`. Release evidence must include an
+immutable-image scan, runtime readback, a canonical-token acceptance probe, and
+a negative legacy-issuer probe. No issuer alias or discovery fallback is
+permitted. This client contract alone changes no telephony state.
