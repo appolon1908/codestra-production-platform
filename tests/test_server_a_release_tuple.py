@@ -45,6 +45,13 @@ def test_protected_release_gate_requires_completed_middleware_tuple() -> None:
     assert "dist/middleware-provenance-verification.json" in workflow
     assert "dist/middleware-sbom-verification.json" in workflow
     assert "dist/middleware-sbom.cdx.json" in workflow
+    for retained_evidence in (
+        "dist/middleware-trivy.json",
+        "dist/middleware-grype-vex.json",
+        "dist/middleware-source-SHA256SUMS",
+    ):
+        assert retained_evidence in workflow
+        assert retained_evidence.replace("dist/", "") in workflow
     assert workflow.count("tools/verify_attestation_predicate.py") == 1
     assert "--predicate middleware-release/sbom.cdx.json" in workflow
     assert "tools/verify_slsa_provenance_attestation.py" in workflow
