@@ -82,13 +82,60 @@ jobs:
 
   approved-operation:
     needs: verify
-    if: inputs.action != 'preflight' && inputs.action != 'status' && inputs.action != 'collect-evidence'
     environment: production
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     permissions:
       contents: read
     steps:
-      - name: Fail closed until narrow host operator is independently installed
+      - name: Configure pinned restricted operator transport
+        env:
+          OPERATOR_KEY: ${{ secrets.CODESTRA_PRODUCTION_OPERATOR_SSH_KEY }}
+          OPERATOR_KNOWN_HOSTS: ${{ secrets.CODESTRA_PRODUCTION_OPERATOR_KNOWN_HOSTS }}
+          OPERATOR_HOST: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_HOST }}
+          OPERATOR_USER: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_USER }}
         run: |
-          echo 'Protected approval recorded; host operator is not yet certified.'
-          exit 2
+          set -euo pipefail
+          test -n "${OPERATOR_KEY}"
+          test -n "${OPERATOR_KNOWN_HOSTS}"
+          test "${OPERATOR_HOST}" = '65.109.65.169'
+          test "${OPERATOR_USER}" = 'codestra-admin'
+          install -m 0700 -d "${RUNNER_TEMP}/operator-ssh"
+          printf '%s\n' "${OPERATOR_KEY}" > "${RUNNER_TEMP}/operator-ssh/id_ed25519"
+          printf '%s\n' "${OPERATOR_KNOWN_HOSTS}" > "${RUNNER_TEMP}/operator-ssh/known_hosts"
+          chmod 0600 "${RUNNER_TEMP}/operator-ssh/id_ed25519" "${RUNNER_TEMP}/operator-ssh/known_hosts"
+          ssh-keygen -y -f "${RUNNER_TEMP}/operator-ssh/id_ed25519" >/dev/null
+          ssh-keygen -F "${OPERATOR_HOST}" -f "${RUNNER_TEMP}/operator-ssh/known_hosts" >/dev/null
+
+      - name: Invoke certified allowlisted operator
+        env:
+          ACTION: ${{ inputs.action }}
+          PROTECTED_SHA: ${{ inputs.protected_sha }}
+          IMAGE_DIGEST: ${{ inputs.image_digest }}
+          CHANGE_ID: ${{ inputs.change_id }}
+          MAINTENANCE_DATE: ${{ inputs.maintenance_date }}
+          OPERATOR_HOST: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_HOST }}
+          OPERATOR_USER: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_USER }}
+          GHCR_TOKEN: ${{ secrets.CODESTRA_GHCR_DEPLOYMENT_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          ssh_args=(
+            -F /dev/null -T
+            -i "${RUNNER_TEMP}/operator-ssh/id_ed25519"
+            -o BatchMode=yes
+            -o ClearAllForwardings=yes
+            -o ConnectTimeout=15
+            -o IdentitiesOnly=yes
+            -o LogLevel=ERROR
+            -o PasswordAuthentication=no
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="${RUNNER_TEMP}/operator-ssh/known_hosts"
+          )
+          command="${ACTION} ${PROTECTED_SHA} ${IMAGE_DIGEST} ${CHANGE_ID} ${MAINTENANCE_DATE}"
+          if test "${ACTION}" = stage; then
+            test -n "${GHCR_TOKEN}"
+            printf '%s' "${GHCR_TOKEN}" |
+              ssh "${ssh_args[@]}" "${OPERATOR_USER}@${OPERATOR_HOST}" "${command}"
+          else
+            ssh "${ssh_args[@]}" "${OPERATOR_USER}@${OPERATOR_HOST}" "${command}" </dev/null
+          fi

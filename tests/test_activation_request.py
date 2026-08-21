@@ -68,3 +68,15 @@ def test_manifest_must_bind_requested_digest(tmp_path):
     args = request(tmp_path, digest="sha256:" + "1" * 64)
     with pytest.raises(ValueError, match="manifest digest"):
         validate(args)
+
+
+def test_workflow_uses_only_restricted_pinned_operator_transport():
+    workflow = open(".github/workflows/production-activation.yml", encoding="utf-8").read()
+    assert "secrets.CODESTRA_PRODUCTION_OPERATOR_SSH_KEY" in workflow
+    assert "secrets.CODESTRA_PRODUCTION_OPERATOR_KNOWN_HOSTS" in workflow
+    assert "StrictHostKeyChecking=yes" in workflow
+    assert "ClearAllForwardings=yes" in workflow
+    assert "PasswordAuthentication=no" in workflow
+    assert "scp " not in workflow
+    assert "rsync " not in workflow
+    assert "Fail closed until narrow host operator" not in workflow
