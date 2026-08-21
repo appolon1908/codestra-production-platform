@@ -17,8 +17,8 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `902d759808b6f496b4f3bfc5b4486462602eb26482a2f79f8bc2c23ad97bfdf5` |
-| `codestra-production-forced-command` | `9bc6974aa56ee015de6a03db754fed3594e85d381bc9c98b405d10894cea6b95` |
+| `codestra-production-operator` | `a8d266af4f944d6fb415aef8f8b0eab4934de9e91cc033989be3455ca680b6bf` |
+| `codestra-production-forced-command` | `e6fa1c9602a3318c61f4f21ce6d57edbcadadbeaf0b2c644e3f2c49b96ccdf74` |
 | `codestra-production-operator.sudoers` | `593cdff802459d3e9ce0d9c9afc17c330df15f4753521c6ad7f2a6c6790a632d` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
@@ -35,8 +35,9 @@ merge so it describes the immutable reviewed artifact rather than a draft.
 | `/usr/local/libexec/codestra-production-forced-command` | `root:root` | `0755` | Pinned above |
 | `/etc/sudoers.d/codestra-production-operator` | `root:root` | `0440` | Pinned; validated by `visudo -cf` |
 | `/etc/ssh/sshd_config.d/60-codestra-production-operator.conf` | `root:root` | `0644` | Pinned; validated by `sshd -t` |
-| `/etc/codestra/production-operator` | `root:root` | `0700` | Operator configuration |
-| `/etc/codestra/production-operator/maintenance-date` | `root:root` | `0600` | Supplied separately after approval |
+| `/etc/codestra/production-operator` | `root:root` | `0755` | Non-secret tuple directory; protected files retain restrictive modes |
+| `/etc/codestra/production-operator/maintenance-date` | `root:root` | `0600` | Installed from the approved tuple |
+| `/etc/codestra/production-operator/release.json` | `root:root` | `0644` | Immutable release tuple used by the forced command |
 | `/etc/codestra/production-operator/installed.sha256` | `root:root` | `0600` | Installed-file checksum manifest |
 | `/var/lib/codestra-production-operator` | `root:root` | `0700` | Evidence and rollback root |
 | `/var/lib/codestra-production-operator/.ssh` | operator user/group | `0700` | SSH key directory |
@@ -56,7 +57,7 @@ command.
 
 ```sh
 sha256sum --check install-server-a-operator.sh.sha256
-sudo ./install-server-a-operator.sh /path/to/operator-ed25519.pub
+sudo ./install-server-a-operator.sh /path/to/operator-ed25519.pub PROTECTED_SHA IMAGE_DIGEST CHANGE_ID MAINTENANCE_DATE
 sudo ./validate-server-a-operator.sh
 ```
 
@@ -68,14 +69,16 @@ configuration.
 
 ## Status and operation
 
-Remote callers send one literal action, for example `status`. Extra arguments,
-paths, metacharacters, empty commands, subsystems, port forwarding, and
-interactive sessions are rejected. Each accepted invocation acquires a global
+Remote callers send an action plus the exact installed SHA, image digest,
+change ID, and maintenance date. Tuple mismatches, extra arguments, paths,
+metacharacters, empty commands, subsystems, port forwarding, and interactive
+sessions are rejected before sudo. Each accepted invocation acquires a global
 lock and writes a sanitized JSON result under the evidence directory.
 `status` and `collect-evidence` remain available when a safety probe fails so
 an incident can be diagnosed. `rollback` remains available outside the normal
-window and when safety flags or telephony counters are unsafe; it can invoke
-only the fixed rollback unit. All pre-activation actions require exact zero
+window and when safety flags or telephony counters are unsafe; it can remove
+only the fixed standby container when its digest matches the installed tuple.
+All pre-activation actions require exact zero
 calls/channels, no SIP registrations, and the complete canonical release flag
 set with every value exactly `false`.
 
@@ -97,3 +100,10 @@ Installation does not enable PSTN dialing, external delivery, customer
 communications, callbacks, or payments. Missing fixed systemd operation units,
 failed safety checks, non-zero calls/channels, or missing privileged telephony
 readback make operations fail closed.
+
+`stage` accepts the GHCR read credential only on standard input, pulls and
+verifies the installed immutable digest, and creates only the fixed standby
+container with network mode `none`, a read-only root filesystem, all
+capabilities dropped, and production-delivery flags disabled. It does not
+replace active middleware or alter proxy routing. Backup validation and restore
+continue to use fixed, root-owned systemd units.

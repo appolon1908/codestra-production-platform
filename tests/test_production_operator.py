@@ -35,11 +35,25 @@ EXPECTED_ACTIONS = {
 
 def test_action_set_is_exact() -> None:
     assert OPERATOR.ALLOWED_ACTIONS == EXPECTED_ACTIONS
-    assert set(OPERATOR.SYSTEMD_ACTIONS) == EXPECTED_ACTIONS - {
-        "preflight",
-        "status",
-        "collect-evidence",
+    assert OPERATOR.SYSTEMD_ACTIONS == {
+        "backup": "codestra-backup.service",
+        "validate-backup": "codestra-backup-state.service",
+        "restore-test": "codestra-readiness-restore.service",
     }
+
+
+@pytest.fixture(autouse=True)
+def fixed_release_tuple(monkeypatch):
+    monkeypatch.setattr(
+        OPERATOR,
+        "load_release_config",
+        lambda: {
+            "protected_sha": "e" * 40,
+            "image_digest": "sha256:" + "3" * 64,
+            "change_id": "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01",
+            "maintenance_date": "2026-08-22",
+        },
+    )
 
 
 @pytest.mark.parametrize(
@@ -185,7 +199,7 @@ def test_nonzero_asterisk_counters_never_match_zero(monkeypatch, count) -> None:
     assert state["active_channels_zero"] is False
 
 
-@pytest.mark.parametrize("action", ["status", "collect-evidence", "rollback"])
+@pytest.mark.parametrize("action", ["status", "collect-evidence"])
 def test_diagnostics_and_rollback_remain_available_when_unsafe(monkeypatch, action) -> None:
     monkeypatch.setattr(
         OPERATOR,
@@ -206,6 +220,24 @@ def test_diagnostics_and_rollback_remain_available_when_unsafe(monkeypatch, acti
     code, result = OPERATOR.execute(action)
     assert code == 0
     assert result["returncode"] == 0
+
+
+def test_rollback_remains_available_when_unsafe(monkeypatch) -> None:
+    monkeypatch.setattr(
+        OPERATOR,
+        "safety_state",
+        lambda: {
+            "telephony_probe_pass": False,
+            "active_calls_zero": False,
+            "active_channels_zero": False,
+            "required_runtime_flags_false": False,
+            "sip_registration_performed": True,
+        },
+    )
+    monkeypatch.setattr(OPERATOR, "remove_standby", lambda _config: {"candidate_present": False})
+    code, result = OPERATOR.execute("rollback")
+    assert code == 0
+    assert result["candidate_present"] is False
 
 
 def test_preflight_rejects_unsafe_runtime(monkeypatch) -> None:
@@ -247,3 +279,31 @@ def test_payload_checksums_are_real() -> None:
     ):
         digest = subprocess.check_output(["sha256sum", str(PACKAGE / name)], text=True).split()[0]
         assert f"{digest}  {name}" in installer
+
+
+def test_forced_command_binds_exact_release_tuple_before_sudo() -> None:
+    text = (PACKAGE / "codestra-production-forced-command").read_text()
+    assert 'path = "/etc/codestra/production-operator/release.json"' in text
+    assert "parts[1:] != expected" in text
+    assert 'exec /usr/bin/sudo -n /usr/local/sbin/codestra-production-operator "$action"' in text
+
+
+def test_stage_uses_exact_digest_and_isolated_standby() -> None:
+    text = OPERATOR_PATH.read_text()
+    assert 'subject = f"{MIDDLEWARE_IMAGE}@{config[' + "'image_digest'" + ']}"' in text
+    assert '"--network", "none"' in text
+    assert '"--read-only", "--cap-drop", "ALL"' in text
+    assert '"ENABLE_EXTERNAL_DELIVERY=false"' in text
+    assert 'subject not in image.get("RepoDigests", [])' in text
+
+
+def test_workflow_uses_restricted_pinned_operator_transport() -> None:
+    workflow = (ROOT / ".github/workflows/production-activation.yml").read_text()
+    assert "secrets.CODESTRA_PRODUCTION_OPERATOR_SSH_KEY" in workflow
+    assert "secrets.CODESTRA_PRODUCTION_OPERATOR_KNOWN_HOSTS" in workflow
+    assert "StrictHostKeyChecking=yes" in workflow
+    assert "ClearAllForwardings=yes" in workflow
+    assert "PasswordAuthentication=no" in workflow
+    assert "test \"${OPERATOR_USER}\" = 'codestra-production-operator'" in workflow
+    assert "scp " not in workflow
+    assert "rsync " not in workflow

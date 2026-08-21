@@ -8,9 +8,17 @@ fail() {
 }
 
 [ "$(id -u)" -eq 0 ] || fail
-[ "$#" -eq 1 ] || fail
+[ "$#" -eq 5 ] || fail
 
 public_key=$1
+protected_sha=$2
+image_digest=$3
+change_id=$4
+maintenance_date=$5
+[ "$(printf '%s' "$protected_sha" | grep -Ec '^[0-9a-f]{40}$')" -eq 1 ] || fail
+[ "$(printf '%s' "$image_digest" | grep -Ec '^sha256:[0-9a-f]{64}$')" -eq 1 ] || fail
+[ "$(printf '%s' "$change_id" | grep -Ec '^CHG-[0-9]{8}-CODESTRA-PRODUCTION-ACTIVATION-[0-9]{2}$')" -eq 1 ] || fail
+[ "$(printf '%s' "$maintenance_date" | grep -Ec '^20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$')" -eq 1 ] || fail
 if [ ! -f "$public_key" ] || [ -L "$public_key" ]; then
   fail
 fi
@@ -32,8 +40,8 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
-902d759808b6f496b4f3bfc5b4486462602eb26482a2f79f8bc2c23ad97bfdf5  codestra-production-operator
-9bc6974aa56ee015de6a03db754fed3594e85d381bc9c98b405d10894cea6b95  codestra-production-forced-command
+a8d266af4f944d6fb415aef8f8b0eab4934de9e91cc033989be3455ca680b6bf  codestra-production-operator
+e6fa1c9602a3318c61f4f21ce6d57edbcadadbeaf0b2c644e3f2c49b96ccdf74  codestra-production-forced-command
 593cdff802459d3e9ce0d9c9afc17c330df15f4753521c6ad7f2a6c6790a632d  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
 EOF
@@ -98,6 +106,8 @@ rollback() {
     restore_path /etc/sudoers.d/codestra-production-operator sudoers
     restore_path /etc/ssh/sshd_config.d/60-codestra-production-operator.conf sshd
     restore_path /var/lib/codestra-production-operator/.ssh/authorized_keys authorized-keys
+    restore_path /etc/codestra/production-operator/release.json release-config
+    restore_path /etc/codestra/production-operator/maintenance-date maintenance-date
     sshd -t >/dev/null 2>&1 || true
   fi
   if [ "$created_user" -eq 1 ]; then
@@ -116,7 +126,7 @@ trap on_failure EXIT HUP INT TERM
 
 install -d -o root -g root -m 0755 /usr/local/sbin /usr/local/libexec
 install -d -o root -g root -m 0755 /etc/sudoers.d /etc/ssh/sshd_config.d
-install -d -o root -g root -m 0700 /etc/codestra/production-operator
+install -d -o root -g root -m 0755 /etc/codestra/production-operator
 install -d -o root -g root -m 0700 /var/lib/codestra-production-operator
 
 reject_target_symlink /usr/local/sbin/codestra-production-operator
@@ -124,6 +134,8 @@ reject_target_symlink /usr/local/libexec/codestra-production-forced-command
 reject_target_symlink /etc/sudoers.d/codestra-production-operator
 reject_target_symlink /etc/ssh/sshd_config.d/60-codestra-production-operator.conf
 reject_target_symlink /var/lib/codestra-production-operator/.ssh/authorized_keys
+reject_target_symlink /etc/codestra/production-operator/release.json
+reject_target_symlink /etc/codestra/production-operator/maintenance-date
 validate_existing_root_target /usr/local/sbin/codestra-production-operator 750
 validate_existing_root_target /usr/local/libexec/codestra-production-forced-command 755
 validate_existing_root_target /etc/sudoers.d/codestra-production-operator 440
@@ -134,6 +146,8 @@ backup_path /usr/local/libexec/codestra-production-forced-command forced-command
 backup_path /etc/sudoers.d/codestra-production-operator sudoers
 backup_path /etc/ssh/sshd_config.d/60-codestra-production-operator.conf sshd
 backup_path /var/lib/codestra-production-operator/.ssh/authorized_keys authorized-keys
+backup_path /etc/codestra/production-operator/release.json release-config
+backup_path /etc/codestra/production-operator/maintenance-date maintenance-date
 installed=1
 
 if ! id codestra-production-operator >/dev/null 2>&1; then
@@ -175,10 +189,37 @@ chown codestra-production-operator:codestra-production-operator "$authorized_tmp
 chmod 0600 "$authorized_tmp"
 mv -f "$authorized_tmp" /var/lib/codestra-production-operator/.ssh/authorized_keys
 
+release_tmp=$(mktemp /etc/codestra/production-operator/.release.XXXXXX)
+python3 - "$release_tmp" "$protected_sha" "$image_digest" "$change_id" "$maintenance_date" <<'PY'
+import json
+import sys
+
+target, protected_sha, image_digest, change_id, maintenance_date = sys.argv[1:]
+with open(target, "w", encoding="ascii") as stream:
+    json.dump({
+        "change_id": change_id,
+        "image_digest": image_digest,
+        "maintenance_date": maintenance_date,
+        "protected_sha": protected_sha,
+    }, stream, sort_keys=True, separators=(",", ":"))
+    stream.write("\n")
+PY
+chown root:root "$release_tmp"
+chmod 0644 "$release_tmp"
+mv -f "$release_tmp" /etc/codestra/production-operator/release.json
+
+maintenance_tmp=$(mktemp /etc/codestra/production-operator/.maintenance-date.XXXXXX)
+printf '%s\n' "$maintenance_date" > "$maintenance_tmp"
+chown root:root "$maintenance_tmp"
+chmod 0600 "$maintenance_tmp"
+mv -f "$maintenance_tmp" /etc/codestra/production-operator/maintenance-date
+
 sha256sum /usr/local/sbin/codestra-production-operator \
   /usr/local/libexec/codestra-production-forced-command \
   /etc/sudoers.d/codestra-production-operator \
   /etc/ssh/sshd_config.d/60-codestra-production-operator.conf \
+  /etc/codestra/production-operator/release.json \
+  /etc/codestra/production-operator/maintenance-date \
   > /etc/codestra/production-operator/installed.sha256
 chmod 0600 /etc/codestra/production-operator/installed.sha256
 chown root:root /etc/codestra/production-operator/installed.sha256
