@@ -36,8 +36,7 @@ EXPECTED_ACTIONS = {
 def test_action_set_is_exact() -> None:
     assert OPERATOR.ALLOWED_ACTIONS == EXPECTED_ACTIONS
     assert OPERATOR.SYSTEMD_ACTIONS == {
-        "backup": "codestra-backup.service",
-        "validate-backup": "codestra-backup-state.service",
+        "backup": "codestra-readiness-backup.service",
         "restore-test": "codestra-readiness-restore.service",
     }
 
@@ -329,6 +328,15 @@ def test_stage_uses_exact_digest_and_isolated_standby() -> None:
     assert '"--read-only", "--cap-drop", "ALL"' in text
     assert '"ENABLE_EXTERNAL_DELIVERY=false"' in text
     assert 'subject not in image.get("RepoDigests", [])' in text
+
+
+def test_backup_actions_use_installed_fixed_paths() -> None:
+    text = OPERATOR_PATH.read_text()
+    assert '"backup": "codestra-readiness-backup.service"' in text
+    assert '"restore-test": "codestra-readiness-restore.service"' in text
+    assert 'Path("/opt/codestra/operations/backup/check-backup-state.sh")' in text
+    assert "codestra-backup.service" not in text
+    assert "codestra-backup-state.service" not in text
 
 
 def test_workflow_uses_restricted_pinned_operator_transport() -> None:
