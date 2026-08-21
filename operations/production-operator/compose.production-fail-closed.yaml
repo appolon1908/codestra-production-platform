@@ -1,0 +1,14 @@
+services:
+  middleware:
+    environment:
+      SEND_EVENTS: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      ODOO_DELIVERY_ENABLED: "false"
+      CALLBACK_DISPATCH: "false"
+      ENABLE_VICIDIAL_WRITES: "false"
+      LIVE_WRITE: "false"
+      ODOO_WRITE: "false"
+      N8N_DELIVERY_ENABLED: "false"
+      PRODUCTION_DIALING: "false"
+      LIVE_CALL_CONTROL: "false"
+      GENERAL_AI_DIALING: "false"
