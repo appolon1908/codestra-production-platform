@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+case "${SSH_ORIGINAL_COMMAND-}" in
+  preflight|backup|validate-backup|restore-test|stage|canary|status|rollback|collect-evidence)
+    exec /usr/bin/sudo -n /usr/local/sbin/codestra-production-operator "${SSH_ORIGINAL_COMMAND}"
+    ;;
+  *)
+    echo "restricted operator: exactly one allowlisted action is required" >&2
+    exit 2
+    ;;
+esac

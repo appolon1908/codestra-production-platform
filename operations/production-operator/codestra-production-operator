@@ -1,0 +1,241 @@
+#!/usr/bin/python3
+"""Root-only, fail-closed Codestra production operation dispatcher."""
+
+from __future__ import annotations
+
+import datetime as dt
+import fcntl
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+ALLOWED_ACTIONS = {
+    "preflight",
+    "backup",
+    "validate-backup",
+    "restore-test",
+    "stage",
+    "canary",
+    "status",
+    "rollback",
+    "collect-evidence",
+}
+READ_ONLY_ACTIONS = {"preflight", "status", "collect-evidence"}
+RECOVERY_ACTIONS = {"rollback"}
+SAFETY_BYPASS_ACTIONS = {"status", "collect-evidence", "rollback"}
+CANONICAL_FALSE_FLAGS = {
+    "SEND_EVENTS",
+    "ENABLE_EXTERNAL_DELIVERY",
+    "ODOO_DELIVERY_ENABLED",
+    "CALLBACK_DISPATCH",
+    "ENABLE_VICIDIAL_WRITES",
+    "LIVE_WRITE",
+    "ODOO_WRITE",
+    "N8N_DELIVERY_ENABLED",
+    "PRODUCTION_DIALING",
+    "LIVE_CALL_CONTROL",
+    "GENERAL_AI_DIALING",
+}
+SYSTEMD_ACTIONS = {
+    "backup": "codestra-backup.service",
+    "validate-backup": "codestra-backup-state.service",
+    "restore-test": "codestra-readiness-restore.service",
+    "stage": "codestra-production-stage.service",
+    "canary": "codestra-production-canary.service",
+    "rollback": "codestra-production-rollback.service",
+}
+CONFIG_DIR = Path("/etc/codestra/production-operator")
+MAINTENANCE_DATE = CONFIG_DIR / "maintenance-date"
+EVIDENCE_DIR = Path("/var/lib/codestra-production-operator/evidence")
+LOCK_FILE = Path("/run/lock/codestra-production-operator.lock")
+DATE_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])")
+
+
+class OperatorError(RuntimeError):
+    pass
+
+
+def checked_root_file(path: Path, *, expected_mode: int = 0o600) -> str:
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise OperatorError(f"unsafe file type: {path}")
+    if info.st_uid != 0 or info.st_gid != 0:
+        raise OperatorError(f"unsafe ownership: {path}")
+    if stat.S_IMODE(info.st_mode) != expected_mode:
+        raise OperatorError(f"unsafe mode: {path}")
+    return path.read_text(encoding="ascii").strip()
+
+
+def require_maintenance_window(now: dt.datetime | None = None) -> str:
+    raw_date = checked_root_file(MAINTENANCE_DATE)
+    if not DATE_RE.fullmatch(raw_date):
+        raise OperatorError("maintenance date is malformed")
+    approved_date = dt.date.fromisoformat(raw_date)
+    current = now or dt.datetime.now(dt.timezone.utc)
+    local = current.astimezone(ZoneInfo("America/New_York"))
+    if local.date() != approved_date or not (0 <= local.hour < 4):
+        raise OperatorError("outside approved maintenance window")
+    return raw_date
+
+
+def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=1800,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+    )
+
+
+def safety_state() -> dict[str, object]:
+    channel = run_fixed(["/usr/bin/ssh", "codestra-vicidial", "asterisk", "-rx", "core show channels count"])
+    registrations = run_fixed(
+        [
+            "/usr/bin/ssh",
+            "codestra-vicidial",
+            "asterisk",
+            "-rx",
+            "pjsip show registrations",
+        ]
+    )
+    runtime = run_fixed(
+        [
+            "/usr/bin/docker",
+            "inspect",
+            "codestra-middleware-1",
+            "--format",
+            "{{json .Config.Env}}",
+        ]
+    )
+    runtime_flags: dict[str, str] = {}
+    if runtime.returncode == 0:
+        try:
+            for entry in json.loads(runtime.stdout):
+                name, separator, value = entry.partition("=")
+                if separator:
+                    runtime_flags[name] = value
+        except (json.JSONDecodeError, TypeError):
+            runtime_flags = {}
+    flags_false = all(
+        runtime_flags.get(name) == "false" for name in CANONICAL_FALSE_FLAGS
+    )
+    calls = re.findall(r"(?m)^([0-9]+) active calls$", channel.stdout)
+    channels = re.findall(r"(?m)^([0-9]+) active channels$", channel.stdout)
+    return {
+        "pstatus": run_fixed(["/usr/bin/systemctl", "is-system-running"]).returncode,
+        "telephony_probe_pass": channel.returncode == 0 and registrations.returncode == 0,
+        "active_calls_zero": calls == ["0"],
+        "active_channels_zero": channels == ["0"],
+        "required_runtime_flags_false": flags_false,
+        "sip_registration_performed": "No objects found." not in registrations.stdout,
+    }
+
+
+def execute(action: str) -> tuple[int, dict[str, object]]:
+    if action not in ALLOWED_ACTIONS:
+        raise OperatorError("action is not allowlisted")
+    maintenance_date = None
+    if action not in READ_ONLY_ACTIONS | RECOVERY_ACTIONS:
+        maintenance_date = require_maintenance_window()
+    state = safety_state()
+    safe_for_activation = (
+        state["telephony_probe_pass"]
+        and state["active_calls_zero"]
+        and state["active_channels_zero"]
+        and state["required_runtime_flags_false"]
+        and not state["sip_registration_performed"]
+    )
+    if action not in SAFETY_BYPASS_ACTIONS and not safe_for_activation:
+        raise OperatorError("runtime safety state is not fail-closed")
+    result: dict[str, object] = {
+        "action": action,
+        "maintenance_date": maintenance_date,
+        "safety": state,
+    }
+    if action in SYSTEMD_ACTIONS:
+        unit = SYSTEMD_ACTIONS[action]
+        invocation = run_fixed(["/usr/bin/systemctl", "start", "--wait", unit])
+        result.update({"unit": unit, "returncode": invocation.returncode})
+        if invocation.returncode != 0:
+            raise OperatorError(f"fixed unit failed: {unit}")
+    elif action in {"preflight", "status"}:
+        invocation = run_fixed(["/usr/bin/systemctl", "--failed", "--no-legend", "--plain"])
+        result.update({"returncode": invocation.returncode, "failed_units_present": bool(invocation.stdout.strip())})
+        if action == "preflight" and result["failed_units_present"]:
+            raise OperatorError("preflight found failed units")
+    else:
+        invocation = run_fixed(["/usr/bin/docker", "ps", "--format", "{{.Names}}|{{.Image}}|{{.Status}}"])
+        result.update({"returncode": invocation.returncode, "container_inventory_collected": invocation.returncode == 0})
+        if invocation.returncode != 0:
+            raise OperatorError("evidence collection failed")
+    return 0, result
+
+
+def write_evidence(action: str, status_value: str, detail: dict[str, object]) -> Path:
+    EVIDENCE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = EVIDENCE_DIR.lstat()
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise OperatorError("evidence directory is unsafe")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = EVIDENCE_DIR / f"{stamp}-{os.getpid()}-{action}.json"
+    payload = {"schema": "codestra.production-operator.v1", "status": status_value, **detail}
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    return target
+
+
+def main(argv: list[str]) -> int:
+    if os.geteuid() != 0:
+        print("operator rejected: root execution required", file=sys.stderr)
+        return 2
+    if len(argv) != 1 or argv[0] not in ALLOWED_ACTIONS:
+        print("operator rejected: exactly one allowlisted action is required", file=sys.stderr)
+        return 2
+    action = argv[0]
+    LOCK_FILE.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    descriptor = os.open(
+        LOCK_FILE,
+        os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW,
+        0o600,
+    )
+    with os.fdopen(descriptor, "a+", encoding="ascii") as lock:
+        lock_info = os.fstat(lock.fileno())
+        if lock_info.st_uid != 0 or stat.S_IMODE(lock_info.st_mode) != 0o600:
+            print("operator rejected: unsafe lock file", file=sys.stderr)
+            return 2
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            _, result = execute(action)
+            evidence = write_evidence(action, "PASS", result)
+            print(f"OPERATOR_RESULT=PASS\nACTION={action}\nEVIDENCE={evidence}")
+            return 0
+        except Exception as error:
+            detail = {"action": action, "error_class": type(error).__name__}
+            try:
+                evidence = write_evidence(action, "FAIL", detail)
+                print(f"EVIDENCE={evidence}", file=sys.stderr)
+            except Exception:
+                pass
+            print(f"operator rejected: {type(error).__name__}", file=sys.stderr)
+            return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

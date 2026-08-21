@@ -1,0 +1,8 @@
+Match User codestra-production-operator
+    AuthenticationMethods publickey
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PermitTTY no
+    DisableForwarding yes
+    X11Forwarding no
+    ForceCommand /usr/local/libexec/codestra-production-forced-command
