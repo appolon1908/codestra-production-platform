@@ -56,12 +56,12 @@ def test_non_root_fails_closed(monkeypatch) -> None:
     assert OPERATOR.main(["status"]) == 2
 
 
-def test_maintenance_window_exact_boundary(monkeypatch, tmp_path) -> None:
-    date_file = tmp_path / "maintenance-date"
-    date_file.write_text("2026-08-22\n", encoding="ascii")
-    date_file.chmod(0o600)
-    monkeypatch.setattr(OPERATOR, "MAINTENANCE_DATE", date_file)
-    monkeypatch.setattr(OPERATOR.os, "geteuid", lambda: 0)
+def test_maintenance_window_exact_boundary(monkeypatch) -> None:
+    monkeypatch.setattr(
+        OPERATOR,
+        "checked_root_file",
+        lambda path: "2026-08-22" if path == OPERATOR.MAINTENANCE_DATE else "",
+    )
     before = dt.datetime(2026, 8, 22, 7, 59, tzinfo=dt.timezone.utc)
     assert OPERATOR.require_maintenance_window(before) == "2026-08-22"
     after = dt.datetime(2026, 8, 22, 8, 0, tzinfo=dt.timezone.utc)
