@@ -18,6 +18,12 @@ Docker network mode `none`. It never changes the active middleware container,
 Kong routes, Caddy, Server B, telephony, providers, databases, or production
 traffic. A failed start remains a failed standby certification gate.
 
+`backup` and `restore-test` start the fixed, root-owned Server A units
+`codestra-readiness-backup.service` and `codestra-readiness-restore.service`.
+Those units load their protected host configuration and call the established
+quiesced-backup and isolated-restore implementations. The operator verifies
+their systemd result and exit status; it never forwards backup configuration.
+
 The installer adds one forced-command key and one sudoers command. OpenSSH
 `restrict` disables forwarding, agent forwarding, X11 and PTY allocation. The
 operator replaces the inherited environment, locks concurrent execution,

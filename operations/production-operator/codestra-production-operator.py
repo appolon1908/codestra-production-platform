@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time as time_module
 from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -155,6 +156,24 @@ def fixed_script(path: str) -> dict:
     return {"result": "PASS", "output_sha256": hashlib.sha256(result.stdout).hexdigest()}
 
 
+def systemd_action(unit: str) -> dict:
+    allowed_units = {
+        "codestra-readiness-backup.service",
+        "codestra-readiness-restore.service",
+    }
+    if unit not in allowed_units:
+        raise Denied("systemd action is not allowlisted")
+    run(["/usr/bin/systemctl", "start", unit], timeout=7200)
+    state = run([
+        "/usr/bin/systemctl", "show", unit, "--property=Result",
+        "--property=ExecMainStatus", "--value",
+    ], timeout=30).stdout.decode("utf-8", errors="replace")
+    values = [item.strip() for item in state.splitlines() if item.strip()]
+    if "success" not in values or "0" not in values:
+        raise Denied(f"{unit} did not complete successfully")
+    return {"result": "PASS", "unit": unit}
+
+
 def stage(config: dict[str, str]) -> dict:
     credential_bytes = sys.stdin.buffer.read(16384)
     if (not credential_bytes or len(credential_bytes) >= 16384 or
@@ -196,6 +215,10 @@ def stage(config: dict[str, str]) -> dict:
     obj = docker_inspect(CONTAINER)
     if obj["Config"]["Image"] != subject or obj["HostConfig"]["NetworkMode"] != "none":
         raise Denied("standby digest or isolation read-back failed")
+    time_module.sleep(5)
+    obj = docker_inspect(CONTAINER)
+    if not obj["State"]["Running"]:
+        raise Denied("standby process exited during startup")
     return {"result": "PASS", "subject": subject, "network_mode": "none", "safety": fail_closed_values()}
 
 
@@ -228,11 +251,11 @@ def dispatch(action: str, config: dict[str, str]) -> dict:
     if action == "status":
         return status(config)
     if action == "backup":
-        return fixed_script("/opt/codestra/operations/backup/codestra-backup.sh")
+        return systemd_action("codestra-readiness-backup.service")
     if action == "validate-backup":
         return fixed_script("/opt/codestra/operations/backup/check-backup-state.sh")
     if action == "restore-test":
-        return fixed_script("/opt/codestra/restore-validation/verify_restore_and_hmac.sh")
+        return systemd_action("codestra-readiness-restore.service")
     if action == "stage":
         return stage(config)
     if action == "canary":

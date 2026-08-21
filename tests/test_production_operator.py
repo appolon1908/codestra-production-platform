@@ -84,3 +84,13 @@ def test_stage_verifies_exact_repo_digest_and_uses_network_none() -> None:
     assert '"--network", "none"' in text
     assert '"PSTN_DIALING=DISABLED"' in text
     assert '"ENABLE_EXTERNAL_DELIVERY=false"' in text
+    assert 'if not obj["State"]["Running"]' in text
+
+
+def test_backup_and_restore_use_fixed_configured_systemd_units() -> None:
+    text = PATH.read_text()
+    assert 'systemd_action("codestra-readiness-backup.service")' in text
+    assert 'systemd_action("codestra-readiness-restore.service")' in text
+    assert '"/usr/bin/systemctl", "start", unit' in text
+    assert 'fixed_script("/opt/codestra/operations/backup/codestra-backup.sh")' not in text
+    assert 'fixed_script("/opt/codestra/restore-validation/verify_restore_and_hmac.sh")' not in text
