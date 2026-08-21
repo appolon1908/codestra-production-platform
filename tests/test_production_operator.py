@@ -177,20 +177,12 @@ def test_vicidial_probe_uses_restricted_absolute_asterisk_command(monkeypatch) -
         [
             "/usr/bin/ssh",
             "codestra-vicidial",
-            "sudo",
-            "-n",
-            "/usr/sbin/asterisk",
-            "-rx",
-            "core show channels count",
+            "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'core show channels count'",
         ],
         [
             "/usr/bin/ssh",
             "codestra-vicidial",
-            "sudo",
-            "-n",
-            "/usr/sbin/asterisk",
-            "-rx",
-            "pjsip show registrations",
+            "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'pjsip show registrations'",
         ],
     ]
 
