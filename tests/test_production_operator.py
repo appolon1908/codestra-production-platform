@@ -153,6 +153,48 @@ def test_status_action_has_positive_dispatch(monkeypatch) -> None:
     assert result["returncode"] == 0
 
 
+def test_vicidial_probe_uses_restricted_absolute_asterisk_command(monkeypatch) -> None:
+    commands = []
+    safe_entries = [f"{name}=false" for name in OPERATOR.CANONICAL_FALSE_FLAGS]
+
+    def fake_run(command):
+        commands.append(command)
+        if command[-1] == "core show channels count":
+            return subprocess.CompletedProcess(command, 0, "0 active channels\n0 active calls\n", "")
+        if command[-1] == "pjsip show registrations":
+            return subprocess.CompletedProcess(command, 0, "No objects found.\n", "")
+        if command[:2] == ["/usr/bin/docker", "inspect"]:
+            import json
+
+            return subprocess.CompletedProcess(command, 0, json.dumps(safe_entries), "")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(OPERATOR, "run_fixed", fake_run)
+    state = OPERATOR.safety_state()
+
+    assert state["telephony_probe_pass"] is True
+    assert commands[:2] == [
+        [
+            "/usr/bin/ssh",
+            "codestra-vicidial",
+            "sudo",
+            "-n",
+            "/usr/sbin/asterisk",
+            "-rx",
+            "core show channels count",
+        ],
+        [
+            "/usr/bin/ssh",
+            "codestra-vicidial",
+            "sudo",
+            "-n",
+            "/usr/sbin/asterisk",
+            "-rx",
+            "pjsip show registrations",
+        ],
+    ]
+
+
 @pytest.mark.parametrize("missing_or_enabled", [None, "true"])
 def test_runtime_safety_flags_fail_closed(monkeypatch, missing_or_enabled) -> None:
     safe_entries = [f"{name}=false" for name in OPERATOR.CANONICAL_FALSE_FLAGS]
