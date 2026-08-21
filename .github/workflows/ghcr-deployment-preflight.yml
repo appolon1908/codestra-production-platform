@@ -1,0 +1,74 @@
+name: Protected GHCR deployment credential preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      protected_sha:
+        description: Exact protected platform SHA
+        required: true
+      image_digest:
+        description: Exact immutable middleware digest
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codestra-production-ghcr-preflight
+  cancel-in-progress: false
+
+jobs:
+  verify-approved-digest-pull:
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.protected_sha }}
+          persist-credentials: false
+
+      - name: Bind request to protected immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROTECTED_SHA: ${{ inputs.protected_sha }}
+          IMAGE_DIGEST: ${{ inputs.image_digest }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${PROTECTED_SHA}"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/release%2Fproduction-activation" --jq .commit.sha)" = "${PROTECTED_SHA}"
+          install -m 0700 -d "${RUNNER_TEMP}/release"
+          gh release download "protected-${PROTECTED_SHA}" \
+            --repo "${GITHUB_REPOSITORY}" --dir "${RUNNER_TEMP}/release"
+          (cd "${RUNNER_TEMP}/release" && sha256sum --check --strict manifest.sha256)
+          python - "${RUNNER_TEMP}/release/deployment-manifest.json" "${PROTECTED_SHA}" "${IMAGE_DIGEST}" <<'PY'
+          import json
+          import sys
+
+          manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+          release = manifest["release_tuple"]
+          assert release["orchestration_protected_sha"] == sys.argv[2]
+          assert release["middleware_image_digest"] == sys.argv[3]
+          assert sys.argv[3].startswith("sha256:") and len(sys.argv[3]) == 71
+          PY
+
+      - name: Authenticate and pull exact approved digest
+        env:
+          GHCR_TOKEN: ${{ secrets.CODESTRA_GHCR_DEPLOYMENT_READ_TOKEN }}
+          IMAGE_DIGEST: ${{ inputs.image_digest }}
+        run: |
+          set -euo pipefail
+          test -n "${GHCR_TOKEN}"
+          subject="ghcr.io/codestra-srl/codestra-middleware@${IMAGE_DIGEST}"
+          printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io --username appolon1908-hue --password-stdin >/dev/null
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          docker pull --quiet "${subject}" >/dev/null
+          docker image inspect "${subject}" \
+            --format '{{json .RepoDigests}}' |
+            python -c 'import json,sys; ds=json.load(sys.stdin); expected=sys.argv[1]; assert any(x.endswith("@"+expected) for x in ds)' "${IMAGE_DIGEST}"
+          printf '%s\n' \
+            'GHCR_LOGIN=PASS' \
+            'APPROVED_DIGEST_PULL=PASS' \
+            'DEPLOYMENT_PERFORMED=NO' \
+            'PSTN_DIALING=DISABLED' \
+            'CALLS_PLACED=0'
