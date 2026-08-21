@@ -26,6 +26,21 @@ ALLOWED_ACTIONS = {
     "collect-evidence",
 }
 READ_ONLY_ACTIONS = {"preflight", "status", "collect-evidence"}
+RECOVERY_ACTIONS = {"rollback"}
+SAFETY_BYPASS_ACTIONS = {"status", "collect-evidence", "rollback"}
+CANONICAL_FALSE_FLAGS = {
+    "SEND_EVENTS",
+    "ENABLE_EXTERNAL_DELIVERY",
+    "ODOO_DELIVERY_ENABLED",
+    "CALLBACK_DISPATCH",
+    "ENABLE_VICIDIAL_WRITES",
+    "LIVE_WRITE",
+    "ODOO_WRITE",
+    "N8N_DELIVERY_ENABLED",
+    "PRODUCTION_DIALING",
+    "LIVE_CALL_CONTROL",
+    "GENERAL_AI_DIALING",
+}
 SYSTEMD_ACTIONS = {
     "backup": "codestra-backup.service",
     "validate-backup": "codestra-backup-state.service",
@@ -82,6 +97,15 @@ def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 def safety_state() -> dict[str, object]:
     channel = run_fixed(["/usr/bin/ssh", "codestra-vicidial", "asterisk", "-rx", "core show channels count"])
+    registrations = run_fixed(
+        [
+            "/usr/bin/ssh",
+            "codestra-vicidial",
+            "asterisk",
+            "-rx",
+            "pjsip show registrations",
+        ]
+    )
     runtime = run_fixed(
         [
             "/usr/bin/docker",
@@ -100,20 +124,18 @@ def safety_state() -> dict[str, object]:
                     runtime_flags[name] = value
         except (json.JSONDecodeError, TypeError):
             runtime_flags = {}
-    required_false = {
-        "LIVE_PSTN_DIALING",
-        "SEND_EVENTS",
-        "LIVE_EMAIL_DELIVERY",
-        "LIVE_SMS_DELIVERY",
-    }
-    flags_false = all(runtime_flags.get(name) == "false" for name in required_false)
+    flags_false = all(
+        runtime_flags.get(name) == "false" for name in CANONICAL_FALSE_FLAGS
+    )
+    calls = re.findall(r"(?m)^([0-9]+) active calls$", channel.stdout)
+    channels = re.findall(r"(?m)^([0-9]+) active channels$", channel.stdout)
     return {
         "pstatus": run_fixed(["/usr/bin/systemctl", "is-system-running"]).returncode,
-        "telephony_probe_pass": channel.returncode == 0,
-        "active_calls_zero": "0 active calls" in channel.stdout,
-        "active_channels_zero": "0 active channels" in channel.stdout,
+        "telephony_probe_pass": channel.returncode == 0 and registrations.returncode == 0,
+        "active_calls_zero": calls == ["0"],
+        "active_channels_zero": channels == ["0"],
         "required_runtime_flags_false": flags_false,
-        "sip_registration_performed": False,
+        "sip_registration_performed": "No objects found." not in registrations.stdout,
     }
 
 
@@ -121,16 +143,18 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
     if action not in ALLOWED_ACTIONS:
         raise OperatorError("action is not allowlisted")
     maintenance_date = None
-    if action not in READ_ONLY_ACTIONS:
+    if action not in READ_ONLY_ACTIONS | RECOVERY_ACTIONS:
         maintenance_date = require_maintenance_window()
     state = safety_state()
-    if (
-        not state["telephony_probe_pass"]
-        or not state["active_calls_zero"]
-        or not state["active_channels_zero"]
-        or not state["required_runtime_flags_false"]
-    ):
-        raise OperatorError("telephony safety state is not zero")
+    safe_for_activation = (
+        state["telephony_probe_pass"]
+        and state["active_calls_zero"]
+        and state["active_channels_zero"]
+        and state["required_runtime_flags_false"]
+        and not state["sip_registration_performed"]
+    )
+    if action not in SAFETY_BYPASS_ACTIONS and not safe_for_activation:
+        raise OperatorError("runtime safety state is not fail-closed")
     result: dict[str, object] = {
         "action": action,
         "maintenance_date": maintenance_date,

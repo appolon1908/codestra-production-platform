@@ -8,7 +8,8 @@ The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
 `restore-test`, `stage`, `canary`, `status`, `rollback`, or `collect-evidence`.
 There is no shell, Docker-group membership, host/path input, arbitrary unit, or
 command argument. `preflight`, `status`, and `collect-evidence` are read-only.
-Every other action requires `/etc/codestra/production-operator/maintenance-date`
+Every other action except emergency `rollback` requires
+`/etc/codestra/production-operator/maintenance-date`
 to be a root-owned regular file with mode `0600`, containing one `YYYY-MM-DD`
 date, and the current time must be 00:00 through 03:59 America/New_York.
 
@@ -16,7 +17,7 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `7eb6e80b233fce31fe34404a31a82a9fa6d0afd076b6b67a9938c4806999d015` |
+| `codestra-production-operator` | `902d759808b6f496b4f3bfc5b4486462602eb26482a2f79f8bc2c23ad97bfdf5` |
 | `codestra-production-forced-command` | `9bc6974aa56ee015de6a03db754fed3594e85d381bc9c98b405d10894cea6b95` |
 | `codestra-production-operator.sudoers` | `593cdff802459d3e9ce0d9c9afc17c330df15f4753521c6ad7f2a6c6790a632d` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
@@ -71,6 +72,12 @@ Remote callers send one literal action, for example `status`. Extra arguments,
 paths, metacharacters, empty commands, subsystems, port forwarding, and
 interactive sessions are rejected. Each accepted invocation acquires a global
 lock and writes a sanitized JSON result under the evidence directory.
+`status` and `collect-evidence` remain available when a safety probe fails so
+an incident can be diagnosed. `rollback` remains available outside the normal
+window and when safety flags or telephony counters are unsafe; it can invoke
+only the fixed rollback unit. All pre-activation actions require exact zero
+calls/channels, no SIP registrations, and the complete canonical release flag
+set with every value exactly `false`.
 
 ## Removal and rollback
 

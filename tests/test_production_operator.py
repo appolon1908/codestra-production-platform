@@ -141,20 +141,17 @@ def test_status_action_has_positive_dispatch(monkeypatch) -> None:
 
 @pytest.mark.parametrize("missing_or_enabled", [None, "true"])
 def test_runtime_safety_flags_fail_closed(monkeypatch, missing_or_enabled) -> None:
-    safe_entries = [
-        "LIVE_PSTN_DIALING=false",
-        "SEND_EVENTS=false",
-        "LIVE_EMAIL_DELIVERY=false",
-        "LIVE_SMS_DELIVERY=false",
-    ]
+    safe_entries = [f"{name}=false" for name in OPERATOR.CANONICAL_FALSE_FLAGS]
     if missing_or_enabled is None:
         safe_entries.pop()
     else:
-        safe_entries[-1] = f"LIVE_SMS_DELIVERY={missing_or_enabled}"
+        safe_entries[-1] = safe_entries[-1].partition("=")[0] + f"={missing_or_enabled}"
 
     def fake_run(command):
-        if command[:2] == ["/usr/bin/ssh", "codestra-vicidial"]:
+        if command[-1] == "core show channels count":
             return subprocess.CompletedProcess(command, 0, "0 active channels\n0 active calls\n", "")
+        if command[-1] == "pjsip show registrations":
+            return subprocess.CompletedProcess(command, 0, "No objects found.\n", "")
         if command[:2] == ["/usr/bin/docker", "inspect"]:
             import json
 
@@ -164,6 +161,67 @@ def test_runtime_safety_flags_fail_closed(monkeypatch, missing_or_enabled) -> No
     monkeypatch.setattr(OPERATOR, "run_fixed", fake_run)
     state = OPERATOR.safety_state()
     assert state["required_runtime_flags_false"] is False
+
+
+@pytest.mark.parametrize("count", [1, 10, 20, 100])
+def test_nonzero_asterisk_counters_never_match_zero(monkeypatch, count) -> None:
+    safe_entries = [f"{name}=false" for name in OPERATOR.CANONICAL_FALSE_FLAGS]
+
+    def fake_run(command):
+        if command[-1] == "core show channels count":
+            output = f"{count} active channels\n{count} active calls\n"
+            return subprocess.CompletedProcess(command, 0, output, "")
+        if command[-1] == "pjsip show registrations":
+            return subprocess.CompletedProcess(command, 0, "No objects found.\n", "")
+        if command[:2] == ["/usr/bin/docker", "inspect"]:
+            import json
+
+            return subprocess.CompletedProcess(command, 0, json.dumps(safe_entries), "")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(OPERATOR, "run_fixed", fake_run)
+    state = OPERATOR.safety_state()
+    assert state["active_calls_zero"] is False
+    assert state["active_channels_zero"] is False
+
+
+@pytest.mark.parametrize("action", ["status", "collect-evidence", "rollback"])
+def test_diagnostics_and_rollback_remain_available_when_unsafe(monkeypatch, action) -> None:
+    monkeypatch.setattr(
+        OPERATOR,
+        "safety_state",
+        lambda: {
+            "telephony_probe_pass": False,
+            "active_calls_zero": False,
+            "active_channels_zero": False,
+            "required_runtime_flags_false": False,
+            "sip_registration_performed": True,
+        },
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_fixed",
+        lambda command: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    code, result = OPERATOR.execute(action)
+    assert code == 0
+    assert result["returncode"] == 0
+
+
+def test_preflight_rejects_unsafe_runtime(monkeypatch) -> None:
+    monkeypatch.setattr(
+        OPERATOR,
+        "safety_state",
+        lambda: {
+            "telephony_probe_pass": True,
+            "active_calls_zero": False,
+            "active_channels_zero": True,
+            "required_runtime_flags_false": True,
+            "sip_registration_performed": False,
+        },
+    )
+    with pytest.raises(OPERATOR.OperatorError, match="not fail-closed"):
+        OPERATOR.execute("preflight")
 
 
 @pytest.mark.parametrize(
