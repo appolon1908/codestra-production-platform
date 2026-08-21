@@ -99,7 +99,7 @@ jobs:
           test -n "${OPERATOR_KEY}"
           test -n "${OPERATOR_KNOWN_HOSTS}"
           test "${OPERATOR_HOST}" = '65.109.65.169'
-          test "${OPERATOR_USER}" = 'codestra-admin'
+          test "${OPERATOR_USER}" = 'codestra-production-operator'
           install -m 0700 -d "${RUNNER_TEMP}/operator-ssh"
           printf '%s\n' "${OPERATOR_KEY}" > "${RUNNER_TEMP}/operator-ssh/id_ed25519"
           printf '%s\n' "${OPERATOR_KNOWN_HOSTS}" > "${RUNNER_TEMP}/operator-ssh/known_hosts"

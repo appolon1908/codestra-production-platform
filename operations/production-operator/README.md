@@ -1,34 +1,109 @@
-# Restricted production operator
+# Server A narrow production operator
 
-This package installs the root-owned forced-command interface used by the
-protected `production-activation.yml` workflow. It does not grant a shell,
-accept paths, or accept arbitrary commands. The request grammar is exactly:
+Status: reviewed source candidate; root installation is prohibited until the
+feature branch is independently approved, merged, and released from the exact
+protected commit.
 
-```text
-ACTION PROTECTED_SHA IMAGE_DIGEST CHANGE_ID MAINTENANCE_DATE
+The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
+`restore-test`, `stage`, `canary`, `status`, `rollback`, or `collect-evidence`.
+There is no shell, Docker-group membership, host/path input, arbitrary unit, or
+command argument. `preflight`, `status`, and `collect-evidence` are read-only.
+Every other action except emergency `rollback` requires
+`/etc/codestra/production-operator/maintenance-date`
+to be a root-owned regular file with mode `0600`, containing one `YYYY-MM-DD`
+date, and the current time must be 00:00 through 03:59 America/New_York.
+
+## Reviewed artifacts
+
+| Repository artifact | SHA-256 |
+|---|---|
+| `codestra-production-operator` | `a8d266af4f944d6fb415aef8f8b0eab4934de9e91cc033989be3455ca680b6bf` |
+| `codestra-production-forced-command` | `e6fa1c9602a3318c61f4f21ce6d57edbcadadbeaf0b2c644e3f2c49b96ccdf74` |
+| `codestra-production-operator.sudoers` | `593cdff802459d3e9ce0d9c9afc17c330df15f4753521c6ad7f2a6c6790a632d` |
+| `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
+| `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
+
+The installer contains the first four pinned digests and verifies them before
+writing host files. The installer digest is published only after protected
+merge so it describes the immutable reviewed artifact rather than a draft.
+
+## Installed inventory
+
+| Path | Owner | Mode | Purpose/checksum |
+|---|---|---:|---|
+| `/usr/local/sbin/codestra-production-operator` | `root:root` | `0750` | Pinned above |
+| `/usr/local/libexec/codestra-production-forced-command` | `root:root` | `0755` | Pinned above |
+| `/etc/sudoers.d/codestra-production-operator` | `root:root` | `0440` | Pinned; validated by `visudo -cf` |
+| `/etc/ssh/sshd_config.d/60-codestra-production-operator.conf` | `root:root` | `0644` | Pinned; validated by `sshd -t` |
+| `/etc/codestra/production-operator` | `root:root` | `0755` | Non-secret tuple directory; protected files retain restrictive modes |
+| `/etc/codestra/production-operator/maintenance-date` | `root:root` | `0600` | Installed from the approved tuple |
+| `/etc/codestra/production-operator/release.json` | `root:root` | `0644` | Immutable release tuple used by the forced command |
+| `/etc/codestra/production-operator/installed.sha256` | `root:root` | `0600` | Installed-file checksum manifest |
+| `/var/lib/codestra-production-operator` | `root:root` | `0700` | Evidence and rollback root |
+| `/var/lib/codestra-production-operator/.ssh` | operator user/group | `0700` | SSH key directory |
+| `/var/lib/codestra-production-operator/.ssh/authorized_keys` | operator user/group | `0600` | One caller-supplied ED25519 key with forced command |
+| `/var/lib/codestra-production-operator/evidence` | `root:root` | `0700` | Sanitized per-action evidence |
+
+The system user is password-locked. SSH requires public-key authentication,
+has no TTY or forwarding, and applies the forced command in both `sshd_config`
+and `authorized_keys`. Sudoers enumerates nine exact command lines and contains
+neither `NOPASSWD: ALL` nor wildcard arguments.
+
+## Installation and validation
+
+After protected merge, use the published installer digest and a standalone
+ED25519 public-key file. Never paste the installer or key into a quoted shell
+command.
+
+```sh
+sha256sum --check install-server-a-operator.sh.sha256
+sudo ./install-server-a-operator.sh /path/to/operator-ed25519.pub PROTECTED_SHA IMAGE_DIGEST CHANGE_ID MAINTENANCE_DATE
+sudo ./validate-server-a-operator.sh
 ```
 
-The allowlist is `preflight`, `backup`, `validate-backup`, `restore-test`,
-`stage`, `canary`, `status`, `rollback`, and `collect-evidence`. State-changing
-actions are denied outside 00:00–04:00 America/New_York on the installed date.
+The installer backs up every replaced target into a mode-0700 root directory.
+Any installation failure restores the prior files. It rejects symlink targets,
+modified payloads, unsafe source/key modes, unexpected ownership or modes on
+existing targets, malformed or multiple keys, invalid sudoers, and invalid SSH
+configuration.
 
-`stage` pulls the configured immutable digest using a credential received on
-standard input and creates only `codestra-production-standby-approved` on
-Docker network mode `none`. It never changes the active middleware container,
-Kong routes, Caddy, Server B, telephony, providers, databases, or production
-traffic. A failed start remains a failed standby certification gate.
+## Status and operation
 
-`backup` and `restore-test` start the fixed, root-owned Server A units
-`codestra-readiness-backup.service` and `codestra-readiness-restore.service`.
-Those units load their protected host configuration and call the established
-quiesced-backup and isolated-restore implementations. The operator verifies
-their systemd result and exit status; it never forwards backup configuration.
+Remote callers send an action plus the exact installed SHA, image digest,
+change ID, and maintenance date. Tuple mismatches, extra arguments, paths,
+metacharacters, empty commands, subsystems, port forwarding, and interactive
+sessions are rejected before sudo. Each accepted invocation acquires a global
+lock and writes a sanitized JSON result under the evidence directory.
+`status` and `collect-evidence` remain available when a safety probe fails so
+an incident can be diagnosed. `rollback` remains available outside the normal
+window and when safety flags or telephony counters are unsafe; it can remove
+only the fixed standby container when its digest matches the installed tuple.
+All pre-activation actions require exact zero
+calls/channels, no SIP registrations, and the complete canonical release flag
+set with every value exactly `false`.
 
-The installer adds one forced-command key and one sudoers command. OpenSSH
-`restrict` disables forwarding, agent forwarding, X11 and PTY allocation. The
-operator replaces the inherited environment, locks concurrent execution,
-binds every call to `/etc/codestra/production-operator/release.json`, and writes
-secret-free JSON audit records.
+## Removal and rollback
 
-Use only the checksum-pinned root-console command published with the reviewed
-PR evidence. Never grant `NOPASSWD: ALL` or install an unrestricted runner.
+Run the reviewed removal file locally as root with no arguments:
+
+```sh
+sudo ./remove-server-a-operator.sh
+```
+
+It creates a root-only tar archive and checksum under
+`/var/lib/codestra-production-operator/removal`, removes authorization before
+the executable, locks the service account, and validates the remaining SSH and
+sudo configuration. Restore a prior installer backup only during an approved
+maintenance window, then rerun `validate-server-a-operator.sh`.
+
+Installation does not enable PSTN dialing, external delivery, customer
+communications, callbacks, or payments. Missing fixed systemd operation units,
+failed safety checks, non-zero calls/channels, or missing privileged telephony
+readback make operations fail closed.
+
+`stage` accepts the GHCR read credential only on standard input, pulls and
+verifies the installed immutable digest, and creates only the fixed standby
+container with network mode `none`, a read-only root filesystem, all
+capabilities dropped, and production-delivery flags disabled. It does not
+replace active middleware or alter proxy routing. Backup validation and restore
+continue to use fixed, root-owned systemd units.
