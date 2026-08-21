@@ -45,10 +45,10 @@ CANONICAL_FALSE_FLAGS = {
     "GENERAL_AI_DIALING",
 }
 SYSTEMD_ACTIONS = {
-    "backup": "codestra-backup.service",
-    "validate-backup": "codestra-backup-state.service",
+    "backup": "codestra-readiness-backup.service",
     "restore-test": "codestra-readiness-restore.service",
 }
+BACKUP_STATE_VALIDATOR = Path("/opt/codestra/operations/backup/check-backup-state.sh")
 CONFIG_DIR = Path("/etc/codestra/production-operator")
 RELEASE_CONFIG = CONFIG_DIR / "release.json"
 MAINTENANCE_DATE = CONFIG_DIR / "maintenance-date"
@@ -122,6 +122,18 @@ def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
         timeout=1800,
         env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
     )
+
+
+def validate_backup_state() -> dict[str, object]:
+    info = BACKUP_STATE_VALIDATOR.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise OperatorError("backup-state validator has unsafe file type")
+    if info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o755:
+        raise OperatorError("backup-state validator has unsafe ownership or mode")
+    invocation = run_fixed([str(BACKUP_STATE_VALIDATOR)])
+    if invocation.returncode != 0:
+        raise OperatorError("backup-state validation failed")
+    return {"validator": str(BACKUP_STATE_VALIDATOR), "returncode": 0}
 
 
 def run_bytes(command: list[str], *, stdin: bytes | None = None, timeout: int = 1800) -> subprocess.CompletedProcess[bytes]:
@@ -274,6 +286,8 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         result.update({"unit": unit, "returncode": invocation.returncode})
         if invocation.returncode != 0:
             raise OperatorError(f"fixed unit failed: {unit}")
+    elif action == "validate-backup":
+        result.update(validate_backup_state())
     elif action == "stage":
         result.update(stage_standby(config))
     elif action == "canary":

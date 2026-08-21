@@ -17,7 +17,7 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `a8d266af4f944d6fb415aef8f8b0eab4934de9e91cc033989be3455ca680b6bf` |
+| `codestra-production-operator` | `fbe81c41fb308e038f55b7c4b7b419994b6676f5d45ed0b0aa02249ed778e8c6` |
 | `codestra-production-forced-command` | `e6fa1c9602a3318c61f4f21ce6d57edbcadadbeaf0b2c644e3f2c49b96ccdf74` |
 | `codestra-production-operator.sudoers` | `593cdff802459d3e9ce0d9c9afc17c330df15f4753521c6ad7f2a6c6790a632d` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
@@ -106,4 +106,7 @@ verifies the installed immutable digest, and creates only the fixed standby
 container with network mode `none`, a read-only root filesystem, all
 capabilities dropped, and production-delivery flags disabled. It does not
 replace active middleware or alter proxy routing. Backup validation and restore
-continue to use fixed, root-owned systemd units.
+continue to use the fixed, root-owned `codestra-readiness-backup.service` and
+`codestra-readiness-restore.service` units. `validate-backup` invokes only the
+fixed root-owned `/opt/codestra/operations/backup/check-backup-state.sh` and
+rejects unsafe file type, ownership, mode, or nonzero validation status.
