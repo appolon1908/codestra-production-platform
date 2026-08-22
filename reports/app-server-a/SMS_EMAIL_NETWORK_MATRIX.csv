@@ -1,0 +1,13 @@
+SOURCE,DESTINATION,PORT,PROTOCOL,TLS,MTLS,AUTH,EXPECTED,ACTUAL,STATUS
+Odoo,Kong,8000,HTTP,no,no,token,reachable,shared edge network; route contract not certified,PARTIAL
+Kong,Integration control plane,8096,HTTP,no,no,service identity,reachable,shared edge network and healthy upstream,PARTIAL
+Middleware,n8n,5678,HTTP,no,no,service identity,reachable,HTTP 200 healthz,PASS
+n8n,Kong,8000,HTTP,no,no,scoped token,reachable,shared edge network; scope test pending,PARTIAL
+Kong,Middleware dispatch API,8096,HTTP,no,no,scoped token,canonical dispatch,requested route absent,FAIL
+SMS API,Telnexa,8443,HTTPS,yes,yes,bearer plus HMAC,reachable,10.40.0.4 resolved and TLS endpoint answered,PARTIAL
+Middleware,Klyrow email API,8080,HTTP,no,no,service identity,reachable,HTTP 200 health,PASS
+Telnexa,Middleware,8080,HTTP,no,no,HMAC plus API key,signed callback,callback implementation present; current live ingress not exercised,PARTIAL
+Klyrow,Middleware,8080,HTTP,no,no,HMAC plus API key,signed callback,private event endpoints present; current live ingress not exercised,PARTIAL
+Middleware,Odoo,8069,HTTP,no,no,service identity,reachable,HTTP 200 web health,PASS
+Middleware,Internal n8n proxy,443,HTTPS,yes,yes,service identity,reachable,proxy healthy; callback not exercised,PARTIAL
+n8n,Approved middleware APIs,8095,HTTP,no,no,scoped service identity,reachable,network attached; authorization matrix pending,PARTIAL
