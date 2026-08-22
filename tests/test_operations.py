@@ -38,6 +38,28 @@ def run(script: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 
 class BackupOperationsTests(unittest.TestCase):
+    def test_restore_rehearsal_preserves_isolated_owner_roles(self) -> None:
+        source = (
+            ROOT
+            / "operations"
+            / "readiness"
+            / "codestra-isolated-restore-rehearsal.sh"
+        ).read_text()
+        self.assertIn("CREATE ROLE middleware_data_owner;", source)
+        self.assertIn("CREATE ROLE keycloak_data_owner;", source)
+        self.assertIn("GRANT middleware_data_owner TO middleware_app;", source)
+        self.assertIn("GRANT keycloak_data_owner TO keycloak;", source)
+        self.assertIn("-O middleware_data_owner codestra_middleware", source)
+        self.assertIn("-O keycloak_data_owner keycloak", source)
+        self.assertIn("PRODUCTION-MIDDLEWARE-ROLE-BASELINE.txt", source)
+        self.assertIn("PRODUCTION-KEYCLOAK-ROLE-AFTER.txt", source)
+        self.assertIn("--exit-on-error", source)
+        self.assertNotIn("--no-owner", source)
+        self.assertIn("KEYCLOAK_DATA_OWNER_NOLOGIN=PASS", source)
+        self.assertIn("RESTORE_ROLE_MEMBERSHIP_SCOPE=ISOLATED_ONLY", source)
+        self.assertIn("PRODUCTION_ROLE_PRIVILEGES_UNCHANGED=PASS", source)
+        self.assertIn("PUBLISHED_PORT_COUNT=0", source)
+
     def test_readiness_backup_publishes_last_success_after_evidence_validation(self) -> None:
         source = (ROOT / "operations" / "readiness" / "codestra-local-consistency-backup.sh").read_text()
         evidence = source.index('sha256sum -c EVIDENCE-SHA256SUMS')
