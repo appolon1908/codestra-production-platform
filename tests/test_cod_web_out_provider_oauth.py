@@ -88,4 +88,3 @@ class CodWebOutProviderOAuthTests(unittest.TestCase):
         os.environ["KLYROW_OUTBOUND_API_KEY"] = "legacy"
         with self.assertRaisesRegex(ProviderError, "credentials_missing"):
             submit(self.message())
-
