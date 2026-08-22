@@ -4,6 +4,17 @@
 --   app_role, owner_role, migration_role, runtime_create (true/false)
 -- Run while connected to the application database as a protected cluster admin.
 
+-- PostgreSQL 17 will never demote the immutable bootstrap superuser (OID 10).
+-- Fail before changing ownership so such clusters are replaced through the
+-- reviewed blue/green procedure instead of being left partially reconciled.
+SELECT count(*) AS bootstrap_app_role
+FROM pg_roles
+WHERE rolname = :'app_role' AND oid = 10 \gset
+\if :bootstrap_app_role
+  \echo 'application role is immutable bootstrap superuser; blue/green cluster replacement required'
+  \quit 5
+\endif
+
 SELECT format(
   'CREATE ROLE %I NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS',
   :'owner_role'

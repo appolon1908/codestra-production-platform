@@ -13,3 +13,11 @@ def test_default_is_rollback_and_never_writes_vicidial():
     assert 'os.environ.get("TEST_SYN_APPLY") == "YES"' in SOURCE
     assert "env.cr.rollback()" in SOURCE
     assert "No VICIdial write is performed" in SOURCE
+
+
+def test_synthetic_anchors_are_resolved_by_authoritative_keys():
+    assert 'search([("code", "=", "COD")], limit=1)' in SOURCE
+    assert '("login", "=", "synthetic.agent.test.syn.6101")' in SOURCE
+    assert '("codestra_employee_number", "=", "COD.2026.00016")' in SOURCE
+    assert ".browse(16)" not in SOURCE
+    assert ".browse(129)" not in SOURCE

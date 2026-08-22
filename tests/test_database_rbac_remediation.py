@@ -8,6 +8,13 @@ def test_application_role_loses_cluster_privileges():
     assert "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS" in SQL
 
 
+def test_bootstrap_application_role_fails_before_ownership_changes():
+    guard = SQL.index("immutable bootstrap superuser")
+    ownership = SQL.index("ALTER SCHEMA")
+    assert "oid = 10" in SQL
+    assert guard < ownership
+
+
 def test_application_role_cannot_inherit_owner_or_migrator():
     assert "REVOKE %I FROM %I', :'owner_role', :'app_role'" in SQL
     assert "REVOKE %I FROM %I', :'migration_role', :'app_role'" in SQL
