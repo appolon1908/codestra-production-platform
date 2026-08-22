@@ -86,6 +86,7 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert 'rate.get("limit_by"), "ip"' in RECONCILER
     assert 'route.get("protocols"), ["http"]' in RECONCILER
     assert '"protocols": ["http"]' in RECONCILER
+    assert 'candidate.get("protocols") in (["http"], ["https"])' in RECONCILER
 
 
 def test_deployment_keeps_every_broad_delivery_path_disabled():

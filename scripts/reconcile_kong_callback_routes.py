@@ -88,7 +88,10 @@ def select_managed_route(routes, expected, host, apply):
         if candidate.get("hosts") == [host]
         and set(candidate.get("paths") or []) == expected_paths
         and set(candidate.get("methods") or []) == expected_methods
-        and candidate.get("protocols") == ["http"]
+        # Adopt both the desired route and the HTTPS-only shape emitted by the
+        # previous reconciler so --apply can migrate it without creating an
+        # overlapping callback route.
+        and candidate.get("protocols") in (["http"], ["https"])
         and candidate.get("strip_path") == expected["strip_path"]
         and not (candidate.get("headers") or {})
         and not (candidate.get("snis") or [])
