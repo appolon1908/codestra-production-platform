@@ -1,28 +1,49 @@
 """Runtime adapter for the isolated TEL-EVENTS publisher.
 
-The service is intentionally inert unless both `TEL_EVENTS_ENABLED=true` and
-`SEND_EVENTS=true` are explicitly set and the external-delivery kill switch is
-absent.  It has no provisioning or telephony-origination code path.
+The service is fail-closed unless its enable flags, approved runtime mode,
+bounded delivery budget, explicit campaign/user-group allowlists, and external
+kill switch all permit delivery. It has no provisioning, call-origination, or
+telephony-control code path.
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import hmac
 import json
 import os
 import ssl
+import stat
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from dataclasses import dataclass
 
 import pymysql
 
-from .publisher import DeliveryLedger, PublisherError, build_call_ended_event, load_watermark, wire_event
+from .publisher import (
+    Cursor,
+    DeliveryLedger,
+    PublisherError,
+    build_call_ended_event,
+    load_watermark,
+    wire_event,
+)
+
+
+@dataclass(frozen=True)
+class RuntimePolicy:
+    mode: str
+    event_budget: int
+    campaigns: frozenset[str]
+    user_groups: frozenset[str]
 
 
 def _secret(path: str) -> str:
+    info = os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o027:
+        raise PublisherError("secret must be a regular, non-writable private file")
     with open(path, encoding="utf-8") as handle:
         value = handle.read().strip()
     if not value:
@@ -34,19 +55,52 @@ def _enabled() -> bool:
     return (
         os.getenv("TEL_EVENTS_ENABLED", "false").lower() in ("1", "true", "yes")
         and os.getenv("SEND_EVENTS", "false").lower() in ("1", "true", "yes")
-        and not os.path.exists(os.getenv("DELIVERY_KILL_SWITCH", "/etc/codestra/disable-external-delivery"))
+        and not os.path.exists(
+            os.getenv("DELIVERY_KILL_SWITCH", "/etc/codestra/disable-external-delivery")
+        )
+    )
+
+
+def _allowlist(name: str) -> frozenset[str]:
+    values = frozenset(value.strip() for value in os.getenv(name, "").split(",") if value.strip())
+    if not values:
+        raise PublisherError(f"{name} must contain an explicit approved allowlist")
+    return values
+
+
+def _runtime_policy() -> RuntimePolicy:
+    mode = os.getenv("TEL_EVENTS_MODE", "disabled").strip().lower()
+    if mode not in ("canary", "production"):
+        raise PublisherError("TEL_EVENTS_MODE must be canary or production")
+    try:
+        budget = int(os.environ["TEL_EVENTS_EVENT_BUDGET"])
+    except (KeyError, ValueError) as exc:
+        raise PublisherError("TEL_EVENTS_EVENT_BUDGET must be an integer") from exc
+    if mode == "canary" and not 5 <= budget <= 10:
+        raise PublisherError("canary budget must be between 5 and 10 finalized events")
+    if mode == "production" and not 1 <= budget <= 100:
+        raise PublisherError("production iteration budget must be between 1 and 100")
+    return RuntimePolicy(
+        mode=mode,
+        event_budget=budget,
+        campaigns=_allowlist("TEL_EVENTS_CAMPAIGN_ALLOWLIST"),
+        user_groups=_allowlist("TEL_EVENTS_USER_GROUP_ALLOWLIST"),
     )
 
 
 def _body(event: dict) -> bytes:
-    return json.dumps(wire_event(event), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return json.dumps(
+        wire_event(event), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
 
 
 def _post(event: dict) -> int:
     body = _body(event)
     timestamp = str(int(time.time()))
     secret = _secret(os.environ["TEL_EVENTS_HMAC_FILE"])
-    signature = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+    signature = hmac.new(
+        secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256
+    ).hexdigest()
     request = urllib.request.Request(
         os.environ["TEL_EVENTS_ENDPOINT"],
         data=body,
@@ -60,7 +114,9 @@ def _post(event: dict) -> int:
         },
     )
     context = ssl.create_default_context(cafile=os.environ["TEL_EVENTS_CA_FILE"])
-    context.load_cert_chain(os.environ["TEL_EVENTS_CERT_FILE"], os.environ["TEL_EVENTS_KEY_FILE"])
+    context.load_cert_chain(
+        os.environ["TEL_EVENTS_CERT_FILE"], os.environ["TEL_EVENTS_KEY_FILE"]
+    )
     try:
         with urllib.request.urlopen(request, context=context, timeout=10) as response:
             return int(response.status)
@@ -80,7 +136,16 @@ def _db():
     )
 
 
-def _rows(db, table: str, end_epoch: int, source_id: str, limit: int = 100):
+def _rows(
+    db,
+    table: str,
+    boundary_epoch: int,
+    cursor_end_epoch: int,
+    source_id: str,
+    limit: int = 100,
+):
+    if not 1 <= limit <= 100:
+        raise PublisherError("batch limit must be between 1 and 100")
     if table == "vicidial_log":
         source = "uniqueid"
     elif table == "vicidial_closer_log":
@@ -93,44 +158,102 @@ def _rows(db, table: str, end_epoch: int, source_id: str, limit: int = 100):
                 AND (end_epoch > %s OR (end_epoch = %s AND {source} > %s))
               ORDER BY end_epoch,{source} LIMIT %s"""
     with db.cursor() as cursor:
-        cursor.execute(sql, (end_epoch, end_epoch, end_epoch, source_id, limit))
+        cursor.execute(
+            sql,
+            (boundary_epoch, cursor_end_epoch, cursor_end_epoch, source_id, limit),
+        )
         return cursor.fetchall()
+
+
+def _assert_scope(event: dict, policy: RuntimePolicy) -> None:
+    payload = event["payload"]
+    campaign = payload.get("campaign_reference")
+    user_group = payload.get("business_unit_reference")
+    if campaign not in policy.campaigns or user_group not in policy.user_groups:
+        raise PublisherError("finalized event is outside the approved canary scope")
 
 
 def run_once() -> int:
     if not _enabled():
         return 0
-    boundaries = load_watermark(os.environ["TEL_EVENTS_WATERMARK"], allowed_group="codestra-events")
+    policy = _runtime_policy()
+    boundaries = load_watermark(
+        os.environ["TEL_EVENTS_WATERMARK"], allowed_group="codestra-events"
+    )
     ledger = DeliveryLedger(os.environ["TEL_EVENTS_LEDGER"])
     db = _db()
     sent = 0
     try:
+        if policy.mode == "canary":
+            remaining = policy.event_budget - ledger.acknowledged_count()
+            if remaining <= 0:
+                return 0
+        else:
+            remaining = policy.event_budget
+
         for boundary in boundaries:
+            if remaining <= 0:
+                break
             cursor = ledger.cursor(boundary.table, boundary.high_water)
-            if cursor.end_epoch < boundary.boundary_epoch:
-                cutoff_epoch, cutoff_id = boundary.boundary_epoch, ""
-            else:
-                cutoff_epoch, cutoff_id = cursor.end_epoch, cursor.source_id
-            rows = _rows(db, boundary.table, cutoff_epoch, cutoff_id)
+            if cursor < boundary.high_water:
+                raise PublisherError("publisher cursor regressed behind the approved watermark")
+            rows = _rows(
+                db,
+                boundary.table,
+                boundary.boundary_epoch,
+                cursor.end_epoch,
+                cursor.source_id,
+                min(100, remaining),
+            )
             for row in rows:
                 event = build_call_ended_event(row, boundary.table)
+                _assert_scope(event, policy)
                 ledger.stage(event)
-                if ledger.state(event["event_id"]) == "acknowledged":
+                state = ledger.state(event["event_id"])
+                if state == "acknowledged":
                     continue
+                if state == "dead_letter":
+                    raise PublisherError("dead-lettered event requires operator reconciliation")
                 for _ in range(3):
-                    status = _post(event)
-                    result = ledger.acknowledge(event["event_id"], status)
+                    result = ledger.acknowledge(event["event_id"], _post(event))
                     if result == "acknowledged":
                         sent += 1
+                        remaining -= 1
                         break
                     if result == "dead_letter":
                         raise PublisherError("delivery entered dead-letter state")
                     time.sleep(1)
+                if remaining <= 0:
+                    break
         return sent
     finally:
         db.close()
         ledger.close()
 
 
+def run_forever() -> None:
+    policy = _runtime_policy()
+    if policy.mode != "production":
+        raise PublisherError("persistent loop is allowed only in production mode")
+    interval = int(os.getenv("TEL_EVENTS_INTERVAL_SECONDS", "15"))
+    if not 5 <= interval <= 300:
+        raise PublisherError("TEL_EVENTS_INTERVAL_SECONDS must be between 5 and 300")
+    while True:
+        run_once()
+        time.sleep(interval)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--loop", action="store_true")
+    args = parser.parse_args(argv)
+    if args.loop:
+        run_forever()
+    else:
+        sent = run_once()
+        print(f"TEL_EVENTS_SENT={sent}")
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(run_once())
+    raise SystemExit(main())
