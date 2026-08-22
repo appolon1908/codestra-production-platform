@@ -1,0 +1,31 @@
+{
+  "host": "api.codestra.co",
+  "service": {
+    "name": "codestra-callback-api",
+    "protocol": "http",
+    "host": "codestra-middleware-integration-api-1",
+    "port": 8095,
+    "retries": 1,
+    "connect_timeout": 3000,
+    "read_timeout": 10000,
+    "write_timeout": 10000
+  },
+  "routes": [
+    {
+      "name": "codestra-callback-control",
+      "paths": ["/api/v1/control/callbacks"],
+      "methods": ["POST"],
+      "strip_path": false,
+      "maxBodyMb": 1,
+      "ratePerMinute": 60
+    },
+    {
+      "name": "codestra-callback-read",
+      "paths": ["/api/v1/callbacks"],
+      "methods": ["GET"],
+      "strip_path": false,
+      "maxBodyMb": 1,
+      "ratePerMinute": 120
+    }
+  ]
+}

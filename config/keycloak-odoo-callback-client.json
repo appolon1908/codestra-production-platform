@@ -1,0 +1,50 @@
+{
+  "realm": "codestra",
+  "clientScopes": ["callbacks.read", "callbacks.write"],
+  "client": {
+    "clientId": "codestra-odoo-callback-service",
+    "enabled": true,
+    "protocol": "openid-connect",
+    "publicClient": false,
+    "bearerOnly": false,
+    "clientAuthenticatorType": "client-secret",
+    "serviceAccountsEnabled": true,
+    "standardFlowEnabled": false,
+    "directAccessGrantsEnabled": false,
+    "implicitFlowEnabled": false,
+    "frontchannelLogout": false,
+    "fullScopeAllowed": false,
+    "defaultClientScopes": [],
+    "optionalClientScopes": ["callbacks.read", "callbacks.write"],
+    "attributes": {"access.token.lifespan": "300"},
+    "protocolMappers": [
+      {
+        "name": "callback-api-audience",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "consentRequired": false,
+        "config": {"included.client.audience": "codestra-callback-api", "access.token.claim": "true", "id.token.claim": "false"}
+      },
+      {
+        "name": "callback-tenant",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-hardcoded-claim-mapper",
+        "consentRequired": false,
+        "config": {"claim.name": "tenant_id", "claim.value": "COD", "jsonType.label": "String", "access.token.claim": "true", "id.token.claim": "false"}
+      },
+      {
+        "name": "callback-campaigns",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-hardcoded-claim-mapper",
+        "consentRequired": false,
+        "config": {"claim.name": "campaigns", "claim.value": "[\"TEST_SYN\"]", "jsonType.label": "JSON", "access.token.claim": "true", "id.token.claim": "false"}
+      }
+    ]
+  },
+  "serviceAccountRealmRoles": ["service"],
+  "delivery": {
+    "secretFile": "/run/secrets/odoo_callback_client_secret",
+    "secretInSource": false,
+    "syntheticOnly": true
+  }
+}
