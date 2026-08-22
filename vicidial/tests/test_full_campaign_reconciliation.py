@@ -1,13 +1,20 @@
 import csv
+import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
 
-from scripts.full_campaign_reconciliation import (
-    ReconciliationError,
-    load_desired,
-    reconcile,
-)
+
+SCRIPT = Path(__file__).parents[1] / "scripts/full_campaign_reconciliation.py"
+SPEC = importlib.util.spec_from_file_location("full_campaign_reconciliation", SCRIPT)
+MODULE = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
+ReconciliationError = MODULE.ReconciliationError
+load_desired = MODULE.load_desired
+reconcile = MODULE.reconcile
 
 
 def write_csv(path: Path, fields: list[str], rows: list[dict[str, str]]) -> Path:
