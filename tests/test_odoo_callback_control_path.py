@@ -54,6 +54,9 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert 'parser.add_argument("--evidence", type=Path, required=True)' in RECONCILER
     assert "manifest_sha256" in RECONCILER
     assert 'name == "openid-connect" and current' in RECONCILER
+    assert "callback-route-disabled.invalid" in RECONCILER
+    assert 'correlation.get("echo_downstream"), True' in RECONCILER
+    assert 'rate.get("limit_by"), "ip"' in RECONCILER
 
 
 def test_deployment_keeps_every_broad_delivery_path_disabled():

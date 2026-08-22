@@ -58,6 +58,11 @@ def verify_plugins(by_name, expected, spec):
     rate = by_name["rate-limiting"]["config"]
     require_equal(rate.get("minute"), expected["ratePerMinute"], expected["name"] + ".rate")
     require_equal(rate.get("policy"), "local", expected["name"] + ".rate_policy")
+    require_equal(rate.get("limit_by"), "ip", expected["name"] + ".rate_identity")
+    correlation = by_name["correlation-id"]["config"]
+    require_equal(correlation.get("header_name"), "X-Correlation-ID", expected["name"] + ".correlation_header")
+    require_equal(correlation.get("generator"), "uuid", expected["name"] + ".correlation_generator")
+    require_equal(correlation.get("echo_downstream"), True, expected["name"] + ".correlation_echo")
     oidc = by_name["openid-connect"]["config"]
     require_equal(oidc.get("issuer"), spec["oidcIssuer"], expected["name"] + ".issuer")
     require_equal(oidc.get("auth_methods"), ["bearer"], expected["name"] + ".auth_methods")
@@ -103,13 +108,18 @@ def main():
         }
         if args.apply:
             endpoint = "/routes/%s" % route["id"] if route else "/routes"
-            route = request(args.admin_url, "PATCH" if route else "POST", endpoint, payload)
+            quarantined = dict(payload)
+            quarantined["hosts[]"] = ["callback-route-disabled.invalid"]
+            route = request(args.admin_url, "PATCH" if route else "POST", endpoint, quarantined)
         elif not route:
             raise RuntimeError("callback route is absent: %s" % expected["name"])
         route = singleton(args.admin_url, "routes", expected["name"])
-        verify_route(route, expected, service["id"], spec["host"])
+        if args.apply:
+            require_equal(route.get("hosts"), ["callback-route-disabled.invalid"], expected["name"] + ".quarantine")
+        else:
+            verify_route(route, expected, service["id"], spec["host"])
         plugins = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
-        by_name = {plugin["name"]: plugin for plugin in plugins if plugin.get("enabled")}
+        by_name = {plugin["name"]: plugin for plugin in plugins}
         controls = {
             "request-size-limiting": {"config.allowed_payload_size": expected["maxBodyMb"]},
             "rate-limiting": {"config.minute": expected["ratePerMinute"], "config.policy": "local", "config.limit_by": "ip"},
@@ -128,16 +138,20 @@ def main():
         for name, config in controls.items():
             current = by_name.get(name)
             if args.apply:
-                # Recreate OIDC instead of a partial PATCH so stale permissive
-                # fields (especially anonymous access) cannot survive.
+                # The quarantined host keeps the route unreachable while OIDC
+                # is replaced, including if the operation is interrupted.
                 if name == "openid-connect" and current:
                     request(args.admin_url, "DELETE", "/plugins/%s" % current["id"])
                     current = None
                 endpoint = "/plugins/%s" % current["id"] if current else "/routes/%s/plugins" % route["id"]
-                request(args.admin_url, "PATCH" if current else "POST", endpoint, {"name": name, **config})
+                request(args.admin_url, "PATCH" if current else "POST", endpoint, {"name": name, "enabled": "true", **config})
         plugins = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
         by_name = {plugin["name"]: plugin for plugin in plugins if plugin.get("enabled")}
         verify_plugins(by_name, expected, spec)
+        if args.apply:
+            request(args.admin_url, "PATCH", "/routes/%s" % route["id"], payload)
+            route = singleton(args.admin_url, "routes", expected["name"])
+            verify_route(route, expected, service["id"], spec["host"])
         evidence["routes"].append({
             "name": expected["name"], "service_id": service["id"],
             "route_id": route["id"], "hosts": route["hosts"],
