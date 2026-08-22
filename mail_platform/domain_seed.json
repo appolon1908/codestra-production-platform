@@ -3,7 +3,7 @@
   {"domain":"codestra.co","brand":"Codestra","domain_type":"CORPORATE_ADMIN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
   {"domain":"nativoenglish.com","brand":"Nativo English","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
   {"domain":"moneybeeloan.com","brand":"MoneyBee","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
-  {"domain":"codestra.cloud","brand":"Codestra","domain_type":"SERVICE_ONLY","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"codestra.cloud","brand":"Codestra","domain_type":"SERVICE_ONLY","assignment_status":"SYSTEM_ONLY"},
   {"domain":"codestra.digital","brand":"Codestra","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
   {"domain":"codestra.media","brand":"Codestra","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
   {"domain":"moneybee.loan","brand":"MoneyBee","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},

@@ -90,3 +90,42 @@ def test_database_enforces_unique_identities(registry):
     user(registry, "alice@a.example", "CAMPAIGN_A", "kc-alice")
     with pytest.raises(sqlite3.IntegrityError):
         user(registry, "other@a.example", "CAMPAIGN_A", "kc-alice")
+
+
+def test_app_password_is_random_hashed_revocable_and_not_recoverable(registry):
+    alice = user(registry, "alice@a.example", "CAMPAIGN_A", "kc-alice")
+    credential, secret = registry.create_app_password(alice["mail_user_uuid"], "Thunderbird", "kc-alice")
+    row = registry.db.execute("SELECT * FROM mail_app_password WHERE credential_uuid=?", (credential,)).fetchone()
+    assert secret not in tuple(str(value) for value in row)
+    assert registry.verify_app_password(alice["mail_user_uuid"], secret)
+    registry.revoke_app_password(credential, "kc-alice")
+    assert not registry.verify_app_password(alice["mail_user_uuid"], secret)
+
+
+def test_shared_inbox_rejects_cross_campaign_member(registry):
+    supervisor = user(registry, "supervisor@a.example", "CAMPAIGN_A", "kc-super", kind="ODOO_LINKED", role="SUPERVISOR", odoo=10)
+    member = user(registry, "member@a.example", "CAMPAIGN_A", "kc-member", kind="ODOO_LINKED", role="AGENT", odoo=11)
+    outsider = user(registry, "outsider@b.example", "CAMPAIGN_B", "kc-outsider", kind="ODOO_LINKED", role="AGENT", odoo=12)
+    mailbox = registry.create_shared_mailbox(actor_uuid=supervisor["mail_user_uuid"], address="support@a.example",
+        campaign_id="CAMPAIGN_A", supervisor_uuid=supervisor["mail_user_uuid"], members=[(member["mail_user_uuid"], "SEND")])
+    assert mailbox
+    with pytest.raises(PolicyError, match="shared_mailbox_member_denied"):
+        registry.create_shared_mailbox(actor_uuid=supervisor["mail_user_uuid"], address="billing@a.example",
+            campaign_id="CAMPAIGN_A", supervisor_uuid=supervisor["mail_user_uuid"], members=[(outsider["mail_user_uuid"], "READ")])
+
+
+def test_threading_and_idempotency_preserve_one_thread(registry):
+    agent = user(registry, "agent@a.example", "CAMPAIGN_A", "kc-agent", kind="ODOO_LINKED", role="AGENT", odoo=1)
+    first = registry.register_message(tenant="COD", direction="OUTBOUND", sender="agent@a.example",
+        recipients=["internal@a.example"], correlation_id="corr-1", idempotency_key="idem-1",
+        message_id="<message-1@test>", actor_uuid=agent["mail_user_uuid"])
+    reply = registry.register_message(tenant="COD", direction="INBOUND", sender="internal@a.example",
+        recipients=["agent@a.example"], correlation_id="corr-2", idempotency_key="idem-2",
+        message_id="<message-2@test>", in_reply_to="<message-1@test>", references=["<message-1@test>"])
+    duplicate = registry.register_message(tenant="COD", direction="OUTBOUND", sender="agent@a.example",
+        recipients=["internal@a.example"], correlation_id="changed", idempotency_key="idem-1",
+        actor_uuid=agent["mail_user_uuid"])
+    assert first["thread_uuid"] == reply["thread_uuid"]
+    assert duplicate["message_uuid"] == first["message_uuid"] and duplicate["duplicate"]
+    assert registry.db.execute("SELECT count(DISTINCT thread_uuid) FROM mail_message").fetchone()[0] == 1
+    assert registry.db.execute("SELECT count(*) FROM mail_message").fetchone()[0] == 2

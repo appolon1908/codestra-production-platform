@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import secrets
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -131,6 +133,54 @@ class MailRegistry:
         # Campaign authority comes only from the server-side recipient domain.
         return {"domain_id": domain["id"], "domain": domain["domain"], "campaign_id": domain["campaign_id"], "business_unit_id": domain["business_unit_id"]}
 
+    def register_message(self, *, tenant: str, direction: str, sender: str,
+                         recipients: list[str], correlation_id: str,
+                         idempotency_key: str, message_id: str | None = None,
+                         in_reply_to: str | None = None,
+                         references: list[str] | None = None,
+                         mailbox_uuid: str | None = None,
+                         actor_uuid: str | None = None) -> dict[str, Any]:
+        if direction not in {"INBOUND", "OUTBOUND"} or not recipients:
+            raise PolicyError("invalid_message")
+        duplicate = self.db.execute(
+            "SELECT * FROM mail_message WHERE tenant=? AND idempotency_key=?",
+            (tenant, idempotency_key),
+        ).fetchone()
+        if duplicate:
+            return {**dict(duplicate), "duplicate": True}
+        if direction == "INBOUND":
+            route = self.route_inbound(recipients[0])
+        else:
+            if not actor_uuid:
+                raise PolicyError("authenticated_actor_required")
+            route = self.authorize_sender(actor_uuid, sender)
+            route["business_unit_id"] = self._user(actor_uuid)["business_unit_id"]
+        refs = references or []
+        parent_ids = [value for value in [in_reply_to, *refs] if value]
+        parent = None
+        for parent_id in parent_ids:
+            parent = self.db.execute(
+                "SELECT thread_uuid FROM mail_message WHERE message_id_header=?", (parent_id,)
+            ).fetchone()
+            if parent:
+                break
+        stamp = now(); message_uuid = str(uuid.uuid4())
+        thread_uuid = parent["thread_uuid"] if parent else str(uuid.uuid4())
+        self.db.execute(
+            """INSERT INTO mail_message(message_uuid,mailbox_uuid,tenant,campaign,domain,channel,direction,
+               sender,recipients_json,thread_uuid,message_id_header,in_reply_to,references_json,desired_state,
+               actual_state,correlation_id,idempotency_key,created_at,updated_at)
+               VALUES(?,?,?,?,?,'EMAIL',?,?,?,?,?,?,?,'REGISTERED','PENDING',?,?,?,?)""",
+            (message_uuid, mailbox_uuid, tenant, route["campaign_id"], route["domain"], direction,
+             sender.lower(), json.dumps([value.lower() for value in recipients]), thread_uuid, message_id,
+             in_reply_to, json.dumps(refs), correlation_id, idempotency_key, stamp, stamp),
+        )
+        self._audit(actor_uuid or "inbound-mail-adapter", "mail.message.registered", route.get("domain_id"),
+                    route["campaign_id"], None, message_uuid, "ALLOW")
+        self.db.commit()
+        return {**dict(self.db.execute("SELECT * FROM mail_message WHERE message_uuid=?", (message_uuid,)).fetchone()),
+                "duplicate": False}
+
     def add_alias(self, actor_uuid: str, address: str, target_uuid: str) -> str:
         actor, target = self._user(actor_uuid), self._user(target_uuid)
         domain = self.domain(address_domain(address))
@@ -141,6 +191,48 @@ class MailRegistry:
         self.db.execute("INSERT INTO mail_alias VALUES(?,?,?,?,?,?,?)", (alias_id,address.lower(),domain["id"],target_uuid,domain["campaign_id"],1,now()))
         self._audit(actor["keycloak_subject"], "mail.alias.created", domain["id"], domain["campaign_id"], None, None, "ALLOW")
         self.db.commit(); return alias_id
+
+    def create_shared_mailbox(self, *, actor_uuid: str, address: str, campaign_id: str,
+                              supervisor_uuid: str, members: list[tuple[str, str]]) -> str:
+        actor = self._user(actor_uuid); domain = self.domain(address_domain(address))
+        if actor["role"] not in ADMIN_ROLES | {"CAMPAIGN_MANAGER", "SUPERVISOR"}:
+            raise PolicyError("shared_mailbox_manage_denied")
+        if not domain["allow_shared_mailboxes"] or domain["campaign_id"] != campaign_id:
+            raise PolicyError("shared_mailbox_domain_denied")
+        self._user(supervisor_uuid); mailbox_uuid = str(uuid.uuid4())
+        self.db.execute("INSERT INTO shared_mailbox VALUES(?,?,?,?,?,?,?)", (
+            mailbox_uuid, address.lower(), domain["id"], campaign_id, supervisor_uuid, 1, now()))
+        for member_uuid, permission in members:
+            member = self._user(member_uuid)
+            if member["campaign_id"] != campaign_id or permission not in {"READ", "SEND", "MANAGE"}:
+                raise PolicyError("shared_mailbox_member_denied")
+            self.db.execute("INSERT INTO shared_mailbox_member VALUES(?,?,?)", (mailbox_uuid, member_uuid, permission))
+        self._audit(actor["keycloak_subject"], "mail.shared.created", domain["id"], campaign_id, None, None, "ALLOW")
+        self.db.commit(); return mailbox_uuid
+
+    def create_app_password(self, mail_user_uuid: str, label: str, actor: str) -> tuple[str, str]:
+        user = self._user(mail_user_uuid)
+        if not user["active"]: raise PolicyError("mail_user_suspended")
+        secret = secrets.token_urlsafe(32); salt = secrets.token_hex(16)
+        digest = hashlib.scrypt(secret.encode(), salt=bytes.fromhex(salt), n=2**14, r=8, p=1).hex()
+        credential_uuid = str(uuid.uuid4())
+        self.db.execute("INSERT INTO mail_app_password VALUES(?,?,?,?,?,?,?,?,?)", (
+            credential_uuid, mail_user_uuid, label, salt, digest, 1, now(), None, None))
+        self._audit(actor, "mail.app_password.created", user["domain_id"], user["campaign_id"], label, None, "ALLOW")
+        self.db.commit(); return credential_uuid, secret
+
+    def verify_app_password(self, mail_user_uuid: str, secret: str) -> bool:
+        for row in self.db.execute("SELECT * FROM mail_app_password WHERE mail_user_uuid=? AND active=1", (mail_user_uuid,)):
+            digest = hashlib.scrypt(secret.encode(), salt=bytes.fromhex(row["secret_salt"]), n=2**14, r=8, p=1).hex()
+            if secrets.compare_digest(digest, row["secret_hash"]): return True
+        return False
+
+    def revoke_app_password(self, credential_uuid: str, actor: str) -> None:
+        row = self.db.execute("SELECT p.*,u.domain_id,u.campaign_id FROM mail_app_password p JOIN mail_user u USING(mail_user_uuid) WHERE credential_uuid=?", (credential_uuid,)).fetchone()
+        if not row: raise PolicyError("app_password_not_found")
+        self.db.execute("UPDATE mail_app_password SET active=0,revoked_at=? WHERE credential_uuid=?", (now(), credential_uuid))
+        self._audit(actor, "mail.app_password.revoked", row["domain_id"], row["campaign_id"], row["label"], None, "ALLOW")
+        self.db.commit()
 
     def suspend(self, mail_user_uuid: str, actor: str, reason: str) -> None:
         user = self._user(mail_user_uuid)

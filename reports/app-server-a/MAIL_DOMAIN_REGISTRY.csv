@@ -3,7 +3,7 @@ codestra.agency,,,CORPORATE_ADMIN,false,false,false,false,PARTIAL,BLOCKED_MISSIN
 codestra.co,,,CORPORATE_ADMIN,false,false,false,false,FAIL_DUPLICATE_DMARC,BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT
 nativoenglish.com,,,AGENT_CAMPAIGN,false,false,false,false,NO_MX,BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT
 moneybeeloan.com,,,AGENT_CAMPAIGN,false,false,false,false,PARTIAL,BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT
-codestra.cloud,,,SERVICE_ONLY,false,false,false,false,NO_MX,BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT
+codestra.cloud,COD,,SERVICE_ONLY,false,false,false,false,NO_MX,SYSTEM_ONLY
 codestra.digital,,,AGENT_CAMPAIGN,false,false,false,false,PARTIAL,BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT
 codestra.media,,,AGENT_CAMPAIGN,false,false,false,false,NO_MX,BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT
 moneybee.loan,,,AGENT_CAMPAIGN,false,false,false,false,PARTIAL,BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT
