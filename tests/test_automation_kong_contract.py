@@ -19,5 +19,13 @@ def test_automation_routes_require_n8n_oauth_tenant_and_scopes():
     for expected in ("codestra-n8n-communications", "communications.message.dispatch",
                      "communications.result.write", "cross_tenant_denied",
                      "invalid_issuer", "invalid_audience", "codestra-middleware",
-                     "KONG_CONTROL_PLANE_GATEWAY_SECRET"):
+                     "/run/secrets/control_plane_gateway_secret"):
         assert expected in policy
+
+
+def test_gateway_identity_is_file_mounted_not_environment_exposed():
+    compose = yaml.safe_load((ROOT / "deploy/kong/compose.gateway-secret.yaml").read_text())
+    assert compose["services"]["kong-gateway"]["secrets"] == ["control_plane_gateway_secret"]
+    assert compose["secrets"]["control_plane_gateway_secret"]["file"] == "/etc/codestra/secrets/control-plane-gateway/shared-secret"
+    rendered = (ROOT / "deploy/kong/control-plane.yml").read_text()
+    assert "os.getenv(\"KONG_CONTROL_PLANE_GATEWAY_SECRET\")" not in rendered

@@ -52,8 +52,11 @@ services:
               for value in string.gmatch(claims.scope or "", "%S+") do scopes[value] = true end
               local required = kong.request.get_path():find("/results$") and "communications.result.write" or "communications.message.dispatch"
               if not scopes[required] then return kong.response.exit(403,{error="insufficient_scope",required_scope=required}) end
-              local gateway_secret=os.getenv("KONG_CONTROL_PLANE_GATEWAY_SECRET")
-              if not gateway_secret or gateway_secret=="" then return kong.response.exit(503,{error="gateway_identity_unavailable"}) end
+              local secret_file=io.open("/run/secrets/control_plane_gateway_secret","r")
+              local gateway_secret=secret_file and secret_file:read("*a") or ""
+              if secret_file then secret_file:close() end
+              gateway_secret=gateway_secret:gsub("%s+$","")
+              if gateway_secret=="" then return kong.response.exit(503,{error="gateway_identity_unavailable"}) end
               kong.service.request.set_header("X-Authenticated-Client",claims.azp)
               kong.service.request.set_header("X-Authenticated-Tenant",claims.tenant_id)
               kong.service.request.set_header("X-Codestra-Gateway-Secret",gateway_secret)
