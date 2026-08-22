@@ -158,3 +158,17 @@ def test_replayed_event_payload_cannot_drift():
         with pytest.raises(PublisherError, match="payload differs"):
             ledger.stage(changed)
         ledger.close()
+
+
+def test_skipped_row_advances_only_its_source_cursor():
+    with tempfile.TemporaryDirectory() as directory:
+        ledger = DeliveryLedger(os.path.join(directory, "ledger.sqlite"))
+        event = build_call_ended_event({
+            "uniqueid": "skip-1", "end_epoch": 2000, "length_in_sec": 10,
+            "status": "DONE", "campaign_id": "NO", "user_group": "NO",
+        }, "vicidial_log")
+        ledger.skip(event, "outside approved scope")
+        assert ledger.cursor("vicidial_log", Cursor(0, "0")) == Cursor(2000, "skip-1")
+        assert ledger.cursor("vicidial_closer_log", Cursor(0, "0")) == Cursor(0, "0")
+        assert ledger.pending() == []
+        ledger.close()

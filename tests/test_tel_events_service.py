@@ -12,7 +12,7 @@ except ModuleNotFoundError:
     sys.modules["pymysql"] = pymysql
 
 from tel_events import service
-from tel_events.publisher import PublisherError, build_call_ended_event
+from tel_events.publisher import Cursor, PublisherError, SourceBoundary, build_call_ended_event
 
 
 class FakeCursor:
@@ -80,7 +80,7 @@ def test_policy_rejects_missing_allowlist(monkeypatch):
         service._runtime_policy()
 
 
-def test_event_outside_approved_scope_is_rejected():
+def test_event_outside_approved_scope_is_not_deliverable():
     policy = service.RuntimePolicy(
         mode="canary",
         event_budget=5,
@@ -98,8 +98,29 @@ def test_event_outside_approved_scope_is_rejected():
         },
         "vicidial_log",
     )
-    with pytest.raises(PublisherError, match="outside"):
-        service._assert_scope(event, policy)
+    assert service._in_scope(event, policy) is False
+
+
+def test_round_robin_prevents_source_starvation():
+    a = SourceBoundary("vicidial_log", 0, Cursor(0, "0"))
+    b = SourceBoundary("vicidial_closer_log", 0, Cursor(0, "0"))
+    rows = list(service._round_robin([(a, [{"id": "a1"}, {"id": "a2"}]), (b, [{"id": "b1"}, {"id": "b2"}])]))
+    assert [(boundary.table, row["id"]) for boundary, row in rows] == [
+        ("vicidial_log", "a1"), ("vicidial_closer_log", "b1"),
+        ("vicidial_log", "a2"), ("vicidial_closer_log", "b2"),
+    ]
+
+
+def test_signature_binds_method_path_event_and_exact_body():
+    baseline = service._signature_input("POST", "/v1/events/", "10", "event-1", b"{}")
+    changed = (
+        service._signature_input("PUT", "/v1/events/", "10", "event-1", b"{}"),
+        service._signature_input("POST", "/v1/other", "10", "event-1", b"{}"),
+        service._signature_input("POST", "/v1/events", "11", "event-1", b"{}"),
+        service._signature_input("POST", "/v1/events", "10", "event-2", b"{}"),
+        service._signature_input("POST", "/v1/events", "10", "event-1", b"{ }")
+    )
+    assert all(candidate != baseline for candidate in changed)
 
 
 def test_cli_success_does_not_use_sent_count_as_exit_code(monkeypatch, capsys):

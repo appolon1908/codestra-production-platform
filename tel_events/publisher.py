@@ -15,7 +15,7 @@ import stat
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping
 
 
 EVENT_TYPE = "vicidial.call.ended"
@@ -208,6 +208,12 @@ class DeliveryLedger:
                 table_name TEXT PRIMARY KEY, end_epoch INTEGER NOT NULL,
                 source_id TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS skipped_source_row (
+                table_name TEXT NOT NULL, end_epoch INTEGER NOT NULL,
+                source_id TEXT NOT NULL, reason TEXT NOT NULL,
+                recorded_at TEXT NOT NULL,
+                PRIMARY KEY(table_name,end_epoch,source_id)
+            );
         """)
         self.db.commit()
 
@@ -298,6 +304,25 @@ class DeliveryLedger:
             "SELECT end_epoch,source_id FROM publisher_cursor WHERE table_name=?", (table,)
         ).fetchone()
         return default if row is None else Cursor(int(row[0]), str(row[1]))
+
+    def skip(self, event: Mapping[str, Any], reason: str) -> None:
+        """Durably advance past a non-deliverable source row without staging it."""
+        cursor = event["_cursor"]
+        now = datetime.now(timezone.utc).isoformat()
+        self.db.execute(
+            "INSERT OR IGNORE INTO skipped_source_row"
+            "(table_name,end_epoch,source_id,reason,recorded_at) VALUES(?,?,?,?,?)",
+            (cursor["table"], cursor["end_epoch"], cursor["source_id"], reason[:200], now),
+        )
+        self.db.execute(
+            "INSERT INTO publisher_cursor(table_name,end_epoch,source_id) VALUES(?,?,?) "
+            "ON CONFLICT(table_name) DO UPDATE SET "
+            "end_epoch=excluded.end_epoch,source_id=excluded.source_id "
+            "WHERE (excluded.end_epoch,excluded.source_id) > "
+            "(publisher_cursor.end_epoch,publisher_cursor.source_id)",
+            (cursor["table"], cursor["end_epoch"], cursor["source_id"]),
+        )
+        self.db.commit()
 
     def reconcile(self) -> dict[str, Any]:
         """Check that acknowledged events are represented by monotonic cursors."""

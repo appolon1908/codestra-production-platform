@@ -17,6 +17,7 @@ import ssl
 import stat
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
@@ -93,13 +94,20 @@ def _body(event: dict) -> bytes:
     ).encode()
 
 
+def _signature_input(method: str, path: str, timestamp: str, event_id: str, body: bytes) -> bytes:
+    normalized_path = "/" + "/".join(part for part in path.split("/") if part)
+    body_hash = hashlib.sha256(body).hexdigest()
+    return "\n".join(("v1", method.upper(), normalized_path, timestamp, event_id, body_hash)).encode()
+
+
 def _post(event: dict) -> int:
     body = _body(event)
     timestamp = str(int(time.time()))
     secret = _secret(os.environ["TEL_EVENTS_HMAC_FILE"])
-    signature = hmac.new(
-        secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256
-    ).hexdigest()
+    endpoint = urllib.parse.urlsplit(os.environ["TEL_EVENTS_ENDPOINT"])
+    signature = hmac.new(secret.encode(), _signature_input(
+        "POST", endpoint.path, timestamp, event["event_id"], body
+    ), hashlib.sha256).hexdigest()
     request = urllib.request.Request(
         os.environ["TEL_EVENTS_ENDPOINT"],
         data=body,
@@ -108,7 +116,9 @@ def _post(event: dict) -> int:
             "Content-Type": "application/json",
             "Idempotency-Key": event["idempotency_key"],
             "X-Signature": signature,
+            "X-Signature-Version": "v1",
             "X-Timestamp": timestamp,
+            "X-Event-ID": event["event_id"],
             "X-Client-Instance-ID": os.environ["TEL_EVENTS_CLIENT_INSTANCE"],
         },
     )
@@ -164,12 +174,26 @@ def _rows(
         return cursor.fetchall()
 
 
-def _assert_scope(event: dict, policy: RuntimePolicy) -> None:
+def _in_scope(event: dict, policy: RuntimePolicy) -> bool:
     payload = event["payload"]
     campaign = payload.get("campaign_reference")
     user_group = payload.get("business_unit_reference")
-    if campaign not in policy.campaigns or user_group not in policy.user_groups:
-        raise PublisherError("finalized event is outside the approved canary scope")
+    return campaign in policy.campaigns and user_group in policy.user_groups
+
+
+def _round_robin(rows_by_source):
+    """Yield one row per source in turn so neither VICIdial log can starve."""
+    offsets = [0] * len(rows_by_source)
+    while True:
+        yielded = False
+        for index, (boundary, rows) in enumerate(rows_by_source):
+            if offsets[index] < len(rows):
+                row = rows[offsets[index]]
+                offsets[index] += 1
+                yielded = True
+                yield boundary, row
+        if not yielded:
+            return
 
 
 def run_once() -> int:
@@ -190,9 +214,8 @@ def run_once() -> int:
         else:
             remaining = policy.event_budget
 
+        rows_by_source = []
         for boundary in boundaries:
-            if remaining <= 0:
-                break
             cursor = ledger.cursor(boundary.table, boundary.high_water)
             if cursor < boundary.high_water:
                 raise PublisherError("publisher cursor regressed behind the approved watermark")
@@ -202,11 +225,16 @@ def run_once() -> int:
                 boundary.boundary_epoch,
                 cursor.end_epoch,
                 cursor.source_id,
-                min(100, remaining),
+                min(100, max(remaining, 1)),
             )
-            for row in rows:
+            rows_by_source.append((boundary, rows))
+        for boundary, row in _round_robin(rows_by_source):
+                if remaining <= 0:
+                    break
                 event = build_call_ended_event(row, boundary.table)
-                _assert_scope(event, policy)
+                if not _in_scope(event, policy):
+                    ledger.skip(event, "outside approved campaign or user-group scope")
+                    continue
                 ledger.stage(event)
                 state = ledger.state(event["event_id"])
                 if state == "acknowledged":
@@ -229,8 +257,6 @@ def run_once() -> int:
                     if result == "dead_letter":
                         raise PublisherError("delivery entered dead-letter state")
                     time.sleep(1)
-                if remaining <= 0:
-                    break
         return sent
     finally:
         db.close()
