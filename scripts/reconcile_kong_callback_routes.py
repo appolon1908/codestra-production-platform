@@ -24,6 +24,20 @@ def request(base, method, path, payload=None):
         raise RuntimeError("Kong Admin API rejected %s %s (%s)" % (method, path, error.code)) from error
 
 
+def request_json(base, method, path, payload):
+    url = path if path.startswith(("http://", "https://")) else base.rstrip("/") + path
+    try:
+        req = Request(
+            url, data=json.dumps(payload).encode(), method=method,
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req, timeout=10) as response:
+            raw = response.read()
+            return json.loads(raw) if raw else {}
+    except HTTPError as error:
+        raise RuntimeError("Kong Admin API rejected %s %s (%s)" % (method, path, error.code)) from error
+
+
 def all_rows(base, path):
     rows = []
     seen = set()
@@ -105,6 +119,9 @@ def verify_route(route, expected, service_id, host):
     require_equal(sorted(route.get("methods") or []), sorted(expected["methods"]), expected["name"] + ".methods")
     require_equal(route.get("protocols"), ["https"], expected["name"] + ".protocols")
     require_equal(route.get("strip_path"), expected["strip_path"], expected["name"] + ".strip_path")
+    require_equal(route.get("headers") or {}, {}, expected["name"] + ".headers")
+    for field in ("snis", "sources", "destinations"):
+        require_equal(route.get(field) or [], [], expected["name"] + "." + field)
 
 
 def route_matches(route, expected, service_id, host):
@@ -193,22 +210,23 @@ def main():
             or not oidc_matches(existing_by_name.get("openid-connect"), expected, spec)
         )
         payload = {
-            "name": expected["name"], "service.id": service["id"],
-            "hosts[]": [spec["host"]], "paths[]": expected["paths"],
-            "methods[]": expected["methods"], "protocols[]": ["https"],
-            "strip_path": str(expected["strip_path"]).lower(),
-            "preserve_host": "true", "https_redirect_status_code": 426,
+            "name": expected["name"], "service": {"id": service["id"]},
+            "hosts": [spec["host"]], "paths": expected["paths"],
+            "methods": expected["methods"], "protocols": ["https"],
+            "strip_path": expected["strip_path"], "preserve_host": True,
+            "https_redirect_status_code": 426, "headers": {}, "snis": [],
+            "sources": [], "destinations": [],
         }
         if args.apply:
             endpoint = "/routes/%s" % route["id"] if route else "/routes"
             if needs_quarantine:
                 quarantined = dict(payload)
-                quarantined["hosts[]"] = ["callback-route-disabled.invalid"]
+                quarantined["hosts"] = ["callback-route-disabled.invalid"]
                 # A new route cannot match the protected callback methods until
                 # its enforced deny plugin has been installed and read back.
                 if not route:
-                    quarantined["methods[]"] = ["OPTIONS"]
-                route = request(args.admin_url, "PATCH" if route else "POST", endpoint, quarantined)
+                    quarantined["methods"] = ["OPTIONS"]
+                route = request_json(args.admin_url, "PATCH" if route else "POST", endpoint, quarantined)
         elif not route:
             raise RuntimeError("callback route is absent: %s" % expected["name"])
         route = singleton(args.admin_url, "routes", expected["name"])
@@ -220,7 +238,12 @@ def main():
             verify_route(route, expected, service["id"], spec["host"])
         plugins = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
         by_name = {plugin["name"]: plugin for plugin in plugins}
-        deny = by_name.get("request-termination")
+        deny = one(
+            [plugin for plugin in plugins if plugin["name"] == "request-termination"],
+            "callback deny plugin",
+        )
+        if not args.apply and deny and deny.get("enabled"):
+            raise RuntimeError("callback route has an enabled deny plugin")
         if args.apply and needs_quarantine:
             deny_config = {
                 "name": "request-termination", "enabled": "true",
@@ -265,14 +288,15 @@ def main():
         by_name = {plugin["name"]: plugin for plugin in plugins if plugin.get("enabled")}
         verify_plugins(by_name, expected, spec)
         if args.apply:
-            request(args.admin_url, "PATCH", "/routes/%s" % route["id"], payload)
+            request_json(args.admin_url, "PATCH", "/routes/%s" % route["id"], payload)
             route = singleton(args.admin_url, "routes", expected["name"])
             verify_route(route, expected, service["id"], spec["host"])
-            if needs_quarantine:
-                request(args.admin_url, "DELETE", "/plugins/%s" % deny["id"])
-                remaining = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
-                if any(plugin["name"] == "request-termination" and plugin.get("enabled") for plugin in remaining):
-                    raise RuntimeError("callback deny plugin removal readback failed")
+            remaining = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
+            for stale_deny in [plugin for plugin in remaining if plugin["name"] == "request-termination"]:
+                request(args.admin_url, "DELETE", "/plugins/%s" % stale_deny["id"])
+            remaining = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
+            if any(plugin["name"] == "request-termination" and plugin.get("enabled") for plugin in remaining):
+                raise RuntimeError("callback deny plugin removal readback failed")
         evidence["routes"].append({
             "name": expected["name"], "service_id": service["id"],
             "route_id": route["id"], "hosts": route["hosts"],

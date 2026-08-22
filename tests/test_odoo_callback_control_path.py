@@ -55,6 +55,9 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert "all_rows" in RECONCILER
     assert '"request-termination"' in RECONCILER
     assert '"config.status_code": 503' in RECONCILER
+    assert "request_json" in RECONCILER
+    assert 'route.get("headers") or {}' in RECONCILER
+    assert "callback route has an enabled deny plugin" in RECONCILER
     assert "audience_required" in RECONCILER
     assert "bearer_token_param_type" in RECONCILER
     assert 'parser.add_argument("--evidence", type=Path, required=True)' in RECONCILER
