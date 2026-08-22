@@ -1,6 +1,7 @@
 FROM python@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
 RUN python -m pip install --no-cache-dir --upgrade pip==26.2 \
- && python -m pip install --no-cache-dir psycopg[binary]==3.3.4
+ && python -m pip install --no-cache-dir psycopg[binary]==3.3.4 \
+ && python -m pip uninstall -y pip setuptools wheel
 RUN useradd --system --uid 10001 controlplane && mkdir /data && chown 10001:10001 /data
 WORKDIR /app
 COPY control_plane_service /app/control_plane_service
