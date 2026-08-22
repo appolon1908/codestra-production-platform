@@ -18,12 +18,11 @@ services:
         methods: [POST]
         strip_path: false
     plugins:
-      - name: openid-connect
+      - name: jwt
         config:
-          issuer: https://auth.codestra.co/realms/codestra/.well-known/openid-configuration
-          auth_methods: [bearer]
-          audience: [codestra-middleware]
-          consumer_claim: [azp]
+          header_names: [authorization]
+          key_claim_name: azp
+          claims_to_verify: [exp]
       - name: rate-limiting
         config: {minute: 120, policy: local, fault_tolerant: false, hide_client_headers: false}
       - name: request-size-limiting
@@ -36,7 +35,17 @@ services:
             - |
               local scheme = kong.request.get_forwarded_scheme()
               if scheme ~= "https" then return kong.response.exit(426,{error="https_required"}) end
-              local claims = kong.ctx.shared.authenticated_jwt_token and kong.ctx.shared.authenticated_jwt_token.claims or {}
+              local header = kong.request.get_header("authorization") or ""
+              local token = header:match("[Bb]earer%s+(.+)") or ""
+              local payload = token:match("^[^.]+%.([^.]+)%.") or ""
+              payload=payload:gsub("-","+"):gsub("_","/")
+              payload=payload..string.rep("=",(4-#payload%4)%4)
+              local raw=ngx.decode_base64(payload)
+              local claims=raw and require("cjson.safe").decode(raw) or {}
+              if claims.iss ~= "https://auth.codestra.co/realms/codestra" then return kong.response.exit(401,{error="invalid_issuer"}) end
+              local audience_ok = claims.aud == "codestra-middleware"
+              if type(claims.aud)=="table" then for _,value in ipairs(claims.aud) do if value=="codestra-middleware" then audience_ok=true end end end
+              if not audience_ok then return kong.response.exit(401,{error="invalid_audience"}) end
               if claims.azp ~= "codestra-n8n-communications" then return kong.response.exit(403,{error="caller_denied"}) end
               if claims.tenant_id ~= "COD" then return kong.response.exit(403,{error="cross_tenant_denied"}) end
               local scopes = {}
