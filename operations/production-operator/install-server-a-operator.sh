@@ -127,7 +127,9 @@ trap on_failure EXIT HUP INT TERM
 install -d -o root -g root -m 0755 /usr/local/sbin /usr/local/libexec
 install -d -o root -g root -m 0755 /etc/sudoers.d /etc/ssh/sshd_config.d
 install -d -o root -g root -m 0755 /etc/codestra/production-operator
-install -d -o root -g root -m 0700 /var/lib/codestra-production-operator
+# Keep the root-controlled home non-listable and non-writable while allowing
+# the operator account to traverse to its user-owned authorized_keys file.
+install -d -o root -g root -m 0711 /var/lib/codestra-production-operator
 
 reject_target_symlink /usr/local/sbin/codestra-production-operator
 reject_target_symlink /usr/local/libexec/codestra-production-forced-command
