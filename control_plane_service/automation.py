@@ -36,6 +36,18 @@ def authorize_automation(store: Store, value: dict[str, Any], tenant: str) -> di
                           simulation=payload.get("dry_run") is True)
         if not contact or not store.preference_allows(tenant, str(contact), channel):
             raise ControlPlaneError("contact_policy_denied")
+        if value["campaign_id"] == "COD-WEB-OUT" and channel == "email":
+            recipient = str(payload.get("recipient") or "").lower()
+            if not payload.get("country") or not recipient:
+                raise ControlPlaneError("contact_policy_denied")
+            if payload.get("legal_basis") not in {"consent", "existing_business_relationship", "internal_test"}:
+                raise ControlPlaneError("contact_policy_denied")
+            if store.is_suppressed(tenant, "email", recipient):
+                raise ControlPlaneError("contact_policy_denied")
+            if payload.get("account_hold") or payload.get("campaign_hold") or payload.get("complaint"):
+                raise ControlPlaneError("contact_policy_denied")
+            if payload.get("sender") != "sales@codestra.co" or payload.get("reply_to") != "support@codestra.co":
+                raise ControlPlaneError("contact_policy_denied")
     return {**value, "authorized": True, "policy_checked_at": now_iso()}
 
 

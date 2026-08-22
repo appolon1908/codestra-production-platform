@@ -1,10 +1,26 @@
 BEGIN;
 
+DO $migration$
+DECLARE
+ campaign_id_type text;
+BEGIN
+ SELECT format_type(a.atttypid,a.atttypmod)
+ INTO campaign_id_type
+ FROM pg_attribute a
+ WHERE a.attrelid='control_plane.campaign'::regclass
+   AND a.attname='id'
+   AND NOT a.attisdropped;
+
+ IF campaign_id_type IS NULL THEN
+  RAISE EXCEPTION 'control_plane.campaign.id is required';
+ END IF;
+
+ EXECUTE format($ddl$
 CREATE TABLE IF NOT EXISTS control_plane.campaign_channel_registry (
  tenant_id varchar(64) NOT NULL,
  campaign_code varchar(128) NOT NULL,
  odoo_campaign_id bigint NOT NULL,
- parent_campaign_id uuid NOT NULL REFERENCES control_plane.campaign(id),
+ parent_campaign_id %s NOT NULL REFERENCES control_plane.campaign(id),
  channel varchar(16) NOT NULL CHECK(channel IN ('EMAIL','SMS','VOICE')),
  registry_status varchar(32) NOT NULL CHECK(registry_status IN ('PROPOSED_DISABLED','CANARY_READY','ACTIVE','SUSPENDED')),
  activation_mode varchar(16) NOT NULL CHECK(activation_mode IN ('DISABLED','CANARY','FULL')),
@@ -16,7 +32,10 @@ CREATE TABLE IF NOT EXISTS control_plane.campaign_channel_registry (
  PRIMARY KEY(tenant_id,campaign_code,channel),
  CHECK(registry_status <> 'CANARY_READY' OR
        (activation_mode='CANARY' AND allowlist_required AND NOT customer_traffic_allowed))
-);
+)
+$ddl$,campaign_id_type);
+END
+$migration$;
 
 INSERT INTO control_plane.campaign_channel_registry(
  tenant_id,campaign_code,odoo_campaign_id,parent_campaign_id,channel,
