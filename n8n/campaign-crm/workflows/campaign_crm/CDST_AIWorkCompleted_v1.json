@@ -7,7 +7,7 @@
       "id": "trigger",
       "name": "Receive Standard Event",
       "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
+      "typeVersion": 2.1,
       "position": [
         0,
         0
@@ -35,7 +35,7 @@
       "id": "policy",
       "name": "Middleware Authorization",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 2,
+      "typeVersion": 4.2,
       "position": [
         480,
         0
@@ -77,7 +77,7 @@
       "id": "complete",
       "name": "Return Result Through Middleware",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 2,
+      "typeVersion": 4.2,
       "position": [
         960,
         0
@@ -106,7 +106,7 @@
       "id": "response",
       "name": "Acknowledge",
       "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 2,
+      "typeVersion": 1.4,
       "position": [
         1200,
         0

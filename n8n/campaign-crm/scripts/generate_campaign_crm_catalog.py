@@ -29,8 +29,23 @@ CAMPAIGN = {
 }
 
 
+NODE_VERSIONS = {
+    "n8n-nodes-base.webhook": 2.1,
+    "n8n-nodes-base.code": 2,
+    "n8n-nodes-base.httpRequest": 4.2,
+    "n8n-nodes-base.respondToWebhook": 1.4,
+}
+
+
 def node(node_id, name, type_name, position, parameters):
-    return {"id": node_id, "name": name, "type": type_name, "typeVersion": 2, "position": position, "parameters": parameters}
+    return {
+        "id": node_id,
+        "name": name,
+        "type": type_name,
+        "typeVersion": NODE_VERSIONS[type_name],
+        "position": position,
+        "parameters": parameters,
+    }
 
 
 KONG_BASE_URL = "https://api.codestra.co"
