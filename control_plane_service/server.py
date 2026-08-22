@@ -290,7 +290,14 @@ class Handler(BaseHTTPRequestHandler):
                 # Odoo signs a unique immutable event ID. Reject its reuse
                 # atomically; legitimate retries use a fresh event ID with the
                 # same tenant-scoped idempotency key.
-                result = STORE.ingest(value, reject_event_replay=source == "odoo")
+                # A signed webhook event ID is a nonce. Exact transport retries
+                # must use a fresh event ID and retain the original idempotency
+                # key; reusing the signed ID is a replay attack for every
+                # external producer, not only Odoo.
+                result = STORE.ingest(
+                    value,
+                    reject_event_replay=source in {"odoo", "telnexa", "klyrow"},
+                )
                 if not result.duplicate and source in {"telnexa","klyrow"} and value.get("payload",{}).get("message_id") and not value.get("metadata", {}).get("sms_postgres_authority"):
                     apply_provider_projection(STORE, source, value)
             except (ControlPlaneError, json.JSONDecodeError) as exc:

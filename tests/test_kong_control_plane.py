@@ -26,3 +26,9 @@ def test_control_plane_implements_business_aliases_without_provider_duplication(
     for path in ("/api/v1/control/messages","/api/v1/messages/","/api/v1/results/messages/"):
         assert path in source
     assert "STORE.create_message(value)" in source
+
+
+def test_signed_provider_event_ids_are_single_use_nonces():
+    source=(ROOT/"control_plane_service/server.py").read_text()
+    assert 'source in {"odoo", "telnexa", "klyrow"}' in source
+    assert '"replayed_event_id"' in source
