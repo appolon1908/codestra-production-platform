@@ -14,7 +14,7 @@
     "implicitFlowEnabled": false,
     "frontchannelLogout": false,
     "fullScopeAllowed": false,
-    "defaultClientScopes": [],
+    "defaultClientScopes": ["roles"],
     "optionalClientScopes": ["callbacks.read", "callbacks.write"],
     "attributes": {"access.token.lifespan": "300"},
     "protocolMappers": [
