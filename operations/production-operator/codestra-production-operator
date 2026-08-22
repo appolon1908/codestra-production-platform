@@ -9,11 +9,13 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 import re
 import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -29,10 +31,13 @@ ALLOWED_ACTIONS = {
     "status",
     "rollback",
     "collect-evidence",
+    "stage-control-plane",
+    "validate-control-plane",
+    "rollback-control-plane",
 }
-READ_ONLY_ACTIONS = {"preflight", "status", "collect-evidence"}
-RECOVERY_ACTIONS = {"rollback"}
-SAFETY_BYPASS_ACTIONS = {"status", "collect-evidence", "rollback"}
+READ_ONLY_ACTIONS = {"preflight", "status", "collect-evidence", "validate-control-plane"}
+RECOVERY_ACTIONS = {"rollback", "rollback-control-plane"}
+SAFETY_BYPASS_ACTIONS = {"status", "collect-evidence", "rollback", "rollback-control-plane"}
 CANONICAL_FALSE_FLAGS = {
     "SEND_EVENTS",
     "ENABLE_EXTERNAL_DELIVERY",
@@ -65,6 +70,15 @@ LOCK_FILE = Path("/run/lock/codestra-production-operator.lock")
 DATE_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])")
 STANDBY_CONTAINER = "codestra-production-standby-approved"
 MIDDLEWARE_IMAGE = "ghcr.io/codestra-srl/codestra-middleware"
+CONTROL_PLANE_PROJECT = "codestra-integration-control-plane"
+CONTROL_PLANE_RELEASE_ROOT = Path("/opt/codestra/releases/control-plane")
+CONTROL_PLANE_ARCHIVE_ROOT = Path("/home/codestra-admin")
+CONTROL_PLANE_ARCHIVE_CHECKSUM = CONFIG_DIR / "control-plane-archive.sha256"
+CONTROL_PLANE_BACKUP_ROOT = Path("/opt/codestra/backups/control-plane-protected-deploy")
+CONTROL_PLANE_DB_CONTAINER = "codestra-postgres-1"
+CONTROL_PLANE_DB = "control_plane"
+CONTROL_PLANE_API = "codestra-integration-control-plane-api-1"
+CONTROL_PLANE_WORKER = "codestra-integration-control-plane-worker-1"
 VICIDIAL_CHANNELS_COMMAND = (
     "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'core show channels count'"
 )
@@ -318,6 +332,166 @@ def remove_standby(config: dict[str, str]) -> dict[str, object]:
     return {"candidate_present": False}
 
 
+def control_plane_paths(config: dict[str, str]) -> tuple[Path, Path]:
+    sha = config["protected_sha"]
+    archive = CONTROL_PLANE_ARCHIVE_ROOT / f"codestra-production-platform-{sha}.tar.gz"
+    release = CONTROL_PLANE_RELEASE_ROOT / sha
+    return archive, release
+
+
+def validate_control_plane_archive(archive: Path, protected_sha: str) -> None:
+    """Reject links, devices, traversal, and unexpected archive roots."""
+    if not re.fullmatch(r"[0-9a-f]{40}", protected_sha):
+        raise OperatorError("protected SHA is malformed")
+    expected_root = "codestra"
+    try:
+        with tarfile.open(archive, mode="r:gz") as bundle:
+            members = bundle.getmembers()
+            if not members:
+                raise OperatorError("control-plane archive is empty")
+            for member in members:
+                parts = Path(member.name).parts
+                if (
+                    not parts
+                    or parts[0] != expected_root
+                    or member.name.startswith("/")
+                    or ".." in parts
+                    or member.issym()
+                    or member.islnk()
+                    or member.isdev()
+                    or member.isfifo()
+                ):
+                    raise OperatorError("control-plane archive member rejected")
+    except (tarfile.TarError, OSError) as error:
+        raise OperatorError("control-plane archive validation failed") from error
+
+
+def copy_pinned_control_plane_archive(source: Path, target: Path, expected: str) -> None:
+    """Copy once from the bootstrap account into a root-only immutable path."""
+    try:
+        descriptor = os.open(source, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise OperatorError("control-plane archive unavailable or unsafe") from error
+    digest = hashlib.sha256()
+    with os.fdopen(descriptor, "rb") as incoming:
+        info = os.fstat(incoming.fileno())
+        bootstrap_uid = pwd.getpwnam("codestra-admin").pw_uid
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != bootstrap_uid
+            or stat.S_IMODE(info.st_mode) != 0o600
+        ):
+            raise OperatorError("control-plane archive ownership or mode is unsafe")
+        output_descriptor = os.open(
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+        )
+        with os.fdopen(output_descriptor, "wb") as outgoing:
+            while chunk := incoming.read(1024 * 1024):
+                digest.update(chunk)
+                outgoing.write(chunk)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+    if digest.hexdigest() != expected:
+        target.unlink(missing_ok=True)
+        raise OperatorError("control-plane archive checksum mismatch")
+
+
+def validate_control_plane(config: dict[str, str]) -> dict[str, object]:
+    _, release = control_plane_paths(config)
+    expected = {
+        "core.py": hashlib.sha256((release / "control_plane_service/core.py").read_bytes()).hexdigest(),
+        "email_adapters.py": hashlib.sha256((release / "control_plane_service/email_adapters.py").read_bytes()).hexdigest(),
+        "postal_inbound.py": hashlib.sha256((release / "control_plane_service/postal_inbound.py").read_bytes()).hexdigest(),
+    }
+    for name, digest_value in expected.items():
+        result = run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_API, "sha256sum", f"/app/control_plane_service/{name}"], timeout=30)
+        if result.stdout.decode().split()[0] != digest_value:
+            raise OperatorError(f"control-plane source readback mismatch: {name}")
+    health = docker_inspect(CONTROL_PLANE_API)
+    if health["State"].get("Health", {}).get("Status") != "healthy":
+        raise OperatorError("control-plane API is not healthy")
+    query = (
+        "select count(*) from information_schema.tables where "
+        "table_schema='control_plane' and table_name in "
+        "('campaign_email_domain','agent_mailbox','mailbox_provisioning_event')"
+    )
+    tables = run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres", "-d", CONTROL_PLANE_DB, "-Atc", query], timeout=30)
+    if tables.stdout.decode().strip() != "3":
+        raise OperatorError("mailbox runtime schema readback failed")
+    env = docker_inspect(CONTROL_PLANE_WORKER)["Config"]["Env"]
+    flags = dict(item.split("=", 1) for item in env if "=" in item)
+    required_flags = {
+        "KLYROW_MODE": "test",
+        "TELNEXA_MODE": "simulator",
+        "LIVE_SMS_DELIVERY": "false",
+        "LIVE_EMAIL_DELIVERY": "false",
+        "LIVE_PSTN_DIALING": "false",
+    }
+    if any(flags.get(name) != value for name, value in required_flags.items()):
+        raise OperatorError("control-plane external delivery is not fail-closed")
+    return {"protected_source_readback": "PASS", "mailbox_runtime_tables": 3,
+            "postal_inbound_adapter": "PASS", "external_delivery": "DISABLED"}
+
+
+def stage_control_plane(config: dict[str, str]) -> dict[str, object]:
+    archive, release = control_plane_paths(config)
+    expected = checked_root_file(CONTROL_PLANE_ARCHIVE_CHECKSUM, expected_mode=0o644)
+    if re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        raise OperatorError("control-plane archive checksum is malformed")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup = CONTROL_PLANE_BACKUP_ROOT / stamp
+    backup.mkdir(mode=0o700, parents=True)
+    trusted_archive = backup / "protected-release.tar.gz"
+    copy_pinned_control_plane_archive(archive, trusted_archive, expected)
+    validate_control_plane_archive(trusted_archive, config["protected_sha"])
+    for container, label in ((CONTROL_PLANE_API, "api"), (CONTROL_PLANE_WORKER, "worker")):
+        image_id = str(docker_inspect(container)["Image"])
+        (backup / f"{label}-image-id").write_text(image_id + "\n", encoding="ascii")
+        run_bytes(["/usr/bin/docker", "tag", image_id, f"codestra/{CONTROL_PLANE_PROJECT}-{label}:rollback-{stamp}"], timeout=60)
+    with (backup / "control-plane.sql").open("wb") as dump:
+        result = run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "pg_dump", "-U", "postgres", "-d", CONTROL_PLANE_DB], timeout=1800)
+        dump.write(result.stdout)
+    (CONTROL_PLANE_BACKUP_ROOT / "LAST_SUCCESS").write_text(stamp + "\n", encoding="ascii")
+    release.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    if release.exists():
+        raise OperatorError("control-plane release directory already exists")
+    release.mkdir(mode=0o755)
+    run_bytes(["/usr/bin/tar", "--extract", "--gzip", "--file", str(trusted_archive), "--directory", str(release), "--strip-components=1", "--no-same-owner", "--no-same-permissions"])
+    for migration in sorted((release / "migrations/control_plane").glob("*.sql")):
+        run_bytes(["/usr/bin/docker", "exec", "-i", CONTROL_PLANE_DB_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", CONTROL_PLANE_DB], stdin=migration.read_bytes(), timeout=300)
+    compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
+               "--file", str(release / "deploy/control-plane/compose.yaml"),
+               "--file", str(release / "deploy/control-plane/compose.live-delivery-safety.yaml")]
+    run_bytes([*compose, "build", "--pull=false"], timeout=1800)
+    try:
+        run_bytes([*compose, "up", "--detach", "--remove-orphans"], timeout=300)
+        time.sleep(10)
+        result = validate_control_plane(config)
+    except Exception:
+        rollback_control_plane(config)
+        raise
+    return {"backup_stamp": stamp, **result}
+
+
+def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
+    marker = CONTROL_PLANE_BACKUP_ROOT / "LAST_SUCCESS"
+    if not marker.is_file() or marker.is_symlink():
+        raise OperatorError("control-plane rollback marker unavailable")
+    stamp = marker.read_text(encoding="ascii").strip()
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp) is None:
+        raise OperatorError("control-plane rollback marker malformed")
+    for label in ("api", "worker"):
+        run_bytes(["/usr/bin/docker", "tag", f"codestra/{CONTROL_PLANE_PROJECT}-{label}:rollback-{stamp}", f"{CONTROL_PLANE_PROJECT}-{label}:latest"], timeout=60)
+    _, release = control_plane_paths(config)
+    compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
+               "--file", str(release / "deploy/control-plane/compose.yaml"),
+               "--file", str(release / "deploy/control-plane/compose.live-delivery-safety.yaml")]
+    run_bytes([*compose, "up", "--detach", "--no-build"], timeout=300)
+    return {"rollback_stamp": stamp, "external_delivery": "DISABLED"}
+
+
 def safety_state() -> dict[str, object]:
     channel = run_fixed(
         ["/usr/bin/ssh", "codestra-vicidial", VICIDIAL_CHANNELS_COMMAND]
@@ -408,6 +582,12 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         result.update(certify_standby(config))
     elif action == "rollback":
         result.update(remove_standby(config))
+    elif action == "stage-control-plane":
+        result.update(stage_control_plane(config))
+    elif action == "validate-control-plane":
+        result.update(validate_control_plane(config))
+    elif action == "rollback-control-plane":
+        result.update(rollback_control_plane(config))
     elif action in {"preflight", "status"}:
         invocation = run_fixed(["/usr/bin/systemctl", "--failed", "--no-legend", "--plain"])
         result.update({"returncode": invocation.returncode, "failed_units_present": bool(invocation.stdout.strip())})

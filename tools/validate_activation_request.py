@@ -9,7 +9,11 @@ import re
 from pathlib import Path
 
 CHANGE_ID = "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01"
-ACTIONS = {"preflight", "backup", "validate-backup", "restore-test", "stage", "canary", "status", "rollback", "collect-evidence"}
+ACTIONS = {
+    "preflight", "backup", "validate-backup", "restore-test", "stage",
+    "canary", "status", "rollback", "collect-evidence",
+    "stage-control-plane", "validate-control-plane", "rollback-control-plane",
+}
 REQUIRED_FALSE_FLAGS = {
     "CALLBACK_DISPATCH",
     "ENABLE_EXTERNAL_DELIVERY",

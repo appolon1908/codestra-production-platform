@@ -8,17 +8,19 @@ fail() {
 }
 
 [ "$(id -u)" -eq 0 ] || fail
-[ "$#" -eq 5 ] || fail
+[ "$#" -eq 6 ] || fail
 
 public_key=$1
 protected_sha=$2
 image_digest=$3
 change_id=$4
 maintenance_date=$5
+control_plane_archive_sha256=$6
 [ "$(printf '%s' "$protected_sha" | grep -Ec '^[0-9a-f]{40}$')" -eq 1 ] || fail
 [ "$(printf '%s' "$image_digest" | grep -Ec '^sha256:[0-9a-f]{64}$')" -eq 1 ] || fail
 [ "$(printf '%s' "$change_id" | grep -Ec '^CHG-[0-9]{8}-CODESTRA-PRODUCTION-ACTIVATION-[0-9]{2}$')" -eq 1 ] || fail
 [ "$(printf '%s' "$maintenance_date" | grep -Ec '^20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$')" -eq 1 ] || fail
+[ "$(printf '%s' "$control_plane_archive_sha256" | grep -Ec '^[0-9a-f]{64}$')" -eq 1 ] || fail
 if [ ! -f "$public_key" ] || [ -L "$public_key" ]; then
   fail
 fi
@@ -40,9 +42,9 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
-4515b653e0d17e8796f908fea353c76c9a5cac6c5c2d9f383c0f86e9aca30197  codestra-production-operator
+e346f636bca3da9f6a94578b190185af6f7f041699349da48496e0315398f7bf  codestra-production-operator
 e6fa1c9602a3318c61f4f21ce6d57edbcadadbeaf0b2c644e3f2c49b96ccdf74  codestra-production-forced-command
-593cdff802459d3e9ce0d9c9afc17c330df15f4753521c6ad7f2a6c6790a632d  codestra-production-operator.sudoers
+bbc8bc30f11d7e32e204433467cb4b320f04b2615f4bcafbee791c94ca44b2de  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
 EOF
 }
@@ -114,6 +116,7 @@ rollback() {
     restore_path /var/lib/codestra-production-operator/.ssh/authorized_keys authorized-keys
     restore_path /etc/codestra/production-operator/release.json release-config
     restore_path /etc/codestra/production-operator/maintenance-date maintenance-date
+    restore_path /etc/codestra/production-operator/control-plane-archive.sha256 control-plane-archive-checksum
     sshd -t >/dev/null 2>&1 || true
   fi
   if [ "$state_dir_metadata_touched" -eq 1 ] && [ "$state_dir_existed" -eq 1 ]; then
@@ -147,7 +150,9 @@ operator_record=$(getent passwd codestra-production-operator)
 [ "$(passwd -S codestra-production-operator | awk '{print $2}')" = L ] || fail
 
 if [ -e "$state_dir" ] || [ -L "$state_dir" ]; then
-  [ -d "$state_dir" ] && [ ! -L "$state_dir" ] || fail
+  if [ ! -d "$state_dir" ] || [ -L "$state_dir" ]; then
+    fail
+  fi
   state_dir_existed=1
   state_dir_uid=$(stat -c %u "$state_dir")
   state_dir_gid=$(stat -c %g "$state_dir")
@@ -168,6 +173,7 @@ reject_target_symlink /etc/ssh/sshd_config.d/60-codestra-production-operator.con
 reject_target_symlink /var/lib/codestra-production-operator/.ssh/authorized_keys
 reject_target_symlink /etc/codestra/production-operator/release.json
 reject_target_symlink /etc/codestra/production-operator/maintenance-date
+reject_target_symlink /etc/codestra/production-operator/control-plane-archive.sha256
 validate_existing_root_target /usr/local/sbin/codestra-production-operator 750
 validate_existing_root_target /usr/local/libexec/codestra-production-forced-command 755
 validate_existing_root_target /etc/sudoers.d/codestra-production-operator 440
@@ -180,6 +186,7 @@ backup_path /etc/ssh/sshd_config.d/60-codestra-production-operator.conf sshd
 backup_path /var/lib/codestra-production-operator/.ssh/authorized_keys authorized-keys
 backup_path /etc/codestra/production-operator/release.json release-config
 backup_path /etc/codestra/production-operator/maintenance-date maintenance-date
+backup_path /etc/codestra/production-operator/control-plane-archive.sha256 control-plane-archive-checksum
 installed=1
 
 install -o root -g root -m 0750 "$script_dir/codestra-production-operator" \
@@ -234,12 +241,19 @@ chown root:root "$maintenance_tmp"
 chmod 0600 "$maintenance_tmp"
 mv -f "$maintenance_tmp" /etc/codestra/production-operator/maintenance-date
 
+control_plane_checksum_tmp=$(mktemp /etc/codestra/production-operator/.control-plane-archive.XXXXXX)
+printf '%s\n' "$control_plane_archive_sha256" > "$control_plane_checksum_tmp"
+chown root:root "$control_plane_checksum_tmp"
+chmod 0644 "$control_plane_checksum_tmp"
+mv -f "$control_plane_checksum_tmp" /etc/codestra/production-operator/control-plane-archive.sha256
+
 sha256sum /usr/local/sbin/codestra-production-operator \
   /usr/local/libexec/codestra-production-forced-command \
   /etc/sudoers.d/codestra-production-operator \
   /etc/ssh/sshd_config.d/60-codestra-production-operator.conf \
   /etc/codestra/production-operator/release.json \
   /etc/codestra/production-operator/maintenance-date \
+  /etc/codestra/production-operator/control-plane-archive.sha256 \
   > /etc/codestra/production-operator/installed.sha256
 chmod 0600 /etc/codestra/production-operator/installed.sha256
 chown root:root /etc/codestra/production-operator/installed.sha256

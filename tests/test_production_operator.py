@@ -4,8 +4,10 @@ import datetime as dt
 import hashlib
 import importlib.machinery
 import importlib.util
+import io
 import os
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -31,6 +33,9 @@ EXPECTED_ACTIONS = {
     "status",
     "rollback",
     "collect-evidence",
+    "stage-control-plane",
+    "validate-control-plane",
+    "rollback-control-plane",
 }
 
 
@@ -40,6 +45,41 @@ def test_action_set_is_exact() -> None:
         "backup": "codestra-readiness-backup.service",
         "restore-test": "codestra-readiness-restore.service",
     }
+
+
+def _archive(tmp_path: Path, member: tarfile.TarInfo) -> Path:
+    archive = tmp_path / "release.tar.gz"
+    with tarfile.open(archive, "w:gz") as bundle:
+        payload = b"safe"
+        member.size = len(payload)
+        bundle.addfile(member, io.BytesIO(payload))
+    return archive
+
+
+def test_control_plane_archive_accepts_fixed_root(tmp_path: Path) -> None:
+    archive = _archive(tmp_path, tarfile.TarInfo("codestra/control_plane_service/core.py"))
+    OPERATOR.validate_control_plane_archive(archive, "e" * 40)
+
+
+@pytest.mark.parametrize(
+    "name,typecode,linkname",
+    [
+        ("../escape", tarfile.REGTYPE, ""),
+        ("codestra/../../escape", tarfile.REGTYPE, ""),
+        ("unexpected/file", tarfile.REGTYPE, ""),
+        ("codestra/link", tarfile.SYMTYPE, "/etc/passwd"),
+        ("codestra/hardlink", tarfile.LNKTYPE, "codestra/file"),
+    ],
+)
+def test_control_plane_archive_rejects_unsafe_members(
+    tmp_path: Path, name: str, typecode: bytes, linkname: str
+) -> None:
+    member = tarfile.TarInfo(name)
+    member.type = typecode
+    member.linkname = linkname
+    archive = _archive(tmp_path, member)
+    with pytest.raises(OPERATOR.OperatorError, match="member rejected"):
+        OPERATOR.validate_control_plane_archive(archive, "e" * 40)
 
 
 @pytest.fixture(autouse=True)

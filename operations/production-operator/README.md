@@ -5,7 +5,8 @@ feature branch is independently approved, merged, and released from the exact
 protected commit.
 
 The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
-`restore-test`, `stage`, `canary`, `status`, `rollback`, or `collect-evidence`.
+`restore-test`, `stage`, `canary`, `status`, `rollback`, `collect-evidence`,
+`stage-control-plane`, `validate-control-plane`, or `rollback-control-plane`.
 There is no shell, Docker-group membership, host/path input, arbitrary unit, or
 command argument. `preflight`, `status`, and `collect-evidence` are read-only.
 Every other action except emergency `rollback` requires
@@ -26,9 +27,9 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `4515b653e0d17e8796f908fea353c76c9a5cac6c5c2d9f383c0f86e9aca30197` |
+| `codestra-production-operator` | `e346f636bca3da9f6a94578b190185af6f7f041699349da48496e0315398f7bf` |
 | `codestra-production-forced-command` | `e6fa1c9602a3318c61f4f21ce6d57edbcadadbeaf0b2c644e3f2c49b96ccdf74` |
-| `codestra-production-operator.sudoers` | `593cdff802459d3e9ce0d9c9afc17c330df15f4753521c6ad7f2a6c6790a632d` |
+| `codestra-production-operator.sudoers` | `bbc8bc30f11d7e32e204433467cb4b320f04b2615f4bcafbee791c94ca44b2de` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
 
@@ -47,6 +48,7 @@ merge so it describes the immutable reviewed artifact rather than a draft.
 | `/etc/codestra/production-operator` | `root:root` | `0755` | Non-secret tuple directory; protected files retain restrictive modes |
 | `/etc/codestra/production-operator/maintenance-date` | `root:root` | `0600` | Installed from the approved tuple |
 | `/etc/codestra/production-operator/release.json` | `root:root` | `0644` | Immutable release tuple used by the forced command |
+| `/etc/codestra/production-operator/control-plane-archive.sha256` | `root:root` | `0644` | Exact protected control-plane archive digest |
 | `/etc/codestra/production-operator/installed.sha256` | `root:root` | `0600` | Installed-file checksum manifest |
 | `/var/lib/codestra-production-operator` | `root:codestra-production-operator` | `0710` | Traversable operator home; contents remain non-listable and individually restricted |
 | `/var/lib/codestra-production-operator/.ssh` | operator user/group | `0700` | SSH key directory |
@@ -68,7 +70,7 @@ command.
 
 ```sh
 sha256sum --check install-server-a-operator.sh.sha256
-sudo ./install-server-a-operator.sh /path/to/operator-ed25519.pub PROTECTED_SHA IMAGE_DIGEST CHANGE_ID MAINTENANCE_DATE
+sudo ./install-server-a-operator.sh /path/to/operator-ed25519.pub PROTECTED_SHA IMAGE_DIGEST CHANGE_ID MAINTENANCE_DATE CONTROL_PLANE_ARCHIVE_SHA256
 sudo ./validate-server-a-operator.sh
 ```
 
