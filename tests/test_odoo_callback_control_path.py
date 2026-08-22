@@ -19,6 +19,7 @@ def test_odoo_callback_identity_is_bounded_and_has_no_secret():
     assert client["defaultClientScopes"] == ["roles"]
     assert set(client["optionalClientScopes"]) == {"callbacks.read", "callbacks.write"}
     assert IDENTITY["serviceAccountRealmRoles"] == ["service"]
+    assert IDENTITY["clientRealmRoleScopeMappings"] == ["service"]
     assert IDENTITY["delivery"]["syntheticOnly"] is True
     serialized = json.dumps(IDENTITY)
     assert '"clientSecret"' not in serialized

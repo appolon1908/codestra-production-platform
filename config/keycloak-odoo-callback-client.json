@@ -49,6 +49,7 @@
     ]
   },
   "serviceAccountRealmRoles": ["service"],
+  "clientRealmRoleScopeMappings": ["service"],
   "delivery": {
     "secretFile": "/run/secrets/odoo_callback_client_secret",
     "secretInSource": false,
