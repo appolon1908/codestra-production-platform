@@ -5,15 +5,19 @@ Wants=network-online.target
 Requires=mariadb.service
 
 [Service]
-Type=oneshot
+Type=simple
 User=codestra-events
 Group=codestra-events
 WorkingDirectory=/opt/codestra-tel-events
 EnvironmentFile=/etc/codestra/tel-events-publisher.env
-ExecStartPre=/usr/bin/test "$TEL_EVENTS_ENABLED" = false
-ExecStartPre=/usr/bin/test "$SEND_EVENTS" = false
-ExecStartPre=/usr/bin/test -e /etc/codestra/disable-external-delivery
-ExecStart=/usr/bin/python3.11 -m tel_events.service
+ExecStartPre=/usr/bin/test "$TEL_EVENTS_ENABLED" = true
+ExecStartPre=/usr/bin/test "$SEND_EVENTS" = true
+ExecStartPre=/usr/bin/test "$TEL_EVENTS_MODE" = production
+ExecStartPre=/usr/bin/test ! -e ${DELIVERY_KILL_SWITCH}
+ExecStart=/usr/bin/python3.11 -m tel_events.service --loop
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=120s
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
@@ -23,7 +27,10 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true
 ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
 RestrictSUIDSGID=true
+LockPersonality=true
 CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
