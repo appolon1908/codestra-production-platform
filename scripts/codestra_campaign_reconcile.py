@@ -10,11 +10,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import subprocess
 import sys
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from campaign_provisioning import PrivateAdapterClient, PrivateAdapterConfig
 
 SCHEMA = "asterisk"
 
@@ -27,11 +32,9 @@ def run(*args: str, input_text: str | None = None) -> str:
     return result.stdout
 
 
-def quote(value: str) -> str:
-    return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
-
-
-def mysql(sql: str) -> str:
+def read_mysql(sql: str) -> str:
+    if not sql.lstrip().upper().startswith("SELECT "):
+        raise RuntimeError("reconciler SSH database path is read-only")
     return run("ssh", "codestra-vicidial", "sudo", "mysql", "-N", "-B", input_text=sql)
 
 
@@ -39,7 +42,8 @@ def actual_state() -> dict[str, dict[str, dict[str, str]]]:
     queries = {
         "campaigns": (
             "SELECT campaign_id,campaign_name,active,dial_method,local_call_time,"
-            f"auto_dial_level,hopper_level FROM {SCHEMA}.vicidial_campaigns"
+            "auto_dial_level,hopper_level,campaign_recording,scheduled_callbacks,"
+            f"campaign_description FROM {SCHEMA}.vicidial_campaigns"
         ),
         "groups": (
             "SELECT user_group,group_name,allowed_campaigns "
@@ -54,7 +58,7 @@ def actual_state() -> dict[str, dict[str, dict[str, str]]]:
         ),
     }
     fields = {
-        "campaigns": ("id", "name", "active", "dial_method", "call_time", "auto", "hopper"),
+        "campaigns": ("id", "name", "active", "dial_method", "call_time", "auto", "hopper", "recording", "callbacks", "description"),
         "groups": ("id", "name", "allowed"),
         "ingroups": ("id", "name", "active"),
         "statuses": ("id", "name", "selectable", "human_answered", "category"),
@@ -62,7 +66,7 @@ def actual_state() -> dict[str, dict[str, dict[str, str]]]:
     state = {}
     for kind, sql in queries.items():
         rows = {}
-        for line in mysql(sql + ";").splitlines():
+        for line in read_mysql(sql + ";").splitlines():
             values = line.split("\t")
             row = dict(zip(fields[kind], values))
             rows[row["id"]] = row
@@ -80,7 +84,7 @@ def desired(path: Path) -> list[dict[str, str]]:
 
 
 def build_plan(rows: list[dict[str, str]], state) -> dict:
-    creates, unchanged, safety_updates, blockers = [], [], [], []
+    creates, unchanged, safety_updates, blockers, legacy_adoptions = [], [], [], [], []
     group_members: dict[str, list[str]] = defaultdict(list)
     ingroups = {}
     for row in rows:
@@ -96,6 +100,14 @@ def build_plan(rows: list[dict[str, str]], state) -> dict:
             creates.append({"physical_id": actual, "canonical_code": code})
         elif current["active"] != "N" or current["auto"] not in ("0", "0.0"):
             blockers.append({"resource": actual, "reason": "existing campaign is dialable"})
+        elif current["description"] != "CODESTRA:" + code or any((
+            current["name"] != code,
+            current["dial_method"] != "MANUAL",
+            current["call_time"] != "9am-5pm",
+            current["recording"] != "ONDEMAND",
+            current["callbacks"] != "N",
+        )):
+            legacy_adoptions.append({"resource": actual, "reason": "explicit fingerprint-gated migration"})
         elif current["hopper"] != "0":
             safety_updates.append({"physical_id": actual, "hopper_before": current["hopper"]})
         else:
@@ -105,16 +117,31 @@ def build_plan(rows: list[dict[str, str]], state) -> dict:
         for group, members in sorted(group_members.items())
         if group not in state["groups"]
     ]
+    group_updates = []
+    for group, members in sorted(group_members.items()):
+        current = state["groups"].get(group)
+        if not current:
+            continue
+        tokens = set((current.get("allowed") or "").strip().strip("-").split())
+        missing = sorted(set(members) - tokens)
+        if missing:
+            group_updates.append({"id": group, "campaigns": sorted(tokens | set(members))})
     ingroup_creates = [
         {"id": group, "name": name}
         for group, name in sorted(ingroups.items())
         if group not in state["ingroups"]
     ]
-    ingroup_safety_updates = [
-        {"id": group}
+    certification_preserved_ingroups = {
+        row["EXPECTED_INGROUP"] for row in rows
+        if row["CODE"] == "TEST_SYN" and row["EXPECTED_INGROUP"]
+    }
+    active_ingroup_blockers = [
+        {"resource": group, "reason": "existing inbound group is active"}
         for group in sorted(ingroups)
         if group in state["ingroups"] and state["ingroups"][group]["active"] != "N"
+        and group not in certification_preserved_ingroups
     ]
+    blockers.extend(active_ingroup_blockers)
     # TEST_SYN dispositions are campaign-scoped. Existing global VICIdial
     # statuses are reused where possible; only missing semantic codes are made.
     required_statuses = {
@@ -138,58 +165,98 @@ def build_plan(rows: list[dict[str, str]], state) -> dict:
         "campaign_creates": creates,
         "campaign_unchanged": unchanged,
         "campaign_safety_updates": safety_updates,
+        "campaign_legacy_adoptions": legacy_adoptions,
         "group_creates": group_creates,
+        "group_updates": group_updates,
         "ingroup_creates": ingroup_creates,
-        "ingroup_safety_updates": ingroup_safety_updates,
+        "ingroup_safety_updates": [],
         "status_creates": status_creates,
         "blockers": blockers,
     }
 
 
-def sql_for(plan: dict) -> str:
-    statements = [f"USE `{SCHEMA}`;", "LOCK TABLES vicidial_campaigns WRITE, vicidial_user_groups WRITE, vicidial_inbound_groups WRITE, vicidial_campaign_statuses WRITE;"]
-    for item in plan["campaign_creates"]:
-        statements.append(
-            "INSERT INTO vicidial_campaigns"
-            "(campaign_id,campaign_name,active,dial_method,local_call_time,"
-            "campaign_recording,scheduled_callbacks,campaign_description,hopper_level,auto_dial_level) VALUES("
-            + ",".join((quote(item["physical_id"]), quote(item["canonical_code"]), "'N'", "'MANUAL'", "'9am-5pm'", "'ONDEMAND'", "'N'", quote("CODESTRA:" + item["canonical_code"]), "0", "'0'"))
-            + ");"
-        )
-    for item in plan.get("campaign_safety_updates", []):
-        statements.append(
-            "UPDATE vicidial_campaigns SET active='N',auto_dial_level='0',hopper_level=0 WHERE campaign_id="
-            + quote(item["physical_id"]) + ";"
-        )
-    for item in plan["group_creates"]:
-        allowed = " " + " ".join(item["campaigns"]) + " -"
-        statements.append(
-            "INSERT INTO vicidial_user_groups(user_group,group_name,allowed_campaigns) VALUES("
-            + ",".join((quote(item["id"]), quote("Codestra " + item["id"]), quote(allowed))) + ");"
-        )
-    for item in plan["ingroup_creates"]:
-        statements.append(
-            "INSERT INTO vicidial_inbound_groups(group_id,group_name,active,group_color,group_handling,call_time_id) VALUES("
-            + ",".join((quote(item["id"]), quote(item["name"]), "'N'", "'white'", "'PHONE'", "'9am-5pm'")) + ");"
-        )
-    for item in plan.get("ingroup_safety_updates", []):
-        statements.append(
-            "UPDATE vicidial_inbound_groups SET active='N' WHERE group_id="
-            + quote(item["id"]) + ";"
-        )
-    for item in plan.get("status_creates", []):
-        statements.append(
-            "INSERT INTO vicidial_campaign_statuses"
-            "(campaign_id,status,status_name,selectable,human_answered,category) VALUES("
-            + ",".join((quote(item["campaign_id"]), quote(item["status"]), quote(item["name"]), "'Y'", quote(item["human_answered"]), quote(item["category"])))
-            + ");"
-        )
-    statements.extend(("UNLOCK TABLES;", "SELECT 'APPLY_COMPLETE';"))
-    return "\n".join(statements) + "\n"
+def adapter_command(row: dict[str, str], state: dict | None = None) -> dict:
+    code = row["CODE"]
+    business_unit = code.split("-", 1)[0] if code != "TEST_SYN" else "TEST"
+    direction = "inbound" if code.endswith("-IN") else "outbound"
+    current_group = state and state["groups"].get(row["EXPECTED_USER_GROUP"])
+    group_name = current_group["name"] if current_group else "Codestra " + row["EXPECTED_USER_GROUP"]
+    groups = [{
+        "code": row["EXPECTED_USER_GROUP"],
+        "name": group_name,
+        "kind": "user",
+        "active": False,
+    }]
+    preserve_certification_ingroup = (
+        code == "TEST_SYN" and row["EXPECTED_INGROUP"] == "TEST_IN"
+        and state and state["ingroups"].get("TEST_IN", {}).get("active") == "Y"
+    )
+    if row["EXPECTED_INGROUP"] and not preserve_certification_ingroup:
+        groups.append({
+            "code": row["EXPECTED_INGROUP"], "name": code,
+            "kind": "inbound", "active": False,
+        })
+    dispositions = []
+    if code == "TEST_SYN":
+        dispositions = [
+            {"code": "ANS", "name": "Answered", "human_answered": True, "category": "HUMAN"},
+            {"code": "APPT", "name": "Appointment", "human_answered": True, "category": "CALLBACK"},
+            {"code": "WN", "name": "Wrong Number", "human_answered": False, "category": "UNWORKABLE"},
+        ]
+    campaign = {
+            "canonical_id": code,
+            "actual_id": row["EXPECTED_VICIDIAL_CAMPAIGN"],
+            "name": code,
+            "business_unit": business_unit,
+            "direction": direction,
+            "active": False,
+            "dial_method": "MANUAL",
+            "call_time": "9am-5pm",
+            "recording_policy": "ONDEMAND",
+            "callback_enabled": False,
+            "lists": [],
+            "groups": groups,
+            "scripts": [],
+            "dispositions": dispositions,
+            "transfer_targets": [],
+            "reporting_mapping": "ODOO:" + code,
+            "recording_policy_reference": "ODOO:ONDEMAND",
+        }
+    current = state and state["campaigns"].get(row["EXPECTED_VICIDIAL_CAMPAIGN"])
+    if current and current["description"] != "CODESTRA:" + code:
+        observed = {
+            "campaign_id": current["id"], "campaign_name": current["name"],
+            "active": current["active"], "dial_method": current["dial_method"],
+            "local_call_time": current["call_time"],
+            "campaign_recording": current["recording"],
+            "scheduled_callbacks": current["callbacks"],
+            "campaign_description": current["description"],
+        }
+        campaign["adopt_existing_sha256"] = hashlib.sha256(
+            json.dumps(observed, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    return {
+        "context": {
+            "correlation_id": "campaign-reconcile-" + row["EXPECTED_VICIDIAL_CAMPAIGN"],
+            "actor": "codestra-campaign-reconcile",
+            "reason": "approved disabled campaign reconciliation",
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "campaign": campaign,
+    }
+
+
+def apply_via_adapter(rows: list[dict[str, str]], state: dict, client: PrivateAdapterClient) -> list[dict]:
+    results = []
+    for row in rows:
+        key = "campaign-reconcile:" + row["EXPECTED_VICIDIAL_CAMPAIGN"]
+        results.append(client.provision_campaign(key, adapter_command(row, state)))
+    return results
 
 
 def verify(rows: list[dict[str, str]], state) -> dict:
     errors = []
+    required_groups: dict[str, set[str]] = defaultdict(set)
     for row in rows:
         actual = row["EXPECTED_VICIDIAL_CAMPAIGN"]
         campaign = state["campaigns"].get(actual)
@@ -199,10 +266,19 @@ def verify(rows: list[dict[str, str]], state) -> dict:
             errors.append(f"dialable campaign {actual}")
         if row["EXPECTED_USER_GROUP"] not in state["groups"]:
             errors.append(f"missing group {row['EXPECTED_USER_GROUP']}")
+        else:
+            required_groups[row["EXPECTED_USER_GROUP"]].add(actual)
         if row["EXPECTED_INGROUP"] and row["EXPECTED_INGROUP"] not in state["ingroups"]:
             errors.append(f"missing ingroup {row['EXPECTED_INGROUP']}")
-        elif row["EXPECTED_INGROUP"] and state["ingroups"][row["EXPECTED_INGROUP"]]["active"] != "N":
+        elif (row["EXPECTED_INGROUP"] and
+              state["ingroups"][row["EXPECTED_INGROUP"]]["active"] != "N" and
+              not (row["CODE"] == "TEST_SYN" and row["EXPECTED_INGROUP"] == "TEST_IN")):
             errors.append(f"active ingroup {row['EXPECTED_INGROUP']}")
+    for group, campaigns in required_groups.items():
+        tokens = set((state["groups"][group].get("allowed") or "").strip().strip("-").split())
+        missing = campaigns - tokens
+        if missing:
+            errors.append(f"group {group} missing campaigns {','.join(sorted(missing))}")
     for status in ("ANS", "APPT", "WN"):
         if f"TEST_SYN:{status}" not in state["statuses"]:
             errors.append(f"missing TEST_SYN status {status}")
@@ -216,6 +292,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--apply-token")
     parser.add_argument("--schema", default="asterisk")
+    parser.add_argument("--adapter-url")
+    parser.add_argument("--adapter-ca-file")
+    parser.add_argument("--adapter-client-cert-file")
+    parser.add_argument("--adapter-client-key-file")
+    parser.add_argument("--adapter-hmac-file")
     args = parser.parse_args()
     global SCHEMA
     if not args.schema.replace("_", "").isalnum():
@@ -230,7 +311,20 @@ def main() -> int:
     elif args.mode == "apply":
         if args.apply_token != "OWNER_FULL_AUTONOMY=YES":
             raise RuntimeError("explicit owner apply token required")
-        mysql(sql_for(plan))
+        adapter_values = (
+            args.adapter_url, args.adapter_ca_file, args.adapter_client_cert_file,
+            args.adapter_client_key_file, args.adapter_hmac_file,
+        )
+        if not all(adapter_values):
+            raise RuntimeError("restricted adapter mTLS/HMAC configuration required")
+        client = PrivateAdapterClient(PrivateAdapterConfig(
+            base_url=args.adapter_url,
+            ca_file=args.adapter_ca_file,
+            client_cert_file=args.adapter_client_cert_file,
+            client_key_file=args.adapter_client_key_file,
+            hmac_file=args.adapter_hmac_file,
+        ))
+        result["adapter_results"] = apply_via_adapter(rows, state, client)
         checked = verify(rows, actual_state())
         result.update(checked, status="PASS" if not checked["errors"] else "FAIL")
     elif args.mode == "verify":

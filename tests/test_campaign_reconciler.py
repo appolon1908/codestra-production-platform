@@ -8,31 +8,58 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-def test_apply_sql_is_always_disabled_and_non_dialing():
-    sql = MODULE.sql_for({
-        "campaign_creates": [{"physical_id": "COD12345", "canonical_code": "COD-X-OUT"}],
-        "campaign_safety_updates": [{"physical_id": "CODSAFE1", "hopper_before": "1"}],
-        "group_creates": [{"id": "COD_AGENTS", "campaigns": ["COD12345"]}],
-        "ingroup_creates": [{"id": "COD1234I", "name": "COD-X-IN"}],
-        "ingroup_safety_updates": [{"id": "TEST_IN"}],
-        "status_creates": [{
-            "campaign_id": "TEST_SYN",
-            "status": "ANS",
-            "name": "Answered",
-            "human_answered": "Y",
-            "category": "HUMAN",
-        }],
-    })
-    assert "'N','MANUAL'" in sql
-    assert "hopper_level,auto_dial_level" in sql
-    assert ",0,'0')" in sql
-    assert "vicidial_lists" not in sql
-    assert "active,group_color" in sql
-    assert "hopper_level=0 WHERE campaign_id='CODSAFE1'" in sql
-    assert "active='N' WHERE group_id='TEST_IN'" in sql
-    assert "vicidial_campaign_statuses" in sql
-    assert "'TEST_SYN','ANS','Answered','Y','Y','HUMAN'" in sql
+def row(code="COD-SERVICE-OUT", actual="COD12345", group="COD_AGENTS", ingroup=""):
+    return {"CODE": code, "EXPECTED_VICIDIAL_CAMPAIGN": actual,
+            "EXPECTED_USER_GROUP": group, "EXPECTED_INGROUP": ingroup}
 
 
-def test_sql_quotes_external_identifiers():
-    assert MODULE.quote("a'b") == "'a''b'"
+def test_adapter_command_is_disabled_and_has_no_customer_list():
+    campaign = MODULE.adapter_command(row())["campaign"]
+    assert campaign["active"] is False
+    assert campaign["dial_method"] == "MANUAL"
+    assert campaign["callback_enabled"] is False
+    assert campaign["lists"] == []
+    assert campaign["groups"][0]["active"] is False
+
+
+def test_test_syn_uses_short_campaign_scoped_statuses():
+    command = MODULE.adapter_command(row("TEST_SYN", "TEST_SYN", "WEBTEST_SYN", "TEST_IN"))
+    assert command["campaign"]["business_unit"] == "TEST"
+    assert {item["code"] for item in command["campaign"]["dispositions"]} == {"ANS", "APPT", "WN"}
+
+
+def test_apply_uses_restricted_adapter():
+    class Client:
+        def __init__(self): self.calls = []
+        def provision_campaign(self, key, command):
+            self.calls.append((key, command))
+            return {"status": "complete_disabled"}
+    client = Client()
+    state = {"campaigns": {}, "groups": {}, "ingroups": {}}
+    assert MODULE.apply_via_adapter([row()], state, client) == [{"status": "complete_disabled"}]
+    assert client.calls[0][0] == "campaign-reconcile:COD12345"
+
+
+def test_plan_blocks_unowned_collision_active_ingroup_and_repairs_membership():
+    state = {
+        "campaigns": {"COD12345": {"id": "COD12345", "name": "Other", "active": "N",
+            "dial_method": "MANUAL", "call_time": "9am-5pm", "auto": "0", "hopper": "0",
+            "recording": "ONDEMAND", "callbacks": "N", "description": "unowned"}},
+        "groups": {"COD_AGENTS": {"id": "COD_AGENTS", "name": "Codestra COD_AGENTS", "allowed": " -"}},
+        "ingroups": {"COD12345I": {"id": "COD12345I", "name": "COD-SERVICE-IN", "active": "Y"}},
+        "statuses": {},
+    }
+    plan = MODULE.build_plan([row("COD-SERVICE-IN", ingroup="COD12345I")], state)
+    assert {item["reason"] for item in plan["blockers"]} == {"existing inbound group is active"}
+    assert plan["campaign_legacy_adoptions"] == [{
+        "resource": "COD12345", "reason": "explicit fingerprint-gated migration"}]
+    assert plan["group_updates"][0]["campaigns"] == ["COD12345"]
+
+
+def test_read_mysql_rejects_mutations():
+    try:
+        MODULE.read_mysql("UPDATE a SET b=1")
+    except RuntimeError as error:
+        assert "read-only" in str(error)
+    else:
+        raise AssertionError("mutation was not rejected")
