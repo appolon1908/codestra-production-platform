@@ -6,6 +6,7 @@ import json
 import os
 import uuid
 import urllib.parse
+import ipaddress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -92,6 +93,16 @@ class Handler(BaseHTTPRequestHandler):
         return self.rfile.read(length)
 
     def auth_operator(self, roles: set[str]) -> tuple[str, str, str | None] | None:
+        proxy_cidrs=[]
+        try:
+            proxy_cidrs=[ipaddress.ip_network(value.strip()) for value in os.getenv("CONTROL_PLANE_TRUSTED_PROXY_CIDRS","").split(",") if value.strip()]
+            peer=ipaddress.ip_address(self.client_address[0])
+        except ValueError:
+            proxy_cidrs=[]; peer=None
+        client=self.headers.get("X-Authenticated-Client","")
+        tenant=self.headers.get("X-Authenticated-Tenant","")
+        if peer is not None and client and tenant and any(peer in network for network in proxy_cidrs):
+            return (client,"tenant_admin",tenant)
         raw = self.headers.get("Authorization", "").removeprefix("Bearer ")
         value = operator(raw)
         if not value or value[1] not in roles:
@@ -215,13 +226,14 @@ class Handler(BaseHTTPRequestHandler):
             except ControlPlaneError as exc: return self.send_json(404, {"error": str(exc)})
             if tenant and job["tenant_id"] != tenant: return self.send_json(404, {"error": "not_found"})
             return self.send_json(200, job)
-        if parsed.path == "/v1/messages":
+        if parsed.path in {"/v1/messages", "/api/v1/messages"}:
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
             return self.send_json(200,{"items":STORE.list_messages(tenant,query.get("channel",[None])[0],query.get("status",[None])[0])})
-        if parsed.path.startswith("/v1/messages/"):
+        if parsed.path.startswith(("/v1/messages/", "/api/v1/messages/")):
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
-            parts=parsed.path.strip("/").split("/"); message_id=parts[2]
-            try: result={"items":STORE.message_events(message_id,tenant)} if len(parts)>3 and parts[3]=="events" else STORE.get_message(message_id,tenant)
+            parts=parsed.path.strip("/").split("/"); message_id=parts[2] if parts[0]=="v1" else parts[3]
+            event_request=parts[-1]=="events"
+            try: result={"items":STORE.message_events(message_id,tenant)} if event_request else STORE.get_message(message_id,tenant)
             except ControlPlaneError as exc: return self.send_json(404,{"error":str(exc)})
             return self.send_json(200,result)
         if parsed.path.startswith("/v1/customers/") and parsed.path.endswith("/preferences"):
@@ -312,9 +324,10 @@ class Handler(BaseHTTPRequestHandler):
                 result=MAPPINGS.reconcile(tenant,value["entity_type"],value["entity_id"],value["target_system"],value["desired"],value["actual"],value["drift_code"],correlation_id=value.get("correlation_id"))
             except (KeyError,ControlPlaneError) as exc: return self.send_json(422,{"error":str(exc)})
             return self.send_json(200,result)
-        if parsed.path in {"/v1/messages/sms","/v1/messages/email"}:
+        if parsed.path in {"/v1/messages/sms","/v1/messages/email","/api/v1/control/messages"}:
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
-            value["tenant_id"]=tenant; value["channel"]=parsed.path.rsplit("/",1)[-1]
+            value["tenant_id"]=tenant
+            if parsed.path != "/api/v1/control/messages": value["channel"]=parsed.path.rsplit("/",1)[-1]
             value.setdefault("request_id",self.headers.get("X-Request-Id")); value.setdefault("correlation_id",self.headers.get("X-Correlation-Id")); value.setdefault("idempotency_key",self.headers.get("Idempotency-Key"))
             try: message,duplicate=STORE.create_message(value)
             except ControlPlaneError as exc:
@@ -322,6 +335,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(code,{"error":str(exc)})
             STORE.audit(op[0],op[1],"message.created","message",message["message_id"],tenant,message["correlation_id"],{"channel":message["channel"],"duplicate":duplicate})
             return self.send_json(200 if duplicate else 202,message)
+        if parsed.path.startswith("/api/v1/control/messages/") and parsed.path.endswith("/dispatch"):
+            if not tenant: return self.send_json(422,{"error":"tenant_required"})
+            message_id=parsed.path.split("/")[5]
+            try:
+                message=STORE.get_message(message_id,tenant)
+                if message["status"] not in {"queued","failed","rejected","deferred"}: raise ControlPlaneError("message_not_dispatchable")
+                if message["status"] != "queued": message=STORE.retry_message(message_id,tenant)
+            except ControlPlaneError as exc: return self.send_json(409 if "not_dispatchable" in str(exc) else 404,{"error":str(exc)})
+            STORE.audit(op[0],op[1],"message.dispatch.requested","message",message_id,tenant,message["correlation_id"])
+            return self.send_json(202,message)
+        if parsed.path.startswith("/api/v1/results/messages/"):
+            if not tenant: return self.send_json(422,{"error":"tenant_required"})
+            message_id=parsed.path.rsplit("/",1)[-1]
+            try:
+                changed=STORE.transition_message(message_id,tenant,str(value["status"]).lower(),str(value.get("provider_status") or value["status"]),
+                  event_id=str(value.get("event_id") or uuid.uuid4()),provider_message_id=value.get("provider_message_id"),error_code=value.get("error_code"),payload=value)
+                message=STORE.get_message(message_id,tenant)
+            except (KeyError,ControlPlaneError) as exc: return self.send_json(409 if str(exc)=="idempotency_conflict" else 422,{"error":str(exc)})
+            return self.send_json(200 if not changed else 202,message)
         if parsed.path == "/v1/crawler/jobs":
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
             value["tenant_id"]=tenant

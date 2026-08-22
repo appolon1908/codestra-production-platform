@@ -10,7 +10,12 @@ services:
       - name: control-plane-control
         hosts: [api.codestra.co]
         paths: [/api/v1/control]
-        methods: [GET, POST]
+        methods: [GET, POST, PATCH]
+        strip_path: false
+      - name: communication-message-read
+        hosts: [api.codestra.co]
+        paths: [/api/v1/messages]
+        methods: [GET]
         strip_path: false
       - name: control-plane-events
         hosts: [api.codestra.co]
@@ -46,5 +51,11 @@ services:
         config: {minute: 120, policy: local, fault_tolerant: false, hide_client_headers: false}
       - name: correlation-id
         config: {header_name: X-Correlation-ID, generator: uuid, echo_downstream: true}
+      - name: pre-function
+        config:
+          access:
+            - |
+              local scheme = kong.request.get_forwarded_scheme()
+              if scheme ~= "https" then return kong.response.exit(426,{error="https_required"}) end
 # Scope enforcement is performed by the pre-function policy installed from
 # deploy/kong/scope-policy.lua. Consumers remain separate Keycloak clients.

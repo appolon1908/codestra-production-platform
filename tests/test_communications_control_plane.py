@@ -32,6 +32,7 @@ class CommunicationsTests(unittest.TestCase):
         first,_=self.store.create_message(request()); second,duplicate=self.store.create_message(request())
         self.assertTrue(duplicate); self.assertEqual(first["message_id"],second["message_id"])
         with self.assertRaisesRegex(ControlPlaneError,"idempotency_conflict"): self.store.create_message(request(recipient="+18095550102"))
+        with self.assertRaisesRegex(ControlPlaneError,"idempotency_conflict"): self.store.create_message(request(content="altered"))
 
     def test_marketing_consent_and_cross_tenant_isolation(self):
         with self.assertRaisesRegex(ControlPlaneError,"consent_required"): self.store.create_message(request(tenant="tenant-b"))
@@ -50,6 +51,13 @@ class CommunicationsTests(unittest.TestCase):
         message,_=self.store.create_message(request("email")); env=validate_envelope({"event_type":"klyrow.email.complained","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"event-1","payload":{"message_id":message["message_id"],"status":"complained"}},"klyrow","event-1")
         self.assertTrue(self.store.apply_provider_event("klyrow",env)); self.assertFalse(self.store.apply_provider_event("klyrow",env))
         self.assertFalse(self.store.preference_allows("tenant-a","customer-1","email"))
+
+    def test_terminal_status_does_not_regress_on_late_event(self):
+        message,_=self.store.create_message(request())
+        self.assertTrue(self.store.transition_message(message["message_id"],"tenant-a","delivered","DELIVERED",event_id="delivered"))
+        self.assertTrue(self.store.transition_message(message["message_id"],"tenant-a","sent","SENT",event_id="late-sent"))
+        self.assertEqual(self.store.get_message(message["message_id"],"tenant-a")["status"],"delivered")
+        self.assertEqual(len(self.store.message_events(message["message_id"],"tenant-a")),3)
 
     def test_sms_stop_optout(self):
         message,_=self.store.create_message(request()); env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"stop-1","payload":{"message_id":message["message_id"],"status":"received","text":"STOP"}},"telnexa","stop-1")

@@ -410,7 +410,16 @@ class Store:
                 self._append_message_event(db, message_id, tenant, f"{channel}.queued", "queued", "queued", value["correlation_id"])
         except IntegrityError:
             with self.connect() as db: row = db.execute("SELECT * FROM messages WHERE tenant_id=? AND idempotency_key=?", (tenant,value["idempotency_key"])).fetchone()
-            if row and row["channel"] == channel and row["normalized_destination"] == destination and row["customer_id"] == customer: return dict(row), True
+            expected_payload=json.dumps(content_payload,separators=(",",":"))
+            if row and all((
+                row["channel"] == channel,
+                row["normalized_destination"] == destination,
+                row["customer_id"] == customer,
+                row["sender"] == value["sender"],
+                row["classification"] == value["classification"],
+                row["campaign_id"] == value.get("campaign_id"),
+                row["content_payload"] == expected_payload,
+            )): return dict(row), True
             raise ControlPlaneError("idempotency_conflict")
         return self.get_message(message_id, tenant), False
 
@@ -454,6 +463,13 @@ class Store:
         message=self.get_message(message_id,tenant); stamp=now_iso(); timestamp_col={"accepted":"accepted_at","sent":"sent_at","delivered":"delivered_at","failed":"failed_at","rejected":"failed_at","bounced":"failed_at"}.get(status)
         with self.connect() as db:
             if not self._append_message_event(db,message_id,tenant,f'{message["channel"]}.{status}',status,raw_status,message["correlation_id"],event_id,payload): return False
+            rank={"created":0,"validated":1,"queued":2,"accepted":3,"sent":4,"deferred":4,
+                  "delivered":6,"inbound_received":6,"failed":6,"rejected":6,"expired":6,
+                  "undeliverable":6,"bounced":7,"complained":8,"unsubscribed":9,
+                  "cancelled":9,"opted_out":9}
+            current=str(message["status"])
+            if rank.get(status,0) < rank.get(current,0):
+                return True
             sql="UPDATE messages SET status=?,raw_provider_status=?,provider_message_id=COALESCE(?,provider_message_id),provider_error_code=?"; args:list[Any]=[status,raw_status,provider_message_id,error_code]
             if timestamp_col: sql+=f",{timestamp_col}=?"; args.append(stamp)
             sql+=" WHERE message_id=? AND tenant_id=?"; args.extend((message_id,tenant)); db.execute(sql,args)
