@@ -16,6 +16,7 @@ def test_odoo_callback_identity_is_bounded_and_has_no_secret():
     assert client["directAccessGrantsEnabled"] is False
     assert client["implicitFlowEnabled"] is False
     assert client["fullScopeAllowed"] is False
+    assert client["defaultClientScopes"] == ["roles"]
     assert set(client["optionalClientScopes"]) == {"callbacks.read", "callbacks.write"}
     assert IDENTITY["serviceAccountRealmRoles"] == ["service"]
     assert IDENTITY["delivery"]["syntheticOnly"] is True
