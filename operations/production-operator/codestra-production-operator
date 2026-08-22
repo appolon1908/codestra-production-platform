@@ -76,14 +76,20 @@ class OperatorError(RuntimeError):
 
 
 def checked_root_file(path: Path, *, expected_mode: int = 0o600) -> str:
-    info = path.lstat()
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise OperatorError(f"required root file unavailable: {path}") from error
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
         raise OperatorError(f"unsafe file type: {path}")
     if info.st_uid != 0 or info.st_gid != 0:
         raise OperatorError(f"unsafe ownership: {path}")
     if stat.S_IMODE(info.st_mode) != expected_mode:
         raise OperatorError(f"unsafe mode: {path}")
-    return path.read_text(encoding="ascii").strip()
+    try:
+        return path.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError) as error:
+        raise OperatorError(f"required root file unreadable: {path}") from error
 
 
 OWNER_WINDOW_WAIVER_STATEMENTS = {

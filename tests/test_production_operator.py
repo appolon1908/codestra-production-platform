@@ -109,7 +109,7 @@ def test_outside_window_without_waiver_is_denied(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(OPERATOR, "OWNER_WAIVER_DIR", tmp_path)
     monkeypatch.setattr(OPERATOR, "OWNER_WINDOW_WAIVER", tmp_path / "OWNER-MAINTENANCE-WINDOW-WAIVER.txt")
     monkeypatch.setattr(OPERATOR, "OWNER_WINDOW_WAIVER_CHECKSUM", tmp_path / "OWNER-MAINTENANCE-WINDOW-WAIVER.sha256")
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(OPERATOR.OperatorError, match="unavailable"):
         OPERATOR.validate_owner_window_waiver()
 
 
