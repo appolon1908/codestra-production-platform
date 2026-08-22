@@ -84,8 +84,16 @@ def require_plugin(plugin: dict, expected_config: dict, description: str) -> Non
 
 def plugin_form(config: dict) -> dict:
     """Translate canonical Admin API config into Kong's form-encoded fields."""
+    def form_value(value):
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return value
+
     return {
-        f"config.{key}{'[]' if isinstance(value, list) else ''}": value
+        f"config.{key}{'[]' if isinstance(value, list) else ''}": (
+            [form_value(item) for item in value] if isinstance(value, list)
+            else form_value(value)
+        )
         for key, value in config.items()
     }
 
