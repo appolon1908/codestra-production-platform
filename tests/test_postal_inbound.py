@@ -7,7 +7,7 @@ from control_plane_service.postal_inbound import PostalInboundAdapter, sanitize_
 
 
 class Router:
-    def route_inbound(self, recipient):
+    def route_inbound(self, recipient, tenant_id=None):
         if recipient.lower() != "maria@codestra.co":
             raise ControlPlaneError("inbound_recipient_not_found")
         return {"tenant_id": "COD", "campaign_id": "campaign-1", "agent_id": "agent-1",
@@ -70,6 +70,7 @@ def test_exact_inbound_preserves_threading_and_delivers_only_scanned_attachment(
     assert result["references"] == ["<root@klyrow.test>", "<parent@klyrow.test>"]
     assert scanner.calls and storage.clean and not storage.quarantine
     assert projection.values[0]["attachments"][0]["scan_result"] == "CLEAN"
+    assert projection.values[0]["attachments"][0]["object_reference"]
 
 
 @pytest.mark.parametrize("recipient", ["unknown@codestra.co", "random@codestra.co"])

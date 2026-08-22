@@ -13,6 +13,7 @@ services:
       CRM_KONG_SHARED_SECRET_SHA256_FILE: /run/secrets/crm_gateway_secret_verifier
       KONG_GATEWAY_SHARED_SECRET_SHA256_FILE: /run/secrets/kong_gateway_secret_verifier
       CONTROL_PLANE_TRUSTED_PROXY_CIDRS: ${CONTROL_PLANE_TRUSTED_PROXY_CIDRS:-172.19.0.18/32}
+      POSTAL_INBOUND_ENABLED: "false"
     ports: ["127.0.0.1:8096:8096"]
     secrets: [control_plane_database_url, crm_gateway_secret_verifier, kong_gateway_secret_verifier]
     read_only: true

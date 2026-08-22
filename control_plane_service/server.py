@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hmac
 import hashlib
+import base64
+import binascii
 import json
 import os
 import uuid
@@ -27,10 +29,12 @@ from .providers import ProviderError, crawler_action, submit_crawler
 from .crm import ACTIVITY_FIELDS, CREATE_FIELDS, PATCH_FIELDS, CrmService, request_hash
 from .forms import FormService, ORIGINS
 from .mapping_registry import MappingRegistry
+from .postal_runtime import PostalInbox, production_adapter
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
 STORE = Store(DB)
 MAPPINGS = MappingRegistry(DB)
+POSTAL_INBOX = PostalInbox(DB)
 TTL = int(os.getenv("CONTROL_PLANE_HMAC_TTL", "300"))
 MAX_BODY = int(os.getenv("CONTROL_PLANE_MAX_BODY", "524288"))
 
@@ -86,9 +90,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-Correlation-ID")
         self.send_header("Access-Control-Max-Age", "600"); self.end_headers()
 
-    def body(self) -> bytes:
+    def body(self, maximum: int = MAX_BODY) -> bytes:
         length = int(self.headers.get("Content-Length", "0"))
-        if length < 1 or length > MAX_BODY:
+        if length < 1 or length > maximum:
             raise ControlPlaneError("invalid_body_size")
         return self.rfile.read(length)
 
@@ -264,6 +268,40 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/v1/integrations/postal/inbound":
+            if os.getenv("POSTAL_INBOUND_ENABLED", "false") != "true":
+                return self.send_json(503, {"error": "postal_inbound_disabled"})
+            maximum = int(os.getenv("POSTAL_MAX_WEBHOOK_BYTES", "36700160"))
+            try: body = self.body(maximum)
+            except (ControlPlaneError, ValueError): return self.send_json(413, {"error": "invalid_body_size"})
+            api_key, secret = identity("postal")
+            supplied = self.headers.get("Authorization", "").removeprefix("Bearer ")
+            digest = os.getenv("POSTAL_MIDDLEWARE_API_KEY_SHA256", "")
+            if not credential_matches(supplied, api_key, digest):
+                return self.send_json(401, {"error": "invalid_api_key"})
+            event_id = self.headers.get("X-Event-Id", "")
+            timestamp = self.headers.get("X-Timestamp", "")
+            signature = self.headers.get("X-Signature", "")
+            correlation = self.headers.get("X-Correlation-Id", "")
+            try:
+                verify_signature(secret, timestamp, event_id, "postal", body, signature, TTL)
+                value = json.loads(body)
+                if not isinstance(value, dict): raise ControlPlaneError("object_required")
+                tenant = str(value.get("tenant_id") or "")
+                recipient = str(value.get("recipient") or "")
+                if not tenant or not recipient or not correlation:
+                    raise ControlPlaneError("inbound_metadata_required")
+                raw_message = base64.b64decode(str(value.get("raw_message_base64") or ""), validate=True)
+                result, duplicate = POSTAL_INBOX.run(
+                    tenant_id=tenant, provider_event_id=event_id, correlation_id=correlation,
+                    recipient=recipient, raw_message=raw_message, adapter=production_adapter(DB))
+                return self.send_json(200 if duplicate else 201, {**result, "duplicate": duplicate})
+            except (json.JSONDecodeError, binascii.Error, ValueError):
+                return self.send_json(422, {"error": "invalid_inbound_payload", "correlation_id": correlation})
+            except ControlPlaneError as exc:
+                message = str(exc)
+                code = 409 if message in {"inbound_idempotency_conflict", "inbound_processing"} else 503 if message.endswith(("_unavailable", "_not_configured")) else 403 if message in {"invalid_signature", "expired_signature"} else 422
+                return self.send_json(code, {"error": message, "correlation_id": correlation})
         if parsed.path.startswith("/v1/forms/"):
             origin = self.headers.get("Origin", "")
             try:
