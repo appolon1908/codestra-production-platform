@@ -1,0 +1,42 @@
+openapi: 3.1.0
+info: {title: Codestra Mail Control Plane API, version: 1.0.0}
+servers: [{url: https://api.codestra.co}]
+security: [{keycloakOAuth: [mail.read]}]
+paths:
+  /api/v1/mail/messages:
+    get: {operationId: listMessages, security: [{keycloakOAuth: [mail.read]}], responses: {'200': {description: OK}}}
+    post: {operationId: sendMessage, security: [{keycloakOAuth: [mail.send]}], responses: {'202': {description: Queued}, '403': {description: Domain or campaign denied}}}
+  /api/v1/mail/messages/{id}:
+    parameters: [{in: path, name: id, required: true, schema: {type: string, format: uuid}}]
+    get: {operationId: getMessage, security: [{keycloakOAuth: [mail.read]}], responses: {'200': {description: OK}}}
+  /api/v1/mail/messages/{id}/reply:
+    parameters: [{in: path, name: id, required: true, schema: {type: string, format: uuid}}]
+    post: {operationId: replyMessage, security: [{keycloakOAuth: [mail.send]}], responses: {'202': {description: Queued}}}
+  /api/v1/mail/messages/{id}/forward:
+    parameters: [{in: path, name: id, required: true, schema: {type: string, format: uuid}}]
+    post: {operationId: forwardMessage, security: [{keycloakOAuth: [mail.send]}], responses: {'202': {description: Queued}}}
+  /api/v1/mail/mailboxes:
+    get: {operationId: listMailboxes, security: [{keycloakOAuth: [mailbox.manage.self]}], responses: {'200': {description: OK}}}
+  /api/v1/admin/mail/users:
+    post: {operationId: createMailUser, security: [{keycloakOAuth: [mail.admin]}], responses: {'202': {description: Provisioning queued}}}
+  /api/v1/admin/mail/domains:
+    post: {operationId: createMailDomain, security: [{keycloakOAuth: [mail.admin]}], responses: {'201': {description: Created}, '409': {description: Domain campaign conflict}}}
+  /api/v1/admin/mail/aliases:
+    post: {operationId: createMailAlias, security: [{keycloakOAuth: [mailbox.manage.domain]}], responses: {'201': {description: Created}, '403': {description: Domain denied}}}
+  /api/v1/admin/mail/domain-mappings:
+    get: {operationId: listDomainMappings, security: [{keycloakOAuth: [mail.admin]}], responses: {'200': {description: OK}}}
+components:
+  securitySchemes:
+    keycloakOAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://auth.codestra.co/realms/codestra/protocol/openid-connect/auth
+          tokenUrl: https://auth.codestra.co/realms/codestra/protocol/openid-connect/token
+          scopes:
+            mail.read: Read authorized mailbox data
+            mail.send: Send from authorized addresses
+            mailbox.manage.self: Manage own mailbox
+            mailbox.manage.domain: Manage an assigned domain
+            mail.admin: Administer mail registry
+            mail.domain.override: Explicit audited cross-domain override

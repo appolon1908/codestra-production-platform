@@ -1,0 +1,16 @@
+[
+  {"domain":"codestra.agency","brand":"Codestra","domain_type":"CORPORATE_ADMIN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"codestra.co","brand":"Codestra","domain_type":"CORPORATE_ADMIN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"nativoenglish.com","brand":"Nativo English","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"moneybeeloan.com","brand":"MoneyBee","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"codestra.cloud","brand":"Codestra","domain_type":"SERVICE_ONLY","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"codestra.digital","brand":"Codestra","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"codestra.media","brand":"Codestra","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"moneybee.loan","brand":"MoneyBee","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"klyrow.com","brand":"Klyrow","domain_type":"SYSTEM_TRANSACTIONAL","assignment_status":"SYSTEM_ONLY"},
+  {"domain":"beyvra.com","brand":"Beyvra","domain_type":"SYSTEM_TRANSACTIONAL","assignment_status":"SYSTEM_ONLY"},
+  {"domain":"kyqra.com","brand":"Kyqra","domain_type":"SERVICE_ONLY","assignment_status":"SYSTEM_ONLY"},
+  {"domain":"breero.com","brand":"Breero","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"breero.shop","brand":"Breero","domain_type":"AGENT_CAMPAIGN","assignment_status":"BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT"},
+  {"domain":"telnexa.co","brand":"Telnexa","domain_type":"SERVICE_ONLY","assignment_status":"SYSTEM_ONLY"}
+]
