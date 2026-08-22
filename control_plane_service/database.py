@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from typing import Any, Iterable
@@ -24,9 +25,17 @@ def is_postgres() -> bool:
 if is_postgres():
     import psycopg
     from psycopg.rows import dict_row
+    from psycopg.types.json import Jsonb
     IntegrityError = psycopg.IntegrityError
 else:
     IntegrityError = sqlite3.IntegrityError
+
+
+def json_value(value: Any) -> Any:
+    """Return a value explicitly adapted for the active JSON storage type."""
+    if is_postgres():
+        return Jsonb(value)
+    return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
 
 def _postgres_sql(sql: str) -> str:
@@ -34,6 +43,7 @@ def _postgres_sql(sql: str) -> str:
     # The embedded test schema uses collision-resistant cp_* names. PostgreSQL
     # exposes the same model as the dedicated control_plane schema.
     mapping = {
+        "postal_inbound_event": "control_plane.postal_inbound_event",
         "cp_campaign_email_domain": "control_plane.campaign_email_domain",
         "cp_agent_mailbox": "control_plane.agent_mailbox",
         "cp_mailbox_provisioning_event": "control_plane.mailbox_provisioning_event",
