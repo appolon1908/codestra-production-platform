@@ -1,4 +1,7 @@
 from pathlib import Path
+import hashlib
+
+from control_plane_service.server import Handler
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -13,6 +16,20 @@ def test_callers_have_distinct_scopes_and_cross_tenant_denial():
     for scope in ("campaign.write","agent.write","mapping.read","mapping.read.minimum","sync.execute","sync.result.write","reconciliation.read","reconciliation.execute"):
         assert scope in policy
     assert "cross_tenant_denied" in policy
+    assert "KONG_CONTROL_PLANE_GATEWAY_SECRET" in policy
+
+
+def test_trusted_proxy_headers_also_require_gateway_secret(monkeypatch,tmp_path):
+    secret="synthetic-gateway-secret"
+    verifier=tmp_path/"verifier"; verifier.write_text(hashlib.sha256(secret.encode()).hexdigest())
+    monkeypatch.setenv("CONTROL_PLANE_TRUSTED_PROXY_CIDRS","10.0.0.2/32")
+    monkeypatch.setenv("KONG_GATEWAY_SHARED_SECRET_SHA256_FILE",str(verifier))
+    handler=Handler.__new__(Handler); handler.client_address=("10.0.0.2",1234)
+    handler.headers={"X-Authenticated-Client":"n8n","X-Authenticated-Tenant":"COD"}
+    denied=[]; handler.send_json=lambda code,value: denied.append((code,value))
+    assert handler.auth_operator({"tenant_admin"}) is None and denied[0][0]==403
+    handler.headers["X-Codestra-Gateway-Secret"]=secret
+    assert handler.auth_operator({"tenant_admin"}) == ("n8n","tenant_admin","COD")
 
 def test_canonical_message_routes_and_scopes_are_explicit():
     kong=(ROOT/"deploy/kong/control-plane.yml").read_text()

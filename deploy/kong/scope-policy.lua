@@ -27,3 +27,6 @@ if tenant and tenant ~= claims.tenant then
 end
 kong.service.request.set_header("X-Authenticated-Client", claims.azp or "unknown")
 kong.service.request.set_header("X-Authenticated-Tenant", claims.tenant or "")
+local gateway_secret=os.getenv("KONG_CONTROL_PLANE_GATEWAY_SECRET")
+if not gateway_secret or gateway_secret=="" then return kong.response.exit(503,{error="gateway_identity_unavailable"}) end
+kong.service.request.set_header("X-Codestra-Gateway-Secret",gateway_secret)

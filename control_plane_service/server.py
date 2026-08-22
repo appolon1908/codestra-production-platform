@@ -101,7 +101,11 @@ class Handler(BaseHTTPRequestHandler):
             proxy_cidrs=[]; peer=None
         client=self.headers.get("X-Authenticated-Client","")
         tenant=self.headers.get("X-Authenticated-Tenant","")
-        if peer is not None and client and tenant and any(peer in network for network in proxy_cidrs):
+        gateway_verifier=verifier("KONG_GATEWAY_SHARED_SECRET")
+        gateway_secret=self.headers.get("X-Codestra-Gateway-Secret","")
+        gateway_valid=bool(gateway_verifier) and hmac.compare_digest(
+            gateway_verifier,hashlib.sha256(gateway_secret.encode()).hexdigest())
+        if peer is not None and client and tenant and gateway_valid and any(peer in network for network in proxy_cidrs):
             return (client,"tenant_admin",tenant)
         raw = self.headers.get("Authorization", "").removeprefix("Bearer ")
         value = operator(raw)
