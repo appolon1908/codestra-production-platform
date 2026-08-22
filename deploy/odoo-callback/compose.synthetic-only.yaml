@@ -1,0 +1,57 @@
+services:
+  odoo:
+    environment:
+      CODESTRA_CALLBACK_SYNC_ENABLED: "true"
+      CODESTRA_CALLBACK_API_BASE_URL: "https://api.codestra.co/api/v1"
+      CODESTRA_CALLBACK_TOKEN_URL: "https://auth.codestra.co/realms/codestra/protocol/openid-connect/token"
+      CODESTRA_CALLBACK_CLIENT_ID: "codestra-odoo-callback-service"
+      CODESTRA_CALLBACK_CLIENT_SECRET_FILE: "/run/secrets/odoo_callback_client_secret"
+      CODESTRA_CALLBACK_CA_FILE: "/etc/ssl/certs/ca-certificates.crt"
+      CODESTRA_CALLBACK_ALLOWED_TENANT: "COD"
+      CODESTRA_CALLBACK_ALLOWED_CAMPAIGN: "TEST_SYN"
+    volumes:
+      - ${ODOO_CALLBACK_ADDON_RELEASE:?exact reviewed addon release required}:/mnt/extra-addons/codestra_appointments:ro
+      - /etc/codestra/secrets/odoo-callback/client_secret:/run/secrets/odoo_callback_client_secret:ro
+
+  middleware-integration-api:
+    environment:
+      CALLBACK_TEST_SYN_ENABLED: "true"
+      CALLBACK_ALLOWED_TENANT: "COD"
+      CALLBACK_ALLOWED_CAMPAIGN: "TEST_SYN"
+      CALLBACK_JWT_AUTHORIZED_PARTIES: "codestra-agent-desktop,codestra-agent-auth-gateway,codestra-odoo-callback-service"
+      CALLBACK_EMAIL_COMMAND_ENABLED: "false"
+      CALLBACK_DELIVERY_ENABLED: "false"
+      LIVE_EMAIL_DELIVERY: "false"
+      LIVE_PSTN_DIALING: "false"
+      ODOO_DELIVERY_ENABLED: "false"
+      ODOO_RESULT_DELIVERY_ENABLED: "false"
+      ODOO_WRITE_ENABLED: "false"
+      ODOO_AUTOMATION_WRITES_ENABLED: "false"
+
+  middleware-scheduler:
+    environment:
+      CALLBACK_TEST_SYN_ENABLED: "true"
+      CALLBACK_ALLOWED_TENANT: "COD"
+      CALLBACK_ALLOWED_CAMPAIGN: "TEST_SYN"
+      CALLBACK_EMAIL_COMMAND_ENABLED: "false"
+      CALLBACK_DELIVERY_ENABLED: "false"
+      LIVE_EMAIL_DELIVERY: "false"
+      LIVE_PSTN_DIALING: "false"
+      ODOO_DELIVERY_ENABLED: "false"
+      ODOO_RESULT_DELIVERY_ENABLED: "false"
+      ODOO_WRITE_ENABLED: "false"
+      ODOO_AUTOMATION_WRITES_ENABLED: "false"
+
+  middleware-notification-worker:
+    environment:
+      CALLBACK_TEST_SYN_ENABLED: "true"
+      CALLBACK_ALLOWED_TENANT: "COD"
+      CALLBACK_ALLOWED_CAMPAIGN: "TEST_SYN"
+      CALLBACK_EMAIL_COMMAND_ENABLED: "false"
+      CALLBACK_DELIVERY_ENABLED: "false"
+      LIVE_EMAIL_DELIVERY: "false"
+      LIVE_PSTN_DIALING: "false"
+      ODOO_DELIVERY_ENABLED: "false"
+      ODOO_RESULT_DELIVERY_ENABLED: "false"
+      ODOO_WRITE_ENABLED: "false"
+      ODOO_AUTOMATION_WRITES_ENABLED: "false"
