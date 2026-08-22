@@ -38,14 +38,35 @@ For each dedicated cluster independently:
 
 ## Cutover
 
-Cut over one database/application pair at a time. Stop only that application,
-stop the old database, attach the candidate to the original private network
-alias, and start the application. This restart is a remediation cutover—not a
-restart-recovery test. Require readiness before beginning the next pair.
+Cut over one database/application pair at a time. The pre-cutover candidate is
+only a rehearsal and must never become authoritative from its point-in-time
+backup. For the final cutover:
+
+1. Stop only that application and prove its database connection count is zero.
+   Keep the old database running but quiesced; no writer may remain connected.
+2. Create and checksum a new logical globals backup and application-database
+   backup from the quiesced old cluster. Any new connection or checksum failure
+   blocks cutover and requires the application to be restored on the old
+   cluster.
+3. Restore those final backups into a fresh candidate volume initialized with
+   `codestra_cluster_admin`. Do not layer the final restore over the rehearsal
+   candidate.
+4. Apply `reconcile_application_role.sql`, then rerun the restore-integrity,
+   role-negative, persistent TEST_SYN read/write/rollback, and migration-head
+   checks against the final candidate while the production application remains
+   stopped.
+5. Stop the old database, attach the final candidate to the original private
+   network alias, and start the application with its unchanged credential
+   mount. This restart is a remediation cutover—not a restart-recovery test.
+   Require readiness and record-count reconciliation before beginning the next
+   pair.
 
 Do not delete or reuse the old volume. If readiness or the persistent probe
 fails, stop the candidate, restore the original database container/network
-alias, start the application, and record the rollback.
+alias, start the application, and record the rollback. Because the original
+application was quiesced before the final backup and remains stopped through
+the switch, the retained old volume and final backup represent the same
+authoritative write boundary; do not accept traffic on both clusters.
 
 ## Required readback
 
