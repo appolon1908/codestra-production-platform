@@ -19,14 +19,15 @@ elseif path:find("^/api/v1/control/adapters") then required = "sync.execute" end
 if required and not scopes[required] then return kong.response.exit(403,{error="insufficient_scope",required_scope=required}) end
 
 local tenant = kong.request.get_header("X-Tenant-ID")
-if not claims.tenant or claims.tenant == "" then
+local authorized_tenant = claims.tenant_id or claims.tenant
+if not authorized_tenant or authorized_tenant == "" then
   return kong.response.exit(403,{error="tenant_claim_required"})
 end
-if tenant and tenant ~= claims.tenant then
+if tenant and tenant ~= authorized_tenant then
   return kong.response.exit(403,{error="cross_tenant_denied"})
 end
 kong.service.request.set_header("X-Authenticated-Client", claims.azp or "unknown")
-kong.service.request.set_header("X-Authenticated-Tenant", claims.tenant or "")
+kong.service.request.set_header("X-Authenticated-Tenant", authorized_tenant)
 local gateway_secret=os.getenv("KONG_CONTROL_PLANE_GATEWAY_SECRET")
 if not gateway_secret or gateway_secret=="" then return kong.response.exit(503,{error="gateway_identity_unavailable"}) end
 kong.service.request.set_header("X-Codestra-Gateway-Secret",gateway_secret)
