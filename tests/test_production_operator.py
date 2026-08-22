@@ -133,6 +133,19 @@ def test_wrong_owner_waiver_checksum_is_denied(monkeypatch, tmp_path) -> None:
         OPERATOR.validate_owner_window_waiver()
 
 
+def test_owner_waiver_checksum_covers_exact_bytes(monkeypatch, tmp_path) -> None:
+    waiver, checksum = _waiver_files(tmp_path, monkeypatch)
+    exact = waiver.read_bytes().rstrip(b"\n")
+    waiver.write_bytes(exact)
+    normalized_digest = __import__("hashlib").sha256(exact + b"\n").hexdigest()
+    checksum.write_text(
+        f"{normalized_digest}  OWNER-MAINTENANCE-WINDOW-WAIVER.txt\n",
+        encoding="ascii",
+    )
+    with pytest.raises(OPERATOR.OperatorError, match="checksum mismatch"):
+        OPERATOR.validate_owner_window_waiver()
+
+
 def test_unsafe_owner_waiver_permissions_are_denied(monkeypatch, tmp_path) -> None:
     waiver, _ = _waiver_files(tmp_path, monkeypatch)
     waiver.chmod(0o660)

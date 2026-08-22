@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import errno
 import fcntl
 import hashlib
 import json
@@ -75,20 +76,28 @@ class OperatorError(RuntimeError):
     pass
 
 
+def checked_root_bytes(path: Path, *, expected_mode: int = 0o600) -> bytes:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise OperatorError(f"unsafe file type: {path}") from error
+        raise OperatorError(f"required root file unavailable: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OperatorError(f"unsafe file type: {path}")
+        if info.st_uid != 0 or info.st_gid != 0:
+            raise OperatorError(f"unsafe ownership: {path}")
+        if stat.S_IMODE(info.st_mode) != expected_mode:
+            raise OperatorError(f"unsafe mode: {path}")
+        return stream.read()
+
+
 def checked_root_file(path: Path, *, expected_mode: int = 0o600) -> str:
     try:
-        info = path.lstat()
-    except OSError as error:
-        raise OperatorError(f"required root file unavailable: {path}") from error
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        raise OperatorError(f"unsafe file type: {path}")
-    if info.st_uid != 0 or info.st_gid != 0:
-        raise OperatorError(f"unsafe ownership: {path}")
-    if stat.S_IMODE(info.st_mode) != expected_mode:
-        raise OperatorError(f"unsafe mode: {path}")
-    try:
-        return path.read_text(encoding="ascii").strip()
-    except (OSError, UnicodeError) as error:
+        return checked_root_bytes(path, expected_mode=expected_mode).decode("ascii").strip()
+    except UnicodeError as error:
         raise OperatorError(f"required root file unreadable: {path}") from error
 
 
@@ -104,14 +113,18 @@ def validate_owner_window_waiver() -> dict[str, str]:
     """Validate the one fixed, root-controlled owner maintenance waiver."""
     if OWNER_WINDOW_WAIVER.parent != OWNER_WAIVER_DIR or OWNER_WINDOW_WAIVER_CHECKSUM.parent != OWNER_WAIVER_DIR:
         raise OperatorError("owner waiver path escaped approved evidence directory")
-    waiver = checked_root_file(OWNER_WINDOW_WAIVER)
+    waiver_bytes = checked_root_bytes(OWNER_WINDOW_WAIVER)
+    try:
+        waiver = waiver_bytes.decode("ascii")
+    except UnicodeError as error:
+        raise OperatorError("owner waiver is not ASCII") from error
     checksum_record = checked_root_file(OWNER_WINDOW_WAIVER_CHECKSUM)
     match = re.fullmatch(
         r"([0-9a-f]{64})  OWNER-MAINTENANCE-WINDOW-WAIVER\.txt", checksum_record
     )
     if match is None:
         raise OperatorError("owner waiver checksum record is malformed")
-    actual = hashlib.sha256((waiver + "\n").encode("ascii")).hexdigest()
+    actual = hashlib.sha256(waiver_bytes).hexdigest()
     if actual != match.group(1):
         raise OperatorError("owner waiver checksum mismatch")
     statements = set(waiver.splitlines())
