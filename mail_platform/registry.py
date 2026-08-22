@@ -175,6 +175,17 @@ class MailRegistry:
              sender.lower(), json.dumps([value.lower() for value in recipients]), thread_uuid, message_id,
              in_reply_to, json.dumps(refs), correlation_id, idempotency_key, stamp, stamp),
         )
+        outbox_payload = {
+            "event_type": "OutboundMailRequestedV1" if direction == "OUTBOUND" else "InboundMailReceivedV1",
+            "message_uuid": message_uuid, "thread_uuid": thread_uuid, "tenant": tenant,
+            "campaign": route["campaign_id"], "domain": route["domain"], "correlation_id": correlation_id,
+            "idempotency_key": idempotency_key, "direction": direction,
+        }
+        self.db.execute("""INSERT INTO mail_outbox(outbox_uuid,aggregate_uuid,event_type,payload_json,
+            correlation_id,idempotency_key,state,attempts,available_at,created_at)
+            VALUES(?,?,?,?,?,?,'PENDING',0,?,?)""",
+            (str(uuid.uuid4()), message_uuid, outbox_payload["event_type"],
+             json.dumps(outbox_payload, sort_keys=True), correlation_id, idempotency_key, stamp, stamp))
         self._audit(actor_uuid or "inbound-mail-adapter", "mail.message.registered", route.get("domain_id"),
                     route["campaign_id"], None, message_uuid, "ALLOW")
         self.db.commit()

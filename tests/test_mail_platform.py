@@ -129,3 +129,4 @@ def test_threading_and_idempotency_preserve_one_thread(registry):
     assert duplicate["message_uuid"] == first["message_uuid"] and duplicate["duplicate"]
     assert registry.db.execute("SELECT count(DISTINCT thread_uuid) FROM mail_message").fetchone()[0] == 1
     assert registry.db.execute("SELECT count(*) FROM mail_message").fetchone()[0] == 2
+    assert registry.db.execute("SELECT count(*) FROM mail_outbox").fetchone()[0] == 2

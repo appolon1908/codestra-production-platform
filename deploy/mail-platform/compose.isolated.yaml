@@ -14,6 +14,8 @@ services:
       - "127.0.0.1:28443:443"
     environment:
       STALWART_PUBLIC_URL: https://mail.test:28443
+    env_file:
+      - /etc/codestra/secrets/mail-platform/stalwart/runtime.env
     healthcheck:
       test: [CMD, /usr/local/bin/stalwart, --version]
       interval: 30s

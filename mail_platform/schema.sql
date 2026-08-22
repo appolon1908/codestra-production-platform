@@ -93,3 +93,20 @@ CREATE TABLE IF NOT EXISTS mail_app_password (
   created_at TEXT NOT NULL, rotated_at TEXT, revoked_at TEXT,
   UNIQUE(mail_user_uuid,label)
 );
+
+CREATE TABLE IF NOT EXISTS mail_outbox (
+  outbox_uuid TEXT PRIMARY KEY,
+  aggregate_uuid TEXT NOT NULL REFERENCES mail_message(message_uuid) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  correlation_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL DEFAULT 'PENDING' CHECK(state IN ('PENDING','CLAIMED','PUBLISHED','FAILED')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  available_at TEXT NOT NULL,
+  claimed_at TEXT,
+  published_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mail_outbox_pending ON mail_outbox(state,available_at);
