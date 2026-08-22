@@ -30,6 +30,10 @@ if APPLY and not employee:
         "work_email": "synthetic.agent.test.syn.6101@invalid.example",
         "user_id": user.id, "active": True,
     })
+if APPLY and not user.active:
+    user.write({"active": True})
+if APPLY and not employee.active:
+    employee.write({"active": True})
 if APPLY and (not employee.user_id or employee.user_id != user):
     employee.write({"user_id": user.id})
 if not employee or not user:
@@ -79,6 +83,11 @@ agent_values = {
 }
 if APPLY:
     agent.write(agent_values) if agent else agent_model.create(agent_values)
+    user.invalidate_recordset(["active"])
+    employee.invalidate_recordset(["active", "user_id"])
+    if not user.active or not employee.active or employee.user_id != user:
+        env.cr.rollback()
+        raise RuntimeError("TEST_SYN Odoo anchors failed active/link readback")
     env.cr.commit()
 else:
     env.cr.rollback()

@@ -42,8 +42,10 @@ Cut over one database/application pair at a time. The pre-cutover candidate is
 only a rehearsal and must never become authoritative from its point-in-time
 backup. For the final cutover:
 
-1. Stop only that application and prove its database connection count is zero.
-   Keep the old database running but quiesced; no writer may remain connected.
+1. Quiesce this application's ingress at its edge and prove new requests are
+   denied or held. Stop only that application and prove its database connection
+   count is zero. Keep the old database running but quiesced; no writer may
+   remain connected.
 2. Create and checksum a new logical globals backup and application-database
    backup from the quiesced old cluster. Any new connection or checksum failure
    blocks cutover and requires the application to be restored on the old
@@ -58,12 +60,14 @@ backup. For the final cutover:
 5. Stop the old database, attach the final candidate to the original private
    network alias, and start the application with its unchanged credential
    mount. This restart is a remediation cutover—not a restart-recovery test.
-   Require readiness and record-count reconciliation before beginning the next
-   pair.
+   Keep edge ingress quiesced until readiness, the persistent probe, and
+   record-count reconciliation all pass. Only then restore ingress and begin
+   the next pair.
 
 Do not delete or reuse the old volume. If readiness or the persistent probe
 fails, stop the candidate, restore the original database container/network
-alias, start the application, and record the rollback. Because the original
+alias, start the application, verify it while ingress remains quiesced, then
+restore ingress and record the rollback. Because the original
 application was quiesced before the final backup and remains stopped through
 the switch, the retained old volume and final backup represent the same
 authoritative write boundary; do not accept traffic on both clusters.
