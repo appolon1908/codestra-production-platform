@@ -97,16 +97,20 @@ class CommunicationsTests(unittest.TestCase):
             else: os.environ["KLYROW_MODE"]=old_k
 
     def test_worker_dispatches_only_when_enabled(self):
-        message,_=self.store.create_message(request()); old_db=os.environ.get("CONTROL_PLANE_DB"); old_enabled=os.environ.get("CONTROL_PLANE_OUTBOUND_ENABLED")
+        message,_=self.store.create_message(request()); old_db=os.environ.get("CONTROL_PLANE_DB"); old_enabled=os.environ.get("CONTROL_PLANE_OUTBOUND_ENABLED"); old_gates=os.environ.get("CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED"); old_sms=os.environ.get("SMS_PRODUCTION")
         try:
             os.environ["CONTROL_PLANE_DB"]=self.path; os.environ["CONTROL_PLANE_OUTBOUND_ENABLED"]="false"; self.assertEqual(dispatch_messages(),0)
-            os.environ["CONTROL_PLANE_OUTBOUND_ENABLED"]="true"; os.environ["TELNEXA_MODE"]="simulator"; self.assertEqual(dispatch_messages(),1)
+            os.environ["CONTROL_PLANE_OUTBOUND_ENABLED"]="true"; os.environ["CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED"]="true"; os.environ["SMS_PRODUCTION"]="true"; os.environ["TELNEXA_MODE"]="simulator"; self.assertEqual(dispatch_messages(),1)
             self.assertEqual(self.store.get_message(message["message_id"],"tenant-a")["status"],"accepted")
         finally:
             if old_db is None: os.environ.pop("CONTROL_PLANE_DB",None)
             else: os.environ["CONTROL_PLANE_DB"]=old_db
             if old_enabled is None: os.environ.pop("CONTROL_PLANE_OUTBOUND_ENABLED",None)
             else: os.environ["CONTROL_PLANE_OUTBOUND_ENABLED"]=old_enabled
+            if old_gates is None: os.environ.pop("CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED",None)
+            else: os.environ["CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED"]=old_gates
+            if old_sms is None: os.environ.pop("SMS_PRODUCTION",None)
+            else: os.environ["SMS_PRODUCTION"]=old_sms
 
     def test_explicit_routing_policy_and_circuit_breaker(self):
         self.assertEqual(select_channel(self.store,"tenant-a","customer-1",{"preferred_channel":"email","classification":"marketing"}),"email")

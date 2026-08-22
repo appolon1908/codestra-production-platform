@@ -403,11 +403,15 @@ class Store:
         required = ("idempotency_key", "request_id", "correlation_id", "sender", "recipient", "source_application", "classification")
         if not tenant or not customer or any(not value.get(k) for k in required): raise ControlPlaneError("missing_message_fields")
         if value["classification"] not in {"marketing", "transactional"}: raise ControlPlaneError("invalid_classification")
+        if channel == "email" and value.get("campaign_id") == "COD-WEB-OUT" and value.get("business_unit_id") != "COD":
+            raise ControlPlaneError("campaign_business_unit_denied")
         destination = normalize_destination(channel, str(value["recipient"]))
         if value["classification"] == "marketing" and not self.preference_allows(tenant, customer, channel): raise ControlPlaneError("consent_required")
         if self.is_suppressed(tenant, channel, destination): raise ControlPlaneError("destination_suppressed")
         message_id = str(uuid.uuid4()); stamp = now_iso(); provider = "telnexa" if channel == "sms" else "klyrow"
         metadata = dict(value.get("content_metadata") or {}); metadata.pop("body", None); metadata.pop("html", None)
+        if value.get("business_unit_id"):
+            metadata["business_unit_id"] = str(value["business_unit_id"])
         content_payload={key:value[key] for key in ("content","subject","template_data") if key in value}
         fields = (message_id,channel,tenant,customer,value.get("external_reference"),value["correlation_id"],value["request_id"],value["idempotency_key"],"outbound",value["source_application"],value.get("campaign_id"),value.get("workflow_id"),value["sender"],value["recipient"],destination,value["classification"],json.dumps(metadata,sort_keys=True),json.dumps(content_payload,separators=(",",":")),provider,None,"queued",None,int(value.get("estimated_cost_minor",0)),None,None,value.get("currency","USD"),None,None,0,stamp,None,None,None,None,None)
         try:

@@ -10,7 +10,9 @@ def envelope():
             "occurred_at":"2026-08-22T00:00:00Z", "automation_key":"test_syn_followup", "payload":{}}
 
 
-def test_policy_is_tenant_bound_and_fail_closed_for_communications(tmp_path):
+def test_policy_is_tenant_bound_and_fail_closed_for_communications(tmp_path, monkeypatch):
+    monkeypatch.setenv("CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED", "true")
+    monkeypatch.setenv("GLOBAL_EMAIL_PRODUCTION", "true")
     store = Store(str(tmp_path / "control-plane.db"))
     assert authorize_automation(store, envelope(), "COD")["authorized"] is True
     wrong = envelope(); wrong["tenant_id"] = "OTHER"
