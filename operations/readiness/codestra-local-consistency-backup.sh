@@ -8,6 +8,50 @@ work_dir="${backup_root}/.work-${stamp}"
 final_dir="${backup_root}/${stamp}"
 paused=()
 
+validate_owner_window_waiver() {
+    /usr/bin/python3 - <<'PY'
+import hashlib
+import os
+import re
+import stat
+
+waiver_root = "/opt/codestra/evidence/production-readiness-soak/20260822T022734Z"
+waiver_path = f"{waiver_root}/OWNER-MAINTENANCE-WINDOW-WAIVER.txt"
+checksum_path = f"{waiver_root}/OWNER-MAINTENANCE-WINDOW-WAIVER.sha256"
+required = {
+    "MAINTENANCE_WINDOW=WAIVED_BY_OWNER",
+    "MAINTENANCE_WINDOW_WAIVER_APPROVED=YES",
+    "MAINTENANCE_WINDOW_WAIVER_AUTHORITY=OWNER",
+    "IMMEDIATE_PRODUCTION_MUTATION_AUTHORIZED=YES",
+}
+
+
+def read_root_file(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("unsafe file type")
+        if info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o600:
+            raise ValueError("unsafe ownership or mode")
+        return stream.read()
+
+
+try:
+    waiver = read_root_file(waiver_path)
+    checksum = read_root_file(checksum_path).decode("ascii").strip()
+    match = re.fullmatch(
+        r"([0-9a-f]{64})  OWNER-MAINTENANCE-WINDOW-WAIVER\.txt", checksum
+    )
+    if match is None or hashlib.sha256(waiver).hexdigest() != match.group(1):
+        raise ValueError("checksum mismatch")
+    if not required <= set(waiver.decode("ascii").splitlines()):
+        raise ValueError("authorization incomplete")
+except (OSError, UnicodeError, ValueError):
+    raise SystemExit(1)
+PY
+}
+
 resume_services() {
     local name
     local remaining=()
@@ -49,8 +93,10 @@ trap 'echo "BACKUP_STATUS=FAIL" >&2' ERR
 
 hour=$(TZ=America/New_York date +%H)
 if (( 10#$hour < 0 || 10#$hour >= 4 )); then
-    echo "refusing to run outside 00:00-04:00 America/New_York" >&2
-    exit 3
+    if ! validate_owner_window_waiver; then
+        echo "refusing to run outside 00:00-04:00 America/New_York without valid owner waiver" >&2
+        exit 3
+    fi
 fi
 
 mkdir -p "$backup_root"
