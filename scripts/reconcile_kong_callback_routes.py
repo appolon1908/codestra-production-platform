@@ -30,6 +30,35 @@ def singleton(base, resource, name):
     return rows[0] if rows else None
 
 
+def one(rows, label):
+    if len(rows) > 1:
+        raise RuntimeError("ambiguous Kong %s" % label)
+    return rows[0] if rows else None
+
+
+def select_managed_route(routes, expected, host, apply):
+    """Select the named route or safely adopt one overlapping legacy route."""
+    named = [route for route in routes if route.get("name") == expected["name"]]
+    route = one(named, "route named %s" % expected["name"])
+    expected_paths = set(expected["paths"])
+    expected_methods = set(expected["methods"])
+    collisions = [
+        candidate for candidate in routes
+        if candidate.get("id") != (route or {}).get("id")
+        and host in (candidate.get("hosts") or [])
+        and expected_paths.intersection(candidate.get("paths") or [])
+        and expected_methods.intersection(candidate.get("methods") or [])
+    ]
+    if route and collisions:
+        raise RuntimeError("conflicting live route for %s%s" % (host, expected["paths"][0]))
+    if route:
+        return route
+    collision = one(collisions, "legacy route for %s%s" % (host, expected["paths"][0]))
+    if collision and not apply:
+        raise RuntimeError("legacy callback route requires managed adoption")
+    return collision
+
+
 def require_equal(actual, expected, label):
     if actual != expected:
         raise RuntimeError("Kong readback mismatch for %s" % label)
@@ -122,7 +151,8 @@ def main():
     verify_service(service, service_spec)
 
     for expected in spec["routes"]:
-        route = singleton(args.admin_url, "routes", expected["name"])
+        routes = request(args.admin_url, "GET", "/routes?size=1000").get("data", [])
+        route = select_managed_route(routes, expected, spec["host"], args.apply)
         existing_plugins = [] if not route else request(
             args.admin_url, "GET", "/routes/%s/plugins" % route["id"]
         ).get("data", [])
