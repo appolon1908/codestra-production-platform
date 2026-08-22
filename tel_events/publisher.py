@@ -214,6 +214,11 @@ class DeliveryLedger:
     def stage(self, event: Mapping[str, Any]) -> None:
         c = event["_cursor"]
         body = json.dumps(event, sort_keys=True, separators=(",", ":"))
+        existing = self.db.execute(
+            "SELECT event_json FROM event_delivery WHERE event_id=?", (event["event_id"],)
+        ).fetchone()
+        if existing is not None and existing[0] != body:
+            raise PublisherError("event replay payload differs from the durable ledger")
         self.db.execute(
             "INSERT OR IGNORE INTO event_delivery(event_id,event_json,table_name,end_epoch,source_id) VALUES(?,?,?,?,?)",
             (event["event_id"], body, c["table"], c["end_epoch"], c["source_id"]),
