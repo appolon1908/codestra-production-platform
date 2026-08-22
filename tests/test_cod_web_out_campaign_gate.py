@@ -36,6 +36,32 @@ def test_exact_allowlist_and_campaign_isolation(monkeypatch):
             authorize_campaign_email(value)
 
 
+def test_root_only_recipient_file_is_supported(monkeypatch, tmp_path):
+    canary_environment(monkeypatch)
+    recipient = tmp_path / "recipient"
+    recipient.write_text("approved@example.invalid\n", encoding="utf-8")
+    recipient.chmod(0o600)
+    monkeypatch.setenv("COD_WEB_OUT_CANARY_RECIPIENT_FILE", str(recipient))
+    monkeypatch.delenv("COD_WEB_OUT_CANARY_RECIPIENT", raising=False)
+    authorize_campaign_email({
+        "campaign_id":"COD-WEB-OUT", "tenant_id":"COD", "business_unit_id":"COD",
+        "recipient":"approved@example.invalid",
+    })
+
+
+def test_recipient_file_fails_closed_when_world_readable(monkeypatch, tmp_path):
+    canary_environment(monkeypatch)
+    recipient = tmp_path / "recipient"
+    recipient.write_text("approved@example.invalid\n", encoding="utf-8")
+    recipient.chmod(0o644)
+    monkeypatch.setenv("COD_WEB_OUT_CANARY_RECIPIENT_FILE", str(recipient))
+    with pytest.raises(ControlPlaneError, match="canary_recipient_file_permissions_invalid"):
+        authorize_campaign_email({
+            "campaign_id":"COD-WEB-OUT", "tenant_id":"COD", "business_unit_id":"COD",
+            "recipient":"approved@example.invalid",
+        })
+
+
 def test_sms_remains_disabled(monkeypatch):
     canary_environment(monkeypatch)
     with pytest.raises(ControlPlaneError, match="sms_production_disabled"):

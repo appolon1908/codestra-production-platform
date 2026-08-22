@@ -14,8 +14,25 @@ services:
       KONG_GATEWAY_SHARED_SECRET_SHA256_FILE: /run/secrets/kong_gateway_secret_verifier
       CONTROL_PLANE_TRUSTED_PROXY_CIDRS: ${CONTROL_PLANE_TRUSTED_PROXY_CIDRS:-172.19.0.18/32}
       POSTAL_INBOUND_ENABLED: "false"
+      COD_WEB_OUT_CANARY_RECIPIENT_FILE: /run/secrets/cod_web_out_canary_recipient
+      KLYROW_ALLOWED_CAMPAIGN: COD-WEB-OUT
+      KLYROW_URL: https://10.40.0.4:18000/v1/email/send
+      KLYROW_OIDC_TOKEN_URL: https://auth.codestra.co/realms/codestra/protocol/openid-connect/token
+      KLYROW_OIDC_CLIENT_ID: cod-web-out-email-production
+      KLYROW_OIDC_CLIENT_SECRET_FILE: /run/secrets/klyrow_oidc_client_secret
+      KLYROW_MTLS_CA_FILE: /run/secrets/klyrow_mtls_ca
+      KLYROW_MTLS_CERT_FILE: /run/secrets/klyrow_mtls_cert
+      KLYROW_MTLS_KEY_FILE: /run/secrets/klyrow_mtls_key
     ports: ["127.0.0.1:8096:8096"]
-    secrets: [control_plane_database_url, crm_gateway_secret_verifier, kong_gateway_secret_verifier]
+    secrets:
+      - control_plane_database_url
+      - crm_gateway_secret_verifier
+      - kong_gateway_secret_verifier
+      - cod_web_out_canary_recipient
+      - klyrow_oidc_client_secret
+      - klyrow_mtls_ca
+      - klyrow_mtls_cert
+      - klyrow_mtls_key
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -35,7 +52,22 @@ services:
     env_file: ${CONTROL_PLANE_ENV_FILE:-/etc/codestra/secrets/control-plane.env}
     environment:
       CONTROL_PLANE_DATABASE_URL_FILE: /run/secrets/control_plane_database_url
-    secrets: [control_plane_database_url]
+      COD_WEB_OUT_CANARY_RECIPIENT_FILE: /run/secrets/cod_web_out_canary_recipient
+      KLYROW_ALLOWED_CAMPAIGN: COD-WEB-OUT
+      KLYROW_URL: https://10.40.0.4:18000/v1/email/send
+      KLYROW_OIDC_TOKEN_URL: https://auth.codestra.co/realms/codestra/protocol/openid-connect/token
+      KLYROW_OIDC_CLIENT_ID: cod-web-out-email-production
+      KLYROW_OIDC_CLIENT_SECRET_FILE: /run/secrets/klyrow_oidc_client_secret
+      KLYROW_MTLS_CA_FILE: /run/secrets/klyrow_mtls_ca
+      KLYROW_MTLS_CERT_FILE: /run/secrets/klyrow_mtls_cert
+      KLYROW_MTLS_KEY_FILE: /run/secrets/klyrow_mtls_key
+    secrets:
+      - control_plane_database_url
+      - cod_web_out_canary_recipient
+      - klyrow_oidc_client_secret
+      - klyrow_mtls_ca
+      - klyrow_mtls_cert
+      - klyrow_mtls_key
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -52,6 +84,16 @@ secrets:
     file: /etc/codestra/auth-verifiers/crm-gateway-secret.sha256
   kong_gateway_secret_verifier:
     file: /etc/codestra/auth-verifiers/control-plane-kong-gateway-secret.sha256
+  cod_web_out_canary_recipient:
+    file: /etc/codestra/secrets/cod-web-out-email/canary-recipient
+  klyrow_oidc_client_secret:
+    file: /etc/codestra/secrets/cod-web-out-email/klyrow-oidc-client-secret
+  klyrow_mtls_ca:
+    file: /etc/codestra/mtls/clients/klyrow/root-ca.crt
+  klyrow_mtls_cert:
+    file: /etc/codestra/mtls/clients/klyrow/client-fullchain.crt
+  klyrow_mtls_key:
+    file: /etc/codestra/mtls/clients/klyrow/client.key
 networks:
   edge:
     name: codestra_edge
