@@ -10,10 +10,14 @@ paused=()
 
 resume_services() {
     local name
+    local remaining=()
     for name in "${paused[@]}"; do
-        docker unpause "$name" >/dev/null 2>&1 || true
+        if ! docker unpause "$name" >/dev/null 2>&1; then
+            remaining+=("$name")
+        fi
     done
-    paused=()
+    paused=("${remaining[@]}")
+    ((${#paused[@]} == 0))
 }
 
 verify_service_recovery() {
@@ -33,7 +37,7 @@ verify_service_recovery() {
 }
 
 cleanup() {
-    resume_services
+    resume_services || true
     if [[ -d "$work_dir" && ! -L "$work_dir" ]]; then
         find "$work_dir" -type f -delete
         find "$work_dir" -depth -type d -empty -delete
@@ -49,6 +53,8 @@ if (( 10#$hour < 0 || 10#$hour >= 4 )); then
     exit 3
 fi
 
+mkdir -p "$backup_root"
+chmod 0700 "$backup_root"
 available_bytes=$(df --output=avail -B1 "$backup_root" | tail -n1 | tr -d ' ')
 test "$available_bytes" -ge 10737418240
 
@@ -70,9 +76,10 @@ gpg_roundtrip=$(printf '%s' "$gpg_probe" \
     | gpg --homedir /etc/codestra/backup-gpg --batch --yes --decrypt 2>/dev/null)
 test "$gpg_roundtrip" = "$gpg_probe"
 
-middleware_image=$(docker inspect -f '{{.Image}}' codestra-middleware-1)
+mapfile -t runtime_images < <(awk '{print $2}' "$work_dir/BACKUP-MANIFEST.tsv" | sort -u)
+test "${#runtime_images[@]}" -gt 0
 docker image save \
-    "$middleware_image" \
+    "${runtime_images[@]}" \
     | gzip -n > "$work_dir/runtime-images.tar.gz"
 
 tar -czf "$work_dir/configuration.tar.gz" -C / \
@@ -104,6 +111,24 @@ docker exec codestra-postgres-1 pg_dump -U postgres -Fc codestra_odoo > "$work_d
 docker exec codestra-postgres-1 pg_dump -U postgres -Fc codestra_middleware > "$work_dir/middleware.dump"
 docker exec codestra-postgres-1 pg_dump -U postgres -Fc codestra_n8n > "$work_dir/n8n.dump"
 docker exec codestra-identity-identity-db-1 pg_dump -U keycloak -Fc keycloak > "$work_dir/keycloak.dump"
+missing_attachment_checksums=$(docker exec codestra-postgres-1 psql -U postgres -d codestra_odoo -At -v ON_ERROR_STOP=1 \
+    -c "SELECT count(*) FROM ir_attachment WHERE store_fname IS NOT NULL AND (checksum IS NULL OR btrim(checksum) = '')")
+test "$missing_attachment_checksums" -eq 0
+docker exec codestra-postgres-1 psql -U postgres -d codestra_odoo -At -F '|' -v ON_ERROR_STOP=1 \
+    -c "SELECT store_fname, checksum FROM ir_attachment WHERE store_fname IS NOT NULL ORDER BY store_fname" \
+    > "$work_dir/odoo-attachments.tsv"
+
+odoo_owner=$(docker run --rm \
+    -v codestra_odoo_data:/source/odoo:ro \
+    alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce \
+    stat -c '%u:%g' /source/odoo)
+cat > "$work_dir/ODOO-BACKUP-METADATA" <<EOF
+BACKUP_ID=${stamp}
+DATABASE=codestra_odoo
+FILESTORE_RELATIVE=.local/share/Odoo/filestore/codestra_odoo
+ODOO_UID=${odoo_owner%%:*}
+ODOO_GID=${odoo_owner##*:}
+EOF
 
 docker run --rm \
     -v codestra_odoo_data:/source/odoo:ro \
@@ -120,6 +145,7 @@ verify_service_recovery
 (
     cd "$work_dir"
     sha256sum odoo.dump middleware.dump n8n.dump keycloak.dump \
+        odoo-attachments.tsv ODOO-BACKUP-METADATA \
         application-volumes.tar.gz configuration.tar.gz runtime-images.tar.gz \
         BACKUP-MANIFEST.tsv > SHA256SUMS
     sha256sum -c SHA256SUMS
@@ -127,6 +153,7 @@ verify_service_recovery
 
 tar -czf "$work_dir/codestra-${stamp}.tar.gz" -C "$work_dir" \
     odoo.dump middleware.dump n8n.dump keycloak.dump \
+    odoo-attachments.tsv ODOO-BACKUP-METADATA \
     application-volumes.tar.gz configuration.tar.gz runtime-images.tar.gz \
     BACKUP-MANIFEST.tsv SHA256SUMS
 

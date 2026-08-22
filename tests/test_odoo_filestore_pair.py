@@ -46,3 +46,35 @@ def test_rejects_checksum_mismatch(tmp_path: Path) -> None:
     next((data / "filestore").rglob("object")).write_bytes(b"modified")
     with pytest.raises(ValidationError, match="checksum mismatches"):
         validate(metadata, data, attachments, "pair-1")
+
+
+def test_rejects_blank_checksum(tmp_path: Path) -> None:
+    metadata, data, attachments = fixture(tmp_path)
+    attachments.write_text("aa/object|\n")
+    with pytest.raises(ValidationError, match="blank filename or checksum"):
+        validate(metadata, data, attachments, "pair-1")
+
+
+def test_preserves_orphan_names(tmp_path: Path) -> None:
+    metadata, data, attachments = fixture(tmp_path)
+    orphan = data / "filestore/codestra_odoo_restore/bb/orphan"
+    orphan.parent.mkdir(parents=True)
+    orphan.write_bytes(b"orphan")
+    result = validate(metadata, data, attachments, "pair-1")
+    assert result["orphan_files"] == ["bb/orphan"]
+
+
+def test_rejects_conflicting_duplicate_checksum(tmp_path: Path) -> None:
+    metadata, data, attachments = fixture(tmp_path)
+    original = attachments.read_text().strip()
+    attachments.write_text(f"{original}\naa/object|{'0' * 40}\n")
+    with pytest.raises(ValidationError, match="conflicting checksums"):
+        validate(metadata, data, attachments, "pair-1")
+
+
+def test_rejects_nontraversable_filestore_directory(tmp_path: Path) -> None:
+    metadata, data, attachments = fixture(tmp_path)
+    shard = data / "filestore/codestra_odoo_restore/aa"
+    shard.chmod(0o600)
+    with pytest.raises(ValidationError, match="directory traversal failures"):
+        validate(metadata, data, attachments, "pair-1")
