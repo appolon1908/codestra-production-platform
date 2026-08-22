@@ -215,7 +215,14 @@ def run_once() -> int:
                 if state == "dead_letter":
                     raise PublisherError("dead-lettered event requires operator reconciliation")
                 for _ in range(3):
-                    result = ledger.acknowledge(event["event_id"], _post(event))
+                    try:
+                        status = _post(event)
+                    except (OSError, urllib.error.URLError) as exc:
+                        result = ledger.fail(
+                            event["event_id"], f"delivery transport failed: {type(exc).__name__}"
+                        )
+                    else:
+                        result = ledger.acknowledge(event["event_id"], status)
                     if result == "acknowledged":
                         sent += 1
                         remaining -= 1
@@ -239,6 +246,8 @@ def run_forever() -> None:
     if not 5 <= interval <= 300:
         raise PublisherError("TEL_EVENTS_INTERVAL_SECONDS must be between 5 and 300")
     while True:
+        if not _enabled():
+            raise PublisherError("publisher was disabled or its kill switch was installed")
         run_once()
         time.sleep(interval)
 
