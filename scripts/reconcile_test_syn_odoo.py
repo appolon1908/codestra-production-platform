@@ -74,7 +74,9 @@ for system, external_id, external_username, extra in specs:
     desired_links.append((system, values))
 
 campaign_model = env["codestra.vicidial.campaign"]
-campaign = campaign_model.search([("campaign_id", "=", "TEST_SYN")], limit=1)
+campaign = campaign_model.with_context(active_test=False).search([
+    ("campaign_id", "=", "TEST_SYN")
+], limit=1)
 campaign_values = {
     "name": "TEST_SYN Synthetic Certification", "campaign_id": "TEST_SYN",
     "campaign_type": "INBOUND", "inbound_group": "TEST_IN", "mode": "test",
@@ -85,7 +87,9 @@ if APPLY:
     campaign = campaign_model.search([("campaign_id", "=", "TEST_SYN")], limit=1)
 
 agent_model = env["codestra.vicidial.agent"]
-agent = agent_model.search(["|", ("vicidial_user", "=", "cod00016"), ("phone_login", "=", "6101")], limit=1)
+agent = agent_model.with_context(active_test=False).search([
+    "|", ("vicidial_user", "=", "cod00016"), ("phone_login", "=", "6101")
+], limit=1)
 agent_values = {
     "name": "Synthetic Agent TEST_SYN 6101", "employee_code": "COD.2026.00016",
     "vicidial_user": "cod00016", "phone_login": "6101", "user_group": "WEBTEST_SYN",
