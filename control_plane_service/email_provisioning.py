@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS cp_mailbox_provisioning_event(
 
 class IdentityAdapter(Protocol):
     def reconcile(self, command: dict[str, Any]) -> dict[str, Any]: ...
-    def revoke_mailbox_grants(self, agent_id: str, campaign_id: str) -> None: ...
+    def revoke_mailbox_grants(self, command: dict[str, Any]) -> None: ...
 
 
 class MailAdapter(Protocol):
@@ -87,7 +87,7 @@ class MailAdapter(Protocol):
     def authorize_sender(self, command: dict[str, Any]) -> dict[str, Any]: ...
     def validate_send_path(self, command: dict[str, Any]) -> bool: ...
     def validate_inbound_route(self, command: dict[str, Any]) -> bool: ...
-    def disable(self, primary_email: str) -> None: ...
+    def disable(self, command: dict[str, Any]) -> None: ...
 
 
 class OdooAdapter(Protocol):
@@ -188,8 +188,10 @@ class CampaignMailboxRegistry:
             return self.get_mailbox(tenant,mailbox_id) or {}, False
         except Exception as exc:
             safe = str(exc)[:240] if isinstance(exc, ControlPlaneError) else "downstream provisioning failure"
-            try: mail.disable(primary)
-            finally: identity.revoke_mailbox_grants(str(value["agent_id"]),str(value["campaign_id"]))
+            try:
+                mail.disable(command)
+            finally:
+                identity.revoke_mailbox_grants(command)
             with Connection(self.path) as db:
                 self._tenant(db,tenant)
                 db.execute("UPDATE cp_agent_mailbox SET sending_enabled=?,receiving_enabled=?,mailbox_status=?,provisioning_error=?,audit_version=audit_version+1 WHERE mailbox_id=?", (db_bool(False),db_bool(False),PROVISIONING_FAILED,safe,mailbox_id))
@@ -200,8 +202,17 @@ class CampaignMailboxRegistry:
         mailbox = self.get_mailbox(tenant,mailbox_id)
         if not mailbox:
             raise ControlPlaneError("mailbox_not_found")
-        mail.disable(mailbox["primary_email"])
-        identity.revoke_mailbox_grants(mailbox["agent_id"],mailbox["campaign_id"])
+        command = {
+            "tenant_id": tenant, "agent_id": mailbox["agent_id"],
+            "campaign_id": mailbox["campaign_id"], "primary_email": mailbox["primary_email"],
+            "correlation_id": str(uuid.uuid4()),
+            "idempotency_key": f"suspend:{mailbox_id}:{mailbox['audit_version']}",
+            "roles": ["codestra-email-agent"],
+            "scopes": ["klyrow.email.send.own", "klyrow.email.read.own",
+                       "klyrow.email.reply.own", "klyrow.email.attachments.own"],
+        }
+        mail.disable(command)
+        identity.revoke_mailbox_grants(command)
         with Connection(self.path) as db:
             self._tenant(db,tenant)
             db.execute("UPDATE cp_agent_mailbox SET sending_enabled=?,receiving_enabled=?,mailbox_status='SUSPENDED',suspended_at=?,audit_version=audit_version+1 WHERE mailbox_id=?", (db_bool(False),db_bool(False),now(),mailbox_id))
