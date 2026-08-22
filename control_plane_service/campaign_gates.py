@@ -6,12 +6,28 @@ empty canary allowlist authorizes policy simulation only and cannot dispatch.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from .core import ControlPlaneError
 
 
 def _enabled(name: str) -> bool:
     return os.getenv(name, "false").strip().lower() == "true"
+
+
+def _canary_allowlist() -> set[str]:
+    path = os.getenv("COD_WEB_OUT_CANARY_RECIPIENT_FILE", "").strip()
+    if path:
+        try:
+            info = os.stat(path, follow_symlinks=False)
+            if not os.path.isfile(path) or info.st_mode & 0o077:
+                raise ControlPlaneError("canary_recipient_file_permissions_invalid")
+            raw = Path(path).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ControlPlaneError("canary_recipient_file_unavailable") from exc
+    else:
+        raw = os.getenv("COD_WEB_OUT_CANARY_RECIPIENT", "")
+    return {item.strip().casefold() for item in raw.split(",") if item.strip()}
 
 
 def authorize_campaign_email(value: dict, *, simulation: bool = False) -> None:
@@ -32,10 +48,7 @@ def authorize_campaign_email(value: dict, *, simulation: bool = False) -> None:
     if not _enabled("COD_WEB_OUT_EMAIL_ALLOWLIST_REQUIRED"):
         raise ControlPlaneError("canary_allowlist_required")
     recipient = str(value.get("recipient") or "").strip().casefold()
-    allowlist = {
-        item.strip().casefold() for item in
-        os.getenv("COD_WEB_OUT_CANARY_RECIPIENT", "").split(",") if item.strip()
-    }
+    allowlist = _canary_allowlist()
     if simulation and not recipient and not allowlist:
         if value.get("external_submission") is not False:
             raise ControlPlaneError("simulation_must_disable_external_submission")
