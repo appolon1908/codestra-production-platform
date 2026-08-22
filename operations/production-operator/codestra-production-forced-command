@@ -5,7 +5,11 @@ action=$(/usr/bin/python3 -c '
 import json, os, re, stat, sys
 raw = os.environ.get("SSH_ORIGINAL_COMMAND", "")
 parts = raw.split(" ")
-allowed = {"preflight", "backup", "validate-backup", "restore-test", "stage", "canary", "status", "rollback", "collect-evidence"}
+allowed = {
+    "preflight", "backup", "validate-backup", "restore-test", "stage",
+    "canary", "status", "rollback", "collect-evidence",
+    "stage-control-plane", "validate-control-plane", "rollback-control-plane",
+}
 if len(parts) != 5 or parts[0] not in allowed:
     raise SystemExit(2)
 patterns = (r"[0-9a-f]{40}", r"sha256:[0-9a-f]{64}", r"CHG-[0-9]{8}-CODESTRA-PRODUCTION-ACTIVATION-[0-9]{2}", r"20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])")
