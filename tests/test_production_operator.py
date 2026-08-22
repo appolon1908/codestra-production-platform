@@ -302,6 +302,31 @@ def test_shell_artifacts_have_valid_syntax(name) -> None:
     subprocess.run(["sh", "-n", str(PACKAGE / name)], check=True)
 
 
+def test_operator_authorized_keys_are_traversable_but_home_is_not_writable() -> None:
+    installer = (PACKAGE / "install-server-a-operator.sh").read_text()
+    validator = (PACKAGE / "validate-server-a-operator.sh").read_text()
+
+    assert (
+        "install -d -o root -g root -m 0711 /var/lib/codestra-production-operator"
+        in installer
+    )
+    assert (
+        "install -d -o root -g root -m 0700 /var/lib/codestra-production-operator"
+        not in installer
+    )
+    assert "'root:root 711'" in validator
+    assert (
+        "/usr/bin/sudo -u codestra-production-operator /usr/bin/test -r "
+        "/var/lib/codestra-production-operator/.ssh/authorized_keys"
+        in validator
+    )
+    assert (
+        "/usr/bin/sudo -u codestra-production-operator /usr/bin/test -w "
+        "/var/lib/codestra-production-operator"
+        in validator
+    )
+
+
 def test_payload_checksums_are_real() -> None:
     installer = (PACKAGE / "install-server-a-operator.sh").read_text()
     for name in (
