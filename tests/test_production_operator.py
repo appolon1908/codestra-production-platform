@@ -483,9 +483,20 @@ def test_validator_proves_authorized_key_is_readable_by_operator():
 
 def test_forced_command_binds_exact_release_tuple_before_sudo() -> None:
     text = (PACKAGE / "codestra-production-forced-command").read_text()
+    for action in EXPECTED_ACTIONS:
+        assert f'"{action}"' in text
     assert 'path = "/etc/codestra/production-operator/release.json"' in text
     assert "parts[1:] != expected" in text
     assert 'exec /usr/bin/sudo -n /usr/local/sbin/codestra-production-operator "$action"' in text
+
+
+def test_control_plane_rollback_restores_database_before_old_images_start() -> None:
+    text = OPERATOR_PATH.read_text()
+    rollback = text[text.index("def rollback_control_plane"):text.index("def safety_state")]
+    assert '"dropdb"' in rollback
+    assert '"createdb"' in rollback
+    assert 'stdin=database_dump' in rollback
+    assert rollback.index('stdin=database_dump') < rollback.index('"up", "--detach", "--no-build"')
 
 
 def test_waiver_cannot_bypass_tuple_or_protected_approval() -> None:

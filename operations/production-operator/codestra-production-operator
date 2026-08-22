@@ -398,6 +398,35 @@ def copy_pinned_control_plane_archive(source: Path, target: Path, expected: str)
         raise OperatorError("control-plane archive checksum mismatch")
 
 
+def prepare_control_plane_release(
+    trusted_archive: Path, release: Path, protected_sha: str, expected: str
+) -> None:
+    """Publish a complete extracted tree atomically and permit exact retries."""
+    marker = release / ".protected-archive.sha256"
+    if release.exists() or release.is_symlink():
+        if release.is_symlink() or not release.is_dir():
+            raise OperatorError("control-plane release path is unsafe")
+        if checked_root_file(marker, expected_mode=0o644) != expected:
+            raise OperatorError("existing control-plane release is not the approved archive")
+        return
+    release.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    candidate = Path(tempfile.mkdtemp(prefix=f".{protected_sha}.", dir=release.parent))
+    try:
+        os.chmod(candidate, 0o755)
+        run_bytes([
+            "/usr/bin/tar", "--extract", "--gzip", "--file", str(trusted_archive),
+            "--directory", str(candidate), "--strip-components=1",
+            "--no-same-owner", "--no-same-permissions",
+        ])
+        marker_path = candidate / marker.name
+        marker_path.write_text(expected + "\n", encoding="ascii")
+        marker_path.chmod(0o644)
+        candidate.rename(release)
+    except Exception:
+        shutil.rmtree(candidate, ignore_errors=True)
+        raise
+
+
 def validate_control_plane(config: dict[str, str]) -> dict[str, object]:
     _, release = control_plane_paths(config)
     expected = {
@@ -448,24 +477,33 @@ def stage_control_plane(config: dict[str, str]) -> dict[str, object]:
     validate_control_plane_archive(trusted_archive, config["protected_sha"])
     for container, label in ((CONTROL_PLANE_API, "api"), (CONTROL_PLANE_WORKER, "worker")):
         image_id = str(docker_inspect(container)["Image"])
-        (backup / f"{label}-image-id").write_text(image_id + "\n", encoding="ascii")
+        image_record = backup / f"{label}-image-id"
+        image_record.write_text(image_id + "\n", encoding="ascii")
+        image_record.chmod(0o600)
         run_bytes(["/usr/bin/docker", "tag", image_id, f"codestra/{CONTROL_PLANE_PROJECT}-{label}:rollback-{stamp}"], timeout=60)
+    database_owner = run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", "postgres", "-Atc",
+        f"select pg_get_userbyid(datdba) from pg_database where datname='{CONTROL_PLANE_DB}'",
+    ], timeout=30).stdout.decode().strip()
+    if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
+        raise OperatorError("control-plane database owner readback failed")
+    owner_record = backup / "database-owner"
+    owner_record.write_text(database_owner + "\n", encoding="ascii")
+    owner_record.chmod(0o600)
     with (backup / "control-plane.sql").open("wb") as dump:
         result = run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "pg_dump", "-U", "postgres", "-d", CONTROL_PLANE_DB], timeout=1800)
         dump.write(result.stdout)
+    (backup / "control-plane.sql").chmod(0o600)
     (CONTROL_PLANE_BACKUP_ROOT / "LAST_SUCCESS").write_text(stamp + "\n", encoding="ascii")
-    release.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-    if release.exists():
-        raise OperatorError("control-plane release directory already exists")
-    release.mkdir(mode=0o755)
-    run_bytes(["/usr/bin/tar", "--extract", "--gzip", "--file", str(trusted_archive), "--directory", str(release), "--strip-components=1", "--no-same-owner", "--no-same-permissions"])
-    for migration in sorted((release / "migrations/control_plane").glob("*.sql")):
-        run_bytes(["/usr/bin/docker", "exec", "-i", CONTROL_PLANE_DB_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", CONTROL_PLANE_DB], stdin=migration.read_bytes(), timeout=300)
+    prepare_control_plane_release(trusted_archive, release, config["protected_sha"], expected)
     compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
                "--file", str(release / "deploy/control-plane/compose.yaml"),
                "--file", str(release / "deploy/control-plane/compose.live-delivery-safety.yaml")]
-    run_bytes([*compose, "build", "--pull=false"], timeout=1800)
     try:
+        for migration in sorted((release / "migrations/control_plane").glob("*.sql")):
+            run_bytes(["/usr/bin/docker", "exec", "-i", CONTROL_PLANE_DB_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", CONTROL_PLANE_DB], stdin=migration.read_bytes(), timeout=300)
+        run_bytes([*compose, "build", "--pull=false"], timeout=1800)
         run_bytes([*compose, "up", "--detach", "--remove-orphans"], timeout=300)
         time.sleep(10)
         result = validate_control_plane(config)
@@ -488,8 +526,22 @@ def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
     compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
                "--file", str(release / "deploy/control-plane/compose.yaml"),
                "--file", str(release / "deploy/control-plane/compose.live-delivery-safety.yaml")]
+    run_bytes([*compose, "stop", "--timeout", "30"], timeout=120)
+    backup = CONTROL_PLANE_BACKUP_ROOT / stamp
+    database_owner = checked_root_file(backup / "database-owner", expected_mode=0o600)
+    if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
+        raise OperatorError("control-plane rollback database owner is malformed")
+    database_dump = checked_root_bytes(backup / "control-plane.sql")
+    run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c",
+        f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{CONTROL_PLANE_DB}' and pid<>pg_backend_pid()",
+    ], timeout=30)
+    run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "dropdb", "-U", "postgres", "--if-exists", CONTROL_PLANE_DB], timeout=60)
+    run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "createdb", "-U", "postgres", "-O", database_owner, CONTROL_PLANE_DB], timeout=60)
+    run_bytes(["/usr/bin/docker", "exec", "-i", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres", "-d", CONTROL_PLANE_DB, "-v", "ON_ERROR_STOP=1"], stdin=database_dump, timeout=1800)
     run_bytes([*compose, "up", "--detach", "--no-build"], timeout=300)
-    return {"rollback_stamp": stamp, "external_delivery": "DISABLED"}
+    return {"rollback_stamp": stamp, "database_restored": "PASS", "external_delivery": "DISABLED"}
 
 
 def safety_state() -> dict[str, object]:
