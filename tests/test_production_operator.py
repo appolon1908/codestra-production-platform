@@ -502,6 +502,18 @@ def test_readiness_backup_validation_hashes_exact_evidence(monkeypatch, tmp_path
     evidence = backup / "EVIDENCE-SHA256SUMS"
     evidence.write_text("\n".join(records) + "\n")
     evidence.chmod(0o600)
+    real_lstat = OPERATOR.Path.lstat
+    real_fstat = OPERATOR.os.fstat
+
+    def root_owned(info):
+        return type(
+            "RootOwnedStat",
+            (),
+            {"st_mode": info.st_mode, "st_uid": 0, "st_gid": 0},
+        )()
+
+    monkeypatch.setattr(OPERATOR.Path, "lstat", lambda path: root_owned(real_lstat(path)))
+    monkeypatch.setattr(OPERATOR.os, "fstat", lambda descriptor: root_owned(real_fstat(descriptor)))
     monkeypatch.setattr(OPERATOR, "BACKUP_STATE_VALIDATOR", validator)
     monkeypatch.setattr(OPERATOR, "READINESS_BACKUP_ROOT", root)
     monkeypatch.setattr(
