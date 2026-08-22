@@ -27,6 +27,7 @@ from .providers import ProviderError, crawler_action, submit_crawler
 from .crm import ACTIVITY_FIELDS, CREATE_FIELDS, PATCH_FIELDS, CrmService, request_hash
 from .forms import FormService, ORIGINS
 from .mapping_registry import MappingRegistry
+from .automation import authorize_automation, record_execution_result
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
 STORE = Store(DB)
@@ -128,6 +129,20 @@ class Handler(BaseHTTPRequestHandler):
         try: return STORE.crm_customer(consumer_id, custom_id)
         except ControlPlaneError as exc:
             self.send_json(403, {"error": str(exc)}); return None
+
+    def n8n_gateway_caller(self):
+        expected = verifier("KONG_GATEWAY_SHARED_SECRET")
+        supplied = self.headers.get("X-Codestra-Gateway-Secret", "")
+        supplied_digest = hashlib.sha256(supplied.encode("utf-8")).hexdigest()
+        custom_id = self.headers.get("X-Consumer-Custom-ID", "")
+        consumer_id = self.headers.get("X-Consumer-ID", "")
+        if (not expected or not hmac.compare_digest(expected, supplied_digest)
+                or custom_id != "codestra-n8n-communications" or not consumer_id):
+            self.send_json(401, {"error": "unauthorized"}); return None
+        tenant = self.headers.get("X-Authenticated-Tenant", "")
+        if tenant != "COD":
+            self.send_json(403, {"error": "cross_tenant_denied"}); return None
+        return {"actor": custom_id, "tenant": tenant}
 
     def crm_error(self, exc: Exception, correlation: str) -> None:
         message = str(exc)
@@ -277,6 +292,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(code, {"error": message.split(":", 1)[0]}, origin)
         if parsed.path.startswith("/v1/crm/"):
             self.crm_mutation("POST"); return
+        if parsed.path in {"/api/v1/automation/policy-check", "/api/v1/integrations/n8n/results"}:
+            caller = self.n8n_gateway_caller()
+            if not caller: return
+            try:
+                value = json.loads(self.body())
+                if parsed.path.endswith("policy-check"):
+                    result = authorize_automation(STORE, value, caller["tenant"])
+                    STORE.audit(caller["actor"], "n8n", "automation.policy.allowed", "campaign", str(value.get("campaign_id", "")), caller["tenant"], value.get("correlation_id"))
+                    return self.send_json(200, result)
+                result = record_execution_result(STORE, value, caller["tenant"])
+                STORE.audit(caller["actor"], "n8n", "automation.result.recorded", "workflow", str(value.get("workflow_key", "")), caller["tenant"], value.get("correlation_id"), {"duplicate": result.duplicate})
+                return self.send_json(200 if result.duplicate else 202, result.__dict__)
+            except json.JSONDecodeError:
+                return self.send_json(422, {"error": "invalid_json"})
+            except ControlPlaneError as exc:
+                code = 409 if str(exc) in {"idempotency_conflict", "replayed_event_id"} else 403 if str(exc) in {"cross_tenant_denied", "contact_policy_denied"} else 422
+                return self.send_json(code, {"error": str(exc)})
         try: body = self.body()
         except ControlPlaneError as exc: return self.send_json(413, {"error": str(exc)})
         if parsed.path.startswith("/api/v1/events/") or parsed.path == "/v1/events":

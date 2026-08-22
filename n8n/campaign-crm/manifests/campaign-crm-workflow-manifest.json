@@ -1,0 +1,307 @@
+{
+  "schema_version": "1",
+  "workflow_count": 75,
+  "active": false,
+  "workflows": [
+    {
+      "id": "CDST_EventRouter_v2",
+      "path": "workflows/campaign_crm/CDST_EventRouter_v2.json"
+    },
+    {
+      "id": "CDST_CampaignRouter_v2",
+      "path": "workflows/campaign_crm/CDST_CampaignRouter_v2.json"
+    },
+    {
+      "id": "CDST_LeadAssignment_v1",
+      "path": "workflows/campaign_crm/CDST_LeadAssignment_v1.json"
+    },
+    {
+      "id": "CDST_NextActionCreated_v1",
+      "path": "workflows/campaign_crm/CDST_NextActionCreated_v1.json"
+    },
+    {
+      "id": "CDST_FollowupDue_v1",
+      "path": "workflows/campaign_crm/CDST_FollowupDue_v1.json"
+    },
+    {
+      "id": "CDST_FollowupOverdue_v1",
+      "path": "workflows/campaign_crm/CDST_FollowupOverdue_v1.json"
+    },
+    {
+      "id": "CDST_AppointmentCreated_v1",
+      "path": "workflows/campaign_crm/CDST_AppointmentCreated_v1.json"
+    },
+    {
+      "id": "CDST_Appointment24HourReminder_v1",
+      "path": "workflows/campaign_crm/CDST_Appointment24HourReminder_v1.json"
+    },
+    {
+      "id": "CDST_Appointment1HourReminder_v1",
+      "path": "workflows/campaign_crm/CDST_Appointment1HourReminder_v1.json"
+    },
+    {
+      "id": "CDST_CustomerNoShow_v1",
+      "path": "workflows/campaign_crm/CDST_CustomerNoShow_v1.json"
+    },
+    {
+      "id": "CDST_AgentNoShow_v1",
+      "path": "workflows/campaign_crm/CDST_AgentNoShow_v1.json"
+    },
+    {
+      "id": "CDST_CallbackDue_v1",
+      "path": "workflows/campaign_crm/CDST_CallbackDue_v1.json"
+    },
+    {
+      "id": "CDST_CallbackOverdue_v1",
+      "path": "workflows/campaign_crm/CDST_CallbackOverdue_v1.json"
+    },
+    {
+      "id": "CDST_NoActivity_v1",
+      "path": "workflows/campaign_crm/CDST_NoActivity_v1.json"
+    },
+    {
+      "id": "CDST_SupervisorEscalation_v1",
+      "path": "workflows/campaign_crm/CDST_SupervisorEscalation_v1.json"
+    },
+    {
+      "id": "CDST_ManagerEscalation_v1",
+      "path": "workflows/campaign_crm/CDST_ManagerEscalation_v1.json"
+    },
+    {
+      "id": "CDST_EmailSend_v1",
+      "path": "workflows/campaign_crm/CDST_EmailSend_v1.json"
+    },
+    {
+      "id": "CDST_SMSAuthorizedSend_v1",
+      "path": "workflows/campaign_crm/CDST_SMSAuthorizedSend_v1.json"
+    },
+    {
+      "id": "CDST_EmailReplyReceived_v1",
+      "path": "workflows/campaign_crm/CDST_EmailReplyReceived_v1.json"
+    },
+    {
+      "id": "CDST_SMSReplyReceived_v1",
+      "path": "workflows/campaign_crm/CDST_SMSReplyReceived_v1.json"
+    },
+    {
+      "id": "CDST_DocumentRequested_v1",
+      "path": "workflows/campaign_crm/CDST_DocumentRequested_v1.json"
+    },
+    {
+      "id": "CDST_DocumentMissing_v1",
+      "path": "workflows/campaign_crm/CDST_DocumentMissing_v1.json"
+    },
+    {
+      "id": "CDST_DocumentReceived_v1",
+      "path": "workflows/campaign_crm/CDST_DocumentReceived_v1.json"
+    },
+    {
+      "id": "CDST_AIWorkRequested_v1",
+      "path": "workflows/campaign_crm/CDST_AIWorkRequested_v1.json"
+    },
+    {
+      "id": "CDST_AIWorkCompleted_v1",
+      "path": "workflows/campaign_crm/CDST_AIWorkCompleted_v1.json"
+    },
+    {
+      "id": "CDST_AIHumanHandoff_v1",
+      "path": "workflows/campaign_crm/CDST_AIHumanHandoff_v1.json"
+    },
+    {
+      "id": "CDST_DailyAgentReport_v1",
+      "path": "workflows/campaign_crm/CDST_DailyAgentReport_v1.json"
+    },
+    {
+      "id": "CDST_DailySupervisorReport_v1",
+      "path": "workflows/campaign_crm/CDST_DailySupervisorReport_v1.json"
+    },
+    {
+      "id": "CDST_DailyCampaignReport_v1",
+      "path": "workflows/campaign_crm/CDST_DailyCampaignReport_v1.json"
+    },
+    {
+      "id": "CDST_DailyAdminReport_v1",
+      "path": "workflows/campaign_crm/CDST_DailyAdminReport_v1.json"
+    },
+    {
+      "id": "CDST_ErrorHandler_v1",
+      "path": "workflows/campaign_crm/CDST_ErrorHandler_v1.json"
+    },
+    {
+      "id": "CDST_DeadLetterRecovery_v1",
+      "path": "workflows/campaign_crm/CDST_DeadLetterRecovery_v1.json"
+    },
+    {
+      "id": "CDST_CompleteExecution_v2",
+      "path": "workflows/campaign_crm/CDST_CompleteExecution_v2.json"
+    },
+    {
+      "id": "transportation_quote_requested",
+      "path": "workflows/campaign_crm/transportation_quote_requested.json"
+    },
+    {
+      "id": "transportation_quote_sent_followup",
+      "path": "workflows/campaign_crm/transportation_quote_sent_followup.json"
+    },
+    {
+      "id": "transportation_carrier_packet",
+      "path": "workflows/campaign_crm/transportation_carrier_packet.json"
+    },
+    {
+      "id": "transportation_load_booked",
+      "path": "workflows/campaign_crm/transportation_load_booked.json"
+    },
+    {
+      "id": "transportation_pickup_reminder",
+      "path": "workflows/campaign_crm/transportation_pickup_reminder.json"
+    },
+    {
+      "id": "transportation_delivery_followup",
+      "path": "workflows/campaign_crm/transportation_delivery_followup.json"
+    },
+    {
+      "id": "transportation_repeat_load",
+      "path": "workflows/campaign_crm/transportation_repeat_load.json"
+    },
+    {
+      "id": "codestra_discovery_scheduled",
+      "path": "workflows/campaign_crm/codestra_discovery_scheduled.json"
+    },
+    {
+      "id": "codestra_discovery_completed",
+      "path": "workflows/campaign_crm/codestra_discovery_completed.json"
+    },
+    {
+      "id": "codestra_technical_review",
+      "path": "workflows/campaign_crm/codestra_technical_review.json"
+    },
+    {
+      "id": "codestra_proposal_sent",
+      "path": "workflows/campaign_crm/codestra_proposal_sent.json"
+    },
+    {
+      "id": "codestra_proposal_overdue",
+      "path": "workflows/campaign_crm/codestra_proposal_overdue.json"
+    },
+    {
+      "id": "codestra_contract_sent",
+      "path": "workflows/campaign_crm/codestra_contract_sent.json"
+    },
+    {
+      "id": "codestra_deposit_received",
+      "path": "workflows/campaign_crm/codestra_deposit_received.json"
+    },
+    {
+      "id": "codestra_project_handoff",
+      "path": "workflows/campaign_crm/codestra_project_handoff.json"
+    },
+    {
+      "id": "codestra_retainer_followup",
+      "path": "workflows/campaign_crm/codestra_retainer_followup.json"
+    },
+    {
+      "id": "moneybee_prequalified",
+      "path": "workflows/campaign_crm/moneybee_prequalified.json"
+    },
+    {
+      "id": "moneybee_documents_requested",
+      "path": "workflows/campaign_crm/moneybee_documents_requested.json"
+    },
+    {
+      "id": "moneybee_documents_partial",
+      "path": "workflows/campaign_crm/moneybee_documents_partial.json"
+    },
+    {
+      "id": "moneybee_documents_overdue",
+      "path": "workflows/campaign_crm/moneybee_documents_overdue.json"
+    },
+    {
+      "id": "moneybee_application_started",
+      "path": "workflows/campaign_crm/moneybee_application_started.json"
+    },
+    {
+      "id": "moneybee_underwriting_followup",
+      "path": "workflows/campaign_crm/moneybee_underwriting_followup.json"
+    },
+    {
+      "id": "moneybee_additional_info",
+      "path": "workflows/campaign_crm/moneybee_additional_info.json"
+    },
+    {
+      "id": "moneybee_offer_sent",
+      "path": "workflows/campaign_crm/moneybee_offer_sent.json"
+    },
+    {
+      "id": "moneybee_funding_followup",
+      "path": "workflows/campaign_crm/moneybee_funding_followup.json"
+    },
+    {
+      "id": "moneybee_post_funding",
+      "path": "workflows/campaign_crm/moneybee_post_funding.json"
+    },
+    {
+      "id": "moneybee_renewal",
+      "path": "workflows/campaign_crm/moneybee_renewal.json"
+    },
+    {
+      "id": "senior_product_selected",
+      "path": "workflows/campaign_crm/senior_product_selected.json"
+    },
+    {
+      "id": "senior_payment_pending",
+      "path": "workflows/campaign_crm/senior_payment_pending.json"
+    },
+    {
+      "id": "senior_payment_confirmed",
+      "path": "workflows/campaign_crm/senior_payment_confirmed.json"
+    },
+    {
+      "id": "senior_shipped",
+      "path": "workflows/campaign_crm/senior_shipped.json"
+    },
+    {
+      "id": "senior_delivery_followup",
+      "path": "workflows/campaign_crm/senior_delivery_followup.json"
+    },
+    {
+      "id": "senior_support",
+      "path": "workflows/campaign_crm/senior_support.json"
+    },
+    {
+      "id": "senior_reorder_due",
+      "path": "workflows/campaign_crm/senior_reorder_due.json"
+    },
+    {
+      "id": "student_eligibility_review",
+      "path": "workflows/campaign_crm/student_eligibility_review.json"
+    },
+    {
+      "id": "student_documents_requested",
+      "path": "workflows/campaign_crm/student_documents_requested.json"
+    },
+    {
+      "id": "student_documents_missing",
+      "path": "workflows/campaign_crm/student_documents_missing.json"
+    },
+    {
+      "id": "student_counselor_appointment",
+      "path": "workflows/campaign_crm/student_counselor_appointment.json"
+    },
+    {
+      "id": "student_submission",
+      "path": "workflows/campaign_crm/student_submission.json"
+    },
+    {
+      "id": "student_response_followup",
+      "path": "workflows/campaign_crm/student_response_followup.json"
+    },
+    {
+      "id": "student_additional_info",
+      "path": "workflows/campaign_crm/student_additional_info.json"
+    },
+    {
+      "id": "student_enrollment_followup",
+      "path": "workflows/campaign_crm/student_enrollment_followup.json"
+    }
+  ]
+}

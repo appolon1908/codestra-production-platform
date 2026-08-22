@@ -1,6 +1,62 @@
 _format_version: "3.0"
 _transform: true
 services:
+  - name: codestra-automation-gateway
+    url: http://codestra-control-plane:8096
+    connect_timeout: 3000
+    read_timeout: 30000
+    write_timeout: 30000
+    routes:
+      - name: automation-policy-check
+        hosts: [api.codestra.co]
+        paths: [/api/v1/automation/policy-check]
+        methods: [POST]
+        strip_path: false
+      - name: automation-result-write
+        hosts: [api.codestra.co]
+        paths: [/api/v1/integrations/n8n/results]
+        methods: [POST]
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          header_names: [authorization]
+          key_claim_name: azp
+          claims_to_verify: [exp]
+      - name: rate-limiting
+        config: {minute: 120, policy: local, fault_tolerant: false, hide_client_headers: false}
+      - name: request-size-limiting
+        config: {allowed_payload_size: 1, size_unit: megabytes, require_content_length: true}
+      - name: correlation-id
+        config: {header_name: X-Correlation-ID, generator: uuid, echo_downstream: true}
+      - name: pre-function
+        config:
+          access:
+            - |
+              local scheme = kong.request.get_forwarded_scheme()
+              if scheme ~= "https" then return kong.response.exit(426,{error="https_required"}) end
+              local header = kong.request.get_header("authorization") or ""
+              local token = header:match("[Bb]earer%s+(.+)") or ""
+              local payload = token:match("^[^.]+%.([^.]+)%.") or ""
+              payload=payload:gsub("-","+"):gsub("_","/")
+              payload=payload..string.rep("=",(4-#payload%4)%4)
+              local raw=ngx.decode_base64(payload)
+              local claims=raw and require("cjson.safe").decode(raw) or {}
+              if claims.iss ~= "https://auth.codestra.co/realms/codestra" then return kong.response.exit(401,{error="invalid_issuer"}) end
+              local audience_ok = claims.aud == "codestra-middleware"
+              if type(claims.aud)=="table" then for _,value in ipairs(claims.aud) do if value=="codestra-middleware" then audience_ok=true end end end
+              if not audience_ok then return kong.response.exit(401,{error="invalid_audience"}) end
+              if claims.azp ~= "codestra-n8n-communications" then return kong.response.exit(403,{error="caller_denied"}) end
+              if claims.tenant_id ~= "COD" then return kong.response.exit(403,{error="cross_tenant_denied"}) end
+              local scopes = {}
+              for value in string.gmatch(claims.scope or "", "%S+") do scopes[value] = true end
+              local required = kong.request.get_path():find("/results$") and "communications.result.write" or "communications.message.dispatch"
+              if not scopes[required] then return kong.response.exit(403,{error="insufficient_scope",required_scope=required}) end
+              local gateway_secret=os.getenv("KONG_CONTROL_PLANE_GATEWAY_SECRET")
+              if not gateway_secret or gateway_secret=="" then return kong.response.exit(503,{error="gateway_identity_unavailable"}) end
+              kong.service.request.set_header("X-Authenticated-Client",claims.azp)
+              kong.service.request.set_header("X-Authenticated-Tenant",claims.tenant_id)
+              kong.service.request.set_header("X-Codestra-Gateway-Secret",gateway_secret)
   - name: codestra-control-plane
     url: http://codestra-control-plane:8096
     connect_timeout: 3000
