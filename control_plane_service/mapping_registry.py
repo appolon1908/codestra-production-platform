@@ -58,6 +58,14 @@ def new_uuid() -> str:
     return str(uuid.uuid4())
 
 
+def validated_uuid(value: Any, field: str) -> str:
+    """Return a canonical UUID string or a safe control-plane error."""
+    try:
+        return str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ControlPlaneError(f"invalid_{field}") from exc
+
+
 def db_bool(value: bool) -> bool | int:
     return value if is_postgres() else int(value)
 
@@ -182,11 +190,12 @@ class MappingRegistry:
     def create_campaign(self, value: dict[str, Any], *, actor: str) -> tuple[dict[str, Any], bool]:
         tenant = str(value["tenant_id"]); key = str(value["idempotency_key"])
         operation = "campaign.create"; digest = payload_hash(value.get("immutable_payload", value))
-        stamp = now(); campaign_id = str(value.get("id") or new_uuid())
+        stamp = now()
+        campaign_id = validated_uuid(value["id"], "entity_id") if value.get("id") else new_uuid()
         desired = str(value.get("desired_state", "DRAFT")).upper()
         if desired not in ENTITY_STATES:
             raise ControlPlaneError("invalid_desired_state")
-        correlation = str(value.get("correlation_id") or new_uuid())
+        correlation = validated_uuid(value["correlation_id"], "correlation_id") if value.get("correlation_id") else new_uuid()
         try:
             with Connection(self.path) as db:
                 self._tenant_scope(db, tenant)

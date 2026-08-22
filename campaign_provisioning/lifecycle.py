@@ -135,7 +135,7 @@ class PrivateAdapterClient:
     def campaign_actual(self, campaign_id: str) -> dict[str, Any]:
         return self._request(
             "GET", f"/v1/campaigns/{campaign_id}/actual-state",
-            scope="telephony:read",
+            scope="telephony:campaign-read",
         )
 
     def sync_agent(self, key: str, command: dict[str, Any]) -> dict[str, Any]:
@@ -161,7 +161,7 @@ class PrivateAdapterClient:
 
     def reconcile(self) -> dict[str, Any]:
         return self._request(
-            "POST", "/v1/reconciliation/run", scope="telephony:read"
+            "POST", "/v1/reconciliation/run", scope="telephony:reconciliation-read"
         )
 
     def disable_campaign(self, key: str, command: dict[str, Any]) -> dict[str, Any]:

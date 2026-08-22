@@ -14,7 +14,7 @@ def registry(tmp_path):
 def campaign(key="create-1"):
     return {"tenant_id":"COD","campaign_code":"TEST_SYN","name":"Synthetic",
             "direction":"OUTBOUND","telephony_enabled":False,"desired_state":"INACTIVE",
-            "idempotency_key":key,"correlation_id":"corr-test-syn",
+            "idempotency_key":key,"correlation_id":"9c0f086e-0dd4-4df9-b3e5-96693b612ff4",
             "immutable_payload":{"campaign_code":"TEST_SYN","desired_state":"INACTIVE"}}
 
 
@@ -24,7 +24,7 @@ def test_transactional_command_creates_uuid_job_and_outbox(registry):
     assert result["entity_id"] != "TEST_SYN"
     assert result["event"]["event_kind"] == "COMMAND"
     assert result["event"]["payload"]["job_id"] == result["job_id"]
-    assert result["event"]["correlation_id"] == "corr-test-syn"
+    assert result["event"]["correlation_id"] == "9c0f086e-0dd4-4df9-b3e5-96693b612ff4"
     with sqlite3.connect(registry.path) as db:
         assert db.execute("select count(*) from cp_campaign").fetchone()[0] == 1
         assert db.execute("select count(*) from cp_sync_job").fetchone()[0] == 1
@@ -44,6 +44,17 @@ def test_idempotency_key_payload_conflict(registry):
     changed = campaign(); changed["immutable_payload"] = {"campaign_code":"OTHER"}
     with pytest.raises(ControlPlaneError, match="idempotency_conflict"):
         registry.create_campaign(changed, actor="odoo")
+
+
+def test_invalid_uuid_fields_are_rejected_before_database_work(registry):
+    value = campaign()
+    value["correlation_id"] = "not-a-uuid"
+    with pytest.raises(ControlPlaneError, match="invalid_correlation_id"):
+        registry.create_campaign(value, actor="odoo")
+    value = campaign()
+    value["id"] = "not-a-uuid"
+    with pytest.raises(ControlPlaneError, match="invalid_entity_id"):
+        registry.create_campaign(value, actor="odoo")
 
 
 def test_stale_result_rejected_and_state_unchanged(registry):
