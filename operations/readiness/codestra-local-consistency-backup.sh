@@ -171,4 +171,6 @@ gpg --homedir /etc/codestra/backup-gpg --batch --yes --trust-model always \
 printf 'BACKUP_STATUS=PASS\nBACKUP_TIMESTAMP=%s\nBACKUP_DIRECTORY=%s\nPRODUCTION_SERVICE_RECOVERY_GATE=PASS\nCONSISTENCY_PAUSE_DURATION_MS=%s\nCONFIGURATION_SCOPE_GATE=PASS_EXACT_ACTIVE_PATHS\nLOCAL_RUNTIME_IMAGE_BACKUP_GATE=PASS\nUNATTENDED_GPG_ROUNDTRIP_GATE=PASS\n' \
     "$stamp" "$final_dir" "$pause_duration_ms" > "$final_dir/STATUS.txt"
 (cd "$final_dir" && sha256sum "codestra-${stamp}.tar.gz.gpg" SHA256SUMS STATUS.txt > EVIDENCE-SHA256SUMS && sha256sum -c EVIDENCE-SHA256SUMS)
+printf '%s\n' "$stamp" > "$backup_root/.LAST_SUCCESS-${stamp}"
+mv "$backup_root/.LAST_SUCCESS-${stamp}" "$backup_root/LAST_SUCCESS"
 printf '%s\n' "$final_dir"

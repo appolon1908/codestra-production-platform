@@ -38,6 +38,12 @@ def run(script: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 
 class BackupOperationsTests(unittest.TestCase):
+    def test_readiness_backup_publishes_last_success_after_evidence_validation(self) -> None:
+        source = (ROOT / "operations" / "readiness" / "codestra-local-consistency-backup.sh").read_text()
+        evidence = source.index('sha256sum -c EVIDENCE-SHA256SUMS')
+        marker = source.index('mv "$backup_root/.LAST_SUCCESS-${stamp}" "$backup_root/LAST_SUCCESS"')
+        self.assertGreater(marker, evidence)
+
     def test_backup_fails_closed_without_protected_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             result = run(
