@@ -35,3 +35,31 @@ def test_result_is_durable_and_idempotent(tmp_path):
     first = record_execution_result(store, result, "COD")
     second = record_execution_result(store, result, "COD")
     assert first.duplicate is False and second.duplicate is True
+
+
+def test_cod_web_out_email_requires_exact_contact_policy(tmp_path, monkeypatch):
+    monkeypatch.setenv("CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED", "true")
+    monkeypatch.setenv("COD_WEB_OUT_EMAIL_ENABLED", "true")
+    monkeypatch.setenv("COD_WEB_OUT_EMAIL_MODE", "CANARY")
+    monkeypatch.setenv("COD_WEB_OUT_EMAIL_ALLOWLIST_REQUIRED", "true")
+    monkeypatch.setenv("COD_WEB_OUT_CANARY_RECIPIENT", "appolon@codestra.co")
+    store = Store(str(tmp_path / "control-plane.db"))
+    store.set_preference("COD", "internal-canary", "email", "subscribed", "internal_test")
+    value = envelope()
+    value["campaign_id"] = "COD-WEB-OUT"
+    value["payload"] = {
+        "channel":"email", "contact_id":"internal-canary", "recipient":"appolon@codestra.co",
+        "sender":"sales@codestra.co", "reply_to":"support@codestra.co", "country":"DO",
+        "legal_basis":"internal_test", "classification":"transactional",
+    }
+    assert authorize_automation(store, value, "COD")["authorized"] is True
+    for field in ("country", "legal_basis"):
+        denied = {**value, "payload":{**value["payload"]}}
+        denied["payload"].pop(field)
+        try: authorize_automation(store, denied, "COD")
+        except ControlPlaneError as exc: assert str(exc) == "contact_policy_denied"
+        else: raise AssertionError(f"missing {field} was allowed")
+    held = {**value, "payload":{**value["payload"], "campaign_hold":True}}
+    try: authorize_automation(store, held, "COD")
+    except ControlPlaneError as exc: assert str(exc) == "contact_policy_denied"
+    else: raise AssertionError("held contact was allowed")
