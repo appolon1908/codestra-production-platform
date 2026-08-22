@@ -35,8 +35,22 @@ def test_canonical_message_routes_and_scopes_are_explicit():
     kong=(ROOT/"deploy/kong/control-plane.yml").read_text()
     policy=(ROOT/"deploy/kong/scope-policy.lua").read_text()
     assert "/api/v1/messages" in kong and "https_required" in kong
-    for scope in ("message.create","message.read","message.dispatch","message.result.write","message.events.read"):
+    for scope in ("communications.message.create","communications.message.read","communications.message.dispatch","communications.result.write","communications.message.events.read"):
         assert scope in policy
+
+
+def test_complete_granular_communication_scope_catalog_is_documented():
+    matrix=(ROOT/"reports/COMMUNICATION_OAUTH_SCOPE_MATRIX.csv").read_text()
+    required={
+        "communications.message.create", "communications.message.read",
+        "communications.message.dispatch", "communications.message.events.read",
+        "communications.sms.create", "communications.sms.dispatch",
+        "communications.sms.events.read", "communications.email.create",
+        "communications.email.dispatch", "communications.email.events.read",
+        "communications.result.write", "communications.reconciliation.read",
+        "communications.reconciliation.execute", "communications.admin",
+    }
+    assert not (required - set(matrix.replace(',', ' ').replace('"', ' ').split()))
 
 def test_control_plane_implements_business_aliases_without_provider_duplication():
     source=(ROOT/"control_plane_service/server.py").read_text()

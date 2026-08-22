@@ -4,14 +4,14 @@ local claims = kong.ctx.shared.authenticated_jwt_token and kong.ctx.shared.authe
 local scopes = {}
 for value in string.gmatch(claims.scope or "", "%S+") do scopes[value] = true end
 local required
-if path:find("^/api/v1/results/messages/") then required = "message.result.write"
-elseif path:find("^/api/v1/control/messages/.+/dispatch$") then required = "message.dispatch"
-elseif path == "/api/v1/control/messages" then required = "message.create"
-elseif path:find("^/api/v1/messages/.+/events$") then required = "message.events.read"
-elseif path:find("^/api/v1/messages/") then required = "message.read"
+if path:find("^/api/v1/results/messages/") then required = "communications.result.write"
+elseif path:find("^/api/v1/control/messages/.+/dispatch$") then required = "communications.message.dispatch"
+elseif path == "/api/v1/control/messages" then required = "communications.message.create"
+elseif path:find("^/api/v1/messages/.+/events$") then required = "communications.message.events.read"
+elseif path:find("^/api/v1/messages/") then required = "communications.message.read"
+elseif path:find("^/api/v1/reconciliation/") and method == "POST" then required = "communications.reconciliation.execute"
+elseif path:find("^/api/v1/reconciliation/") then required = "communications.reconciliation.read"
 elseif path:find("^/api/v1/results/") then required = "sync.result.write"
-elseif path:find("^/api/v1/reconciliation/") and method == "POST" then required = "reconciliation.execute"
-elseif path:find("^/api/v1/reconciliation/") then required = "reconciliation.read"
 elseif path:find("^/api/v1/control/campaigns") then required = method == "GET" and "mapping.read" or "campaign.write"
 elseif path:find("^/api/v1/control/agents") then required = method == "GET" and "mapping.read" or "agent.write"
 elseif path:find("^/api/v1/control/memberships") then required = method == "GET" and "mapping.read.minimum" or "sync.execute"
