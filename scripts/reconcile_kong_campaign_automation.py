@@ -119,6 +119,29 @@ def one(items: list[dict], description: str) -> dict | None:
     return items[0] if items else None
 
 
+def select_managed_route(
+    routes: list[dict], expected_name: str, host: str, path: str, apply: bool
+) -> dict | None:
+    """Select the named route or safely adopt one exact legacy path collision."""
+    named = [route for route in routes if route.get("name") == expected_name]
+    route = one(named, expected_name)
+    collisions = [
+        candidate for candidate in routes
+        if candidate.get("id") != (route or {}).get("id")
+        and host in (candidate.get("hosts") or [])
+        and path in (candidate.get("paths") or [])
+        and "POST" in (candidate.get("methods") or [])
+    ]
+    if route and collisions:
+        raise RuntimeError(f"conflicting live route for {host}{path}")
+    if route:
+        return route
+    collision = one(collisions, f"legacy route for {host}{path}")
+    if collision and not apply:
+        raise RuntimeError(f"legacy route requires managed adoption for {host}{path}")
+    return collision
+
+
 def ensure_entity(admin: str, collection: str, query: str, payload: dict, apply: bool) -> dict:
     existing = one(request(admin, "GET", f"/{collection}?" + urlencode({"name": query}))["data"], query)
     if existing:
@@ -191,8 +214,10 @@ def main() -> int:
     require_exact_fields(credential, jwt_payload, "campaign JWT credential")
     evidence = []
     for expected in manifest["routes"]:
-        routes = request(args.admin_url, "GET", "/routes?" + urlencode({"name": expected["name"]}))["data"]
-        route = one(routes, expected["name"])
+        routes = request(args.admin_url, "GET", "/routes?size=1000")["data"]
+        route = select_managed_route(
+            routes, expected["name"], manifest["host"], expected["path"], args.apply
+        )
         route_payload = {
             "name": expected["name"], "service.id": service["id"],
             "hosts[]": [manifest["host"]], "paths[]": [expected["path"]],

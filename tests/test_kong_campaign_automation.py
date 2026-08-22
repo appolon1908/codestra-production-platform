@@ -9,6 +9,7 @@ from scripts.reconcile_kong_campaign_automation import (
     plugin_form,
     require_exact_fields,
     rsa_public_key_pem,
+    select_managed_route,
 )
 
 
@@ -48,6 +49,30 @@ def test_plugin_config_is_form_encoded_for_kong_admin_api():
         "config.claims_to_verify[]": ["exp"],
         "config.run_on_preflight": True,
     }
+
+
+def test_legacy_same_path_route_is_adopted_only_during_apply():
+    legacy = {
+        "id": "legacy", "name": "automation-policy-check",
+        "hosts": ["api.codestra.co"], "paths": ["/policy"], "methods": ["POST"],
+    }
+    with pytest.raises(RuntimeError, match="requires managed adoption"):
+        select_managed_route([legacy], "managed-policy", "api.codestra.co", "/policy", False)
+    assert select_managed_route(
+        [legacy], "managed-policy", "api.codestra.co", "/policy", True
+    ) == legacy
+
+
+def test_duplicate_same_path_route_is_rejected():
+    managed = {
+        "id": "managed", "name": "managed-policy",
+        "hosts": ["api.codestra.co"], "paths": ["/policy"], "methods": ["POST"],
+    }
+    legacy = {**managed, "id": "legacy", "name": "legacy-policy"}
+    with pytest.raises(RuntimeError, match="conflicting live route"):
+        select_managed_route(
+            [managed, legacy], "managed-policy", "api.codestra.co", "/policy", True
+        )
 
 
 def test_overlapping_jwks_selects_fresh_token_kid(monkeypatch):
