@@ -31,13 +31,18 @@ def test_test_syn_uses_short_campaign_scoped_statuses():
 def test_apply_uses_restricted_adapter():
     class Client:
         def __init__(self): self.calls = []
-        def provision_campaign(self, key, command):
+        def reconcile_campaign(self, key, command):
             self.calls.append((key, command))
             return {"status": "complete_disabled"}
     client = Client()
     state = {"campaigns": {}, "groups": {}, "ingroups": {}}
-    assert MODULE.apply_via_adapter([row()], state, client) == [{"status": "complete_disabled"}]
+    assert MODULE.apply_via_adapter(
+        [row()], state, client, plan_sha256="a" * 64,
+        authorization_reference="CHG-20260821-CAMPAIGN-RECONCILIATION",
+        backup_reference="backup/20260822T120000Z",
+    ) == [{"status": "complete_disabled"}]
     assert client.calls[0][0] == "campaign-reconcile:COD12345"
+    assert client.calls[0][1]["plan_sha256"] == "a" * 64
 
 
 def test_plan_blocks_unowned_collision_active_ingroup_and_repairs_membership():

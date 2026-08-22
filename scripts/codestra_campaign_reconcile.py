@@ -175,7 +175,10 @@ def build_plan(rows: list[dict[str, str]], state) -> dict:
     }
 
 
-def adapter_command(row: dict[str, str], state: dict | None = None) -> dict:
+def adapter_command(row: dict[str, str], state: dict | None = None, *,
+                    plan_sha256: str | None = None,
+                    authorization_reference: str | None = None,
+                    backup_reference: str | None = None) -> dict:
     code = row["CODE"]
     business_unit = code.split("-", 1)[0] if code != "TEST_SYN" else "TEST"
     direction = "inbound" if code.endswith("-IN") else "outbound"
@@ -235,7 +238,7 @@ def adapter_command(row: dict[str, str], state: dict | None = None) -> dict:
         campaign["adopt_existing_sha256"] = hashlib.sha256(
             json.dumps(observed, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
-    return {
+    command = {
         "context": {
             "correlation_id": "campaign-reconcile-" + row["EXPECTED_VICIDIAL_CAMPAIGN"],
             "actor": "codestra-campaign-reconcile",
@@ -244,13 +247,29 @@ def adapter_command(row: dict[str, str], state: dict | None = None) -> dict:
         },
         "campaign": campaign,
     }
+    if plan_sha256 or authorization_reference or backup_reference:
+        if not all((plan_sha256, authorization_reference, backup_reference)):
+            raise RuntimeError("complete reconciliation request binding required")
+        command.update({
+            "plan_sha256": plan_sha256,
+            "authorization_reference": authorization_reference,
+            "backup_reference": backup_reference,
+        })
+    return command
 
 
-def apply_via_adapter(rows: list[dict[str, str]], state: dict, client: PrivateAdapterClient) -> list[dict]:
+def apply_via_adapter(rows: list[dict[str, str]], state: dict, client: PrivateAdapterClient,
+                      *, plan_sha256: str, authorization_reference: str,
+                      backup_reference: str) -> list[dict]:
     results = []
     for row in rows:
         key = "campaign-reconcile:" + row["EXPECTED_VICIDIAL_CAMPAIGN"]
-        results.append(client.provision_campaign(key, adapter_command(row, state)))
+        command = adapter_command(
+            row, state, plan_sha256=plan_sha256,
+            authorization_reference=authorization_reference,
+            backup_reference=backup_reference,
+        )
+        results.append(client.reconcile_campaign(key, command))
     return results
 
 
@@ -297,6 +316,9 @@ def main() -> int:
     parser.add_argument("--adapter-client-cert-file")
     parser.add_argument("--adapter-client-key-file")
     parser.add_argument("--adapter-hmac-file")
+    parser.add_argument("--plan-sha256")
+    parser.add_argument("--authorization-reference")
+    parser.add_argument("--backup-reference")
     args = parser.parse_args()
     global SCHEMA
     if not args.schema.replace("_", "").isalnum():
@@ -324,7 +346,14 @@ def main() -> int:
             client_key_file=args.adapter_client_key_file,
             hmac_file=args.adapter_hmac_file,
         ))
-        result["adapter_results"] = apply_via_adapter(rows, state, client)
+        bindings = (args.plan_sha256, args.authorization_reference, args.backup_reference)
+        if not all(bindings):
+            raise RuntimeError("plan, owner authorization, and backup bindings required")
+        result["adapter_results"] = apply_via_adapter(
+            rows, state, client, plan_sha256=args.plan_sha256,
+            authorization_reference=args.authorization_reference,
+            backup_reference=args.backup_reference,
+        )
         checked = verify(rows, actual_state())
         result.update(checked, status="PASS" if not checked["errors"] else "FAIL")
     elif args.mode == "verify":
