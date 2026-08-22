@@ -8,7 +8,7 @@ on:
         required: true
         type: choice
         default: preflight
-        options: [preflight, backup, validate-backup, restore-test, stage, canary, status, rollback, collect-evidence]
+        options: [preflight, backup, validate-backup, restore-test, stage, canary, status, rollback, collect-evidence, stage-control-plane, validate-control-plane, rollback-control-plane]
       protected_sha:
         description: Exact protected platform SHA
         required: true

@@ -8,3 +8,6 @@ codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-produ
 codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator status
 codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator rollback
 codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator collect-evidence
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator stage-control-plane
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator validate-control-plane
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator rollback-control-plane
