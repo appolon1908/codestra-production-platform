@@ -41,6 +41,7 @@ def main() -> int:
     parser.add_argument("--app-role", required=True)
     parser.add_argument("--owner-role", required=True)
     parser.add_argument("--migration-role", required=True)
+    parser.add_argument("--probe-table", default="public.codestra_rbac_probe")
     args = parser.parse_args()
 
     for value in (args.app_role, args.owner_role, args.migration_role):
@@ -69,7 +70,27 @@ def main() -> int:
     if membership != "f":
         raise RuntimeError("application role has forbidden membership")
 
-    run_psql(dsn, "BEGIN; CREATE TEMP TABLE test_syn_rbac(v int); INSERT INTO test_syn_rbac VALUES (1); UPDATE test_syn_rbac SET v=2; ROLLBACK", expect_success=True)
+    if not all(IDENTIFIER.fullmatch(part) for part in args.probe_table.split(".")):
+        raise SystemExit("probe table must be a schema-qualified unquoted identifier")
+    readback = run_psql(
+        dsn, f"SELECT probe_value FROM {args.probe_table} WHERE probe_id='TEST_SYN'",
+        expect_success=True,
+    )
+    if readback != "1":
+        raise RuntimeError("persistent TEST_SYN read probe failed")
+    run_psql(
+        dsn,
+        f"BEGIN; UPDATE {args.probe_table} SET probe_value=2, updated_at=now() "
+        "WHERE probe_id='TEST_SYN'; "
+        f"SELECT probe_value FROM {args.probe_table} WHERE probe_id='TEST_SYN'; ROLLBACK",
+        expect_success=True,
+    )
+    after = run_psql(
+        dsn, f"SELECT probe_value FROM {args.probe_table} WHERE probe_id='TEST_SYN'",
+        expect_success=True,
+    )
+    if after != "1":
+        raise RuntimeError("persistent TEST_SYN rollback probe failed")
     denied = {
         "CREATE_DATABASE": "CREATE DATABASE test_syn_rbac_forbidden",
         "CREATE_ROLE": "CREATE ROLE test_syn_rbac_forbidden",

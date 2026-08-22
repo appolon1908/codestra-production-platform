@@ -18,3 +18,13 @@ def test_reconciliation_defaults_to_dry_run_and_refuses_credentials():
 def test_supported_partial_import_is_used_for_exact_uuid():
     assert 'partialImport' in SOURCE
     assert 'ifResourceExists": "FAIL"' in SOURCE
+
+
+def test_disabled_canonical_user_is_not_certified():
+    assert 'reason="canonical subject disabled"' in SOURCE
+    assert "canonical subject enable readback failed" in SOURCE
+
+
+def test_stale_subject_has_compensating_recovery():
+    assert 'status="RECOVERED_STALE"' in SOURCE
+    assert "canonical import failed and stale recovery failed" in SOURCE

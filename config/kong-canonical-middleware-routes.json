@@ -1,6 +1,7 @@
 {
   "canonicalHost": "api.codestra.co",
   "legacyHost": "api.codestra.agency",
+  "allowedExistingRouteNames": ["codestra-token-validation-certification"],
   "routes": [
     {"name": "crm-route", "path": "/v1/crm", "methods": ["GET", "POST", "PATCH", "OPTIONS"], "auth": "key-auth", "maxBodyMb": 2, "ratePerMinute": 120},
     {"name": "email-route", "path": "/v1/email", "methods": ["GET", "POST"], "auth": "key-auth", "maxBodyMb": 10, "ratePerMinute": 60},

@@ -66,6 +66,18 @@ ORDER BY n.nspname, p.proname, p.oid \gexec
 
 SELECT format('ALTER DATABASE %I OWNER TO %I', current_database(), :'owner_role') \gexec
 
+-- A permanent synthetic fixture proves real table grants without touching
+-- application or customer rows. It remains bounded to one TEST_SYN record.
+CREATE TABLE IF NOT EXISTS public.codestra_rbac_probe (
+  probe_id text PRIMARY KEY,
+  probe_value integer NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.codestra_rbac_probe(probe_id, probe_value)
+VALUES ('TEST_SYN', 1)
+ON CONFLICT (probe_id) DO NOTHING;
+SELECT format('ALTER TABLE public.codestra_rbac_probe OWNER TO %I', :'owner_role') \gexec
+
 SELECT format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I', current_database(), :'app_role') \gexec
 SELECT format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I', current_database(), :'migration_role') \gexec
 

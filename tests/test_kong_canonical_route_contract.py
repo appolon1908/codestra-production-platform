@@ -24,3 +24,5 @@ def test_reconciler_is_dry_run_by_default_and_fail_closed():
     assert 'parser.add_argument("--apply", action="store_true")' in SOURCE
     assert "expected exactly one existing route" in SOURCE
     assert "required auth plugin absent" in SOURCE
+    assert "limiter readback mismatch" in SOURCE
+    assert "unexpected_public" in SOURCE

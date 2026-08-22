@@ -76,7 +76,18 @@ def main() -> int:
         "before_subjects": [user["id"] for user in users],
     }
     if canonical:
-        result.update(status="PASS", changed=False, active_stale_subject_mappings=0)
+        if canonical[0].get("enabled"):
+            result.update(status="PASS", changed=False, active_stale_subject_mappings=0)
+        elif args.apply:
+            canonical_state = kc.call(f"/admin/realms/{REALM}/users/{CANONICAL_SUBJECT}")
+            canonical_state["enabled"] = True
+            kc.call(f"/admin/realms/{REALM}/users/{CANONICAL_SUBJECT}", "PUT", canonical_state)
+            enabled = kc.call(f"/admin/realms/{REALM}/users/{CANONICAL_SUBJECT}").get("enabled")
+            if not enabled:
+                raise RuntimeError("canonical subject enable readback failed")
+            result.update(status="PASS", changed=True, active_stale_subject_mappings=0)
+        else:
+            result.update(status="DRIFT", changed=False, reason="canonical subject disabled")
     elif not stale or stale.get("username") != USERNAME:
         raise RuntimeError("canonical user absent and exact stale TEST_SYN authority not found")
     else:
@@ -89,24 +100,50 @@ def main() -> int:
                       group_paths=[group["path"] for group in groups],
                       realm_roles=[role["name"] for role in roles])
         if args.apply:
-            representation = {key: stale[key] for key in (
+            stale_representation = {key: stale[key] for key in (
                 "firstName", "lastName", "email", "emailVerified", "attributes",
                 "requiredActions",
             ) if key in stale}
-            representation.update(id=CANONICAL_SUBJECT, username=USERNAME, enabled=True)
+            stale_representation.update(id=STALE_SUBJECT, username=USERNAME,
+                                        enabled=stale.get("enabled", False))
+            canonical_representation = dict(stale_representation)
+            canonical_representation.update(id=CANONICAL_SUBJECT, enabled=True)
+            # Persist recovery metadata before the only destructive operation.
+            result.update(status="APPLYING", recovery_subject=STALE_SUBJECT)
+            args.evidence.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+
+            def restore_mappings(subject: str) -> None:
+                for group in groups:
+                    kc.call(f"/admin/realms/{REALM}/users/{subject}/groups/{group['id']}", "PUT")
+                if roles:
+                    kc.call(f"/admin/realms/{REALM}/users/{subject}/role-mappings/realm", "POST", roles)
+
             kc.call(f"/admin/realms/{REALM}/users/{STALE_SUBJECT}", "DELETE")
-            imported = kc.call(f"/admin/realms/{REALM}/partialImport", "POST", {
-                "ifResourceExists": "FAIL", "users": [representation],
-            })
-            if imported.get("added") != 1:
-                raise RuntimeError("canonical partial import did not add exactly one user")
-            for group in groups:
-                kc.call(f"/admin/realms/{REALM}/users/{CANONICAL_SUBJECT}/groups/{group['id']}", "PUT")
-            if roles:
-                kc.call(f"/admin/realms/{REALM}/users/{CANONICAL_SUBJECT}/role-mappings/realm", "POST", roles)
-            after = kc.call(f"/admin/realms/{REALM}/users?username={USERNAME}&exact=true")
-            if len(after) != 1 or after[0]["id"] != CANONICAL_SUBJECT or not after[0]["enabled"]:
-                raise RuntimeError("canonical subject readback failed")
+            try:
+                imported = kc.call(f"/admin/realms/{REALM}/partialImport", "POST", {
+                    "ifResourceExists": "FAIL", "users": [canonical_representation],
+                })
+                if imported.get("added") != 1:
+                    raise RuntimeError("canonical partial import did not add exactly one user")
+                restore_mappings(CANONICAL_SUBJECT)
+                after = kc.call(f"/admin/realms/{REALM}/users?username={USERNAME}&exact=true")
+                if len(after) != 1 or after[0]["id"] != CANONICAL_SUBJECT or not after[0]["enabled"]:
+                    raise RuntimeError("canonical subject readback failed")
+            except Exception:
+                # Ordinary creation cannot restore an exact UUID; partial import
+                # is therefore also the compensating recovery mechanism.
+                current = kc.call(f"/admin/realms/{REALM}/users?username={USERNAME}&exact=true")
+                for user in current:
+                    kc.call(f"/admin/realms/{REALM}/users/{user['id']}", "DELETE")
+                restored = kc.call(f"/admin/realms/{REALM}/partialImport", "POST", {
+                    "ifResourceExists": "FAIL", "users": [stale_representation],
+                })
+                if restored.get("added") != 1:
+                    raise RuntimeError("canonical import failed and stale recovery failed")
+                restore_mappings(STALE_SUBJECT)
+                result.update(status="RECOVERED_STALE", changed=False)
+                args.evidence.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+                raise
             result.update(status="PASS", changed=True,
                           after_subjects=[after[0]["id"]], active_stale_subject_mappings=0)
 

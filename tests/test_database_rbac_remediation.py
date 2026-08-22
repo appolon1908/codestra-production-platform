@@ -23,6 +23,7 @@ def test_runtime_grants_are_application_scoped():
     assert "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES" in SQL
     assert "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES" in SQL
     assert "GRANT EXECUTE ON ALL FUNCTIONS" in SQL
+    assert "public.codestra_rbac_probe" in SQL
 
 
 def test_create_is_explicitly_gated():
@@ -36,3 +37,10 @@ def test_verifier_never_accepts_password_argument():
     source = Path("scripts/verify_postgres_app_role.py").read_text()
     assert "--password" not in source
     assert "stderr" not in source[source.index("print(json.dumps"):]
+
+
+def test_verifier_exercises_persistent_synthetic_fixture():
+    source = Path("scripts/verify_postgres_app_role.py").read_text()
+    assert "public.codestra_rbac_probe" in source
+    assert "UPDATE {args.probe_table}" in source
+    assert "persistent TEST_SYN rollback probe failed" in source
