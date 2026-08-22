@@ -41,8 +41,13 @@ def desired(tmp_path: Path, *, active: str = "false") -> Path:
 def test_complete_disabled_mapping_passes(tmp_path: Path) -> None:
     mw = write_csv(
         tmp_path / "mw.csv",
-        ["canonical_campaign_code", "vicidial_campaign_id"],
-        [{"canonical_campaign_code": "COD-WEB-OUT", "vicidial_campaign_id": "COD20821"}],
+        ["canonical_campaign_code", "vicidial_campaign_id", "test_status", "evidence_reference"],
+        [{
+            "canonical_campaign_code": "COD-WEB-OUT",
+            "vicidial_campaign_id": "COD20821",
+            "test_status": "PASS",
+            "evidence_reference": "evidence://campaign/COD-WEB-OUT/1",
+        }],
     )
     vd = write_csv(
         tmp_path / "vd.csv",
@@ -68,11 +73,64 @@ def test_active_production_desired_state_is_rejected(tmp_path: Path) -> None:
         load_desired(desired(tmp_path, active="true"))
 
 
+def test_empty_odoo_authority_is_rejected(tmp_path: Path) -> None:
+    empty = write_csv(
+        tmp_path / "empty.csv",
+        ["canonical_campaign_code", "vicidial_campaign_id", "environment", "active"],
+        [],
+    )
+    with pytest.raises(ReconciliationError, match="authority snapshot is empty"):
+        load_desired(empty)
+
+
+def test_short_and_underscore_physical_ids_follow_adapter_contract(tmp_path: Path) -> None:
+    source = write_csv(
+        tmp_path / "short.csv",
+        ["canonical_campaign_code", "vicidial_campaign_id", "environment", "active"],
+        [{
+            "canonical_campaign_code": "COD-WEB-OUT",
+            "vicidial_campaign_id": "COD_1",
+            "environment": "production",
+            "active": "false",
+        }],
+    )
+    assert load_desired(source)[0].physical == "COD_1"
+
+
+def test_structural_match_without_functional_evidence_is_blocked(tmp_path: Path) -> None:
+    mw = write_csv(
+        tmp_path / "mw.csv",
+        ["canonical_campaign_code", "vicidial_campaign_id", "test_status", "evidence_reference"],
+        [{
+            "canonical_campaign_code": "COD-WEB-OUT",
+            "vicidial_campaign_id": "COD20821",
+            "test_status": "NOT_TESTED",
+            "evidence_reference": "",
+        }],
+    )
+    vd = write_csv(
+        tmp_path / "vd.csv",
+        ["campaign_id", "campaign_description", "active", "auto_dial_level"],
+        [{"campaign_id": "COD20821", "campaign_description": "CODESTRA:COD-WEB-OUT", "active": "N", "auto_dial_level": "0"}],
+    )
+    rows, _ = reconcile(load_desired(desired(tmp_path)), mw, vd)
+    assert rows[0]["status"] == "BLOCKED"
+    assert set(rows[0]["reasons"]) == {
+        "FUNCTIONAL_TEST_EVIDENCE_MISSING",
+        "EVIDENCE_REFERENCE_MISSING",
+    }
+
+
 def test_unowned_or_active_vicidial_collision_is_blocked(tmp_path: Path) -> None:
     mw = write_csv(
         tmp_path / "mw.csv",
-        ["canonical_campaign_code", "vicidial_campaign_id"],
-        [{"canonical_campaign_code": "COD-WEB-OUT", "vicidial_campaign_id": "COD20821"}],
+        ["canonical_campaign_code", "vicidial_campaign_id", "test_status", "evidence_reference"],
+        [{
+            "canonical_campaign_code": "COD-WEB-OUT",
+            "vicidial_campaign_id": "COD20821",
+            "test_status": "PASS",
+            "evidence_reference": "evidence://campaign/COD-WEB-OUT/1",
+        }],
     )
     vd = write_csv(
         tmp_path / "vd.csv",

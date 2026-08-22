@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 CANONICAL = re.compile(r"^(MOY|COD|SCP|MBL|RLP|FTP|TRX|CAL)-[A-Z0-9-]+$")
-PHYSICAL = re.compile(r"^[A-Z0-9]{8}$")
+PHYSICAL = re.compile(r"^[A-Z0-9_]{2,8}$")
 
 
 class ReconciliationError(ValueError):
@@ -66,6 +66,8 @@ def load_desired(path: Path) -> list[Desired]:
             seen_canonical.add(key)
             seen_physical.add(physical)
             rows.append(Desired(canonical, physical, environment, active))
+    if not rows:
+        raise ReconciliationError("Odoo authority snapshot is empty")
     return sorted(rows, key=lambda row: (row.environment, row.canonical))
 
 
@@ -100,6 +102,11 @@ def reconcile(
             reasons.append("MIDDLEWARE_MAPPING_MISSING")
         elif mw.get("vicidial_campaign_id", "").strip().upper() != item.physical:
             reasons.append("MIDDLEWARE_PHYSICAL_ID_MISMATCH")
+        else:
+            if mw.get("test_status", "").strip().upper() != "PASS":
+                reasons.append("FUNCTIONAL_TEST_EVIDENCE_MISSING")
+            if not mw.get("evidence_reference", "").strip():
+                reasons.append("EVIDENCE_REFERENCE_MISSING")
         if vd is None:
             reasons.append("VICIDIAL_CAMPAIGN_MISSING")
         else:
