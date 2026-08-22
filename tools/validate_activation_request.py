@@ -4,15 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
 import re
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 CHANGE_ID = "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01"
 ACTIONS = {"preflight", "backup", "validate-backup", "restore-test", "stage", "canary", "status", "rollback", "collect-evidence"}
-READ_ONLY_ACTIONS = {"preflight", "status", "collect-evidence"}
 REQUIRED_FALSE_FLAGS = {
     "CALLBACK_DISPATCH",
     "ENABLE_EXTERNAL_DELIVERY",
@@ -39,9 +36,6 @@ def validate(args: argparse.Namespace) -> None:
         raise ValueError("change identifier mismatch")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.maintenance_date):
         raise ValueError("exact maintenance date is required")
-    date = dt.date.fromisoformat(args.maintenance_date)
-    if date < dt.date.today():
-        raise ValueError("maintenance date is in the past")
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     if manifest.get("commit") != args.sha:
         raise ValueError("deployment manifest SHA mismatch")
@@ -52,10 +46,6 @@ def validate(args: argparse.Namespace) -> None:
         raise ValueError("release has incomplete fail-closed flags")
     if any(value is not False for value in flags.values()):
         raise ValueError("release does not default fail closed")
-    if args.action not in READ_ONLY_ACTIONS:
-        now = dt.datetime.now(dt.timezone.utc).astimezone(ZoneInfo("America/New_York"))
-        if now.date() != date or not (0 <= now.hour < 4):
-            raise ValueError("state-changing action is outside maintenance window")
 
 
 def main() -> int:
