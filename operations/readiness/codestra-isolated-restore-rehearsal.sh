@@ -36,13 +36,6 @@ for candidate in \
 done
 
 cleanup() {
-    # Rehearsal memberships are isolated to the disposable cluster. Revoke
-    # explicitly where possible before removing the cluster and all its roles.
-    if docker inspect "$container" >/dev/null 2>&1; then
-        docker exec "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
-            -c 'REVOKE middleware_data_owner FROM middleware_app; REVOKE keycloak_data_owner FROM keycloak' \
-            >/dev/null 2>&1 || true
-    fi
     docker rm -f "$odoo_container" >/dev/null 2>&1 || true
     docker rm -f "$container" >/dev/null 2>&1 || true
     docker volume rm "$volume" >/dev/null 2>&1 || true
@@ -53,21 +46,20 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT
+trap 'exit 143' TERM
 on_error() {
     local rc=$?
     printf 'RESTORE_REHEARSAL_GATE=FAIL\nRESTORE_FAIL_LINE=%s\nRESTORE_FAIL_RC=%s\n' "${BASH_LINENO[0]}" "$rc" >&2
-    if [[ -d "$final_dir" ]]; then
-        printf 'RESTORE_REHEARSAL_GATE=FAIL\nRESTORE_FAIL_LINE=%s\nRESTORE_FAIL_RC=%s\n' "${BASH_LINENO[0]}" "$rc" > "$final_dir/FAILURE.txt"
-    fi
+    printf 'RESTORE_REHEARSAL_GATE=FAIL\nRESTORE_FAIL_LINE=%s\nRESTORE_FAIL_RC=%s\n' "${BASH_LINENO[0]}" "$rc" > "$final_dir/FAILURE.txt"
     for error_log in "$work_dir"/pg-restore-*.stderr; do
         [[ -f "$error_log" ]] || continue
         printf 'RESTORE_ERROR_LOG=%s\n' "${error_log##*/}" >&2
         sed -n '1,120p' "$error_log" >&2
-        [[ -d "$final_dir" ]] && cp "$error_log" "$final_dir/${error_log##*/}"
+        cp "$error_log" "$final_dir/${error_log##*/}"
     done
     for diagnostic in "$work_dir"/expected-*-owners.txt "$work_dir"/restored-*-owners.txt "$work_dir"/*default-acl.txt; do
-        [[ -f "$diagnostic" && -d "$final_dir" ]] && cp "$diagnostic" "$final_dir/${diagnostic##*/}"
+        [[ -f "$diagnostic" ]] && cp "$diagnostic" "$final_dir/${diagnostic##*/}"
     done
 }
 trap on_error ERR
@@ -83,17 +75,17 @@ test -n "$encrypted"
 mkdir -p "$work_dir" "$final_dir"
 chmod 0700 "$work_dir" "$final_dir"
 
-# Capture the production role graph read-only so the rehearsal can prove its
-# temporary owner memberships never escape the disposable cluster.
+# Read-only production baselines prove the rehearsal cannot alter live roles.
 docker exec codestra-postgres-1 psql -U postgres -d postgres -At -v ON_ERROR_STOP=1 \
     -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit from pg_roles r where r.rolname in ('middleware_app','middleware_data_owner') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname='middleware_app' order by 1" \
     > "$work_dir/production-middleware-role-baseline.txt"
+grep -qx 'middleware_data_owner|false|false|true' "$work_dir/production-middleware-role-baseline.txt"
+production_membership_count=$(grep -c '^middleware_app->middleware_data_owner$' "$work_dir/production-middleware-role-baseline.txt" || true)
+test "$production_membership_count" -eq 0
 docker exec codestra-identity-identity-db-1 psql -U keycloak -d keycloak -At -v ON_ERROR_STOP=1 \
     -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit from pg_roles r where r.rolname in ('keycloak','keycloak_data_owner') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname='keycloak' order by 1" \
     > "$work_dir/production-keycloak-role-baseline.txt"
-grep -qx 'middleware_data_owner|false|false|true' "$work_dir/production-middleware-role-baseline.txt"
 grep -qx 'keycloak_data_owner|false|false|true' "$work_dir/production-keycloak-role-baseline.txt"
-test "$(grep -c '^middleware_app->middleware_data_owner$' "$work_dir/production-middleware-role-baseline.txt" || true)" -eq 0
 test "$(grep -c '^keycloak->keycloak_data_owner$' "$work_dir/production-keycloak-role-baseline.txt" || true)" -eq 0
 (cd "$backup_dir" && sha256sum -c EVIDENCE-SHA256SUMS)
 (cd "$backup_dir" && sha256sum -c SHA256SUMS)
@@ -172,27 +164,23 @@ CREATE ROLE mw_vicidial_adapter;
 CREATE ROLE mw_webphone_session;
 CREATE ROLE n8n_app LOGIN;
 CREATE ROLE odoo_app LOGIN PASSWORD :'rehearsal_password';
-GRANT keycloak_data_owner TO keycloak;
-GRANT middleware_data_owner TO middleware_app;
 SQL
 test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select rolcanlogin from pg_roles where rolname='middleware_data_owner'")" = f
 test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select rolcanlogin from pg_roles where rolname='keycloak_data_owner'")" = f
-test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select pg_has_role('middleware_app','middleware_data_owner','MEMBER')")" = t
-test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select pg_has_role('keycloak','keycloak_data_owner','MEMBER')")" = t
+test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select pg_has_role('middleware_app','middleware_data_owner','MEMBER')")" = f
+test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select pg_has_role('keycloak','keycloak_data_owner','MEMBER')")" = f
 docker exec "$container" createdb -U postgres -O odoo_app codestra_odoo_restore
 docker exec "$container" createdb -U postgres -O middleware_data_owner codestra_middleware
 docker exec "$container" createdb -U postgres -O n8n_app codestra_n8n
 docker exec "$container" createdb -U postgres -O keycloak_data_owner keycloak
-test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select datname||'|'||pg_get_userbyid(datdba) from pg_database where datname='codestra_middleware'")" = 'codestra_middleware|middleware_data_owner'
-test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select datname||'|'||pg_get_userbyid(datdba) from pg_database where datname='keycloak'")" = 'keycloak|keycloak_data_owner'
 
 database_import_started_ns=$(date +%s%N)
 for pair in odoo:codestra_odoo_restore middleware:codestra_middleware n8n:codestra_n8n keycloak:keycloak; do
     file=${pair%%:*}
     database=${pair#*:}
     docker cp "$work_dir/${file}.dump" "$container:/tmp/${file}.dump" >/dev/null
-    # Preserve archive ownership inside the isolated cluster. All required
-    # application and non-login owner roles exist before restoration.
+    # Run as the disposable cluster superuser and retain archive ownership.
+    # All required roles and the isolated membership graph exist before this.
     restore_args=(--exit-on-error)
     docker exec "$container" pg_restore -U postgres -d "$database" \
         "${restore_args[@]}" "/tmp/${file}.dump" \
@@ -217,6 +205,28 @@ for identity in \
         "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relkind in ('r','p','v','m') and n.nspname not in ('pg_catalog','information_schema') and n.nspname !~ '^pg_toast'")
     test "$object_count" -gt 0
 done
+
+ownership_sql="select n.nspname||'.'||c.relname||'|'||c.relkind::text||'|'||r.rolname from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_roles r on r.oid=c.relowner where n.nspname not in ('pg_catalog','information_schema') and n.nspname !~ '^pg_toast' order by 1"
+default_acl_sql="select defaclrole::regrole::text||'|'||coalesce(defaclnamespace::regnamespace::text,'')||'|'||defaclobjtype::text||'|'||defaclacl::text from pg_default_acl order by 1"
+reassigned_ownership_mismatches=0
+for mapping in expected-codestra_odoo-owners.txt:codestra_odoo_restore expected-codestra_middleware-owners.txt:codestra_middleware expected-codestra_n8n-owners.txt:codestra_n8n; do
+    source_database=${mapping%%:*}
+    restored_database=${mapping#*:}
+    restored_file="restored-${source_database#expected-}"
+    docker exec "$container" psql -U postgres -d "$restored_database" -At -v ON_ERROR_STOP=1 -c "$ownership_sql" > "$work_dir/$restored_file"
+    if ! cmp -s "$work_dir/$source_database" "$work_dir/$restored_file"; then
+        reassigned_ownership_mismatches=$((reassigned_ownership_mismatches + 1))
+    fi
+done
+docker exec "$container" psql -U postgres -d keycloak -At -v ON_ERROR_STOP=1 -c "$ownership_sql" > "$work_dir/restored-keycloak-owners.txt"
+if ! cmp -s "$work_dir/expected-keycloak-owners.txt" "$work_dir/restored-keycloak-owners.txt"; then
+    reassigned_ownership_mismatches=$((reassigned_ownership_mismatches + 1))
+fi
+test "$reassigned_ownership_mismatches" -eq 0
+docker exec "$container" psql -U postgres -d codestra_middleware -At -v ON_ERROR_STOP=1 -c "$default_acl_sql" > "$work_dir/restored-default-acl.txt"
+default_acl_mismatches=0
+cmp -s "$work_dir/expected-default-acl.txt" "$work_dir/restored-default-acl.txt" || default_acl_mismatches=1
+test "$default_acl_mismatches" -eq 0
 
 restored_filestore="$work_dir/restored-volumes/odoo/.local/share/Odoo/filestore"
 test -d "$restored_filestore/codestra_odoo"
@@ -282,11 +292,16 @@ for _ in $(seq 1 90); do
         odoo_health=healthy
         break
     fi
-    test "$(docker inspect -f '{{.State.Running}}' "$odoo_container")" = true
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$odoo_container")" != true ]]; then
+        docker logs "$odoo_container" > "$final_dir/ODOO-STARTUP.log" 2>&1 || true
+        echo "ODOO_START=FAIL" >&2
+        exit 1
+    fi
     sleep 2
 done
 test "$odoo_health" = healthy
-test "$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$odoo_container")" = null
+port_bindings=$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$odoo_container")
+[[ "$port_bindings" == null || "$port_bindings" == '{}' ]]
 test "$(docker network inspect -f '{{.Internal}}' "$network")" = true
 
 # A healthy process and host-side hashes do not prove that Odoo can resolve the
@@ -309,7 +324,7 @@ lines = [line.strip() for line in open(sys.argv[1], encoding="utf-8") if line.st
 if len(lines) != 1:
     raise SystemExit("expected exactly one Odoo filestore read result")
 result = json.loads(lines[0][len(prefix):])
-if result.get("read_failures") != 0 or result.get("odoo_filestore_objects_read", 0) < 1:
+if result.get("read_failures") != 0 or result.get("odoo_filestore_objects_read", 0) < 2:
     raise SystemExit("Odoo filestore read verification failed")
 print(result["odoo_filestore_objects_read"])
 PY
@@ -340,6 +355,13 @@ RESTORE_ROLE_MEMBERSHIP_SCOPE=ISOLATED_ONLY
 PRODUCTION_ROLE_PRIVILEGES_UNCHANGED=PASS
 PG_RESTORE=PASS
 PG_RESTORE_ERRORS=${pg_restore_errors}
+DEFAULT_PRIVILEGES_RESTORED=PASS
+DEFAULT_ACL_MISMATCHES=${default_acl_mismatches}
+OBJECT_OWNERSHIP=PASS
+REASSIGNED_OWNERSHIP_MISMATCHES=${reassigned_ownership_mismatches}
+DATABASE_RESTORE=PASS
+FILESTORE_RESTORE=PASS
+ODOO_ORM_FILESTORE_READS=PASS
 BACKUP_CHECKSUM_GATE=PASS
 INNER_CHECKSUM_GATE=PASS
 ISOLATED_NETWORK_GATE=PASS
@@ -362,12 +384,5 @@ LOCAL_RUNTIME_IMAGE_ARCHIVE_GATE=PASS
 EXACT_RUNTIME_IMAGE_ID_BINDING_GATE=PASS
 DISPOSABLE_CLEANUP_REQUIRED=YES
 EOF
-(cd "$final_dir" && sha256sum \
-    RESTORE-RESULT.txt \
-    ODOO-FILESTORE-VALIDATION.json \
-    PRODUCTION-MIDDLEWARE-ROLE-BASELINE.txt \
-    PRODUCTION-MIDDLEWARE-ROLE-AFTER.txt \
-    PRODUCTION-KEYCLOAK-ROLE-BASELINE.txt \
-    PRODUCTION-KEYCLOAK-ROLE-AFTER.txt \
-    > SHA256SUMS && sha256sum -c SHA256SUMS)
+(cd "$final_dir" && sha256sum RESTORE-RESULT.txt ODOO-FILESTORE-VALIDATION.json PRODUCTION-*-ROLE-*.txt > SHA256SUMS && sha256sum -c SHA256SUMS)
 printf '%s\n' "$final_dir"
