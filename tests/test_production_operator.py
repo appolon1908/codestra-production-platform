@@ -99,6 +99,17 @@ def _waiver_files(tmp_path: Path, monkeypatch, content: str | None = None) -> tu
     checksum.write_text(f"{digest}  {waiver.name}\n", encoding="ascii")
     waiver.chmod(0o600)
     checksum.chmod(0o600)
+    real_fstat = os.fstat
+
+    def root_owned_fstat(descriptor):
+        info = real_fstat(descriptor)
+        return type(
+            "RootOwnedStat",
+            (),
+            {"st_mode": info.st_mode, "st_uid": 0, "st_gid": 0},
+        )()
+
+    monkeypatch.setattr(OPERATOR.os, "fstat", root_owned_fstat)
     monkeypatch.setattr(OPERATOR, "OWNER_WAIVER_DIR", tmp_path)
     monkeypatch.setattr(OPERATOR, "OWNER_WINDOW_WAIVER", waiver)
     monkeypatch.setattr(OPERATOR, "OWNER_WINDOW_WAIVER_CHECKSUM", checksum)
@@ -150,6 +161,21 @@ def test_unsafe_owner_waiver_permissions_are_denied(monkeypatch, tmp_path) -> No
     waiver, _ = _waiver_files(tmp_path, monkeypatch)
     waiver.chmod(0o660)
     with pytest.raises(OPERATOR.OperatorError, match="unsafe mode"):
+        OPERATOR.validate_owner_window_waiver()
+
+
+def test_non_root_owner_waiver_is_denied(monkeypatch, tmp_path) -> None:
+    _waiver_files(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        OPERATOR.os,
+        "fstat",
+        lambda _descriptor: type(
+            "UnprivilegedStat",
+            (),
+            {"st_mode": 0o100600, "st_uid": 1000, "st_gid": 1000},
+        )(),
+    )
+    with pytest.raises(OPERATOR.OperatorError, match="unsafe ownership"):
         OPERATOR.validate_owner_window_waiver()
 
 
