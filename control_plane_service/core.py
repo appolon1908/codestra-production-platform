@@ -130,6 +130,14 @@ class Store:
 
     def initialize(self) -> None:
         with self.connect() as db:
+            if is_postgres():
+                row=db.execute("SELECT to_regclass('public.events') present").fetchone()
+                if not row or not row["present"]:
+                    raise RuntimeError("base control-plane migration is required")
+                for name in ("odoo", "n8n", "kyqra", "telnexa", "klyrow"):
+                    db.execute("INSERT INTO integrations VALUES(?,0,?) ON CONFLICT DO NOTHING", (name, now_iso()))
+                    db.execute("INSERT INTO circuits(name) VALUES(?) ON CONFLICT DO NOTHING", (name,))
+                return
             db.executescript("""
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS events(
