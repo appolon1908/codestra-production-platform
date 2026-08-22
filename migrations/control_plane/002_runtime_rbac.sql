@@ -3,6 +3,11 @@ DO $$ BEGIN CREATE ROLE codestra_control_plane_owner NOLOGIN; EXCEPTION WHEN dup
 DO $$ BEGIN CREATE ROLE codestra_control_plane_runtime NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER ROLE codestra_control_plane_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
 ALTER ROLE codestra_control_plane_runtime NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='control_plane_app') THEN
+    GRANT codestra_control_plane_runtime TO control_plane_app;
+  END IF;
+END $$;
 ALTER SCHEMA control_plane OWNER TO codestra_control_plane_owner;
 DO $$ DECLARE item record; BEGIN
   FOR item IN SELECT tablename FROM pg_tables WHERE schemaname='control_plane' LOOP
