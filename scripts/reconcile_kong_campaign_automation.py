@@ -50,16 +50,44 @@ def rsa_public_key_pem(jwk: dict[str, str]) -> str:
     return f"-----BEGIN PUBLIC KEY-----\n{lines}\n-----END PUBLIC KEY-----\n"
 
 
-def active_rsa_key(jwks_url: str) -> dict[str, str]:
+def active_rsa_key(jwks_url: str, active_kid: str | None = None) -> dict[str, str]:
     with urlopen(jwks_url, timeout=15) as response:
         keys = json.load(response).get("keys", [])
     candidates = [
         key for key in keys
         if key.get("kty") == "RSA" and key.get("alg") == "RS256" and key.get("use") == "sig"
     ]
+    if active_kid:
+        candidates = [key for key in candidates if key.get("kid") == active_kid]
     if len(candidates) != 1:
-        raise RuntimeError("exactly one active Keycloak RS256 signing key is required")
+        raise RuntimeError(
+            "Keycloak RS256 signing key is ambiguous; pass the kid from a freshly "
+            "issued production service token with --active-kid"
+        )
     return candidates[0]
+
+
+def require_exact_fields(actual: dict, expected: dict, description: str) -> None:
+    """Fail closed when a live Kong entity differs from its approved manifest."""
+    drift = {
+        key: {"expected": value, "actual": actual.get(key)}
+        for key, value in expected.items()
+        if actual.get(key) != value
+    }
+    if drift:
+        raise RuntimeError(f"{description} configuration drift: {json.dumps(drift, sort_keys=True)}")
+
+
+def require_plugin(plugin: dict, expected_config: dict, description: str) -> None:
+    require_exact_fields(plugin.get("config", {}), expected_config, description)
+
+
+def plugin_form(config: dict) -> dict:
+    """Translate canonical Admin API config into Kong's form-encoded fields."""
+    return {
+        f"config.{key}{'[]' if isinstance(value, list) else ''}": value
+        for key, value in config.items()
+    }
 
 
 def claim_guard(manifest: dict, required_scope: str) -> str:
@@ -96,22 +124,32 @@ def ensure_entity(admin: str, collection: str, query: str, payload: dict, apply:
     if existing:
         if apply:
             request(admin, "PATCH", f"/{collection}/{existing['id']}", payload)
+        existing = request(admin, "GET", f"/{collection}/{existing['id']}")
+        require_exact_fields(existing, payload, query)
         return existing
     if not apply:
         raise RuntimeError(f"missing {collection}: {query}")
-    return request(admin, "POST", f"/{collection}", payload)
+    created = request(admin, "POST", f"/{collection}", payload)
+    created = request(admin, "GET", f"/{collection}/{created['id']}")
+    require_exact_fields(created, payload, query)
+    return created
 
 
-def ensure_plugin(admin: str, route_id: str, name: str, payload: dict, apply: bool) -> None:
+def ensure_plugin(admin: str, route_id: str, name: str, config: dict, apply: bool) -> None:
     plugins = request(admin, "GET", f"/routes/{route_id}/plugins")["data"]
     existing = one([item for item in plugins if item["name"] == name and item.get("enabled")], name)
     if existing:
         if apply:
-            request(admin, "PATCH", f"/plugins/{existing['id']}", payload)
+            request(admin, "PATCH", f"/plugins/{existing['id']}", plugin_form(config))
+        current = request(admin, "GET", f"/plugins/{existing['id']}")
+        require_plugin(current, config, f"{name} plugin")
         return
     if not apply:
         raise RuntimeError(f"missing route plugin: {name}")
-    request(admin, "POST", f"/routes/{route_id}/plugins", {"name": name, **payload})
+    created = request(
+        admin, "POST", f"/routes/{route_id}/plugins", {"name": name, **plugin_form(config)}
+    )
+    require_plugin(created, config, f"{name} plugin")
 
 
 def main() -> int:
@@ -120,10 +158,12 @@ def main() -> int:
     parser.add_argument("--jwks-url", required=True)
     parser.add_argument("--manifest", type=Path, default=Path("config/kong-campaign-automation-routes.json"))
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--active-kid", help="kid from a freshly issued production service token")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     manifest = json.loads(args.manifest.read_text())
-    public_key = rsa_public_key_pem(active_rsa_key(args.jwks_url))
+    signing_key = active_rsa_key(args.jwks_url, args.active_kid)
+    public_key = rsa_public_key_pem(signing_key)
     service = ensure_entity(args.admin_url, "services", manifest["service"]["name"], manifest["service"], args.apply)
     consumers = request(args.admin_url, "GET", "/consumers?size=1000")["data"]
     consumer = one([row for row in consumers if row.get("username") == manifest["consumer"]["username"]], "consumer")
@@ -142,9 +182,13 @@ def main() -> int:
             jwt_payload,
         )
     elif not credential and args.apply:
-        request(args.admin_url, "POST", f"/consumers/{consumer['id']}/jwt", jwt_payload)
+        credential = request(
+            args.admin_url, "POST", f"/consumers/{consumer['id']}/jwt", jwt_payload
+        )
     elif not credential:
         raise RuntimeError("campaign JWT credential is missing")
+    credential = request(args.admin_url, "GET", f"/consumers/{consumer['id']}/jwt/{credential['id']}")
+    require_exact_fields(credential, jwt_payload, "campaign JWT credential")
     evidence = []
     for expected in manifest["routes"]:
         routes = request(args.admin_url, "GET", "/routes?" + urlencode({"name": expected["name"]}))["data"]
@@ -161,28 +205,35 @@ def main() -> int:
             route = request(args.admin_url, "POST", "/routes", route_payload)
         elif not route:
             raise RuntimeError(f"missing route: {expected['name']}")
+        route = request(args.admin_url, "GET", f"/routes/{route['id']}")
+        require_exact_fields(route, {
+            "name": expected["name"], "hosts": [manifest["host"]],
+            "paths": [expected["path"]], "methods": ["POST"],
+            "protocols": ["https"], "strip_path": False,
+            "https_redirect_status_code": 426,
+        }, expected["name"])
+        if route.get("service", {}).get("id") != service["id"]:
+            raise RuntimeError(f"{expected['name']} service binding drift")
         ensure_plugin(args.admin_url, route["id"], "jwt", {
-            "config.key_claim_name": "azp", "config.claims_to_verify[]": ["exp"],
-            "config.header_names[]": ["authorization"], "config.run_on_preflight": "true",
+            "key_claim_name": "azp", "claims_to_verify": ["exp"],
+            "header_names": ["authorization"], "run_on_preflight": True,
         }, args.apply)
         ensure_plugin(args.admin_url, route["id"], "post-function", {
-            "config.access[]": [claim_guard(manifest, expected["scope"])],
+            "access": [claim_guard(manifest, expected["scope"])],
         }, args.apply)
         ensure_plugin(args.admin_url, route["id"], "request-size-limiting", {
-            "config.allowed_payload_size": expected["max_body_mb"],
+            "allowed_payload_size": expected["max_body_mb"],
         }, args.apply)
         ensure_plugin(args.admin_url, route["id"], "rate-limiting", {
-            "config.minute": expected["rate_per_minute"], "config.policy": "local",
-            "config.limit_by": "consumer",
+            "minute": expected["rate_per_minute"], "policy": "local", "limit_by": "consumer",
         }, args.apply)
         ensure_plugin(args.admin_url, route["id"], "correlation-id", {
-            "config.header_name": "X-Correlation-ID", "config.generator": "uuid",
-            "config.echo_downstream": "true",
+            "header_name": "X-Correlation-ID", "generator": "uuid", "echo_downstream": True,
         }, args.apply)
         evidence.append({
             "route": expected["path"], "scope": expected["scope"],
             "audience": manifest["audience"], "issuer": manifest["issuer"],
-            "jwt_signature": "RS256", "status": "PASS",
+            "jwt_signature": "RS256", "signing_kid": signing_key.get("kid"), "status": "PASS",
         })
     args.evidence.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
     print("KONG_CAMPAIGN_AUTOMATION_ROUTES=PASS")

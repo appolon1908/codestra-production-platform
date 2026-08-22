@@ -1,7 +1,15 @@
 import json
 from pathlib import Path
 
-from scripts.reconcile_kong_campaign_automation import claim_guard, rsa_public_key_pem
+import pytest
+
+from scripts.reconcile_kong_campaign_automation import (
+    active_rsa_key,
+    claim_guard,
+    plugin_form,
+    require_exact_fields,
+    rsa_public_key_pem,
+)
 
 
 ROOT = Path(__file__).parents[1]
@@ -28,3 +36,39 @@ def test_rsa_jwk_conversion_is_public_key_pem():
     pem = rsa_public_key_pem({"n": "sXch", "e": "AQAB"})
     assert pem.startswith("-----BEGIN PUBLIC KEY-----\n")
     assert pem.endswith("-----END PUBLIC KEY-----\n")
+
+
+def test_exact_verification_rejects_live_drift():
+    with pytest.raises(RuntimeError, match="configuration drift"):
+        require_exact_fields({"methods": ["GET"]}, {"methods": ["POST"]}, "route")
+
+
+def test_plugin_config_is_form_encoded_for_kong_admin_api():
+    assert plugin_form({"claims_to_verify": ["exp"], "run_on_preflight": True}) == {
+        "config.claims_to_verify[]": ["exp"],
+        "config.run_on_preflight": True,
+    }
+
+
+def test_overlapping_jwks_selects_fresh_token_kid(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    response = Response()
+    monkeypatch.setattr(
+        "scripts.reconcile_kong_campaign_automation.urlopen", lambda *_args, **_kwargs: response
+    )
+    monkeypatch.setattr(
+        "scripts.reconcile_kong_campaign_automation.json.load",
+        lambda _response: {"keys": [
+            {"kid": "old", "kty": "RSA", "alg": "RS256", "use": "sig"},
+            {"kid": "new", "kty": "RSA", "alg": "RS256", "use": "sig"},
+        ]},
+    )
+    assert active_rsa_key("https://issuer/certs", "new")["kid"] == "new"
+    with pytest.raises(RuntimeError, match="--active-kid"):
+        active_rsa_key("https://issuer/certs")
