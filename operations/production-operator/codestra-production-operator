@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import errno
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -52,6 +54,11 @@ BACKUP_STATE_VALIDATOR = Path("/opt/codestra/operations/backup/check-backup-stat
 CONFIG_DIR = Path("/etc/codestra/production-operator")
 RELEASE_CONFIG = CONFIG_DIR / "release.json"
 MAINTENANCE_DATE = CONFIG_DIR / "maintenance-date"
+OWNER_WAIVER_DIR = Path(
+    "/opt/codestra/evidence/production-readiness-soak/20260822T022734Z"
+)
+OWNER_WINDOW_WAIVER = OWNER_WAIVER_DIR / "OWNER-MAINTENANCE-WINDOW-WAIVER.txt"
+OWNER_WINDOW_WAIVER_CHECKSUM = OWNER_WAIVER_DIR / "OWNER-MAINTENANCE-WINDOW-WAIVER.sha256"
 EVIDENCE_DIR = Path("/var/lib/codestra-production-operator/evidence")
 LOCK_FILE = Path("/run/lock/codestra-production-operator.lock")
 DATE_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])")
@@ -69,27 +76,83 @@ class OperatorError(RuntimeError):
     pass
 
 
+def checked_root_bytes(path: Path, *, expected_mode: int = 0o600) -> bytes:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise OperatorError(f"unsafe file type: {path}") from error
+        raise OperatorError(f"required root file unavailable: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OperatorError(f"unsafe file type: {path}")
+        if info.st_uid != 0 or info.st_gid != 0:
+            raise OperatorError(f"unsafe ownership: {path}")
+        if stat.S_IMODE(info.st_mode) != expected_mode:
+            raise OperatorError(f"unsafe mode: {path}")
+        return stream.read()
+
+
 def checked_root_file(path: Path, *, expected_mode: int = 0o600) -> str:
-    info = path.lstat()
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        raise OperatorError(f"unsafe file type: {path}")
-    if info.st_uid != 0 or info.st_gid != 0:
-        raise OperatorError(f"unsafe ownership: {path}")
-    if stat.S_IMODE(info.st_mode) != expected_mode:
-        raise OperatorError(f"unsafe mode: {path}")
-    return path.read_text(encoding="ascii").strip()
+    try:
+        return checked_root_bytes(path, expected_mode=expected_mode).decode("ascii").strip()
+    except UnicodeError as error:
+        raise OperatorError(f"required root file unreadable: {path}") from error
 
 
-def require_maintenance_window(now: dt.datetime | None = None) -> str:
+OWNER_WINDOW_WAIVER_STATEMENTS = {
+    "MAINTENANCE_WINDOW=WAIVED_BY_OWNER",
+    "MAINTENANCE_WINDOW_WAIVER_APPROVED=YES",
+    "MAINTENANCE_WINDOW_WAIVER_AUTHORITY=OWNER",
+    "IMMEDIATE_PRODUCTION_MUTATION_AUTHORIZED=YES",
+}
+
+
+def validate_owner_window_waiver() -> dict[str, str]:
+    """Validate the one fixed, root-controlled owner maintenance waiver."""
+    if OWNER_WINDOW_WAIVER.parent != OWNER_WAIVER_DIR or OWNER_WINDOW_WAIVER_CHECKSUM.parent != OWNER_WAIVER_DIR:
+        raise OperatorError("owner waiver path escaped approved evidence directory")
+    waiver_bytes = checked_root_bytes(OWNER_WINDOW_WAIVER)
+    try:
+        waiver = waiver_bytes.decode("ascii")
+    except UnicodeError as error:
+        raise OperatorError("owner waiver is not ASCII") from error
+    checksum_record = checked_root_file(OWNER_WINDOW_WAIVER_CHECKSUM)
+    match = re.fullmatch(
+        r"([0-9a-f]{64})  OWNER-MAINTENANCE-WINDOW-WAIVER\.txt", checksum_record
+    )
+    if match is None:
+        raise OperatorError("owner waiver checksum record is malformed")
+    actual = hashlib.sha256(waiver_bytes).hexdigest()
+    if actual != match.group(1):
+        raise OperatorError("owner waiver checksum mismatch")
+    statements = set(waiver.splitlines())
+    if not OWNER_WINDOW_WAIVER_STATEMENTS <= statements:
+        raise OperatorError("owner waiver authorization statements are incomplete")
+    return {
+        "maintenance_window": "WAIVED_BY_OWNER",
+        "owner_window_waiver_evidence": "PASS",
+        "window_check": "BYPASSED_BY_VALID_OWNER_WAIVER",
+    }
+
+
+def require_maintenance_window(now: dt.datetime | None = None) -> dict[str, str]:
     raw_date = checked_root_file(MAINTENANCE_DATE)
     if not DATE_RE.fullmatch(raw_date):
         raise OperatorError("maintenance date is malformed")
     approved_date = dt.date.fromisoformat(raw_date)
     current = now or dt.datetime.now(dt.timezone.utc)
     local = current.astimezone(ZoneInfo("America/New_York"))
-    if local.date() != approved_date or not (0 <= local.hour < 4):
-        raise OperatorError("outside approved maintenance window")
-    return raw_date
+    if local.date() == approved_date and 0 <= local.hour < 4:
+        return {
+            "maintenance_date": raw_date,
+            "maintenance_window": "PASS",
+            "owner_window_waiver_evidence": "NOT_REQUIRED",
+            "window_check": "APPROVED_WINDOW",
+        }
+    result = validate_owner_window_waiver()
+    return {"maintenance_date": raw_date, **result}
 
 
 def load_release_config() -> dict[str, str]:
@@ -259,11 +322,21 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
     if action not in ALLOWED_ACTIONS:
         raise OperatorError("action is not allowlisted")
     config = load_release_config()
-    maintenance_date = None
+    window: dict[str, str] | None = None
     if action not in READ_ONLY_ACTIONS | RECOVERY_ACTIONS:
-        maintenance_date = require_maintenance_window()
-        if maintenance_date != config["maintenance_date"]:
+        window = require_maintenance_window()
+        if window["maintenance_date"] != config["maintenance_date"]:
             raise OperatorError("maintenance date does not match release tuple")
+    elif action in READ_ONLY_ACTIONS:
+        try:
+            window = require_maintenance_window()
+        except OperatorError:
+            window = {
+                "maintenance_date": config["maintenance_date"],
+                "maintenance_window": "OUTSIDE_APPROVED_WINDOW",
+                "owner_window_waiver_evidence": "FAIL",
+                "window_check": "DENIED",
+            }
     state = safety_state()
     safe_for_activation = (
         state["telephony_probe_pass"]
@@ -276,7 +349,8 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         raise OperatorError("runtime safety state is not fail-closed")
     result: dict[str, object] = {
         "action": action,
-        "maintenance_date": maintenance_date,
+        "maintenance_date": None if window is None else window["maintenance_date"],
+        "window": window,
         "release": config,
         "safety": state,
     }
