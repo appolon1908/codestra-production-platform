@@ -96,3 +96,53 @@ def test_watermark_permission_and_schema():
         assert len(load_watermark(path, allowed_owner_uid=os.getuid())) == 2
     finally:
         os.unlink(path)
+
+
+def test_http_conflict_is_not_a_success_acknowledgement():
+    with tempfile.TemporaryDirectory() as directory:
+        ledger = DeliveryLedger(os.path.join(directory, "ledger.sqlite"))
+        event = build_call_ended_event(row("conflict", 2100), "vicidial_log")
+        ledger.stage(event)
+        assert ledger.acknowledge(event["event_id"], 409) == "dead_letter"
+        assert ledger.state(event["event_id"]) == "dead_letter"
+        assert ledger.cursor("vicidial_log", Cursor(1, "initial")) == Cursor(1, "initial")
+        with pytest.raises(PublisherError, match="dead-lettered"):
+            ledger.acknowledge(event["event_id"], 202)
+        ledger.close()
+
+
+def test_acknowledged_event_is_idempotent_and_terminal():
+    with tempfile.TemporaryDirectory() as directory:
+        ledger = DeliveryLedger(os.path.join(directory, "ledger.sqlite"))
+        event = build_call_ended_event(row("ack", 2200), "vicidial_log")
+        ledger.stage(event)
+        assert ledger.acknowledge(event["event_id"], 202) == "acknowledged"
+        assert ledger.acknowledge(event["event_id"], 202) == "acknowledged"
+        assert ledger.acknowledged_count() == 1
+        with pytest.raises(PublisherError, match="terminal"):
+            ledger.fail(event["event_id"], "must not resurrect")
+        ledger.close()
+
+
+def test_watermark_symlink_and_unsafe_mode_are_rejected(tmp_path):
+    from tel_events.publisher import load_watermark
+
+    value = {
+        "ordering": ["end_epoch", "stable_source_id"],
+        "captured_at": "2026-07-25T11:24:19Z",
+        "sources": {
+            "vicidial_log": {"end_epoch": 1, "source_id": "a"},
+            "vicidial_closer_log": {"end_epoch": 1, "source_id": "0"},
+        },
+    }
+    watermark = tmp_path / "watermark.json"
+    watermark.write_text(json.dumps(value), encoding="utf-8")
+    os.chmod(watermark, 0o660)
+    with pytest.raises(PublisherError, match="mode"):
+        load_watermark(str(watermark), allowed_owner_uid=os.getuid())
+
+    os.chmod(watermark, 0o600)
+    link = tmp_path / "watermark-link.json"
+    link.symlink_to(watermark)
+    with pytest.raises(PublisherError, match="regular"):
+        load_watermark(str(link), allowed_owner_uid=os.getuid())
