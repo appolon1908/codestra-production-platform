@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -59,17 +61,27 @@ def verify_plugins(by_name, expected, spec):
     oidc = by_name["openid-connect"]["config"]
     require_equal(oidc.get("issuer"), spec["oidcIssuer"], expected["name"] + ".issuer")
     require_equal(oidc.get("auth_methods"), ["bearer"], expected["name"] + ".auth_methods")
-    require_equal(oidc.get("audience"), [spec["audience"]], expected["name"] + ".audience")
+    require_equal(oidc.get("audience_required"), [spec["audience"]], expected["name"] + ".audience")
     require_equal(oidc.get("scopes_required"), [expected["requiredScope"]], expected["name"] + ".scope")
+    require_equal(oidc.get("bearer_token_param_type"), ["header"], expected["name"] + ".bearer_source")
+    require_equal(oidc.get("verify_signature"), True, expected["name"] + ".signature")
+    require_equal(oidc.get("verify_claims"), True, expected["name"] + ".claims")
+    require_equal(oidc.get("ssl_verify"), True, expected["name"] + ".tls")
+    require_equal(oidc.get("anonymous"), None, expected["name"] + ".anonymous")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--admin-url", required=True)
     parser.add_argument("--manifest", type=Path, default=Path("config/kong-callback-routes.json"))
+    parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    spec = json.loads(args.manifest.read_text())
+    manifest_bytes = args.manifest.read_bytes()
+    spec = json.loads(manifest_bytes)
+    evidence = {"checked_at": datetime.now(UTC).isoformat(),
+                "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+                "mode": "apply" if args.apply else "dry-run", "routes": []}
     service_spec = spec["service"]
     service = singleton(args.admin_url, "services", service_spec["name"])
     if args.apply:
@@ -105,17 +117,38 @@ def main():
             "openid-connect": {
                 "config.issuer": spec["oidcIssuer"],
                 "config.auth_methods[]": ["bearer"],
-                "config.audience[]": [spec["audience"]],
+                "config.audience_required[]": [spec["audience"]],
                 "config.scopes_required[]": [expected["requiredScope"]],
+                "config.bearer_token_param_type[]": ["header"],
+                "config.verify_signature": "true",
+                "config.verify_claims": "true",
+                "config.ssl_verify": "true",
             },
         }
         for name, config in controls.items():
             current = by_name.get(name)
             if args.apply:
+                # Recreate OIDC instead of a partial PATCH so stale permissive
+                # fields (especially anonymous access) cannot survive.
+                if name == "openid-connect" and current:
+                    request(args.admin_url, "DELETE", "/plugins/%s" % current["id"])
+                    current = None
                 endpoint = "/plugins/%s" % current["id"] if current else "/routes/%s/plugins" % route["id"]
                 request(args.admin_url, "PATCH" if current else "POST", endpoint, {"name": name, **config})
         plugins = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
-        verify_plugins({plugin["name"]: plugin for plugin in plugins if plugin.get("enabled")}, expected, spec)
+        by_name = {plugin["name"]: plugin for plugin in plugins if plugin.get("enabled")}
+        verify_plugins(by_name, expected, spec)
+        evidence["routes"].append({
+            "name": expected["name"], "service_id": service["id"],
+            "route_id": route["id"], "hosts": route["hosts"],
+            "paths": route["paths"], "methods": sorted(route["methods"]),
+            "oidc": {"issuer": by_name["openid-connect"]["config"]["issuer"],
+                     "audience_required": by_name["openid-connect"]["config"]["audience_required"],
+                     "scopes_required": by_name["openid-connect"]["config"]["scopes_required"],
+                     "anonymous": by_name["openid-connect"]["config"].get("anonymous")},
+        })
+    args.evidence.parent.mkdir(parents=True, exist_ok=True)
+    args.evidence.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
     print("KONG_CALLBACK_ROUTES=%s" % ("APPLIED" if args.apply else "PASS"))
     return 0
 

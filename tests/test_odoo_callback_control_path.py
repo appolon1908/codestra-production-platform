@@ -49,6 +49,11 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert "verify_service" in RECONCILER
     assert "verify_route" in RECONCILER
     assert "verify_plugins" in RECONCILER
+    assert "audience_required" in RECONCILER
+    assert "bearer_token_param_type" in RECONCILER
+    assert 'parser.add_argument("--evidence", type=Path, required=True)' in RECONCILER
+    assert "manifest_sha256" in RECONCILER
+    assert 'name == "openid-connect" and current' in RECONCILER
 
 
 def test_deployment_keeps_every_broad_delivery_path_disabled():
