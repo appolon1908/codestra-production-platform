@@ -23,3 +23,4 @@ free_bytes=$(df --output=avail -B1 "$BACKUP_ROOT" | tail -1 | tr -d ' ')
 printf 'backup_age_seconds %s\nbackup_free_bytes %s\n' "$age" "$free_bytes"
 (( age <= MAX_AGE_SECONDS )) || exit 1
 (( free_bytes >= MIN_FREE_BYTES )) || exit 1
+
