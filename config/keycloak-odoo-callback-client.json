@@ -38,6 +38,13 @@
         "protocolMapper": "oidc-hardcoded-claim-mapper",
         "consentRequired": false,
         "config": {"claim.name": "campaigns", "claim.value": "[\"TEST_SYN\"]", "jsonType.label": "JSON", "access.token.claim": "true", "id.token.claim": "false"}
+      },
+      {
+        "name": "callback-service-realm-roles",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-usermodel-realm-role-mapper",
+        "consentRequired": false,
+        "config": {"claim.name": "realm_access.roles", "multivalued": "true", "jsonType.label": "String", "access.token.claim": "true", "id.token.claim": "false", "userinfo.token.claim": "false", "usermodel.realmRoleMapping.rolePrefix": ""}
       }
     ]
   },
