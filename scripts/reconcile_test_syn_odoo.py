@@ -16,7 +16,7 @@ if not employee or not user or not unit:
     raise RuntimeError("approved TEST_SYN Odoo anchors are missing")
 
 specs = [
-    ("keycloak", "46c6027f-1ea8-4010-a104-5b908aabb715", "synthetic.agent.test.syn.6101", {}),
+    ("keycloak", "46c6027f-1ea8-4010-a104-5b908aabb715", "synthetic.agent.test.syn.6101", {}),  # gitleaks:allow -- public synthetic UUID
     ("vicidial", "cod00016", "cod00016", {}),
     ("sip", "6101", "6101", {"extension": "6101", "endpoint_id": "6101"}),
 ]
