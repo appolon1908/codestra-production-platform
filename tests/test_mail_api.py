@@ -34,7 +34,7 @@ def test_api_enforces_scope_sender_policy_and_idempotency(tmp_path, monkeypatch)
         api.require_scope("mail.send")(denied)
     assert exc.value.status_code == 403
     payload = api.MessageCommand(sender="agent@mail.test", recipients=["internal@mail.test"],
-        correlation_id="correlation-1", idempotency_key="idempotency-1")
+        correlation_id="correlation-1", idempotency_key="idempotency-1")  # gitleaks:allow -- synthetic test value
     allowed = denied.model_copy(update={"scopes": {"mail.read", "mail.send"}})
     first = api.create_message(payload, allowed)
     second = api.create_message(payload, allowed)
