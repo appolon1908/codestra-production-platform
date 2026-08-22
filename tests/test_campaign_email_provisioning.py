@@ -17,8 +17,8 @@ class Identity:
     def reconcile(self, command):
         self.created.append(command)
         return {"user_id": "kc-agent-1"}
-    def revoke_mailbox_grants(self, agent_id, campaign_id):
-        self.revoked.append((agent_id, campaign_id))
+    def revoke_mailbox_grants(self, command):
+        self.revoked.append(command)
 
 
 class Mail:
@@ -32,7 +32,7 @@ class Mail:
         assert command["external_delivery"] is False
         return self.send
     def validate_inbound_route(self, command): return self.receive
-    def disable(self, primary_email): self.disabled.append(primary_email)
+    def disable(self, command): self.disabled.append(command["primary_email"])
 
 
 class Odoo:

@@ -1,0 +1,90 @@
+<odoo>
+  <record id="group_codestra_email_agent" model="res.groups">
+    <field name="name">Callback Email Agent</field>
+    <field name="implied_ids" eval="[Command.link(ref('call_center_core.group_call_center_user'))]"/>
+  </record>
+  <record id="group_codestra_email_supervisor" model="res.groups">
+    <field name="name">Callback Email Supervisor</field>
+    <field name="implied_ids" eval="[Command.link(ref('group_codestra_email_agent'))]"/>
+  </record>
+  <record id="group_codestra_email_campaign_manager" model="res.groups">
+    <field name="name">Callback Email Campaign Manager</field>
+    <field name="implied_ids" eval="[Command.link(ref('group_codestra_email_supervisor'))]"/>
+  </record>
+  <record id="group_codestra_email_tenant_admin" model="res.groups">
+    <field name="name">Callback Email Tenant Administrator</field>
+    <field name="implied_ids" eval="[Command.link(ref('group_codestra_email_campaign_manager'))]"/>
+  </record>
+  <record id="group_codestra_email_platform_admin" model="res.groups">
+    <field name="name">Callback Email Platform Administrator</field>
+  </record>
+
+  <record id="rule_agent_mailbox_own" model="ir.rule">
+    <field name="name">Agent mailbox: active own mailbox only</field>
+    <field name="model_id" ref="model_codestra_agent_mailbox"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_agent'))]"/>
+    <field name="domain_force">[('user_id', '=', user.id), ('user_id.active', '=', True), ('mailbox_status', 'not in', ['SUSPENDED', 'DEACTIVATED']), ('company_id', 'in', company_ids)]</field>
+  </record>
+  <record id="rule_supervisor_mailbox_campaign" model="ir.rule">
+    <field name="name">Supervisor mailbox: authorized campaigns only</field>
+    <field name="model_id" ref="model_codestra_agent_mailbox"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_supervisor')), Command.link(ref('group_codestra_email_campaign_manager'))]"/>
+    <field name="domain_force">[('campaign_id', 'in', user.codestra_email_campaign_ids.ids), ('company_id', 'in', company_ids)]</field>
+  </record>
+  <record id="rule_tenant_admin_mailbox" model="ir.rule">
+    <field name="name">Tenant administrator mailbox scope</field>
+    <field name="model_id" ref="model_codestra_agent_mailbox"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_tenant_admin'))]"/>
+    <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+  </record>
+  <record id="rule_platform_admin_mailbox" model="ir.rule">
+    <field name="name">Platform administrator mailbox scope</field>
+    <field name="model_id" ref="model_codestra_agent_mailbox"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_platform_admin'))]"/>
+    <field name="domain_force">[(1, '=', 1)]</field>
+  </record>
+
+  <record id="rule_agent_message_own" model="ir.rule">
+    <field name="name">Agent messages: active own mailbox only</field>
+    <field name="model_id" ref="model_codestra_agent_mail_message"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_agent'))]"/>
+    <field name="domain_force">[('mailbox_id.user_id', '=', user.id), ('mailbox_id.user_id.active', '=', True), ('mailbox_id.mailbox_status', 'not in', ['SUSPENDED', 'DEACTIVATED']), ('company_id', 'in', company_ids)]</field>
+  </record>
+  <record id="rule_supervisor_message_campaign" model="ir.rule">
+    <field name="name">Supervisor messages: authorized campaigns only</field>
+    <field name="model_id" ref="model_codestra_agent_mail_message"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_supervisor')), Command.link(ref('group_codestra_email_campaign_manager'))]"/>
+    <field name="domain_force">[('campaign_id', 'in', user.codestra_email_campaign_ids.ids), ('company_id', 'in', company_ids)]</field>
+  </record>
+  <record id="rule_tenant_admin_message" model="ir.rule">
+    <field name="name">Tenant administrator message scope</field>
+    <field name="model_id" ref="model_codestra_agent_mail_message"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_tenant_admin'))]"/>
+    <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+  </record>
+  <record id="rule_platform_admin_message" model="ir.rule">
+    <field name="name">Platform administrator message scope</field>
+    <field name="model_id" ref="model_codestra_agent_mail_message"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_platform_admin'))]"/>
+    <field name="domain_force">[(1, '=', 1)]</field>
+  </record>
+
+  <record id="rule_supervisor_domain_campaign" model="ir.rule">
+    <field name="name">Campaign domains: authorized campaigns only</field>
+    <field name="model_id" ref="model_codestra_campaign_email_domain"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_supervisor')), Command.link(ref('group_codestra_email_campaign_manager'))]"/>
+    <field name="domain_force">[('campaign_id', 'in', user.codestra_email_campaign_ids.ids), ('company_id', 'in', company_ids)]</field>
+  </record>
+  <record id="rule_tenant_admin_domain" model="ir.rule">
+    <field name="name">Tenant administrator domain scope</field>
+    <field name="model_id" ref="model_codestra_campaign_email_domain"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_tenant_admin'))]"/>
+    <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+  </record>
+  <record id="rule_platform_admin_domain" model="ir.rule">
+    <field name="name">Platform administrator domain scope</field>
+    <field name="model_id" ref="model_codestra_campaign_email_domain"/>
+    <field name="groups" eval="[Command.link(ref('group_codestra_email_platform_admin'))]"/>
+    <field name="domain_force">[(1, '=', 1)]</field>
+  </record>
+</odoo>
