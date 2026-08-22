@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
+import time
 import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 
 class ProviderError(RuntimeError):
@@ -17,6 +20,67 @@ class ProviderResult:
     provider_message_id: str
     status: str
     raw_status: str
+
+
+_token_cache: tuple[str, float] | None = None
+
+
+def _secret(path_variable: str) -> str:
+    path = os.getenv(path_variable, "")
+    if not path:
+        raise ProviderError("provider_credentials_missing")
+    try:
+        value = Path(path).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ProviderError("provider_credentials_unavailable") from exc
+    if not value:
+        raise ProviderError("provider_credentials_missing")
+    return value
+
+
+def _klyrow_token() -> str:
+    global _token_cache
+    now = time.time()
+    if _token_cache and _token_cache[1] > now + 15:
+        return _token_cache[0]
+    token_url = os.getenv("KLYROW_OIDC_TOKEN_URL", "")
+    if token_url != "https://auth.codestra.co/realms/codestra/protocol/openid-connect/token":
+        raise ProviderError("unapproved_oidc_issuer")
+    client_id = os.getenv("KLYROW_OIDC_CLIENT_ID", "")
+    if client_id != "cod-web-out-email-production":
+        raise ProviderError("unapproved_oidc_client")
+    body = urllib.parse.urlencode(
+        {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": _secret("KLYROW_OIDC_CLIENT_SECRET_FILE"),
+        }
+    ).encode()
+    request = urllib.request.Request(
+        token_url,
+        body,
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        result = json.loads(response.read())
+    token = str(result.get("access_token") or "")
+    expires_in = min(int(result.get("expires_in") or 60), 300)
+    if not token:
+        raise ProviderError("provider_token_missing")
+    _token_cache = (token, now + expires_in)
+    return token
+
+
+def _klyrow_tls_context() -> ssl.SSLContext:
+    ca = os.getenv("KLYROW_MTLS_CA_FILE", "")
+    cert = os.getenv("KLYROW_MTLS_CERT_FILE", "")
+    key = os.getenv("KLYROW_MTLS_KEY_FILE", "")
+    if not all((ca, cert, key)):
+        raise ProviderError("provider_mtls_configuration_missing")
+    context = ssl.create_default_context(cafile=ca)
+    context.load_cert_chain(certfile=cert, keyfile=key)
+    return context
 
 
 def _request_json(method: str, url: str, payload: dict[str, object] | None, headers: dict[str, str]) -> dict[str, object]:
@@ -49,13 +113,35 @@ def submit(message: dict[str, object]) -> ProviderResult:
     if mode != "production" or os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") != "true":
         raise ProviderError("production_delivery_not_authorized")
     url = _private_url(provider.upper())
-    token = os.getenv(provider.upper() + "_OUTBOUND_API_KEY", "")
-    if not token:
-        raise ProviderError("provider_credentials_missing")
-    payload = {k: message[k] for k in ("message_id", "tenant_id", "customer_id", "correlation_id", "idempotency_key", "sender", "normalized_destination", "classification")}
-    payload["content"] = json.loads(str(message.get("content_payload") or "{}"))
-    request = urllib.request.Request(url, json.dumps(payload).encode(), {"Content-Type":"application/json", "Authorization":"Bearer " + token, "X-Correlation-Id":str(message["correlation_id"]), "Idempotency-Key":str(message["idempotency_key"])}, method="POST")
-    with urllib.request.urlopen(request, timeout=5) as response:
+    campaign = str(message.get("campaign_id") or "")
+    allowed_campaign = os.getenv("KLYROW_ALLOWED_CAMPAIGN", "")
+    if campaign != "COD-WEB-OUT" or allowed_campaign != campaign:
+        raise ProviderError("provider_campaign_not_authorized")
+    content = json.loads(str(message.get("content_payload") or "{}"))
+    payload = {
+        "to": str(message["normalized_destination"]),
+        "sender": str(message["sender"]),
+        "reply_to": str(content.get("reply_to") or "support@codestra.co"),
+        "subject": str(content.get("subject") or ""),
+        "html": str(content.get("html") or content.get("content") or ""),
+        "text": str(content.get("text") or content.get("content") or ""),
+        "template_id": content.get("template_id"),
+        "campaign_id": campaign,
+        "stream": str(message["classification"]),
+    }
+    request = urllib.request.Request(
+        url,
+        json.dumps(payload, separators=(",", ":")).encode(),
+        {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + _klyrow_token(),
+            "X-Correlation-Id": str(message["correlation_id"]),
+            "X-Codestra-Campaign": campaign,
+            "Idempotency-Key": str(message["idempotency_key"]),
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5, context=_klyrow_tls_context()) as response:
         result = json.loads(response.read())
     return ProviderResult(str(result["id"]), "accepted", str(result.get("status", "accepted")))
 
