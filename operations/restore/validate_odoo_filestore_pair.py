@@ -48,7 +48,23 @@ def validate(
     for part in relative.parts:
         cursor = cursor / part
         directory_paths.append(cursor)
-    directory_paths.extend(path for path in filestore.rglob("*") if path.is_dir())
+    # Inspect directories before recursively touching their children.  pathlib's
+    # rglob may yield an entry below a non-traversable shard and then leak a raw
+    # PermissionError from is_dir() when the validator runs as the Odoo user.
+    # os.walk lets us stat the shard itself and prune it before descending.
+    for root, directory_names, _ in os.walk(filestore, followlinks=False):
+        root_path = Path(root)
+        traversable_names = []
+        for directory_name in directory_names:
+            directory_path = root_path / directory_name
+            directory_paths.append(directory_path)
+            try:
+                mode = directory_path.stat().st_mode
+            except OSError as exc:
+                raise ValidationError("filestore directory traversal failures: 1") from exc
+            if mode & 0o100:
+                traversable_names.append(directory_name)
+        directory_names[:] = traversable_names
     directory_ownership_failures = []
     directory_traversal_failures = []
     for path in directory_paths:
