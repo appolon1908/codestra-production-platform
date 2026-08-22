@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from .core import ControlPlaneError, Store, now_iso
+from .campaign_gates import authorize_channel
 
 ENVELOPE_FIELDS = {
     "schema_version", "event_id", "event_type", "correlation_id", "idempotency_key",
@@ -29,6 +30,10 @@ def authorize_automation(store: Store, value: dict[str, Any], tenant: str) -> di
     channel = payload.get("channel")
     contact = payload.get("contact_id")
     if channel in {"sms", "email"}:
+        authorize_channel({**payload, "campaign_id": value["campaign_id"],
+                           "tenant_id": value["tenant_id"],
+                           "business_unit_id": value["business_unit_id"]},
+                          simulation=payload.get("dry_run") is True)
         if not contact or not store.preference_allows(tenant, str(contact), channel):
             raise ControlPlaneError("contact_policy_denied")
     return {**value, "authorized": True, "policy_checked_at": now_iso()}

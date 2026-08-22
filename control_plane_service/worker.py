@@ -8,8 +8,9 @@ import time
 import urllib.request
 import urllib.parse
 
-from .core import Store
+from .core import ControlPlaneError, Store
 from .providers import submit
+from .campaign_gates import authorize_channel
 
 MAX_ATTEMPTS = int(os.getenv("CONTROL_PLANE_MAX_ATTEMPTS", "5"))
 
@@ -101,6 +102,15 @@ def dispatch_messages() -> int:
         rows = [dict(row) for row in db.execute("SELECT * FROM messages WHERE status='queued' ORDER BY created_at LIMIT 50")]
     for message in rows:
         if not current.circuit_allows(message["provider"], int(os.getenv("CONTROL_PLANE_CIRCUIT_COOLDOWN", "30"))):
+            continue
+        try:
+            authorize_channel(message)
+        except ControlPlaneError as exc:
+            current.transition_message(
+                message["message_id"], message["tenant_id"], "rejected",
+                "campaign_policy_denied", error_code=str(exc),
+            )
+            processed += 1
             continue
         try:
             result = submit(message)

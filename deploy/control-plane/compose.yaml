@@ -13,6 +13,13 @@ services:
       CRM_KONG_SHARED_SECRET_SHA256_FILE: /run/secrets/crm_gateway_secret_verifier
       KONG_GATEWAY_SHARED_SECRET_SHA256_FILE: /run/secrets/kong_gateway_secret_verifier
       CONTROL_PLANE_TRUSTED_PROXY_CIDRS: ${CONTROL_PLANE_TRUSTED_PROXY_CIDRS:-172.19.0.18/32}
+      CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED: "true"
+      COD_WEB_OUT_EMAIL_ENABLED: "true"
+      COD_WEB_OUT_EMAIL_MODE: CANARY
+      COD_WEB_OUT_EMAIL_ALLOWLIST_REQUIRED: "true"
+      GLOBAL_EMAIL_PRODUCTION: "false"
+      SMS_PRODUCTION: "false"
+      VOICE_PRODUCTION: "false"
     ports: ["127.0.0.1:8096:8096"]
     secrets: [control_plane_database_url, crm_gateway_secret_verifier, kong_gateway_secret_verifier]
     read_only: true
@@ -38,6 +45,13 @@ services:
     env_file: ${CONTROL_PLANE_ENV_FILE:-/etc/codestra/secrets/control-plane.env}
     environment:
       CONTROL_PLANE_DATABASE_URL_FILE: /run/secrets/control_plane_database_url
+      CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED: "true"
+      COD_WEB_OUT_EMAIL_ENABLED: "true"
+      COD_WEB_OUT_EMAIL_MODE: CANARY
+      COD_WEB_OUT_EMAIL_ALLOWLIST_REQUIRED: "true"
+      GLOBAL_EMAIL_PRODUCTION: "false"
+      SMS_PRODUCTION: "false"
+      VOICE_PRODUCTION: "false"
     secrets: [control_plane_database_url]
     read_only: true
     tmpfs: [/tmp]
