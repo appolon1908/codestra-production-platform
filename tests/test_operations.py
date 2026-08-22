@@ -44,6 +44,15 @@ class BackupOperationsTests(unittest.TestCase):
         marker = source.index('mv "$backup_root/.LAST_SUCCESS-${stamp}" "$backup_root/LAST_SUCCESS"')
         self.assertGreater(marker, evidence)
 
+    def test_readiness_backup_validates_exact_root_owned_owner_waiver(self) -> None:
+        source = (ROOT / "operations" / "readiness" / "codestra-local-consistency-backup.sh").read_text()
+        self.assertIn("os.O_NOFOLLOW", source)
+        self.assertIn("os.fstat(stream.fileno())", source)
+        self.assertIn("info.st_uid != 0 or info.st_gid != 0", source)
+        self.assertIn("stat.S_IMODE(info.st_mode) != 0o600", source)
+        self.assertIn("hashlib.sha256(waiver).hexdigest()", source)
+        self.assertIn("if ! validate_owner_window_waiver; then", source)
+
     def test_backup_fails_closed_without_protected_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             result = run(
