@@ -1,0 +1,57 @@
+DOMAIN,RECORD_TYPE,HOST,VALUE,TTL,PURPOSE,CURRENT,EXPECTED,ACTION
+codestra.agency,MX,@,mail-provider-authority,3600,inbound,"Zoho MX 10/20/50",KEEP_UNTIL_MAILBOX_CUTOVER,VERIFY_OWNERSHIP_AND_PLAN_MIGRATION
+codestra.agency,SPF,@,single-authorized-sender-policy,3600,outbound,"v=spf1 include:zohomail.com ~all",INVENTORY_ALL_SENDERS_BEFORE_CHANGE,REVIEW
+codestra.agency,DKIM,SELECTOR._domainkey,PER_DOMAIN_2048_BIT_PUBLIC_KEY,3600,authentication,NOT_VERIFIED,GENERATE_IN_SECRET_BACKED_MAILBOX_SERVICE,PREPARE
+codestra.agency,DMARC,_dmarc,MONITORING_POLICY_WITH_RUA,3600,authentication,NONE_FOUND,p=none_FIRST,PREPARE
+codestra.co,MX,@,mail-provider-authority,3600,inbound,"Zoho MX 10/20/50",KEEP_UNTIL_MAILBOX_CUTOVER,VERIFY_OWNERSHIP_AND_PLAN_MIGRATION
+codestra.co,SPF,@,single-authorized-sender-policy,3600,outbound,"v=spf1 include:dc-8e814c8572._spfm.codestra.co ~all",INVENTORY_ALL_SENDERS_BEFORE_CHANGE,REVIEW
+codestra.co,DKIM,SELECTOR._domainkey,PER_DOMAIN_2048_BIT_PUBLIC_KEY,3600,authentication,NOT_VERIFIED,GENERATE_IN_SECRET_BACKED_MAILBOX_SERVICE,PREPARE
+codestra.co,DMARC,_dmarc,ONE_VALID_DMARC_RECORD,3600,authentication,"TWO RECORDS: p=none AND p=quarantine",ONE_RECORD_ONLY,URGENT_REMOVE_DUPLICATE_AFTER_OWNER_APPROVAL
+nativoenglish.com,MX,@,mail-provider-authority,3600,inbound,NONE,ASSIGN_ONLY_AFTER_CAMPAIGN_OWNER_APPROVAL,BLOCKED
+nativoenglish.com,SPF,@,single-authorized-sender-policy,3600,outbound,NONE,AUTHORIZE_ONLY_ACTUAL_SENDERS,BLOCKED
+nativoenglish.com,DKIM,SELECTOR._domainkey,PER_DOMAIN_2048_BIT_PUBLIC_KEY,3600,authentication,NOT_VERIFIED,GENERATE_AFTER_ASSIGNMENT,BLOCKED
+nativoenglish.com,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,p=quarantine,VERIFY_LEGITIMATE_SENDERS_BEFORE_CHANGE,REVIEW
+moneybeeloan.com,MX,@,mail-provider-authority,3600,inbound,"Zoho MX 10/20/50",KEEP_UNTIL_MAILBOX_CUTOVER,BLOCKED_ASSIGNMENT
+moneybeeloan.com,SPF,@,single-authorized-sender-policy,3600,outbound,"v=spf1 include:dc-8e814c8572._spfm.moneybeeloan.com ~all",INVENTORY_ALL_SENDERS,REVIEW
+moneybeeloan.com,DKIM,SELECTOR._domainkey,PER_DOMAIN_2048_BIT_PUBLIC_KEY,3600,authentication,NOT_VERIFIED,GENERATE_AFTER_ASSIGNMENT,BLOCKED
+moneybeeloan.com,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,p=quarantine,VERIFY_ALIGNMENT,REVIEW
+codestra.cloud,MX,@,mail-provider-authority,3600,inbound,NONE,SERVICE_ONLY_NO_HUMAN_MAILBOX_UNTIL_APPROVED,NO_ACTION
+codestra.cloud,SPF,@,single-authorized-sender-policy,3600,outbound,NONE,NO_SEND_UNTIL_SERVICE_AUTHORITY_DEFINED,BLOCKED
+codestra.cloud,DKIM,SELECTOR._domainkey,PER_DOMAIN_2048_BIT_PUBLIC_KEY,3600,authentication,NOT_VERIFIED,ONLY_IF_OUTBOUND_APPROVED,BLOCKED
+codestra.cloud,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,p=quarantine,VERIFY_EXISTING_POLICY,REVIEW
+codestra.digital,MX,@,mail-provider-authority,3600,inbound,"Zoho MX 10/20/50",KEEP_UNTIL_MAILBOX_CUTOVER,BLOCKED_ASSIGNMENT
+codestra.digital,SPF,@,single-authorized-sender-policy,3600,outbound,"v=spf1 include:zohomail.com ~all",INVENTORY_ALL_SENDERS,REVIEW
+codestra.digital,DKIM,SELECTOR._domainkey,PER_DOMAIN_2048_BIT_PUBLIC_KEY,3600,authentication,NOT_VERIFIED,GENERATE_AFTER_ASSIGNMENT,BLOCKED
+codestra.digital,DMARC,_dmarc,MONITORING_POLICY_WITH_RUA,3600,authentication,NONE_FOUND,p=none_FIRST,PREPARE
+codestra.media,MX,@,mail-provider-authority,3600,inbound,NONE,ASSIGN_ONLY_AFTER_CAMPAIGN_OWNER_APPROVAL,BLOCKED
+codestra.media,SPF,@,single-authorized-sender-policy,3600,outbound,NONE,AUTHORIZE_ONLY_ACTUAL_SENDERS,BLOCKED
+codestra.media,DKIM,SELECTOR._domainkey,PER_DOMAIN_2048_BIT_PUBLIC_KEY,3600,authentication,NOT_VERIFIED,GENERATE_AFTER_ASSIGNMENT,BLOCKED
+codestra.media,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,p=quarantine,VERIFY_ALIGNMENT,REVIEW
+moneybee.loan,MX,@,mail-provider-authority,3600,inbound,"Zoho MX 10/20/50",KEEP_UNTIL_MAILBOX_CUTOVER,BLOCKED_ASSIGNMENT
+moneybee.loan,SPF,@,single-authorized-sender-policy,3600,outbound,"v=spf1 include:dc-8e814c8572._spfm.moneybee.loan ~all",INVENTORY_ALL_SENDERS,REVIEW
+moneybee.loan,DKIM,SELECTOR._domainkey,PER_DOMAIN_2048_BIT_PUBLIC_KEY,3600,authentication,NOT_VERIFIED,GENERATE_AFTER_ASSIGNMENT,BLOCKED
+moneybee.loan,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,p=quarantine,VERIFY_ALIGNMENT,REVIEW
+klyrow.com,MX,@,mail.klyrow.com,3600,transactional-inbound,"10 mail.klyrow.com",KEEP,VERIFY_POSTAL_AND_MAILBOX_SEPARATION
+klyrow.com,SPF,@,single-authorized-sender-policy,3600,transactional-outbound,"v=spf1 include:spf.klyrow.com ~all",KEEP_IF_PROVIDER_INVENTORY_MATCHES,VERIFY
+klyrow.com,DKIM,SELECTOR._domainkey,PROVIDER_MANAGED_PER_DOMAIN_KEY,3600,authentication,NOT_VERIFIED,VERIFY_PROVIDER_SELECTOR,VERIFY
+klyrow.com,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,"p=none; adkim=r; aspf=r",ADD_RUA_THEN_REVIEW_ENFORCEMENT,REVIEW
+beyvra.com,MX,@,transactional-provider-route,3600,transactional-inbound,NONE,DEFINE_WITH_KLYROW_POSTAL_OWNER,BLOCKED
+beyvra.com,SPF,@,single-authorized-sender-policy,3600,transactional-outbound,NONE,AUTHORIZE_KLYROW_POSTAL_ONLY,BLOCKED
+beyvra.com,DKIM,SELECTOR._domainkey,PROVIDER_MANAGED_PER_DOMAIN_KEY,3600,authentication,NOT_VERIFIED,GENERATE_WITH_PROVIDER,BLOCKED
+beyvra.com,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,p=quarantine,VERIFY_PROVIDER_ALIGNMENT,REVIEW
+kyqra.com,MX,@,NONE,3600,service-only,NONE,NO_HUMAN_MAILBOX,NO_ACTION
+kyqra.com,SPF,@,single-authorized-sender-policy,3600,service-only,NONE,NO_SEND_UNTIL_APPROVED,NO_ACTION
+kyqra.com,DKIM,SELECTOR._domainkey,ONLY_IF_MAIL_ENABLED,3600,authentication,NOT_VERIFIED,NO_HUMAN_MAILBOX,NO_ACTION
+kyqra.com,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,p=quarantine,KEEP_AFTER_ALIGNMENT_REVIEW,REVIEW
+breero.com,MX,@,mail-provider-authority,3600,inbound,NONE,ASSIGN_ONLY_AFTER_CAMPAIGN_OWNER_APPROVAL,BLOCKED
+breero.com,SPF,@,single-authorized-sender-policy,3600,outbound,NONE,AUTHORIZE_ONLY_ACTUAL_SENDERS,BLOCKED
+breero.com,DKIM,SELECTOR._domainkey,PER_DOMAIN_2048_BIT_PUBLIC_KEY,3600,authentication,NOT_VERIFIED,GENERATE_AFTER_ASSIGNMENT,BLOCKED
+breero.com,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,p=quarantine,VERIFY_ALIGNMENT,REVIEW
+breero.shop,MX,@,mail-provider-authority,3600,inbound,NONE,ASSIGN_ONLY_AFTER_CAMPAIGN_OWNER_APPROVAL,BLOCKED
+breero.shop,SPF,@,single-authorized-sender-policy,3600,outbound,NONE,AUTHORIZE_ONLY_ACTUAL_SENDERS,BLOCKED
+breero.shop,DKIM,SELECTOR._domainkey,PER_DOMAIN_2048_BIT_PUBLIC_KEY,3600,authentication,NOT_VERIFIED,GENERATE_AFTER_ASSIGNMENT,BLOCKED
+breero.shop,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,p=quarantine,VERIFY_ALIGNMENT,REVIEW
+telnexa.co,MX,@,NONE,3600,service-only,NONE,NO_HUMAN_MAILBOX,NO_ACTION
+telnexa.co,SPF,@,single-authorized-sender-policy,3600,service-only,NONE,NO_SEND_UNTIL_APPROVED,NO_ACTION
+telnexa.co,DKIM,SELECTOR._domainkey,ONLY_IF_MAIL_ENABLED,3600,authentication,NOT_VERIFIED,NO_HUMAN_MAILBOX,NO_ACTION
+telnexa.co,DMARC,_dmarc,MONITOR_THEN_ENFORCE,3600,authentication,p=quarantine,KEEP_AFTER_ALIGNMENT_REVIEW,REVIEW

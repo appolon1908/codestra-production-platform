@@ -1,0 +1,11 @@
+DOMAIN,RECORD_TYPE,HOST,CURRENT,REPLACEMENT,TTL,ACTION,ACTIVATION_GATE
+codestra.co,A,mail,49.12.145.107,49.12.145.107,3600,KEEP_PENDING_HOST_AUTHORITY,Confirm 49.12.145.107 is approved Stalwart ingress
+codestra.co,AAAA,mail,NONE,NONE,3600,DO_NOT_CREATE,No approved IPv6 listener
+codestra.co,PTR,49.12.145.107,static.107.145.12.49.clients.your-server.de.,mail.codestra.co,86400,REQUEST_FROM_IP_OWNER,Forward-confirmed reverse DNS and TLS required
+codestra.co,TLS_CERT,mail.codestra.co,NO_VALIDATED_CERTIFICATE,ACME_CERTIFICATE_FOR_mail.codestra.co,NA,PROVISION_AFTER_HOST_AUTHORITY,HTTPS IMAPS and submission SAN validation
+codestra.co,CNAME,autoconfig,NONE,mail.codestra.co.,3600,ADD_AFTER_STALWART_PRODUCTION_READY,Protocol discovery verified
+codestra.co,CNAME,autodiscover,NONE,mail.codestra.co.,3600,ADD_AFTER_STALWART_PRODUCTION_READY,Protocol discovery verified
+codestra.co,TXT,_dmarc,"v=DMARC1; p=none;",REMOVE,3600,REPLACE_CONFLICTING_PAIR_AS_ONE,Owner DNS review
+codestra.co,TXT,_dmarc,"v=DMARC1; p=quarantine; adkim=r; aspf=r; rua=mailto:dmarc_rua@onsecureserver.net;",REMOVE,3600,REPLACE_CONFLICTING_PAIR_AS_ONE,Owner DNS review
+codestra.co,TXT,_dmarc,NONE,"v=DMARC1; p=none; adkim=r; aspf=r; rua=mailto:dmarc_rua@onsecureserver.net; pct=100",3600,ADD_SINGLE_CONSOLIDATED_RECORD,Monitor Zoho Klyrow/Postal and future Stalwart alignment before enforcement
+klyrow.com,A,mail,37.27.128.39,37.27.128.39,3600,KEEP,Transactional plane remains separate
