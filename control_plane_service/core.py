@@ -4,13 +4,14 @@ import hashlib
 import hmac
 import json
 import os
-import sqlite3
 import time
 import uuid
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+
+from .database import Connection, IntegrityError, is_postgres
 
 SOURCES = {"kyqra", "telnexa", "klyrow", "n8n", "odoo", "crm"}
 EVENT_PREFIXES = {
@@ -124,10 +125,8 @@ class Store:
         self.path = path
         self.initialize()
 
-    def connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=15)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def connect(self) -> Connection:
+        return Connection(self.path)
 
     def initialize(self) -> None:
         with self.connect() as db:
@@ -137,20 +136,20 @@ class Store:
               event_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source TEXT NOT NULL,
               event_type TEXT NOT NULL, idempotency_key TEXT NOT NULL, correlation_id TEXT NOT NULL,
               envelope TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0,
-              next_attempt REAL NOT NULL DEFAULT 0, last_error TEXT, created_at REAL NOT NULL,
+              next_attempt DOUBLE PRECISION NOT NULL DEFAULT 0, last_error TEXT, created_at DOUBLE PRECISION NOT NULL,
               UNIQUE(tenant_id, source, idempotency_key));
             CREATE INDEX IF NOT EXISTS events_state_due ON events(state,next_attempt);
             CREATE INDEX IF NOT EXISTS events_correlation ON events(correlation_id);
             CREATE TABLE IF NOT EXISTS event_deliveries(
               event_id TEXT NOT NULL, target TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued',
-              attempts INTEGER NOT NULL DEFAULT 0, next_attempt REAL NOT NULL DEFAULT 0, last_error TEXT,
+              attempts INTEGER NOT NULL DEFAULT 0, next_attempt DOUBLE PRECISION NOT NULL DEFAULT 0, last_error TEXT,
               PRIMARY KEY(event_id,target), FOREIGN KEY(event_id) REFERENCES events(event_id));
             CREATE TABLE IF NOT EXISTS preferences(
               tenant_id TEXT NOT NULL, contact_id TEXT NOT NULL, channel TEXT NOT NULL,
               status TEXT NOT NULL, source TEXT NOT NULL, consent_at TEXT, opted_out_at TEXT,
               reason TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(tenant_id,contact_id,channel));
             CREATE TABLE IF NOT EXISTS integrations(name TEXT PRIMARY KEY, paused INTEGER NOT NULL DEFAULT 0, changed_at TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS circuits(name TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'closed', failures INTEGER NOT NULL DEFAULT 0, opened_at REAL);
+            CREATE TABLE IF NOT EXISTS circuits(name TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'closed', failures INTEGER NOT NULL DEFAULT 0, opened_at DOUBLE PRECISION);
             CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY, actor TEXT NOT NULL, role TEXT NOT NULL, action TEXT NOT NULL, object_type TEXT NOT NULL, object_id TEXT NOT NULL, tenant_id TEXT, correlation_id TEXT, metadata TEXT NOT NULL, created_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS contacts(
               tenant_id TEXT NOT NULL, customer_id TEXT NOT NULL, odoo_partner_id TEXT,
@@ -207,8 +206,8 @@ class Store:
               correlation_id TEXT NOT NULL, created_at TEXT NOT NULL);
             """)
             for name in ("odoo", "n8n", "kyqra", "telnexa", "klyrow"):
-                db.execute("INSERT OR IGNORE INTO integrations VALUES(?,0,?)", (name, now_iso()))
-                db.execute("INSERT OR IGNORE INTO circuits(name) VALUES(?)", (name,))
+                db.execute("INSERT INTO integrations VALUES(?,0,?) ON CONFLICT DO NOTHING", (name, now_iso()))
+                db.execute("INSERT INTO circuits(name) VALUES(?) ON CONFLICT DO NOTHING", (name,))
 
     def crm_register_customer(self, customer_id: str, kong_consumer_id: str, kong_custom_id: str,
                               enabled: bool, company_label: str, business_unit_label: str) -> None:
@@ -223,6 +222,14 @@ class Store:
         with self.connect() as db:
             row = db.execute("SELECT * FROM crm_customers WHERE kong_consumer_id=? AND kong_custom_id=?",
                              (kong_consumer_id, kong_custom_id)).fetchone()
+        if not row: raise ControlPlaneError("crm_customer_unknown")
+        if not row["enabled"]: raise ControlPlaneError("crm_customer_disabled")
+        return dict(row)
+
+    def crm_customer_by_id(self, customer_id: str) -> dict[str, Any]:
+        """Resolve an internal, server-selected customer (never a request field)."""
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM crm_customers WHERE customer_id=?", (customer_id,)).fetchone()
         if not row: raise ControlPlaneError("crm_customer_unknown")
         if not row["enabled"]: raise ControlPlaneError("crm_customer_disabled")
         return dict(row)
@@ -285,7 +292,7 @@ class Store:
             with self.connect() as db:
                 db.execute("INSERT INTO crawler_jobs VALUES(?,?,?,?,?,?,?,?)", tuple(job.values()))
             return job, False
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             with self.connect() as db:
                 row = db.execute("SELECT * FROM crawler_jobs WHERE tenant_id=? AND idempotency_key=?", (job["tenant_id"], job["idempotency_key"])).fetchone()
             if row and row["target_url"] == target:
@@ -320,7 +327,7 @@ class Store:
         with self.connect() as db:
             for item in items:
                 raw = json.dumps(item, sort_keys=True, separators=(",", ":")); key = hashlib.sha256(raw.encode()).hexdigest()
-                db.execute("INSERT OR IGNORE INTO crawler_results VALUES(?,?,?,?)", (job_id, key, raw, now_iso()))
+                db.execute("INSERT INTO crawler_results VALUES(?,?,?,?) ON CONFLICT DO NOTHING", (job_id, key, raw, now_iso()))
             rows = db.execute("SELECT payload FROM crawler_results WHERE job_id=? ORDER BY created_at,result_key", (job_id,)).fetchall()
         return [json.loads(row["payload"]) for row in rows]
 
@@ -332,7 +339,7 @@ class Store:
                 targets=("n8n",) if envelope["source"] in {"odoo", "crm"} else ("odoo",) if envelope["source"]=="n8n" else ("odoo","n8n")
                 db.executemany("INSERT INTO event_deliveries(event_id,target) VALUES(?,?)",((envelope["event_id"],target) for target in targets))
             return IngestResult(envelope["event_id"], envelope["correlation_id"], False, "queued")
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             with self.connect() as db:
                 if reject_event_replay and db.execute(
                     "SELECT 1 FROM events WHERE event_id=? LIMIT 1",
@@ -401,7 +408,7 @@ class Store:
                 units = sms_segments(str(value.get("content", ""))) if channel == "sms" else 1
                 db.execute("INSERT INTO usage_meter VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (str(uuid.uuid4()),message_id,tenant,channel,units,int(value.get("estimated_cost_minor",0)),None,None,value.get("currency","USD"),"reserved",stamp[:7],stamp))
                 self._append_message_event(db, message_id, tenant, f"{channel}.queued", "queued", "queued", value["correlation_id"])
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             with self.connect() as db: row = db.execute("SELECT * FROM messages WHERE tenant_id=? AND idempotency_key=?", (tenant,value["idempotency_key"])).fetchone()
             if row and row["channel"] == channel and row["normalized_destination"] == destination and row["customer_id"] == customer: return dict(row), True
             raise ControlPlaneError("idempotency_conflict")
@@ -418,10 +425,10 @@ class Store:
             message=self.get_message(message["message_id"],tenant)
         return message,duplicate
 
-    def _append_message_event(self, db: sqlite3.Connection, message_id: str, tenant: str, event_type: str, status: str, raw_status: str | None, correlation: str, event_id: str | None = None, payload: dict[str, Any] | None = None) -> bool:
+    def _append_message_event(self, db: Connection, message_id: str, tenant: str, event_type: str, status: str, raw_status: str | None, correlation: str, event_id: str | None = None, payload: dict[str, Any] | None = None) -> bool:
         event_id = event_id or str(uuid.uuid4()); envelope = {"event_id":event_id,"event_type":event_type,"event_version":"1.0","timestamp":now_iso(),"correlation_id":correlation,"tenant_id":tenant,"message_id":message_id,"channel":event_type.split(".",1)[0],"payload":payload or {},"metadata":{}}
         try: db.execute("INSERT INTO message_events VALUES(?,?,?,?,?,?,?,?)", (event_id,message_id,tenant,event_type,status,raw_status,json.dumps(envelope,sort_keys=True),now_iso())); return True
-        except sqlite3.IntegrityError: return False
+        except IntegrityError: return False
 
     def get_message(self, message_id: str, tenant: str | None) -> dict[str, Any]:
         with self.connect() as db:
@@ -526,12 +533,17 @@ class Store:
     def metrics(self) -> str:
         with self.connect() as db:
             counts = db.execute("SELECT state,count(*) n FROM events GROUP BY state").fetchall()
+            deliveries = db.execute("SELECT target,state,count(*) n,sum(attempts) retries FROM event_deliveries GROUP BY target,state").fetchall()
             circuits = db.execute("SELECT name,state FROM circuits").fetchall()
             messages = db.execute("SELECT channel,status,count(*) n FROM messages GROUP BY channel,status").fetchall()
             suppressions = db.execute("SELECT channel,count(*) n FROM suppressions WHERE active=1 GROUP BY channel").fetchall()
             usage = db.execute("SELECT channel,sum(units) n FROM usage_meter GROUP BY channel").fetchall()
         lines = ["# TYPE codestra_control_plane_events gauge"]
         lines += [f'codestra_control_plane_events{{state="{r["state"]}"}} {r["n"]}' for r in counts]
+        lines += ["# TYPE codestra_control_plane_deliveries gauge"]
+        lines += [f'codestra_control_plane_deliveries{{target="{r["target"]}",state="{r["state"]}"}} {r["n"]}' for r in deliveries]
+        lines += ["# TYPE codestra_control_plane_delivery_retries_total counter"]
+        lines += [f'codestra_control_plane_delivery_retries_total{{target="{r["target"]}",state="{r["state"]}"}} {r["retries"] or 0}' for r in deliveries]
         lines += ["# TYPE codestra_control_plane_circuit_open gauge"]
         lines += [f'codestra_control_plane_circuit_open{{dependency="{r["name"]}"}} {1 if r["state"] == "open" else 0}' for r in circuits]
         lines += ["# TYPE codestra_communications_messages_total gauge"]

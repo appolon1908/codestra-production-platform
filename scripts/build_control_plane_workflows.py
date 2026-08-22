@@ -6,6 +6,9 @@ import json
 import sys
 
 SPECS = [
+    (17, "sms.submitted", "telnexa.sms.submitted"),
+    (18, "sms.sent", "telnexa.sms.sent"),
+    (19, "sms.rejected", "telnexa.sms.rejected"),
     (20, "sms.received", "telnexa.sms.received"),
     (21, "sms.delivered", "telnexa.sms.delivered"),
     (22, "sms.failed", "telnexa.sms.failed"),
@@ -23,6 +26,7 @@ SPECS = [
     (34, "crm.lead.created", "crm.lead.created"),
     (35, "crm.lead.updated", "crm.lead.updated"),
     (36, "crm.activity.created", "crm.activity.created"),
+    (37, "sms.expired", "telnexa.sms.expired"),
 ]
 
 
@@ -37,13 +41,6 @@ const eventId=String(b.event_id||h['x-event-id']);
 const correlationId=String(b.correlation_id);
 const tenantId=String(b.tenant_id);
 const customerId=b.customer_id==null?null:String(b.customer_id);
-const state=$getWorkflowStaticData('global');
-state.seen=state.seen||{};
-const dedupeKey=tenantId+':'+String(b.idempotency_key);
-if(state.seen[dedupeKey]) return [{json:{accepted:true,duplicate:true,event_id:eventId,correlation_id:correlationId,tenant_id:tenantId,customer_id:customerId}}];
-state.seen[dedupeKey]=Date.now();
-const keys=Object.keys(state.seen);
-if(keys.length>10000) keys.sort((a,z)=>state.seen[a]-state.seen[z]).slice(0,1000).forEach(k=>delete state.seen[k]);
 return [{json:{accepted:true,duplicate:false,event_id:eventId,event_type:b.event_type,correlation_id:correlationId,tenant_id:tenantId,customer_id:customerId,idempotency_key:String(b.idempotency_key),payload:b.payload||{},structured_error:null,structured_log:{level:'info',workflow:WORKFLOW,event_id:eventId,correlation_id:correlationId,tenant_id:tenantId,customer_id:customerId}}}];
 """.replace("EVENT_TYPE", json.dumps(event_type)).replace("WORKFLOW", json.dumps(name))
 

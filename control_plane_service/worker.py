@@ -54,7 +54,13 @@ def once() -> int:
                 envelope["event_type"] = inner_type
         delivery_row = dict(row)
         delivery_row["envelope"] = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
-        target_name = row["target"]; target = os.getenv("CONTROL_PLANE_" + target_name.upper() + "_URL", "")
+        target_name = row["target"]
+        if target_name == "odoo":
+            with current.connect() as db:
+                n8n_state = db.execute("SELECT state FROM event_deliveries WHERE event_id=? AND target='n8n'", (row["event_id"],)).fetchone()
+            if n8n_state and n8n_state["state"] != "delivered":
+                continue
+        target = os.getenv("CONTROL_PLANE_" + target_name.upper() + "_URL", "")
         if target_name == "odoo" and str(envelope.get("event_type")) in {"klyrow.email.delivered", "klyrow.email.bounced", "klyrow.email.deferred"}:
             target = os.getenv("CONTROL_PLANE_ODOO_EMAIL_STATUS_URL", target)
         event_slug = {"kyqra.record.created": "crawler-result-created", "kyqra.job.completed": "crawler-job-completed", "kyqra.job.failed": "crawler-job-failed"}.get(str(envelope.get("event_type")))
@@ -65,7 +71,7 @@ def once() -> int:
             attempts = row["delivery_attempts"] + 1; state = "dead_letter" if attempts >= MAX_ATTEMPTS else "retrying"; delay = min(300, 2 ** attempts)
             with current.connect() as db:
                 db.execute("UPDATE event_deliveries SET state=?,attempts=?,next_attempt=?,last_error=? WHERE event_id=? AND target=?",(state,attempts,time.time()+delay,"CircuitOpen",row["event_id"],target_name))
-                db.execute("UPDATE events SET state=?,attempts=max(attempts,?),next_attempt=?,last_error=? WHERE event_id=?",(state,attempts,time.time()+delay,"CircuitOpen",row["event_id"]))
+                db.execute("UPDATE events SET state=?,attempts=CASE WHEN attempts>? THEN attempts ELSE ? END,next_attempt=?,last_error=? WHERE event_id=?",(state,attempts,attempts,time.time()+delay,"CircuitOpen",row["event_id"]))
             processed += 1
             continue
         try:
@@ -74,7 +80,7 @@ def once() -> int:
                 if response.status >= 300: raise RuntimeError("downstream_status")
             with current.connect() as db:
                 db.execute("UPDATE event_deliveries SET state='delivered',last_error=NULL WHERE event_id=? AND target=?", (row["event_id"],target_name))
-                pending=db.execute("SELECT count(*) FROM event_deliveries WHERE event_id=? AND state!='delivered'",(row["event_id"],)).fetchone()[0]
+                count_row=db.execute("SELECT count(*) AS n FROM event_deliveries WHERE event_id=? AND state!='delivered'",(row["event_id"],)).fetchone(); pending=count_row["n"]
                 if pending==0: db.execute("UPDATE events SET state='delivered',last_error=NULL WHERE event_id=?",(row["event_id"],))
             current.circuit_result(target_name, True)
         except Exception as exc:
@@ -82,7 +88,7 @@ def once() -> int:
             attempts = row["delivery_attempts"] + 1; state = "dead_letter" if attempts >= MAX_ATTEMPTS else "retrying"; delay = min(300, 2 ** attempts)
             with current.connect() as db:
                 db.execute("UPDATE event_deliveries SET state=?,attempts=?,next_attempt=?,last_error=? WHERE event_id=? AND target=?",(state,attempts,time.time()+delay,type(exc).__name__,row["event_id"],target_name))
-                db.execute("UPDATE events SET state=?,attempts=max(attempts,?),next_attempt=?,last_error=? WHERE event_id=?",(state,attempts,time.time()+delay,type(exc).__name__,row["event_id"]))
+                db.execute("UPDATE events SET state=?,attempts=CASE WHEN attempts>? THEN attempts ELSE ? END,next_attempt=?,last_error=? WHERE event_id=?",(state,attempts,attempts,time.time()+delay,type(exc).__name__,row["event_id"]))
         processed += 1
     return processed
 

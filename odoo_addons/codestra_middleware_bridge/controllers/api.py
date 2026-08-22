@@ -15,6 +15,9 @@ class CodestraMiddlewareBridge(http.Controller):
     CRM_LEAD_CREATE_FIELDS = {
         "name", "contact_name", "email", "phone", "company_name", "source",
         "campaign", "description", "customer_reference", "external_id", "middleware_id",
+        "form_type", "form_version", "source_site", "consent_timestamp",
+        "consent_disclosure_version", "sms_consent", "email_marketing_consent",
+        "consent_correlation_id",
     }
     CRM_LEAD_PATCH_FIELDS = {
         "name", "contact_name", "email", "phone", "company_name", "source",
@@ -163,6 +166,11 @@ class CodestraMiddlewareBridge(http.Controller):
             "company_name": lead.partner_name, "description": lead.description,
             "source": lead.source_id.name if lead.source_id else None,
             "campaign": lead.campaign_id.name if lead.campaign_id else None,
+            "form_type": lead.codestra_form_type, "form_version": lead.codestra_form_version,
+            "source_site": lead.codestra_source_site,
+            "sms_consent": lead.codestra_sms_consent,
+            "email_marketing_consent": lead.codestra_email_marketing_consent,
+            "consent_correlation_id": lead.codestra_consent_correlation_id,
             "status": "active" if lead.active else "archived",
             "created_at": lead.create_date.isoformat() if lead.create_date else None,
             "updated_at": lead.write_date.isoformat() if lead.write_date else None,
@@ -178,6 +186,17 @@ class CodestraMiddlewareBridge(http.Controller):
             "phone": "phone", "company_name": "partner_name", "description": "description",
         }
         for source, target in mapping.items():
+            if source in payload:
+                values[target] = payload[source]
+        consent_mapping = {
+            "form_type": "codestra_form_type", "form_version": "codestra_form_version",
+            "source_site": "codestra_source_site", "consent_timestamp": "codestra_consent_timestamp",
+            "consent_disclosure_version": "codestra_consent_disclosure_version",
+            "sms_consent": "codestra_sms_consent",
+            "email_marketing_consent": "codestra_email_marketing_consent",
+            "consent_correlation_id": "codestra_consent_correlation_id",
+        }
+        for source, target in consent_mapping.items():
             if source in payload:
                 values[target] = payload[source]
         for source, model in (("source", "utm.source"), ("campaign", "utm.campaign")):

@@ -3,6 +3,9 @@
   "generated_at": "2026-08-15T00:00:00Z",
   "defaults": {"active": false, "error_workflow": "CP-90-STANDARD-ERROR-V1", "max_delivery_attempts": 5},
   "workflows": [
+    {"id":"CodestraCP17","name":"CP-17-SMS.SUBMITTED-V1","owner":"communications","events":["telnexa.sms.submitted"],"endpoint":"/webhook/codestra-sms-submitted","active":false},
+    {"id":"CodestraCP18","name":"CP-18-SMS.SENT-V1","owner":"communications","events":["telnexa.sms.sent"],"endpoint":"/webhook/codestra-sms-sent","active":false},
+    {"id":"CodestraCP19","name":"CP-19-SMS.REJECTED-V1","owner":"communications","events":["telnexa.sms.rejected"],"endpoint":"/webhook/codestra-sms-rejected","active":false},
     {"id":"CodestraCP20","name":"CP-20-SMS.RECEIVED-V1","owner":"communications","events":["telnexa.sms.received"],"endpoint":"/webhook/codestra-sms-received","active":false},
     {"id":"CodestraCP21","name":"CP-21-SMS.DELIVERED-V1","owner":"communications","events":["telnexa.sms.delivered"],"endpoint":"/webhook/codestra-sms-delivered","active":false},
     {"id":"CodestraCP22","name":"CP-22-SMS.FAILED-V1","owner":"communications","events":["telnexa.sms.failed"],"endpoint":"/webhook/codestra-sms-failed","active":false},
@@ -20,6 +23,7 @@
     {"id":"CodestraCP34","name":"CP-34-CRM.LEAD.CREATED-V1","owner":"sales-operations","events":["crm.lead.created"],"endpoint":"/webhook/codestra-crm-lead-created","active":false},
     {"id":"CodestraCP35","name":"CP-35-CRM.LEAD.UPDATED-V1","owner":"sales-operations","events":["crm.lead.updated"],"endpoint":"/webhook/codestra-crm-lead-updated","active":false},
     {"id":"CodestraCP36","name":"CP-36-CRM.ACTIVITY.CREATED-V1","owner":"sales-operations","events":["crm.activity.created"],"endpoint":"/webhook/codestra-crm-activity-created","active":false},
+    {"id":"CodestraCP37","name":"CP-37-SMS.EXPIRED-V1","owner":"communications","events":["telnexa.sms.expired"],"endpoint":"/webhook/codestra-sms-expired","active":false},
     {"id":"CodestraCP90","name":"CP-90-STANDARD-ERROR-V1","owner":"platform-operations","events":["workflow.failed"],"endpoint":null,"active":false}
   ]
 }

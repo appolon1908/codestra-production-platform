@@ -1,20 +1,35 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import json
 import os
 import uuid
-import sqlite3
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from .core import ControlPlaneError, Store, credential_matches, validate_envelope, verify_signature
+
+
+def verifier(name: str) -> str:
+    file_name = os.getenv(f"{name}_SHA256_FILE", "")
+    if not file_name:
+        return ""
+    with open(file_name, "r", encoding="utf-8") as handle:
+        value = handle.read().strip().lower()
+    if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+        raise RuntimeError(f"invalid verifier for {name}")
+    return value
+from .database import IntegrityError
 from .providers import ProviderError, crawler_action, submit_crawler
 from .crm import ACTIVITY_FIELDS, CREATE_FIELDS, PATCH_FIELDS, CrmService, request_hash
+from .forms import FormService, ORIGINS
+from .mapping_registry import MappingRegistry
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
 STORE = Store(DB)
+MAPPINGS = MappingRegistry(DB)
 TTL = int(os.getenv("CONTROL_PLANE_HMAC_TTL", "300"))
 MAX_BODY = int(os.getenv("CONTROL_PLANE_MAX_BODY", "524288"))
 
@@ -54,9 +69,21 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: object) -> None:
         print(json.dumps({"system": "control-plane", "client": self.client_address[0], "message": fmt % args}))
 
-    def send_json(self, code: int, value: object) -> None:
+    def send_json(self, code: int, value: object, origin: str = "") -> None:
         raw = json.dumps(value, separators=(",", ":")).encode()
-        self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
+        self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(raw)))
+        if origin in ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin); self.send_header("Vary", "Origin")
+        self.end_headers(); self.wfile.write(raw)
+
+    def do_OPTIONS(self) -> None:
+        origin = self.headers.get("Origin", "")
+        if origin not in ORIGINS or not urlparse(self.path).path.startswith("/v1/forms/"):
+            return self.send_json(403, {"error": "origin_denied"})
+        self.send_response(204); self.send_header("Access-Control-Allow-Origin", origin); self.send_header("Vary", "Origin")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-Correlation-ID")
+        self.send_header("Access-Control-Max-Age", "600"); self.end_headers()
 
     def body(self) -> bytes:
         length = int(self.headers.get("Content-Length", "0"))
@@ -72,11 +99,16 @@ class Handler(BaseHTTPRequestHandler):
         return value
 
     def crm_customer(self):
-        expected = os.getenv("CRM_KONG_SHARED_SECRET", "")
+        expected = verifier("CRM_KONG_SHARED_SECRET")
+        previous = verifier("CRM_KONG_SHARED_SECRET_PREVIOUS")
         supplied = self.headers.get("X-Codestra-Crm-Gateway-Secret", "")
         consumer_id = self.headers.get("X-Consumer-ID", "")
         custom_id = self.headers.get("X-Consumer-Custom-ID", "")
-        if not expected or not hmac.compare_digest(expected, supplied) or not consumer_id or not custom_id:
+        supplied_digest = hashlib.sha256(supplied.encode("utf-8")).hexdigest()
+        secret_valid = bool(expected) and hmac.compare_digest(expected, supplied_digest)
+        if previous:
+            secret_valid = secret_valid or hmac.compare_digest(previous, supplied_digest)
+        if not secret_valid or not consumer_id or not custom_id:
             self.send_json(401, {"error": "unauthorized"}); return None
         try: return STORE.crm_customer(consumer_id, custom_id)
         except ControlPlaneError as exc:
@@ -155,15 +187,15 @@ class Handler(BaseHTTPRequestHandler):
             STORE.crm_audit(customer["customer_id"], operation, external_id, list(payload), "success", status, correlation)
             crm.emit(customer, {"lead.create":"crm.lead.created", "lead.update":"crm.lead.updated", "activity.create":"crm.activity.created"}[operation], external_id, correlation)
             self.send_json(status, result); return True
-        except (ControlPlaneError, sqlite3.IntegrityError) as exc:
+        except (ControlPlaneError, IntegrityError) as exc:
             STORE.crm_audit(customer["customer_id"], operation, external_id, list(payload), "denied", 409 if "idempotency" in str(exc) else 422, correlation)
             self.crm_error(exc, correlation); return True
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path == "/health": return self.send_json(200, {"status": "ok"})
-        if parsed.path == "/v1/health": return self.send_json(200, {"status": "ok"})
-        if parsed.path == "/ready":
+        if parsed.path in {"/health", "/v1/health", "/livez"}:
+            return self.send_json(200, {"status": "alive"})
+        if parsed.path in {"/ready", "/readyz"}:
             try: STORE.list_events(None, limit=1)
             except Exception: return self.send_json(503, {"status": "not_ready"})
             return self.send_json(200, {"status": "ready", "outbound_safe_mode": os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED", "false") != "true"})
@@ -173,11 +205,16 @@ class Handler(BaseHTTPRequestHandler):
             production_enabled=os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED","false")=="true" and os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED","false")=="true" and os.getenv("TELNEXA_MODE","simulator")=="production" and os.getenv("KLYROW_MODE","test")=="production"
             return self.send_json(200, {"status":"ready","providers":{"telnexa":os.getenv("TELNEXA_MODE","simulator"),"klyrow":os.getenv("KLYROW_MODE","test")},"production_delivery_enabled":production_enabled})
         if parsed.path == "/metrics":
-            raw = STORE.metrics().encode(); self.send_response(200); self.send_header("Content-Type", "text/plain; version=0.0.4"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); return self.wfile.write(raw)
+            raw = (STORE.metrics()+MAPPINGS.metrics()).encode(); self.send_response(200); self.send_header("Content-Type", "text/plain; version=0.0.4"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); return self.wfile.write(raw)
         if self.crm_get(parsed): return
         op = self.auth_operator({"platform_admin", "operations", "support", "auditor", "tenant_admin"})
         if not op: return
         query = parse_qs(parsed.query); tenant = op[2] or query.get("tenant_id", [None])[0]
+        if parsed.path.startswith("/api/v1/control/jobs/"):
+            try: job = MAPPINGS.get_job(parsed.path.rsplit("/", 1)[-1])
+            except ControlPlaneError as exc: return self.send_json(404, {"error": str(exc)})
+            if tenant and job["tenant_id"] != tenant: return self.send_json(404, {"error": "not_found"})
+            return self.send_json(200, job)
         if parsed.path == "/v1/messages":
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
             return self.send_json(200,{"items":STORE.list_messages(tenant,query.get("channel",[None])[0],query.get("status",[None])[0])})
@@ -211,6 +248,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/v1/forms/"):
+            origin = self.headers.get("Origin", "")
+            try:
+                raw = self.body(); value = json.loads(raw)
+                if not isinstance(value, dict): raise ControlPlaneError("object_required")
+                status, result = FormService(STORE).submit(parsed.path.rsplit("/", 1)[-1], value, self.headers, len(raw))
+                return self.send_json(status, result, origin)
+            except json.JSONDecodeError: return self.send_json(422, {"error": "invalid_json"}, origin)
+            except ControlPlaneError as exc:
+                message = str(exc); code = 404 if message == "form_not_found" else 413 if message == "body_too_large" else 409 if message == "idempotency_conflict" else 403 if message in {"origin_denied", "bot_rejected"} else 422
+                return self.send_json(code, {"error": message.split(":", 1)[0]}, origin)
         if parsed.path.startswith("/v1/crm/"):
             self.crm_mutation("POST"); return
         try: body = self.body()
@@ -231,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
                 # atomically; legitimate retries use a fresh event ID with the
                 # same tenant-scoped idempotency key.
                 result = STORE.ingest(value, reject_event_replay=source == "odoo")
-                if not result.duplicate and source in {"telnexa","klyrow"} and value.get("payload",{}).get("message_id"):
+                if not result.duplicate and source in {"telnexa","klyrow"} and value.get("payload",{}).get("message_id") and not value.get("metadata", {}).get("sms_postgres_authority"):
                     apply_provider_projection(STORE, source, value)
             except (ControlPlaneError, json.JSONDecodeError) as exc:
                 code = 409 if str(exc) in {"idempotency_conflict", "replayed_event_id"} else 401 if "signature" in str(exc) or "timestamp" in str(exc) else 422
@@ -242,6 +290,28 @@ class Handler(BaseHTTPRequestHandler):
         try: value = json.loads(body)
         except json.JSONDecodeError: return self.send_json(422, {"error": "invalid_json"})
         tenant = op[2] or value.get("tenant_id")
+        if parsed.path == "/api/v1/control/campaigns":
+            if not tenant: return self.send_json(422,{"error":"tenant_required"})
+            value["tenant_id"] = tenant
+            value.setdefault("idempotency_key", self.headers.get("Idempotency-Key"))
+            value.setdefault("correlation_id", self.headers.get("X-Correlation-ID"))
+            if not value.get("idempotency_key"): return self.send_json(422,{"error":"idempotency_key_required"})
+            try: result, duplicate = MAPPINGS.create_campaign(value, actor=op[0])
+            except ControlPlaneError as exc:
+                return self.send_json(409 if str(exc) in {"idempotency_conflict","mapping_collision"} else 422,{"error":str(exc)})
+            result["duplicate"] = duplicate
+            return self.send_json(200 if duplicate else 202,result)
+        if parsed.path.startswith("/api/v1/results/jobs/"):
+            job_id = parsed.path.rsplit("/",1)[-1]
+            try: result = MAPPINGS.record_result(job_id,value)
+            except ControlPlaneError as exc: return self.send_json(409 if str(exc)=="stale_version" else 422,{"error":str(exc)})
+            return self.send_json(202,result)
+        if parsed.path == "/api/v1/reconciliation/run":
+            if not tenant: return self.send_json(422,{"error":"tenant_required"})
+            try:
+                result=MAPPINGS.reconcile(tenant,value["entity_type"],value["entity_id"],value["target_system"],value["desired"],value["actual"],value["drift_code"],correlation_id=value.get("correlation_id"))
+            except (KeyError,ControlPlaneError) as exc: return self.send_json(422,{"error":str(exc)})
+            return self.send_json(200,result)
         if parsed.path in {"/v1/messages/sms","/v1/messages/email"}:
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
             value["tenant_id"]=tenant; value["channel"]=parsed.path.rsplit("/",1)[-1]

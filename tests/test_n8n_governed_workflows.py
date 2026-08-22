@@ -16,13 +16,14 @@ def workflows():
 
 def test_exact_governed_event_set_and_common_error_workflow():
     items = workflows()
-    # One shared error workflow plus the 14 original communications/customer
-    # workflows and the three approved bounded CRM mutation workflows.
-    assert len(items) == 18
+    # One shared error workflow plus the governed communication, customer,
+    # crawler, and bounded CRM workflows.
+    assert len(items) == 22
     assert items[0]["id"] == "CodestraCP90"
     assert items[0]["nodes"][0]["type"] == "n8n-nodes-base.errorTrigger"
     expected = {
-        "telnexa.sms.received", "telnexa.sms.delivered", "telnexa.sms.failed", "telnexa.sms.opted_out",
+        "telnexa.sms.submitted", "telnexa.sms.sent", "telnexa.sms.received", "telnexa.sms.delivered",
+        "telnexa.sms.failed", "telnexa.sms.rejected", "telnexa.sms.expired", "telnexa.sms.opted_out",
         "klyrow.email.delivered", "klyrow.email.bounced", "klyrow.email.deferred", "klyrow.email.complained", "klyrow.email.unsubscribed",
         "kyqra.record.created", "kyqra.job.completed", "kyqra.job.failed", "customer.created", "customer.updated",
         "crm.lead.created", "crm.lead.updated", "crm.activity.created",
@@ -39,8 +40,9 @@ def test_workflows_are_inactive_authenticated_idempotent_and_context_preserving(
         assert webhook["parameters"]["authentication"] == "headerAuth"
         assert webhook["credentials"]["httpHeaderAuth"]["id"] == "codestraMiddlewareHeaderAuth"
         code = validation["parameters"]["jsCode"]
-        for required in ("correlation_id", "tenant_id", "customer_id", "idempotency_key", "$getWorkflowStaticData"):
+        for required in ("correlation_id", "tenant_id", "customer_id", "idempotency_key"):
             assert required in code
+        assert "$getWorkflowStaticData" not in code
         assert "httpRequest" not in json.dumps(item)
 
 

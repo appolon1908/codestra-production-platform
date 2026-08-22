@@ -21,6 +21,19 @@ class ResPartner(models.Model):
         copy=False,
     )
 
+
+class CrmLead(models.Model):
+    _inherit = "crm.lead"
+
+    codestra_form_type = fields.Char(index=True, readonly=True, copy=False)
+    codestra_form_version = fields.Char(readonly=True, copy=False)
+    codestra_source_site = fields.Char(index=True, readonly=True, copy=False)
+    codestra_consent_timestamp = fields.Datetime(readonly=True, copy=False)
+    codestra_consent_disclosure_version = fields.Char(readonly=True, copy=False)
+    codestra_sms_consent = fields.Boolean(readonly=True, copy=False)
+    codestra_email_marketing_consent = fields.Boolean(readonly=True, copy=False)
+    codestra_consent_correlation_id = fields.Char(index=True, readonly=True, copy=False)
+
     _codestra_external_unique = models.Constraint(
         "UNIQUE(codestra_integration_external_id)",
         "Middleware external contact IDs must be unique.",

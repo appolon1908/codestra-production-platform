@@ -9,14 +9,15 @@ services:
     environment:
       CONTROL_PLANE_BIND: 0.0.0.0
       CONTROL_PLANE_PORT: 8096
-      CONTROL_PLANE_DB: /data/control-plane.db
+      CONTROL_PLANE_DATABASE_URL_FILE: /run/secrets/control_plane_database_url
+      CRM_KONG_SHARED_SECRET_SHA256_FILE: /run/secrets/crm_gateway_secret_verifier
     ports: ["127.0.0.1:8096:8096"]
-    volumes: [control_plane_data:/data]
+    secrets: [control_plane_database_url, crm_gateway_secret_verifier]
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    networks: [edge]
+    networks: [edge, backend]
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8096/health')"]
       interval: 20s
@@ -30,18 +31,26 @@ services:
     restart: unless-stopped
     env_file: ${CONTROL_PLANE_ENV_FILE:-/etc/codestra/secrets/control-plane.env}
     environment:
-      CONTROL_PLANE_DB: /data/control-plane.db
-    volumes: [control_plane_data:/data]
+      CONTROL_PLANE_DATABASE_URL_FILE: /run/secrets/control_plane_database_url
+    secrets: [control_plane_database_url]
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    networks: [edge]
+    networks: [edge, backend]
     healthcheck:
       disable: true
 volumes:
   control_plane_data:
+secrets:
+  control_plane_database_url:
+    file: /etc/codestra/secrets/middleware-certification/control-plane-database-url
+  crm_gateway_secret_verifier:
+    file: /etc/codestra/auth-verifiers/crm-gateway-secret.sha256
 networks:
   edge:
     name: codestra_edge
+    external: true
+  backend:
+    name: codestra_backend
     external: true
