@@ -6,26 +6,30 @@ Date: 2026-08-22. Safety posture: no dialing, hopper loading, carrier traffic, c
 
 The source candidate implements the normalized canonical registry, immutable Codestra UUIDs, desired/actual separation, state/version guards, transactional job/outbox creation, idempotency, explicit command/event/result semantics, dead letters, reconciliation/drift policy, metrics, Kong route/scope policy, stateless modular n8n workflows, a restricted adapter contract, and an Odoo reconciliation dashboard projection.
 
-The candidate is **not certified for protected production cutover**. Local and isolated gates pass, but authoritative-source provenance is incomplete for the deployed Odoo, n8n, and provisioning components; the dependency audit reports vulnerabilities in the host Python environment; no independent protected-branch review/merge exists; and authoritative destination read-back for `TEST_SYN`, agent `synthetic.agent.test.syn.6101`, and extension `6101` has not completed. Accordingly no production migration, mapping-authority cutover, VICIdial mutation, or false `SYNCED` state was performed.
+The candidate is **not certified for authoritative production cutover**. Protected source provenance has been recovered and the isolated candidate is deployed, but no independent protected-branch review/merge exists, the isolated staging VICIdial client certificate is stale, the Odoo command/dashboard addon has not been cut over, and authoritative Asterisk extension read-back has not completed. Accordingly no production mapping-authority cutover, VICIdial mutation, or false `SYNCED` state was performed.
 
 ## Evidence summary
 
 - Live read-only Odoo counts: 105 campaigns, 102 legacy mappings, one VICIdial projection, seven identity links, one extension assignment.
 - All 105 campaigns were draft/inactive during inspection.
 - Mapping difference classification: `RLP-INBOUND-IN` and `TRX-INBOUND-IN` intentionally unmapped generic placeholders; `CMP-400-COD` certification-only; unexplained differences: zero.
-- Isolated PostgreSQL: 17 relations created; runtime/owner roles have no login, superuser, createdb, createrole, or bypass-RLS privileges.
+- Deployed Odoo, provisioning, and n8n source snapshots were recovered to protected remote archive branches; the middleware candidate is commit `11268120532c4fff7ac42c2e6354ebcfeb305f36`.
+- Isolated PostgreSQL: 17 relations created; runtime/owner roles have no login, superuser, createdb, createrole, or bypass-RLS privileges. The shadow registry contains all 105 campaigns, zero telephony-enabled campaigns, 105 durable jobs, and 105 outbox events; no dispatcher was enabled.
 - Isolated replay: same command returned same job; stale result rejected and job state unchanged.
-- Tests: 226 passed and 9 subtests passed.
+- Isolated middleware restart preserved all 105 campaigns/jobs and returned ready. The production n8n restart preserved 23 activation states and removed all authoritative workflow static data.
+- Restricted-adapter mTLS read-back: `TEST_SYN` exists and is inactive (`active=N`); `cod00016` exists, is active, and belongs to `WEBTEST_SYN`. Read-only inventory reports 25 campaigns before and after this mission.
+- Tests: 236 passed and 9 subtests passed; restricted-adapter suite: 40 passed.
 - Secret scan: no leaks found.
-- Dependency audit: failed with 26 advisories across host-installed `pyjwt`, `python-multipart`, and `starlette`; these are not pinned by this checkout, but the release gate remains failed until the deploy image/SBOM is audited and remediated.
+- Candidate-image dependency audit: zero known Python package vulnerabilities after pinning pip 26.2.
 
 ## Production-blocking findings
 
-1. Deployed Odoo and provisioning repositories have no configured origin; the deployed n8n directory is an unborn repository. `AUTHORITATIVE_SOURCE=FAIL`.
-2. `TEST_SYN` has no Odoo desired agent-membership row. Keycloak, VICIdial, and Asterisk destination read-back is incomplete. `TEST_SYN_FULL_MAPPING=FAIL`.
-3. The one Odoo VICIdial projection currently says active while business telephony intent is false. It is not accepted as actual state; restricted adapter read-back is required before remediation.
-4. No independent reviewer has approved or merged this candidate. `REVIEW=PENDING`, merge SHA is unset.
-5. Restart, failure-recovery, complete Kong negative matrix, shadow mismatch, and protected production-candidate tests have not been run against the new deployed candidate.
+1. `TEST_SYN` still has no Odoo desired agent-membership row and the new Odoo outbox/dashboard addon has not been deployed. Asterisk endpoint 6101 read-back is incomplete. `TEST_SYN_FULL_MAPPING=FAIL`.
+2. The isolated staging adapter certificate is rejected by the gateway CA. Read-back succeeded using the currently approved production middleware certificate with read-only scopes; issuing a distinct valid staging machine certificate remains required.
+3. The legacy statement that VICIdial contained one campaign conflicts with the authoritative adapter inventory of 25. The mission performed no VICIdial writes; this discrepancy must be classified before any provisioning plan can be approved.
+4. The one Odoo VICIdial projection says active while authoritative VICIdial read-back says inactive. This is confirmed drift and must be corrected through the Odoo projection/reconciliation path, not by changing VICIdial.
+5. No independent reviewer has approved or merged this candidate. `REVIEW=PENDING`, protected merge SHA is unset.
+6. A real isolated Kong/Keycloak negative matrix and full Odoo → Kong → middleware → n8n callback trace remain incomplete.
 
 ## Certification decision
 
