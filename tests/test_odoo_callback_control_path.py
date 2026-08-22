@@ -41,9 +41,14 @@ def test_kong_exposes_only_required_callback_surfaces():
     }
     assert {method for route in KONG["routes"] for method in route["methods"]} <= {"GET", "POST"}
     assert all(route["maxBodyMb"] == 1 and route["ratePerMinute"] > 0 for route in KONG["routes"])
+    assert {route["requiredScope"] for route in KONG["routes"]} == {"callbacks.read", "callbacks.write"}
     assert 'parser.add_argument("--apply", action="store_true")' in RECONCILER
     assert "duplicate Kong" in RECONCILER
     assert "correlation-id" in RECONCILER
+    assert "openid-connect" in RECONCILER
+    assert "verify_service" in RECONCILER
+    assert "verify_route" in RECONCILER
+    assert "verify_plugins" in RECONCILER
 
 
 def test_deployment_keeps_every_broad_delivery_path_disabled():
