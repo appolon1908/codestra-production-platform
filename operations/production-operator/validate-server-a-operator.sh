@@ -9,6 +9,13 @@ test "$(stat -c '%U:%G %a' /etc/sudoers.d/codestra-production-operator)" = 'root
 test "$(stat -c '%U:%G %a' /etc/ssh/sshd_config.d/60-codestra-production-operator.conf)" = 'root:root 644'
 test "$(stat -c '%U:%G %a' /etc/codestra/production-operator/release.json)" = 'root:root 644'
 test "$(stat -c '%U:%G %a' /etc/codestra/production-operator/maintenance-date)" = 'root:root 600'
+test "$(stat -c '%U:%G %a' /var/lib/codestra-production-operator)" = 'root:root 711'
+test "$(stat -c '%U:%G %a' /var/lib/codestra-production-operator/.ssh)" = 'codestra-production-operator:codestra-production-operator 700'
+test "$(stat -c '%U:%G %a' /var/lib/codestra-production-operator/.ssh/authorized_keys)" = 'codestra-production-operator:codestra-production-operator 600'
+/usr/bin/sudo -u codestra-production-operator /usr/bin/test -r /var/lib/codestra-production-operator/.ssh/authorized_keys
+if /usr/bin/sudo -u codestra-production-operator /usr/bin/test -w /var/lib/codestra-production-operator; then
+  exit 2
+fi
 sha256sum --check --strict /etc/codestra/production-operator/installed.sha256 >/dev/null
 visudo -cf /etc/sudoers.d/codestra-production-operator >/dev/null
 sshd -t
