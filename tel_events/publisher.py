@@ -24,8 +24,15 @@ TRANSIENT_ACKS = frozenset((408, 425, 429, 500, 502, 503, 504))
 SUCCESS_ACKS = frozenset((200, 201, 202, 204))
 MAX_DURATION_SECONDS = 86400
 PAYLOAD_FIELDS = frozenset(
-    ("call_id", "ended_at", "duration_seconds", "direction",
-     "disposition_code", "campaign_reference", "business_unit_reference")
+    (
+        "call_id",
+        "ended_at",
+        "duration_seconds",
+        "direction",
+        "disposition_code",
+        "campaign_reference",
+        "business_unit_reference",
+    )
 )
 
 
@@ -78,9 +85,12 @@ def load_watermark(
     if not stat.S_ISREG(st.st_mode) or st.st_uid != allowed_owner_uid:
         raise PublisherError("watermark must be a root-owned regular file")
     if mode not in (0o600, 0o640):
-        raise PublisherError("watermark mode must be exactly 0600 or approved-group 0640")
+        raise PublisherError(
+            "watermark mode must be exactly 0600 or approved-group 0640"
+        )
     if mode == 0o640:
         import grp
+
         if not allowed_group or grp.getgrgid(st.st_gid).gr_name != allowed_group:
             raise PublisherError("watermark group ownership is invalid")
     with open(path, encoding="utf-8") as handle:
@@ -118,7 +128,9 @@ def _ended_epoch(row: Mapping[str, Any]) -> int:
 
 
 def _event_id(table: str, source_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"codestra:{EVENT_TYPE}:{table}:{source_id}"))
+    return str(
+        uuid.uuid5(uuid.NAMESPACE_URL, f"codestra:{EVENT_TYPE}:{table}:{source_id}")
+    )
 
 
 def build_call_ended_event(row: Mapping[str, Any], table: str) -> dict[str, Any]:
@@ -128,7 +140,11 @@ def build_call_ended_event(row: Mapping[str, Any], table: str) -> dict[str, Any]
     source_id = _source_id(row, table)
     ended_epoch = _ended_epoch(row)
     duration = row.get("length_in_sec")
-    if isinstance(duration, bool) or not isinstance(duration, int) or not 0 <= duration <= MAX_DURATION_SECONDS:
+    if (
+        isinstance(duration, bool)
+        or not isinstance(duration, int)
+        or not 0 <= duration <= MAX_DURATION_SECONDS
+    ):
         raise PublisherError("duration is invalid")
     disposition = row.get("status")
     if not isinstance(disposition, str) or not disposition:
@@ -137,7 +153,9 @@ def build_call_ended_event(row: Mapping[str, Any], table: str) -> dict[str, Any]
     call_id = hashlib.sha256(f"{table}:{source_id}".encode()).hexdigest()
     payload = {
         "call_id": call_id,
-        "ended_at": datetime.fromtimestamp(ended_epoch, timezone.utc).isoformat().replace("+00:00", "Z"),
+        "ended_at": datetime.fromtimestamp(ended_epoch, timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
         "duration_seconds": duration,
         "direction": direction,
         "disposition_code": disposition,
@@ -180,7 +198,10 @@ def select_finalized_rows(
         if not row.get("status"):
             continue
         candidate = Cursor(_ended_epoch(row), _source_id(row, boundary.table))
-        if candidate.end_epoch <= boundary.boundary_epoch or candidate <= boundary.high_water:
+        if (
+            candidate.end_epoch <= boundary.boundary_epoch
+            or candidate <= boundary.high_water
+        ):
             continue
         selected.append((candidate, row))
     selected.sort(key=lambda pair: pair[0])
@@ -214,6 +235,10 @@ class DeliveryLedger:
                 recorded_at TEXT NOT NULL,
                 PRIMARY KEY(table_name,end_epoch,source_id)
             );
+            CREATE TABLE IF NOT EXISTS publisher_schedule (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                next_source_index INTEGER NOT NULL
+            );
         """)
         self.db.commit()
 
@@ -221,7 +246,8 @@ class DeliveryLedger:
         c = event["_cursor"]
         body = json.dumps(event, sort_keys=True, separators=(",", ":"))
         existing = self.db.execute(
-            "SELECT event_json FROM event_delivery WHERE event_id=?", (event["event_id"],)
+            "SELECT event_json FROM event_delivery WHERE event_id=?",
+            (event["event_id"],),
         ).fetchone()
         if existing is not None and existing[0] != body:
             raise PublisherError("event replay payload differs from the durable ledger")
@@ -288,7 +314,9 @@ class DeliveryLedger:
         return int(row[0])
 
     def state(self, event_id: str) -> str:
-        row = self.db.execute("SELECT state FROM event_delivery WHERE event_id=?", (event_id,)).fetchone()
+        row = self.db.execute(
+            "SELECT state FROM event_delivery WHERE event_id=?", (event_id,)
+        ).fetchone()
         if row is None:
             raise PublisherError("unknown event")
         return str(row[0])
@@ -301,7 +329,8 @@ class DeliveryLedger:
 
     def cursor(self, table: str, default: Cursor) -> Cursor:
         row = self.db.execute(
-            "SELECT end_epoch,source_id FROM publisher_cursor WHERE table_name=?", (table,)
+            "SELECT end_epoch,source_id FROM publisher_cursor WHERE table_name=?",
+            (table,),
         ).fetchone()
         return default if row is None else Cursor(int(row[0]), str(row[1]))
 
@@ -312,7 +341,13 @@ class DeliveryLedger:
         self.db.execute(
             "INSERT OR IGNORE INTO skipped_source_row"
             "(table_name,end_epoch,source_id,reason,recorded_at) VALUES(?,?,?,?,?)",
-            (cursor["table"], cursor["end_epoch"], cursor["source_id"], reason[:200], now),
+            (
+                cursor["table"],
+                cursor["end_epoch"],
+                cursor["source_id"],
+                reason[:200],
+                now,
+            ),
         )
         self.db.execute(
             "INSERT INTO publisher_cursor(table_name,end_epoch,source_id) VALUES(?,?,?) "
@@ -323,6 +358,24 @@ class DeliveryLedger:
             (cursor["table"], cursor["end_epoch"], cursor["source_id"]),
         )
         self.db.commit()
+
+    def claim_source_start(self, source_count: int) -> int:
+        """Persistently rotate which source gets the first delivery opportunity."""
+        if source_count <= 0:
+            return 0
+        self.db.execute(
+            "INSERT OR IGNORE INTO publisher_schedule(singleton,next_source_index) VALUES(1,0)"
+        )
+        row = self.db.execute(
+            "SELECT next_source_index FROM publisher_schedule WHERE singleton=1"
+        ).fetchone()
+        current = int(row[0]) % source_count
+        self.db.execute(
+            "UPDATE publisher_schedule SET next_source_index=? WHERE singleton=1",
+            ((current + 1) % source_count,),
+        )
+        self.db.commit()
+        return current
 
     def reconcile(self) -> dict[str, Any]:
         """Check that acknowledged events are represented by monotonic cursors."""
@@ -336,19 +389,29 @@ class DeliveryLedger:
             maximum = self.db.execute(
                 "SELECT end_epoch,source_id FROM event_delivery "
                 "WHERE table_name=? AND state='acknowledged' "
-                "ORDER BY end_epoch DESC,source_id DESC LIMIT 1", (table,)
+                "ORDER BY end_epoch DESC,source_id DESC LIMIT 1",
+                (table,),
             ).fetchone()
             checkpoint = self.db.execute(
-                "SELECT end_epoch,source_id FROM publisher_cursor WHERE table_name=?", (table,)
+                "SELECT end_epoch,source_id FROM publisher_cursor WHERE table_name=?",
+                (table,),
             ).fetchone()
-            if maximum and (not checkpoint or Cursor(int(checkpoint[0]), str(checkpoint[1])) < Cursor(int(maximum[0]), str(maximum[1]))):
+            if maximum and (
+                not checkpoint
+                or Cursor(int(checkpoint[0]), str(checkpoint[1]))
+                < Cursor(int(maximum[0]), str(maximum[1]))
+            ):
                 drift.append(table)
             summaries[table] = {
                 "total": int(total),
                 "acknowledged": int(acknowledged or 0),
                 "dead_letter": int(dead or 0),
             }
-        return {"status": "drift" if drift else "healthy", "drift_sources": drift, "sources": summaries}
+        return {
+            "status": "drift" if drift else "healthy",
+            "drift_sources": drift,
+            "sources": summaries,
+        }
 
     def close(self) -> None:
         self.db.close()

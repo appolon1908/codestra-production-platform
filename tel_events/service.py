@@ -62,7 +62,9 @@ def _enabled() -> bool:
 
 
 def _allowlist(name: str) -> frozenset[str]:
-    values = frozenset(value.strip() for value in os.getenv(name, "").split(",") if value.strip())
+    values = frozenset(
+        value.strip() for value in os.getenv(name, "").split(",") if value.strip()
+    )
     if not values:
         raise PublisherError(f"{name} must contain an explicit approved allowlist")
     return values
@@ -94,10 +96,14 @@ def _body(event: dict) -> bytes:
     ).encode()
 
 
-def _signature_input(method: str, path: str, timestamp: str, event_id: str, body: bytes) -> bytes:
+def _signature_input(
+    method: str, path: str, timestamp: str, event_id: str, body: bytes
+) -> bytes:
     normalized_path = "/" + "/".join(part for part in path.split("/") if part)
     body_hash = hashlib.sha256(body).hexdigest()
-    return "\n".join(("v1", method.upper(), normalized_path, timestamp, event_id, body_hash)).encode()
+    return "\n".join(
+        ("v1", method.upper(), normalized_path, timestamp, event_id, body_hash)
+    ).encode()
 
 
 def _post(event: dict) -> int:
@@ -105,9 +111,11 @@ def _post(event: dict) -> int:
     timestamp = str(int(time.time()))
     secret = _secret(os.environ["TEL_EVENTS_HMAC_FILE"])
     endpoint = urllib.parse.urlsplit(os.environ["TEL_EVENTS_ENDPOINT"])
-    signature = hmac.new(secret.encode(), _signature_input(
-        "POST", endpoint.path, timestamp, event["event_id"], body
-    ), hashlib.sha256).hexdigest()
+    signature = hmac.new(
+        secret.encode(),
+        _signature_input("POST", endpoint.path, timestamp, event["event_id"], body),
+        hashlib.sha256,
+    ).hexdigest()
     request = urllib.request.Request(
         os.environ["TEL_EVENTS_ENDPOINT"],
         data=body,
@@ -151,6 +159,8 @@ def _rows(
     boundary_epoch: int,
     cursor_end_epoch: int,
     source_id: str,
+    campaigns: frozenset[str],
+    user_groups: frozenset[str],
     limit: int = 100,
 ):
     if not 1 <= limit <= 100:
@@ -161,15 +171,27 @@ def _rows(
         source = "closecallid"
     else:
         raise PublisherError("unapproved source table")
+    campaign_slots = ",".join("%s" for _ in campaigns)
+    group_slots = ",".join("%s" for _ in user_groups)
     sql = f"""SELECT {source},end_epoch,length_in_sec,status,campaign_id,user_group
               FROM {table}
               WHERE end_epoch > %s AND status IS NOT NULL AND status <> ''
                 AND (end_epoch > %s OR (end_epoch = %s AND {source} > %s))
+                AND campaign_id IN ({campaign_slots})
+                AND user_group IN ({group_slots})
               ORDER BY end_epoch,{source} LIMIT %s"""
     with db.cursor() as cursor:
         cursor.execute(
             sql,
-            (boundary_epoch, cursor_end_epoch, cursor_end_epoch, source_id, limit),
+            (
+                boundary_epoch,
+                cursor_end_epoch,
+                cursor_end_epoch,
+                source_id,
+                *sorted(campaigns),
+                *sorted(user_groups),
+                limit,
+            ),
         )
         return cursor.fetchall()
 
@@ -181,12 +203,14 @@ def _in_scope(event: dict, policy: RuntimePolicy) -> bool:
     return campaign in policy.campaigns and user_group in policy.user_groups
 
 
-def _round_robin(rows_by_source):
+def _round_robin(rows_by_source, start_index: int = 0):
     """Yield one row per source in turn so neither VICIdial log can starve."""
     offsets = [0] * len(rows_by_source)
     while True:
         yielded = False
-        for index, (boundary, rows) in enumerate(rows_by_source):
+        for offset in range(len(rows_by_source)):
+            index = (start_index + offset) % len(rows_by_source)
+            boundary, rows = rows_by_source[index]
             if offsets[index] < len(rows):
                 row = rows[offsets[index]]
                 offsets[index] += 1
@@ -218,45 +242,57 @@ def run_once() -> int:
         for boundary in boundaries:
             cursor = ledger.cursor(boundary.table, boundary.high_water)
             if cursor < boundary.high_water:
-                raise PublisherError("publisher cursor regressed behind the approved watermark")
+                raise PublisherError(
+                    "publisher cursor regressed behind the approved watermark"
+                )
             rows = _rows(
                 db,
                 boundary.table,
                 boundary.boundary_epoch,
                 cursor.end_epoch,
                 cursor.source_id,
+                policy.campaigns,
+                policy.user_groups,
                 min(100, max(remaining, 1)),
             )
             rows_by_source.append((boundary, rows))
-        for boundary, row in _round_robin(rows_by_source):
-                if remaining <= 0:
+        start_index = ledger.claim_source_start(len(rows_by_source))
+        for boundary, row in _round_robin(rows_by_source, start_index):
+            if remaining <= 0:
+                break
+            event = build_call_ended_event(row, boundary.table)
+            if not _in_scope(event, policy):
+                ledger.skip(event, "outside approved campaign or user-group scope")
+                continue
+            ledger.stage(event)
+            state = ledger.state(event["event_id"])
+            if state == "acknowledged":
+                continue
+            if state == "dead_letter":
+                raise PublisherError(
+                    "dead-lettered event requires operator reconciliation"
+                )
+            for _ in range(3):
+                if not _enabled():
+                    raise PublisherError(
+                        "publisher was disabled or its kill switch was installed"
+                    )
+                try:
+                    status = _post(event)
+                except (OSError, urllib.error.URLError) as exc:
+                    result = ledger.fail(
+                        event["event_id"],
+                        f"delivery transport failed: {type(exc).__name__}",
+                    )
+                else:
+                    result = ledger.acknowledge(event["event_id"], status)
+                if result == "acknowledged":
+                    sent += 1
+                    remaining -= 1
                     break
-                event = build_call_ended_event(row, boundary.table)
-                if not _in_scope(event, policy):
-                    ledger.skip(event, "outside approved campaign or user-group scope")
-                    continue
-                ledger.stage(event)
-                state = ledger.state(event["event_id"])
-                if state == "acknowledged":
-                    continue
-                if state == "dead_letter":
-                    raise PublisherError("dead-lettered event requires operator reconciliation")
-                for _ in range(3):
-                    try:
-                        status = _post(event)
-                    except (OSError, urllib.error.URLError) as exc:
-                        result = ledger.fail(
-                            event["event_id"], f"delivery transport failed: {type(exc).__name__}"
-                        )
-                    else:
-                        result = ledger.acknowledge(event["event_id"], status)
-                    if result == "acknowledged":
-                        sent += 1
-                        remaining -= 1
-                        break
-                    if result == "dead_letter":
-                        raise PublisherError("delivery entered dead-letter state")
-                    time.sleep(1)
+                if result == "dead_letter":
+                    raise PublisherError("delivery entered dead-letter state")
+                time.sleep(1)
         return sent
     finally:
         db.close()
@@ -272,7 +308,9 @@ def run_forever() -> None:
         raise PublisherError("TEL_EVENTS_INTERVAL_SECONDS must be between 5 and 300")
     while True:
         if not _enabled():
-            raise PublisherError("publisher was disabled or its kill switch was installed")
+            raise PublisherError(
+                "publisher was disabled or its kill switch was installed"
+            )
         run_once()
         time.sleep(interval)
 

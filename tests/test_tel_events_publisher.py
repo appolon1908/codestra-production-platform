@@ -45,8 +45,13 @@ def test_event_is_minimized_and_deterministic():
     assert first == second
     assert "phone_number" not in json.dumps(first)
     assert set(first["payload"]) <= {
-        "call_id", "ended_at", "duration_seconds", "direction",
-        "disposition_code", "campaign_reference", "business_unit_reference",
+        "call_id",
+        "ended_at",
+        "duration_seconds",
+        "direction",
+        "disposition_code",
+        "campaign_reference",
+        "business_unit_reference",
     }
     assert first["test_syn"] is False
     assert "_cursor" not in wire_event(first)
@@ -61,7 +66,9 @@ def test_invalid_finalization_rejected(bad):
 
 def test_ack_retry_and_dead_letter_cursor_advance_only_on_ack():
     with tempfile.TemporaryDirectory() as directory:
-        ledger = DeliveryLedger(os.path.join(directory, "ledger.sqlite"), max_attempts=2)
+        ledger = DeliveryLedger(
+            os.path.join(directory, "ledger.sqlite"), max_attempts=2
+        )
         event = build_call_ended_event(row("a", 2001), "vicidial_log")
         ledger.stage(event)
         assert ledger.acknowledge(event["event_id"], 503) == "retry"
@@ -79,20 +86,35 @@ def test_ack_retry_and_dead_letter_cursor_advance_only_on_ack():
         ledger.close()
 
 
+def test_source_start_rotation_survives_separate_iterations():
+    with tempfile.TemporaryDirectory() as directory:
+        path = os.path.join(directory, "ledger.sqlite")
+        ledger = DeliveryLedger(path)
+        assert [ledger.claim_source_start(2) for _ in range(3)] == [0, 1, 0]
+        ledger.close()
+        reopened = DeliveryLedger(path)
+        assert reopened.claim_source_start(2) == 1
+        reopened.close()
+
+
 def test_watermark_permission_and_schema():
     with tempfile.NamedTemporaryFile(mode="w", delete=False) as handle:
-        json.dump({
-            "ordering": ["end_epoch", "stable_source_id"],
-            "captured_at": "2026-07-25T11:24:19Z",
-            "sources": {
-                "vicidial_log": {"end_epoch": 1, "source_id": "a"},
-                "vicidial_closer_log": {"end_epoch": 1, "source_id": "0"},
+        json.dump(
+            {
+                "ordering": ["end_epoch", "stable_source_id"],
+                "captured_at": "2026-07-25T11:24:19Z",
+                "sources": {
+                    "vicidial_log": {"end_epoch": 1, "source_id": "a"},
+                    "vicidial_closer_log": {"end_epoch": 1, "source_id": "0"},
+                },
             },
-        }, handle)
+            handle,
+        )
         path = handle.name
     try:
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
         from tel_events.publisher import load_watermark
+
         assert len(load_watermark(path, allowed_owner_uid=os.getuid())) == 2
     finally:
         os.unlink(path)
@@ -105,7 +127,9 @@ def test_http_conflict_is_not_a_success_acknowledgement():
         ledger.stage(event)
         assert ledger.acknowledge(event["event_id"], 409) == "dead_letter"
         assert ledger.state(event["event_id"]) == "dead_letter"
-        assert ledger.cursor("vicidial_log", Cursor(1, "initial")) == Cursor(1, "initial")
+        assert ledger.cursor("vicidial_log", Cursor(1, "initial")) == Cursor(
+            1, "initial"
+        )
         with pytest.raises(PublisherError, match="dead-lettered"):
             ledger.acknowledge(event["event_id"], 202)
         ledger.close()
@@ -163,10 +187,17 @@ def test_replayed_event_payload_cannot_drift():
 def test_skipped_row_advances_only_its_source_cursor():
     with tempfile.TemporaryDirectory() as directory:
         ledger = DeliveryLedger(os.path.join(directory, "ledger.sqlite"))
-        event = build_call_ended_event({
-            "uniqueid": "skip-1", "end_epoch": 2000, "length_in_sec": 10,
-            "status": "DONE", "campaign_id": "NO", "user_group": "NO",
-        }, "vicidial_log")
+        event = build_call_ended_event(
+            {
+                "uniqueid": "skip-1",
+                "end_epoch": 2000,
+                "length_in_sec": 10,
+                "status": "DONE",
+                "campaign_id": "NO",
+                "user_group": "NO",
+            },
+            "vicidial_log",
+        )
         ledger.skip(event, "outside approved scope")
         assert ledger.cursor("vicidial_log", Cursor(0, "0")) == Cursor(2000, "skip-1")
         assert ledger.cursor("vicidial_closer_log", Cursor(0, "0")) == Cursor(0, "0")

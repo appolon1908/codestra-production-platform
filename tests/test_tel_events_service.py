@@ -12,7 +12,12 @@ except ModuleNotFoundError:
     sys.modules["pymysql"] = pymysql
 
 from tel_events import service
-from tel_events.publisher import Cursor, PublisherError, SourceBoundary, build_call_ended_event
+from tel_events.publisher import (
+    Cursor,
+    PublisherError,
+    SourceBoundary,
+    build_call_ended_event,
+)
 
 
 class FakeCursor:
@@ -44,16 +49,39 @@ class FakeDB:
 
 def test_rows_preserve_hard_boundary_and_composite_cursor():
     db = FakeDB()
-    assert service._rows(db, "vicidial_log", 1000, 2000, "1.2", 10) == []
+    assert (
+        service._rows(
+            db,
+            "vicidial_log",
+            1000,
+            2000,
+            "1.2",
+            frozenset(("C1",)),
+            frozenset(("TL",)),
+            10,
+        )
+        == []
+    )
     assert "end_epoch > %s" in db.value.sql
     assert "(end_epoch > %s OR (end_epoch = %s AND uniqueid > %s))" in db.value.sql
-    assert db.value.params == (1000, 2000, 2000, "1.2", 10)
+    assert "campaign_id IN (%s)" in db.value.sql
+    assert "user_group IN (%s)" in db.value.sql
+    assert db.value.params == (1000, 2000, 2000, "1.2", "C1", "TL", 10)
 
 
 @pytest.mark.parametrize("limit", [0, 101])
 def test_rows_reject_unbounded_batches(limit):
     with pytest.raises(PublisherError, match="batch limit"):
-        service._rows(FakeDB(), "vicidial_log", 1000, 2000, "1.2", limit)
+        service._rows(
+            FakeDB(),
+            "vicidial_log",
+            1000,
+            2000,
+            "1.2",
+            frozenset(("C1",)),
+            frozenset(("TL",)),
+            limit,
+        )
 
 
 def test_canary_policy_requires_bounded_scope(monkeypatch):
@@ -104,11 +132,21 @@ def test_event_outside_approved_scope_is_not_deliverable():
 def test_round_robin_prevents_source_starvation():
     a = SourceBoundary("vicidial_log", 0, Cursor(0, "0"))
     b = SourceBoundary("vicidial_closer_log", 0, Cursor(0, "0"))
-    rows = list(service._round_robin([(a, [{"id": "a1"}, {"id": "a2"}]), (b, [{"id": "b1"}, {"id": "b2"}])]))
+    rows = list(
+        service._round_robin(
+            [(a, [{"id": "a1"}, {"id": "a2"}]), (b, [{"id": "b1"}, {"id": "b2"}])]
+        )
+    )
     assert [(boundary.table, row["id"]) for boundary, row in rows] == [
-        ("vicidial_log", "a1"), ("vicidial_closer_log", "b1"),
-        ("vicidial_log", "a2"), ("vicidial_closer_log", "b2"),
+        ("vicidial_log", "a1"),
+        ("vicidial_closer_log", "b1"),
+        ("vicidial_log", "a2"),
+        ("vicidial_closer_log", "b2"),
     ]
+    rows = list(
+        service._round_robin([(a, [{"id": "a1"}]), (b, [{"id": "b1"}])], start_index=1)
+    )
+    assert [row["id"] for _, row in rows] == ["b1", "a1"]
 
 
 def test_signature_binds_method_path_event_and_exact_body():
@@ -118,7 +156,7 @@ def test_signature_binds_method_path_event_and_exact_body():
         service._signature_input("POST", "/v1/other", "10", "event-1", b"{}"),
         service._signature_input("POST", "/v1/events", "11", "event-1", b"{}"),
         service._signature_input("POST", "/v1/events", "10", "event-2", b"{}"),
-        service._signature_input("POST", "/v1/events", "10", "event-1", b"{ }")
+        service._signature_input("POST", "/v1/events", "10", "event-1", b"{ }"),
     )
     assert all(candidate != baseline for candidate in changed)
 
