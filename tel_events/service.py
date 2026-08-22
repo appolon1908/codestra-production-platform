@@ -23,7 +23,6 @@ from dataclasses import dataclass
 import pymysql
 
 from .publisher import (
-    Cursor,
     DeliveryLedger,
     PublisherError,
     build_call_ended_event,
