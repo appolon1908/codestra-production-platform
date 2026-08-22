@@ -1,0 +1,34 @@
+{
+  "realm": "codestra",
+  "issuer": "https://auth.codestra.co/realms/codestra",
+  "clientId": "cod-web-out-email-production",
+  "enabled": true,
+  "publicClient": false,
+  "serviceAccountsEnabled": true,
+  "standardFlowEnabled": false,
+  "directAccessGrantsEnabled": false,
+  "fullScopeAllowed": false,
+  "accessTokenLifespanSeconds": 300,
+  "tenantClaim": {
+    "name": "tenant_id",
+    "value": "COD",
+    "source": "server"
+  },
+  "audiences": [
+    "codestra-api",
+    "codestra-kong-certification"
+  ],
+  "defaultClientScopes": [
+    "campaign.cod-web-out",
+    "email.send",
+    "email.status",
+    "klyrow.read",
+    "klyrow.send"
+  ],
+  "deniedScopes": [
+    "communications.admin",
+    "communications.reconciliation.execute",
+    "communications.result.write"
+  ],
+  "secretFile": "/etc/codestra/secrets/cod-web-out-email/klyrow-oidc-client-secret"
+}
