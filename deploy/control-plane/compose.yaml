@@ -28,11 +28,12 @@ services:
       - control_plane_database_url
       - crm_gateway_secret_verifier
       - kong_gateway_secret_verifier
-      - cod_web_out_canary_recipient
-      - klyrow_oidc_client_secret
-      - klyrow_mtls_ca
-      - klyrow_mtls_cert
-      - klyrow_mtls_key
+    volumes:
+      - /etc/codestra/runtime-secrets/control-plane/cod-web-out-canary-recipient:/run/secrets/cod_web_out_canary_recipient:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-oidc-client-secret:/run/secrets/klyrow_oidc_client_secret:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-ca:/run/secrets/klyrow_mtls_ca:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-cert:/run/secrets/klyrow_mtls_cert:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-key:/run/secrets/klyrow_mtls_key:ro
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -63,11 +64,12 @@ services:
       KLYROW_MTLS_KEY_FILE: /run/secrets/klyrow_mtls_key
     secrets:
       - control_plane_database_url
-      - cod_web_out_canary_recipient
-      - klyrow_oidc_client_secret
-      - klyrow_mtls_ca
-      - klyrow_mtls_cert
-      - klyrow_mtls_key
+    volumes:
+      - /etc/codestra/runtime-secrets/control-plane/cod-web-out-canary-recipient:/run/secrets/cod_web_out_canary_recipient:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-oidc-client-secret:/run/secrets/klyrow_oidc_client_secret:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-ca:/run/secrets/klyrow_mtls_ca:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-cert:/run/secrets/klyrow_mtls_cert:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-key:/run/secrets/klyrow_mtls_key:ro
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -84,16 +86,6 @@ secrets:
     file: /etc/codestra/auth-verifiers/crm-gateway-secret.sha256
   kong_gateway_secret_verifier:
     file: /etc/codestra/auth-verifiers/control-plane-kong-gateway-secret.sha256
-  cod_web_out_canary_recipient:
-    file: /etc/codestra/secrets/cod-web-out-email/canary-recipient
-  klyrow_oidc_client_secret:
-    file: /etc/codestra/secrets/cod-web-out-email/klyrow-oidc-client-secret
-  klyrow_mtls_ca:
-    file: /etc/codestra/mtls/clients/klyrow/root-ca.crt
-  klyrow_mtls_cert:
-    file: /etc/codestra/mtls/clients/klyrow/client-fullchain.crt
-  klyrow_mtls_key:
-    file: /etc/codestra/mtls/clients/klyrow/client.key
 networks:
   edge:
     name: codestra_edge
