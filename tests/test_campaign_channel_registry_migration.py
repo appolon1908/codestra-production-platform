@@ -12,3 +12,11 @@ def test_first_campaign_channel_migration_is_exact_and_fail_closed():
     assert "COD-TEST-OUT" not in sql
     assert "'SMS','CANARY_READY'" not in sql
     assert "'VOICE','CANARY_READY'" not in sql
+
+
+def test_registry_parent_key_uses_the_authoritative_campaign_id_type():
+    sql=(Path(__file__).parents[1]/"migrations/control_plane/004_campaign_scoped_channel_gate.sql").read_text()
+    assert "format_type(a.atttypid,a.atttypmod)" in sql
+    assert "a.attrelid='control_plane.campaign'::regclass" in sql
+    assert "parent_campaign_id %s NOT NULL REFERENCES control_plane.campaign(id)" in sql
+    assert "parent_campaign_id uuid" not in sql
