@@ -76,10 +76,77 @@ def test_maintenance_window_exact_boundary(monkeypatch) -> None:
         lambda path: "2026-08-22" if path == OPERATOR.MAINTENANCE_DATE else "",
     )
     before = dt.datetime(2026, 8, 22, 7, 59, tzinfo=dt.timezone.utc)
-    assert OPERATOR.require_maintenance_window(before) == "2026-08-22"
+    assert OPERATOR.require_maintenance_window(before)["window_check"] == "APPROVED_WINDOW"
     after = dt.datetime(2026, 8, 22, 8, 0, tzinfo=dt.timezone.utc)
-    with pytest.raises(OPERATOR.OperatorError, match="outside approved"):
-        OPERATOR.require_maintenance_window(after)
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_owner_window_waiver",
+        lambda: {
+            "maintenance_window": "WAIVED_BY_OWNER",
+            "owner_window_waiver_evidence": "PASS",
+            "window_check": "BYPASSED_BY_VALID_OWNER_WAIVER",
+        },
+    )
+    assert OPERATOR.require_maintenance_window(after)["window_check"] == "BYPASSED_BY_VALID_OWNER_WAIVER"
+
+
+def _waiver_files(tmp_path: Path, monkeypatch, content: str | None = None) -> tuple[Path, Path]:
+    waiver = tmp_path / "OWNER-MAINTENANCE-WINDOW-WAIVER.txt"
+    checksum = tmp_path / "OWNER-MAINTENANCE-WINDOW-WAIVER.sha256"
+    body = content or "\n".join(sorted(OPERATOR.OWNER_WINDOW_WAIVER_STATEMENTS)) + "\n"
+    waiver.write_text(body, encoding="ascii")
+    digest = __import__("hashlib").sha256(body.encode("ascii")).hexdigest()
+    checksum.write_text(f"{digest}  {waiver.name}\n", encoding="ascii")
+    waiver.chmod(0o600)
+    checksum.chmod(0o600)
+    monkeypatch.setattr(OPERATOR, "OWNER_WAIVER_DIR", tmp_path)
+    monkeypatch.setattr(OPERATOR, "OWNER_WINDOW_WAIVER", waiver)
+    monkeypatch.setattr(OPERATOR, "OWNER_WINDOW_WAIVER_CHECKSUM", checksum)
+    return waiver, checksum
+
+
+def test_outside_window_without_waiver_is_denied(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(OPERATOR, "OWNER_WAIVER_DIR", tmp_path)
+    monkeypatch.setattr(OPERATOR, "OWNER_WINDOW_WAIVER", tmp_path / "OWNER-MAINTENANCE-WINDOW-WAIVER.txt")
+    monkeypatch.setattr(OPERATOR, "OWNER_WINDOW_WAIVER_CHECKSUM", tmp_path / "OWNER-MAINTENANCE-WINDOW-WAIVER.sha256")
+    with pytest.raises(FileNotFoundError):
+        OPERATOR.validate_owner_window_waiver()
+
+
+def test_valid_owner_waiver_is_allowed(monkeypatch, tmp_path) -> None:
+    _waiver_files(tmp_path, monkeypatch)
+    result = OPERATOR.validate_owner_window_waiver()
+    assert result["maintenance_window"] == "WAIVED_BY_OWNER"
+    assert result["window_check"] == "BYPASSED_BY_VALID_OWNER_WAIVER"
+
+
+def test_malformed_owner_waiver_is_denied(monkeypatch, tmp_path) -> None:
+    _waiver_files(tmp_path, monkeypatch, "MAINTENANCE_WINDOW=WAIVED_BY_OWNER\n")
+    with pytest.raises(OPERATOR.OperatorError, match="statements"):
+        OPERATOR.validate_owner_window_waiver()
+
+
+def test_wrong_owner_waiver_checksum_is_denied(monkeypatch, tmp_path) -> None:
+    _, checksum = _waiver_files(tmp_path, monkeypatch)
+    checksum.write_text(f"{'0' * 64}  OWNER-MAINTENANCE-WINDOW-WAIVER.txt\n", encoding="ascii")
+    with pytest.raises(OPERATOR.OperatorError, match="checksum mismatch"):
+        OPERATOR.validate_owner_window_waiver()
+
+
+def test_unsafe_owner_waiver_permissions_are_denied(monkeypatch, tmp_path) -> None:
+    waiver, _ = _waiver_files(tmp_path, monkeypatch)
+    waiver.chmod(0o660)
+    with pytest.raises(OPERATOR.OperatorError, match="unsafe mode"):
+        OPERATOR.validate_owner_window_waiver()
+
+
+def test_owner_waiver_symlink_is_denied(monkeypatch, tmp_path) -> None:
+    waiver, _ = _waiver_files(tmp_path, monkeypatch)
+    target = tmp_path / "target"
+    waiver.rename(target)
+    waiver.symlink_to(target)
+    with pytest.raises(OPERATOR.OperatorError, match="unsafe file type"):
+        OPERATOR.validate_owner_window_waiver()
 
 
 def test_maintenance_file_symlink_is_rejected(monkeypatch, tmp_path) -> None:
@@ -339,6 +406,17 @@ def test_forced_command_binds_exact_release_tuple_before_sudo() -> None:
     assert 'path = "/etc/codestra/production-operator/release.json"' in text
     assert "parts[1:] != expected" in text
     assert 'exec /usr/bin/sudo -n /usr/local/sbin/codestra-production-operator "$action"' in text
+
+
+def test_waiver_cannot_bypass_tuple_or_protected_approval() -> None:
+    forced = (PACKAGE / "codestra-production-forced-command").read_text()
+    workflow = (ROOT / ".github/workflows/production-activation.yml").read_text()
+    assert 'parts[1:] != expected' in forced
+    assert 'test "$(git rev-parse HEAD)" = "${PROTECTED_SHA}"' in workflow
+    assert 'test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/release%2Fproduction-activation" --jq .commit.sha)" = "${PROTECTED_SHA}"' in workflow
+    assert '--digest "${IMAGE_DIGEST}"' in workflow
+    assert "environment: production" in workflow
+    assert "OWNER_WINDOW_WAIVER" not in workflow
 
 
 def test_stage_uses_exact_digest_and_isolated_standby() -> None:
