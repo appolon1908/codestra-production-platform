@@ -10,6 +10,15 @@ There is no shell, Docker-group membership, host/path input, arbitrary unit, or
 command argument. `preflight`, `status`, and `collect-evidence` are read-only.
 Every other action except emergency `rollback` requires
 `/etc/codestra/production-operator/maintenance-date`
+
+Outside that window, mutation is allowed only when the fixed evidence files
+`/opt/codestra/evidence/production-readiness-soak/20260822T022734Z/OWNER-MAINTENANCE-WINDOW-WAIVER.txt`
+and its `.sha256` manifest are regular root-owned mode `0600` files, the
+checksum is exact, and all four owner authorization statements are present.
+The evidence path is compiled into the operator and cannot be supplied through
+arguments or environment variables. This waiver changes only the time-window
+decision; the installed release tuple, protected environment, runtime safety,
+and action restrictions remain mandatory.
 to be a root-owned regular file with mode `0600`, containing one `YYYY-MM-DD`
 date, and the current time must be 00:00 through 03:59 America/New_York.
 
@@ -17,7 +26,7 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `fbe81c41fb308e038f55b7c4b7b419994b6676f5d45ed0b0aa02249ed778e8c6` |
+| `codestra-production-operator` | `48b4098912830aab79b909788fd1e30dfc1dc9671122330c8c4fe77a770de9ce` |
 | `codestra-production-forced-command` | `e6fa1c9602a3318c61f4f21ce6d57edbcadadbeaf0b2c644e3f2c49b96ccdf74` |
 | `codestra-production-operator.sudoers` | `593cdff802459d3e9ce0d9c9afc17c330df15f4753521c6ad7f2a6c6790a632d` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
