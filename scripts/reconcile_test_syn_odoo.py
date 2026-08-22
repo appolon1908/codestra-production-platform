@@ -9,11 +9,33 @@ import os
 
 
 APPLY = os.environ.get("TEST_SYN_APPLY") == "YES"
-employee = env["hr.employee"].browse(16).exists()
-user = env["res.users"].browse(129).exists()
-unit = env["call.center.business.unit"].browse(2).exists()
-if not employee or not user or not unit:
-    raise RuntimeError("approved TEST_SYN Odoo anchors are missing")
+unit = env["call.center.business.unit"].search([("code", "=", "COD")], limit=1)
+if not unit:
+    raise RuntimeError("authoritative COD business unit is missing")
+user = env["res.users"].with_context(active_test=False).search([
+    ("login", "=", "synthetic.agent.test.syn.6101")
+], limit=1)
+employee = env["hr.employee"].with_context(active_test=False).search([
+    ("codestra_employee_number", "=", "COD.2026.00016")
+], limit=1)
+if APPLY and not user:
+    user = env["res.users"].create({
+        "name": "Synthetic Agent 6101", "login": "synthetic.agent.test.syn.6101",
+        "email": "synthetic.agent.test.syn.6101@invalid.example", "active": True,
+        "company_id": env.company.id, "company_ids": [(6, 0, [env.company.id])],
+    })
+if APPLY and not employee:
+    employee = env["hr.employee"].create({
+        "name": "Synthetic Agent 6101", "codestra_employee_number": "COD.2026.00016",
+        "work_email": "synthetic.agent.test.syn.6101@invalid.example",
+        "user_id": user.id, "active": True,
+    })
+if APPLY and (not employee.user_id or employee.user_id != user):
+    employee.write({"user_id": user.id})
+if not employee or not user:
+    env.cr.rollback()
+    print(json.dumps({"apply": APPLY, "status": "DRIFT", "reason": "TEST_SYN Odoo user or employee missing"}, sort_keys=True))
+    raise SystemExit(0)
 
 specs = [
     ("keycloak", "46c6027f-1ea8-4010-a104-5b908aabb715", "synthetic.agent.test.syn.6101", {}),  # gitleaks:allow -- public synthetic UUID
@@ -64,5 +86,6 @@ else:
 print(json.dumps({
     "apply": APPLY, "username": "synthetic.agent.test.syn.6101", "tenant": "COD",
     "campaign": "TEST_SYN", "extension": "6101", "employee_id": "COD.2026.00016",
-    "odoo_user_id": user.id, "links": observed,
+    "odoo_user_id": user.id, "odoo_employee_id": employee.id, "links": observed,
+    "status": "PASS" if APPLY or all(item["before_match"] for item in observed) else "DRIFT",
 }, sort_keys=True))
