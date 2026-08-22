@@ -10,10 +10,10 @@ User=codestra-events
 Group=codestra-events
 WorkingDirectory=/opt/codestra-tel-events
 EnvironmentFile=/etc/codestra/tel-events-publisher.env
-ExecStartPre=/usr/bin/test "$TEL_EVENTS_ENABLED" = true
-ExecStartPre=/usr/bin/test "$SEND_EVENTS" = true
-ExecStartPre=/usr/bin/test "$TEL_EVENTS_MODE" = production
-ExecStartPre=/usr/bin/test ! -e ${DELIVERY_KILL_SWITCH}
+ExecCondition=/usr/bin/test "$TEL_EVENTS_ENABLED" = true
+ExecCondition=/usr/bin/test "$SEND_EVENTS" = true
+ExecCondition=/usr/bin/test "$TEL_EVENTS_MODE" = production
+ExecCondition=/usr/bin/test ! -e ${DELIVERY_KILL_SWITCH}
 ExecStart=/usr/bin/python3.11 -m tel_events.service --loop
 Restart=on-failure
 RestartSec=5s
