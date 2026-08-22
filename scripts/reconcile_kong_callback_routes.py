@@ -50,6 +50,39 @@ def verify_route(route, expected, service_id, host):
     require_equal(route.get("strip_path"), expected["strip_path"], expected["name"] + ".strip_path")
 
 
+def route_matches(route, expected, service_id, host):
+    if not route:
+        return False
+    try:
+        verify_route(route, expected, service_id, host)
+        return True
+    except RuntimeError:
+        return False
+
+
+def verify_oidc(plugin, expected, spec):
+    if not plugin or not plugin.get("enabled"):
+        raise RuntimeError("callback route lacks enabled OIDC: %s" % expected["name"])
+    oidc = plugin["config"]
+    require_equal(oidc.get("issuer"), spec["oidcIssuer"], expected["name"] + ".issuer")
+    require_equal(oidc.get("auth_methods"), ["bearer"], expected["name"] + ".auth_methods")
+    require_equal(oidc.get("audience_required"), [spec["audience"]], expected["name"] + ".audience")
+    require_equal(oidc.get("scopes_required"), [expected["requiredScope"]], expected["name"] + ".scope")
+    require_equal(oidc.get("bearer_token_param_type"), ["header"], expected["name"] + ".bearer_source")
+    require_equal(oidc.get("verify_signature"), True, expected["name"] + ".signature")
+    require_equal(oidc.get("verify_claims"), True, expected["name"] + ".claims")
+    require_equal(oidc.get("ssl_verify"), True, expected["name"] + ".tls")
+    require_equal(oidc.get("anonymous"), None, expected["name"] + ".anonymous")
+
+
+def oidc_matches(plugin, expected, spec):
+    try:
+        verify_oidc(plugin, expected, spec)
+        return True
+    except RuntimeError:
+        return False
+
+
 def verify_plugins(by_name, expected, spec):
     required = {"request-size-limiting", "rate-limiting", "correlation-id", "openid-connect"}
     if not required <= set(by_name):
@@ -63,16 +96,7 @@ def verify_plugins(by_name, expected, spec):
     require_equal(correlation.get("header_name"), "X-Correlation-ID", expected["name"] + ".correlation_header")
     require_equal(correlation.get("generator"), "uuid", expected["name"] + ".correlation_generator")
     require_equal(correlation.get("echo_downstream"), True, expected["name"] + ".correlation_echo")
-    oidc = by_name["openid-connect"]["config"]
-    require_equal(oidc.get("issuer"), spec["oidcIssuer"], expected["name"] + ".issuer")
-    require_equal(oidc.get("auth_methods"), ["bearer"], expected["name"] + ".auth_methods")
-    require_equal(oidc.get("audience_required"), [spec["audience"]], expected["name"] + ".audience")
-    require_equal(oidc.get("scopes_required"), [expected["requiredScope"]], expected["name"] + ".scope")
-    require_equal(oidc.get("bearer_token_param_type"), ["header"], expected["name"] + ".bearer_source")
-    require_equal(oidc.get("verify_signature"), True, expected["name"] + ".signature")
-    require_equal(oidc.get("verify_claims"), True, expected["name"] + ".claims")
-    require_equal(oidc.get("ssl_verify"), True, expected["name"] + ".tls")
-    require_equal(oidc.get("anonymous"), None, expected["name"] + ".anonymous")
+    verify_oidc(by_name["openid-connect"], expected, spec)
 
 
 def main():
@@ -99,6 +123,14 @@ def main():
 
     for expected in spec["routes"]:
         route = singleton(args.admin_url, "routes", expected["name"])
+        existing_plugins = [] if not route else request(
+            args.admin_url, "GET", "/routes/%s/plugins" % route["id"]
+        ).get("data", [])
+        existing_by_name = {plugin["name"]: plugin for plugin in existing_plugins}
+        needs_quarantine = (
+            not route_matches(route, expected, service["id"], spec["host"])
+            or not oidc_matches(existing_by_name.get("openid-connect"), expected, spec)
+        )
         payload = {
             "name": expected["name"], "service.id": service["id"],
             "hosts[]": [spec["host"]], "paths[]": expected["paths"],
@@ -108,13 +140,14 @@ def main():
         }
         if args.apply:
             endpoint = "/routes/%s" % route["id"] if route else "/routes"
-            quarantined = dict(payload)
-            quarantined["hosts[]"] = ["callback-route-disabled.invalid"]
-            route = request(args.admin_url, "PATCH" if route else "POST", endpoint, quarantined)
+            if needs_quarantine:
+                quarantined = dict(payload)
+                quarantined["hosts[]"] = ["callback-route-disabled.invalid"]
+                route = request(args.admin_url, "PATCH" if route else "POST", endpoint, quarantined)
         elif not route:
             raise RuntimeError("callback route is absent: %s" % expected["name"])
         route = singleton(args.admin_url, "routes", expected["name"])
-        if args.apply:
+        if args.apply and needs_quarantine:
             require_equal(route.get("hosts"), ["callback-route-disabled.invalid"], expected["name"] + ".quarantine")
         else:
             verify_route(route, expected, service["id"], spec["host"])
@@ -141,6 +174,8 @@ def main():
                 # The quarantined host keeps the route unreachable while OIDC
                 # is replaced, including if the operation is interrupted.
                 if name == "openid-connect" and current:
+                    if oidc_matches(current, expected, spec):
+                        continue
                     request(args.admin_url, "DELETE", "/plugins/%s" % current["id"])
                     current = None
                 endpoint = "/plugins/%s" % current["id"] if current else "/routes/%s/plugins" % route["id"]
