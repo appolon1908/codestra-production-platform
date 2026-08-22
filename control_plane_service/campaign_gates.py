@@ -45,9 +45,9 @@ def authorize_campaign_email(value: dict, *, simulation: bool = False) -> None:
 
 
 def authorize_channel(value: dict, *, simulation: bool = False) -> None:
-    if not _enabled("CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED"):
-        return
     channel = str(value.get("channel") or "")
+    if channel in {"email", "sms"} and not _enabled("CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED"):
+        raise ControlPlaneError("campaign_channel_gates_disabled")
     if channel == "email":
         authorize_campaign_email(value, simulation=simulation)
     elif channel == "sms" and not _enabled("SMS_PRODUCTION"):
