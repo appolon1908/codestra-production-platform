@@ -10,7 +10,7 @@ NOW = datetime(2026, 8, 14, 18, 0, tzinfo=timezone.utc)
 
 def contract():
     return ServiceIdentityContract(
-        issuer="https://auth.codestra.agency/realms/production",
+        issuer="https://auth.codestra.co/realms/codestra",
         audience="codestra-middleware",
         client_id="vicidial-event-publisher",
         required_roles=frozenset({"event:publish"}),

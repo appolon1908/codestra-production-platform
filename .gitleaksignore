@@ -6,3 +6,4 @@ reports/github/SECRET_SCAN_FINDINGS.csv:generic-api-key:18
 reports/github/SECRET_SCAN_FINDINGS.csv:generic-api-key:27
 4613c7493016aceddf831f92df29c96024ef816b:reports/github/SECRET_SCAN_FINDINGS.csv:generic-api-key:6
 1ae61df7c93d2ab776b3dffbc07f2b088109d2ec:reports/github/SECRET_SCAN_FINDINGS.csv:generic-api-key:8
+07d8045b2e1d7483bf3e756999c0d797b272c5e8:scripts/reconcile_test_syn_odoo.py:generic-api-key:19
