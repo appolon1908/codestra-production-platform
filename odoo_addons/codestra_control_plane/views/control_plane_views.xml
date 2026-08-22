@@ -1,0 +1,52 @@
+<odoo>
+ <record id="view_control_plane_campaign_list" model="ir.ui.view">
+  <field name="name">codestra.control.plane.campaign.list</field><field name="model">codestra.control.plane.campaign</field>
+  <field name="arch" type="xml"><list decoration-success="sync_status == 'HEALTHY'" decoration-warning="sync_status in ('PENDING','SYNCING','DRIFTED')" decoration-danger="sync_status in ('FAILED','DEAD_LETTER')">
+   <field name="campaign_code"/><field name="campaign_name"/><field name="business_state"/><field name="telephony_enabled"/>
+   <field name="desired_state"/><field name="actual_state"/><field name="sync_status"/><field name="vicidial_status"/>
+   <field name="expected_agent_count"/><field name="actual_agent_count"/><field name="expected_extension_count"/><field name="actual_extension_count"/>
+   <field name="mapping_version"/><field name="last_sync"/><field name="last_reconciliation"/>
+  </list></field>
+ </record>
+ <record id="view_control_plane_campaign_form" model="ir.ui.view">
+  <field name="name">codestra.control.plane.campaign.form</field><field name="model">codestra.control.plane.campaign</field>
+  <field name="arch" type="xml"><form create="0" edit="0" delete="0"><header>
+   <button name="action_validate" type="object" string="Validate" groups="call_center_core.group_call_center_manager"/>
+   <button name="action_request_sync" type="object" string="Request Sync" groups="call_center_core.group_call_center_manager"/>
+   <button name="action_reconcile" type="object" string="Reconcile" groups="call_center_core.group_call_center_manager"/>
+   <button name="action_retry" type="object" string="Retry Failed" groups="call_center_core.group_call_center_manager"/>
+   <field name="sync_status" widget="statusbar"/></header><sheet>
+   <group><group><field name="campaign_code"/><field name="campaign_name"/><field name="codestra_campaign_uuid"/><field name="mapping_version"/></group>
+   <group><field name="desired_state"/><field name="actual_state"/><field name="correlation_id"/><field name="job_id"/></group></group>
+   <notebook><page string="Systems"><group><field name="odoo_status"/><field name="middleware_status"/><field name="n8n_status"/><field name="vicidial_status"/><field name="user_group"/><field name="in_group"/></group></page>
+   <page string="Desired"><field name="desired_json" widget="json"/></page><page string="Actual"><field name="actual_json" widget="json"/></page><page string="Difference"><field name="difference_json" widget="json"/></page></notebook>
+  </sheet></form></field>
+ </record>
+ <record id="action_control_plane_campaign" model="ir.actions.act_window"><field name="name">Synchronization Control Plane</field><field name="res_model">codestra.control.plane.campaign</field><field name="view_mode">list,form</field></record>
+ <menuitem id="menu_control_plane_campaign" name="Synchronization Control Plane" action="action_control_plane_campaign" groups="call_center_core.group_call_center_user"/>
+ <record id="view_agent_mailbox_list" model="ir.ui.view">
+  <field name="name">codestra.agent.mailbox.list</field><field name="model">codestra.agent.mailbox</field>
+  <field name="arch" type="xml"><list create="0" edit="0" delete="0" decoration-success="mailbox_status == 'ACTIVE'" decoration-warning="mailbox_status in ('PROVISIONING','BLOCKED_DOMAIN_MAPPING_REQUIRED','EMAIL_ADDRESS_CONFLICT')" decoration-danger="mailbox_status in ('PROVISIONING_FAILED','SUSPENDED')">
+   <field name="primary_email"/><field name="display_name"/><field name="campaign_name"/><field name="domain"/>
+   <field name="mailbox_status"/><field name="sending_enabled"/><field name="receiving_enabled"/>
+   <field name="quota"/><field name="usage"/><field name="last_sync"/>
+  </list></field>
+ </record>
+ <record id="view_agent_mailbox_form" model="ir.ui.view">
+  <field name="name">codestra.agent.mailbox.form</field><field name="model">codestra.agent.mailbox</field>
+  <field name="arch" type="xml"><form create="0" edit="0" delete="0"><header><field name="mailbox_status" widget="statusbar"/></header><sheet>
+   <group><group><field name="primary_email"/><field name="display_name"/><field name="campaign_id"/><field name="domain"/></group>
+   <group><field name="sending_enabled"/><field name="receiving_enabled"/><field name="quota"/><field name="usage"/></group></group>
+   <notebook><page string="Mailbox"><group><field name="employee_id"/><field name="user_id"/><field name="mailbox_uuid"/><field name="agent_uuid"/></group></page>
+   <page string="Synchronization"><group><field name="last_sync"/><field name="last_send_at"/><field name="last_receive_at"/><field name="correlation_id"/><field name="audit_version"/><field name="failure_reason_safe"/></group></page></notebook>
+  </sheet></form></field>
+ </record>
+ <record id="action_agent_mailbox" model="ir.actions.act_window"><field name="name">Email</field><field name="res_model">codestra.agent.mailbox</field><field name="view_mode">list,form</field></record>
+ <menuitem id="menu_agent_mailbox" name="Email" action="action_agent_mailbox" parent="menu_control_plane_campaign" groups="call_center_core.group_call_center_user"/>
+ <record id="view_campaign_email_domain_list" model="ir.ui.view">
+  <field name="name">codestra.campaign.email.domain.list</field><field name="model">codestra.campaign.email.domain</field>
+  <field name="arch" type="xml"><list create="0" edit="0" delete="0"><field name="campaign_id"/><field name="primary_domain"/><field name="sender_domain_verified"/><field name="inbound_domain_verified"/><field name="sending_enabled"/><field name="receiving_enabled"/><field name="status"/><field name="approved_by"/><field name="approved_at"/></list></field>
+ </record>
+ <record id="action_campaign_email_domain" model="ir.actions.act_window"><field name="name">Campaign Email Domains</field><field name="res_model">codestra.campaign.email.domain</field><field name="view_mode">list</field></record>
+ <menuitem id="menu_campaign_email_domain" name="Campaign Email Domains" action="action_campaign_email_domain" parent="menu_control_plane_campaign" groups="call_center_core.group_call_center_manager"/>
+</odoo>

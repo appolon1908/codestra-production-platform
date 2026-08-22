@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+manifest=${CERTIFICATE_MANIFEST:-/etc/codestra/tls/certificates.tsv}
+metrics=${CERTIFICATE_METRICS_FILE:-/var/lib/node_exporter/textfile_collector/codestra_certificates.prom}
+warning_days=${CERTIFICATE_WARNING_DAYS:-30}
+critical_days=${CERTIFICATE_CRITICAL_DAYS:-14}
+tmp=$(mktemp "${metrics}.XXXXXX")
+trap 'rm -f -- "$tmp"' EXIT
+now=$(date +%s)
+status=0
+
+{
+  echo '# HELP codestra_certificate_expiry_seconds Seconds until a middleware-owned certificate expires.'
+  echo '# TYPE codestra_certificate_expiry_seconds gauge'
+  echo '# HELP codestra_certificate_expiry_status Certificate status: 0 OK, 1 warning, 2 critical.'
+  echo '# TYPE codestra_certificate_expiry_status gauge'
+} >"$tmp"
+while IFS='|' read -r name _ cert _ ca_cert _ _ _ _ _ owner; do
+  case "$name" in ''|'#'*) continue ;; esac
+  for entry in "$name|leaf|$cert" "$name-ca|ca|$ca_cert"; do
+    IFS='|' read -r metric_name metric_kind path <<<"$entry"
+    [ -r "$path" ] || { logger -p daemon.alert -t certificate-lifecycle -- "CRITICAL missing certificate name=$metric_name path=$path owner=$owner"; status=2; continue; }
+    end=$(openssl x509 -in "$path" -noout -enddate | cut -d= -f2-)
+    expiry=$(date -d "$end" +%s)
+    remaining=$((expiry - now))
+    state=0
+    if ((remaining <= critical_days * 86400)); then state=2; status=2
+    elif ((remaining <= warning_days * 86400)); then state=1; ((status < 1)) && status=1
+    fi
+    printf 'codestra_certificate_expiry_seconds{name="%s",kind="%s"} %s\n' "$metric_name" "$metric_kind" "$remaining" >>"$tmp"
+    printf 'codestra_certificate_expiry_status{name="%s",kind="%s"} %s\n' "$metric_name" "$metric_kind" "$state" >>"$tmp"
+  done
+done <"$manifest"
+chmod 0644 "$tmp"
+mv -f -- "$tmp" "$metrics"
+trap - EXIT
+exit "$status"

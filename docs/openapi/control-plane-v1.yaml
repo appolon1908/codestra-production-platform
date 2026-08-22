@@ -1,0 +1,197 @@
+openapi: 3.1.0
+info:
+  title: Codestra Integration Control Plane
+  version: 1.0.0
+  description: Authoritative authenticated ingress and operations API. Outbound delivery is fail-closed by default.
+servers:
+  - url: http://127.0.0.1:8096
+    description: Private/local deployment
+paths:
+  /v1/crawler/jobs:
+    post:
+      operationId: createCrawlerJob
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: X-Correlation-Id, in: header, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/CrawlerJobRequest"}}}}
+      responses:
+        "202": {description: Accepted by Kyqra safe/test adapter}
+        "200": {description: Idempotent replay}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /v1/messages/sms:
+    post:
+      operationId: sendSms
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: X-Request-Id, in: header, required: true, schema: {type: string}}
+        - {name: X-Correlation-Id, in: header, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/MessageRequest"}}}}
+      responses:
+        "202": {description: Queued in Telnexa simulator or authorized adapter}
+        "200": {description: Idempotent replay}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /v1/messages/email:
+    post:
+      operationId: sendEmail
+      security: [{operatorToken: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/MessageRequest"}}}}
+      responses:
+        "202": {description: Queued in Klyrow test mode or authorized adapter}
+        "200": {description: Idempotent replay}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /v1/messages:
+    get:
+      operationId: listMessages
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: tenant_id, in: query, schema: {type: string}}
+        - {name: channel, in: query, schema: {type: string, enum: [sms, email]}}
+        - {name: status, in: query, schema: {type: string}}
+      responses:
+        "200": {description: Tenant-scoped communications ledger}
+  /v1/messages/{message_id}:
+    get:
+      operationId: getMessage
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: message_id, in: path, required: true, schema: {type: string}}
+        - {name: tenant_id, in: query, schema: {type: string}}
+      responses:
+        "200": {description: Tenant-scoped message}
+        "404": {$ref: "#/components/responses/Error"}
+  /health:
+    get:
+      operationId: getLiveness
+      responses:
+        "200": {description: Process is alive, content: {application/json: {schema: {$ref: "#/components/schemas/Health"}}}}
+  /ready:
+    get:
+      operationId: getReadiness
+      responses:
+        "200": {description: State store is ready, content: {application/json: {schema: {$ref: "#/components/schemas/Health"}}}}
+        "503": {$ref: "#/components/responses/Error"}
+  /metrics:
+    get:
+      operationId: getMetrics
+      responses:
+        "200": {description: Prometheus metrics, content: {text/plain: {schema: {type: string}}}}
+  /api/v1/events/{source}:
+    post:
+      operationId: ingestEvent
+      security: [{serviceKey: [], webhookHmac: []}]
+      parameters:
+        - {name: source, in: path, required: true, schema: {type: string, enum: [kyqra, telnexa, klyrow, n8n, odoo]}}
+        - {name: X-Event-Id, in: header, required: true, schema: {type: string, minLength: 1}}
+        - {name: X-Timestamp, in: header, required: true, schema: {type: string, pattern: "^[0-9]+$"}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EventEnvelope"}
+      responses:
+        "202": {description: Accepted}
+        "200": {description: Exact duplicate; original result returned}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+  /api/v1/preferences/check:
+    post:
+      operationId: checkCommunicationPreference
+      security: [{operatorToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, contact_id, channel]
+              properties:
+                tenant_id: {type: string}
+                contact_id: {type: string}
+                channel: {type: string, enum: [sms, email]}
+      responses:
+        "200": {description: Default-deny preference decision}
+        "403": {$ref: "#/components/responses/Error"}
+  /api/v1/ops/summary:
+    get:
+      operationId: getOperationsSummary
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: tenant_id, in: query, schema: {type: string}}
+      responses:
+        "200": {description: Tenant-filtered operational state}
+        "403": {$ref: "#/components/responses/Error"}
+  /api/v1/ops/events:
+    get:
+      operationId: listEvents
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: tenant_id, in: query, schema: {type: string}}
+        - {name: state, in: query, schema: {type: string, enum: [queued, retrying, delivered, dead_letter, quarantined]}}
+      responses:
+        "200": {description: Tenant-filtered events}
+        "403": {$ref: "#/components/responses/Error"}
+components:
+  securitySchemes:
+    serviceKey: {type: http, scheme: bearer}
+    operatorToken: {type: http, scheme: bearer}
+    webhookHmac: {type: apiKey, in: header, name: X-Signature}
+  responses:
+    Error:
+      description: Stable machine-readable error
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+  schemas:
+    CrawlerJobRequest:
+      type: object
+      required: [tenant_id, target_url]
+      properties:
+        tenant_id: {type: string}
+        target_url: {type: string, format: uri, description: Safe local/test URL only}
+    MessageRequest:
+      type: object
+      required: [tenant_id, customer_id, sender, recipient, source_application, classification]
+      properties:
+        tenant_id: {type: string}
+        customer_id: {type: string}
+        sender: {type: string}
+        recipient: {type: string}
+        source_application: {type: string}
+        classification: {type: string, enum: [marketing, transactional]}
+        campaign_id: {type: string}
+        workflow_id: {type: string}
+        content_metadata: {type: object}
+        estimated_cost_minor: {type: integer}
+        currency: {type: string}
+    Health:
+      type: object
+      required: [status]
+      properties: {status: {type: string}}
+    Error:
+      type: object
+      required: [error]
+      properties: {error: {type: string}}
+    EventEnvelope:
+      type: object
+      additionalProperties: false
+      required: [event_type, event_version, occurred_at, tenant_id, idempotency_key, payload]
+      properties:
+        event_type: {type: string, minLength: 3}
+        event_version: {type: string, const: "1.0"}
+        occurred_at: {type: string, format: date-time}
+        tenant_id: {type: string, minLength: 1}
+        customer_id: {type: [string, "null"]}
+        correlation_id: {type: string}
+        causation_id: {type: [string, "null"]}
+        idempotency_key: {type: string, minLength: 1}
+        payload: {type: object}
+        metadata: {type: object}

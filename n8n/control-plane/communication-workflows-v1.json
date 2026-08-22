@@ -1,0 +1,20 @@
+{
+  "schema_version":"codestra.n8n.communication-workflows.v1",
+  "authority":"control-plane-message-registry",
+  "provider_credentials":"middleware-adapters-only",
+  "active":false,
+  "required_envelope":["message_uuid","version","tenant","channel","correlation_id","idempotency_key"],
+  "workflows":[
+    {"name":"SmsDispatchV1","event":"sms.queued","action":"request middleware SMS adapter dispatch"},
+    {"name":"SmsInboundV1","event":"sms.inbound","action":"project exact/no-match/ambiguous result to Odoo"},
+    {"name":"SmsDeliveryStatusV1","event":"sms.delivered","action":"project canonical status to Odoo"},
+    {"name":"SmsFailureV1","event":"sms.failed","action":"project failure and alert"},
+    {"name":"EmailDispatchV1","event":"email.queued","action":"request middleware email adapter dispatch"},
+    {"name":"EmailDeliveryStatusV1","event":"email.delivered","action":"project canonical status to Odoo"},
+    {"name":"EmailBounceV1","event":"email.bounced","action":"project bounce and suppression"},
+    {"name":"EmailComplaintV1","event":"email.complained","action":"project complaint and suppression"},
+    {"name":"EmailUnsubscribeV1","event":"email.unsubscribed","action":"project unsubscribe and suppression"},
+    {"name":"CommunicationReconcileV1","event":"communication.reconcile.requested","action":"compare provider, registry, n8n, and Odoo state"},
+    {"name":"CommunicationFailureV1","event":"workflow.failed","action":"bounded retry then dead-letter"}
+  ]
+}
