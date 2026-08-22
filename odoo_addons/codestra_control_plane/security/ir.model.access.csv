@@ -1,3 +1,6 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_cp_campaign_user,control plane dashboard user,model_codestra_control_plane_campaign,call_center_core.group_call_center_user,1,0,0,0
 access_cp_campaign_manager,control plane dashboard manager,model_codestra_control_plane_campaign,call_center_core.group_call_center_manager,1,0,0,0
+access_agent_mailbox_user,agent mailbox user,model_codestra_agent_mailbox,call_center_core.group_call_center_user,1,0,0,0
+access_agent_mailbox_manager,agent mailbox manager,model_codestra_agent_mailbox,call_center_core.group_call_center_manager,1,0,0,0
+access_campaign_email_domain_manager,campaign email domain manager,model_codestra_campaign_email_domain,call_center_core.group_call_center_manager,1,0,0,0

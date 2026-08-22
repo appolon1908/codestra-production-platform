@@ -34,6 +34,9 @@ def _postgres_sql(sql: str) -> str:
     # The embedded test schema uses collision-resistant cp_* names. PostgreSQL
     # exposes the same model as the dedicated control_plane schema.
     mapping = {
+        "cp_campaign_email_domain": "control_plane.campaign_email_domain",
+        "cp_agent_mailbox": "control_plane.agent_mailbox",
+        "cp_mailbox_provisioning_event": "control_plane.mailbox_provisioning_event",
         "cp_campaign_target": "control_plane.campaign_target",
         "cp_extension_assignment": "control_plane.extension_assignment",
         "cp_agent_identity": "control_plane.agent_identity",
