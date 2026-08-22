@@ -15,12 +15,26 @@ from urllib.request import Request, urlopen
 
 def request(base, method, path, payload=None):
     data = None if payload is None else urlencode(payload, doseq=True).encode()
+    url = path if path.startswith(("http://", "https://")) else base.rstrip("/") + path
     try:
-        with urlopen(Request(base.rstrip("/") + path, data=data, method=method), timeout=10) as response:
+        with urlopen(Request(url, data=data, method=method), timeout=10) as response:
             raw = response.read()
             return json.loads(raw) if raw else {}
     except HTTPError as error:
         raise RuntimeError("Kong Admin API rejected %s %s (%s)" % (method, path, error.code)) from error
+
+
+def all_rows(base, path):
+    rows = []
+    seen = set()
+    while path:
+        if path in seen:
+            raise RuntimeError("Kong pagination loop detected")
+        seen.add(path)
+        page = request(base, "GET", path)
+        rows.extend(page.get("data", []))
+        path = page.get("next")
+    return rows
 
 
 def singleton(base, resource, name):
@@ -42,18 +56,32 @@ def select_managed_route(routes, expected, host, apply):
     route = one(named, "route named %s" % expected["name"])
     expected_paths = set(expected["paths"])
     expected_methods = set(expected["methods"])
-    collisions = [
+    overlaps = [
         candidate for candidate in routes
         if candidate.get("id") != (route or {}).get("id")
         and host in (candidate.get("hosts") or [])
         and expected_paths.intersection(candidate.get("paths") or [])
         and expected_methods.intersection(candidate.get("methods") or [])
     ]
-    if route and collisions:
+    if route and overlaps:
         raise RuntimeError("conflicting live route for %s%s" % (host, expected["paths"][0]))
     if route:
         return route
-    collision = one(collisions, "legacy route for %s%s" % (host, expected["paths"][0]))
+    exact = [
+        candidate for candidate in overlaps
+        if candidate.get("hosts") == [host]
+        and set(candidate.get("paths") or []) == expected_paths
+        and set(candidate.get("methods") or []) == expected_methods
+        and candidate.get("protocols") == ["https"]
+        and candidate.get("strip_path") == expected["strip_path"]
+        and not (candidate.get("headers") or {})
+        and not (candidate.get("snis") or [])
+        and not (candidate.get("sources") or [])
+        and not (candidate.get("destinations") or [])
+    ]
+    if overlaps and len(exact) != len(overlaps):
+        raise RuntimeError("partial legacy route overlap for %s%s" % (host, expected["paths"][0]))
+    collision = one(exact, "legacy route for %s%s" % (host, expected["paths"][0]))
     if collision and not apply:
         raise RuntimeError("legacy callback route requires managed adoption")
     return collision
@@ -151,13 +179,16 @@ def main():
     verify_service(service, service_spec)
 
     for expected in spec["routes"]:
-        routes = request(args.admin_url, "GET", "/routes?size=1000").get("data", [])
+        routes = all_rows(args.admin_url, "/routes?size=1000")
         route = select_managed_route(routes, expected, spec["host"], args.apply)
+        route_was_missing = route is None
         existing_plugins = [] if not route else request(
             args.admin_url, "GET", "/routes/%s/plugins" % route["id"]
         ).get("data", [])
         existing_by_name = {plugin["name"]: plugin for plugin in existing_plugins}
         needs_quarantine = (
+            (route or {}).get("name") != expected["name"]
+            or
             not route_matches(route, expected, service["id"], spec["host"])
             or not oidc_matches(existing_by_name.get("openid-connect"), expected, spec)
         )
@@ -173,16 +204,36 @@ def main():
             if needs_quarantine:
                 quarantined = dict(payload)
                 quarantined["hosts[]"] = ["callback-route-disabled.invalid"]
+                # A new route cannot match the protected callback methods until
+                # its enforced deny plugin has been installed and read back.
+                if not route:
+                    quarantined["methods[]"] = ["OPTIONS"]
                 route = request(args.admin_url, "PATCH" if route else "POST", endpoint, quarantined)
         elif not route:
             raise RuntimeError("callback route is absent: %s" % expected["name"])
         route = singleton(args.admin_url, "routes", expected["name"])
         if args.apply and needs_quarantine:
             require_equal(route.get("hosts"), ["callback-route-disabled.invalid"], expected["name"] + ".quarantine")
+            if route_was_missing:
+                require_equal(route.get("methods"), ["OPTIONS"], expected["name"] + ".quarantine_methods")
         else:
             verify_route(route, expected, service["id"], spec["host"])
         plugins = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
         by_name = {plugin["name"]: plugin for plugin in plugins}
+        deny = by_name.get("request-termination")
+        if args.apply and needs_quarantine:
+            deny_config = {
+                "name": "request-termination", "enabled": "true",
+                "config.status_code": 503,
+                "config.message": "callback route maintenance",
+            }
+            endpoint = "/plugins/%s" % deny["id"] if deny else "/routes/%s/plugins" % route["id"]
+            request(args.admin_url, "PATCH" if deny else "POST", endpoint, deny_config)
+            deny_plugins = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
+            deny = one([plugin for plugin in deny_plugins if plugin["name"] == "request-termination"], "callback deny plugin")
+            require_equal(deny.get("enabled"), True, expected["name"] + ".deny_enabled")
+            require_equal(deny.get("config", {}).get("status_code"), 503, expected["name"] + ".deny_status")
+            require_equal(deny.get("config", {}).get("message"), "callback route maintenance", expected["name"] + ".deny_message")
         controls = {
             "request-size-limiting": {"config.allowed_payload_size": expected["maxBodyMb"]},
             "rate-limiting": {"config.minute": expected["ratePerMinute"], "config.policy": "local", "config.limit_by": "ip"},
@@ -217,6 +268,11 @@ def main():
             request(args.admin_url, "PATCH", "/routes/%s" % route["id"], payload)
             route = singleton(args.admin_url, "routes", expected["name"])
             verify_route(route, expected, service["id"], spec["host"])
+            if needs_quarantine:
+                request(args.admin_url, "DELETE", "/plugins/%s" % deny["id"])
+                remaining = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
+                if any(plugin["name"] == "request-termination" and plugin.get("enabled") for plugin in remaining):
+                    raise RuntimeError("callback deny plugin removal readback failed")
         evidence["routes"].append({
             "name": expected["name"], "service_id": service["id"],
             "route_id": route["id"], "hosts": route["hosts"],

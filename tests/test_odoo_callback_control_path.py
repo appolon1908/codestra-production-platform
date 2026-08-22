@@ -51,6 +51,10 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert "verify_plugins" in RECONCILER
     assert "select_managed_route" in RECONCILER
     assert "conflicting live route" in RECONCILER
+    assert "partial legacy route overlap" in RECONCILER
+    assert "all_rows" in RECONCILER
+    assert '"request-termination"' in RECONCILER
+    assert '"config.status_code": 503' in RECONCILER
     assert "audience_required" in RECONCILER
     assert "bearer_token_param_type" in RECONCILER
     assert 'parser.add_argument("--evidence", type=Path, required=True)' in RECONCILER
