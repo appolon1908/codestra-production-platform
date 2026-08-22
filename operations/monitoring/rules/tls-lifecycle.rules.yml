@@ -1,0 +1,33 @@
+groups:
+  - name: codestra-certificate-lifecycle
+    rules:
+      - alert: CodestraPrivateCertificateExpiring
+        expr: codestra_certificate_expiry_seconds{kind="leaf"} < 30 * 86400
+        for: 15m
+        labels:
+          severity: warning
+          owner: middleware-platform-operations
+        annotations:
+          summary: Middleware-owned private certificate expires within 30 days
+          description: "Certificate {{ $labels.name }} has entered its renewal window. Confirm the renewal timer and reload validation."
+          runbook: docs/OPERATIONS.md#tls-and-mtls-certificate-lifecycle
+      - alert: CodestraPrivateCertificateExpiryCritical
+        expr: codestra_certificate_expiry_seconds{kind="leaf"} < 14 * 86400
+        for: 5m
+        labels:
+          severity: critical
+          owner: middleware-platform-operations
+        annotations:
+          summary: Middleware-owned private certificate expires within 14 days
+          description: "Certificate {{ $labels.name }} needs immediate renewal or approved CA rotation."
+          runbook: docs/OPERATIONS.md#tls-and-mtls-certificate-lifecycle
+      - alert: CodestraPrivateCaExpiryCritical
+        expr: codestra_certificate_expiry_seconds{kind="ca"} < 30 * 86400
+        for: 5m
+        labels:
+          severity: critical
+          owner: middleware-platform-operations
+        annotations:
+          summary: Private CA expires within 30 days
+          description: "CA {{ $labels.name }} requires an approved overlap rotation; leaf automation will not replace it."
+          runbook: docs/OPERATIONS.md#private-ca-rotation

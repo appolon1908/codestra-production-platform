@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew due middleware-owned private certificates and publish expiry metrics
+After=docker.service network-online.target
+Wants=network-online.target
+OnFailure=tls-alert@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/codestra-certificate-lifecycle
+UMask=0077
