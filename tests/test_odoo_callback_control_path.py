@@ -5,6 +5,7 @@ from pathlib import Path
 IDENTITY = json.loads(Path("config/keycloak-odoo-callback-client.json").read_text())
 KONG = json.loads(Path("config/kong-callback-routes.json").read_text())
 RECONCILER = Path("scripts/reconcile_kong_callback_routes.py").read_text()
+DEPLOYMENT = Path("deploy/odoo-callback/compose.synthetic-only.yaml").read_text()
 
 
 def test_odoo_callback_identity_is_bounded_and_has_no_secret():
@@ -43,3 +44,16 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert 'parser.add_argument("--apply", action="store_true")' in RECONCILER
     assert "duplicate Kong" in RECONCILER
     assert "correlation-id" in RECONCILER
+
+
+def test_deployment_keeps_every_broad_delivery_path_disabled():
+    assert 'CODESTRA_CALLBACK_SYNC_ENABLED: "true"' in DEPLOYMENT
+    assert "codestra-odoo-callback-service" in DEPLOYMENT
+    assert "exact reviewed addon release required" in DEPLOYMENT
+    for setting in (
+        "CALLBACK_EMAIL_COMMAND_ENABLED", "CALLBACK_DELIVERY_ENABLED",
+        "LIVE_EMAIL_DELIVERY", "LIVE_PSTN_DIALING", "ODOO_DELIVERY_ENABLED",
+        "ODOO_RESULT_DELIVERY_ENABLED", "ODOO_WRITE_ENABLED",
+        "ODOO_AUTOMATION_WRITES_ENABLED",
+    ):
+        assert f'{setting}: "false"' in DEPLOYMENT
