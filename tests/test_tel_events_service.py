@@ -161,6 +161,24 @@ def test_signature_binds_method_path_event_and_exact_body():
     assert all(candidate != baseline for candidate in changed)
 
 
+def test_signature_defaults_to_deployed_v1_and_v2_is_request_bound(monkeypatch):
+    import hashlib
+    import hmac
+
+    monkeypatch.delenv("TEL_EVENTS_SIGNATURE_VERSION", raising=False)
+    version, value = service._sign("secret", "POST", "/events", "10", "event-1", b"{}")
+    assert version == "v1"
+    assert value == hmac.new(b"secret", b"10.{}", hashlib.sha256).hexdigest()
+    monkeypatch.setenv("TEL_EVENTS_SIGNATURE_VERSION", "v2")
+    version, baseline = service._sign(
+        "secret", "POST", "/events", "10", "event-1", b"{}"
+    )
+    assert version == "v2"
+    assert (
+        service._sign("secret", "PUT", "/events", "10", "event-1", b"{}")[1] != baseline
+    )
+
+
 def test_cli_success_does_not_use_sent_count_as_exit_code(monkeypatch, capsys):
     monkeypatch.setattr(service, "run_once", lambda: 3)
     assert service.main([]) == 0

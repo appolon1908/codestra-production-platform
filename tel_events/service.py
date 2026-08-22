@@ -106,16 +106,27 @@ def _signature_input(
     ).encode()
 
 
+def _sign(
+    secret: str, method: str, path: str, timestamp: str, event_id: str, body: bytes
+):
+    version = os.getenv("TEL_EVENTS_SIGNATURE_VERSION", "v1")
+    if version == "v1":
+        canonical = timestamp.encode("ascii") + b"." + body
+    elif version == "v2":
+        canonical = _signature_input(method, path, timestamp, event_id, body)
+    else:
+        raise PublisherError("TEL_EVENTS_SIGNATURE_VERSION must be v1 or v2")
+    return version, hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
+
+
 def _post(event: dict) -> int:
     body = _body(event)
     timestamp = str(int(time.time()))
     secret = _secret(os.environ["TEL_EVENTS_HMAC_FILE"])
     endpoint = urllib.parse.urlsplit(os.environ["TEL_EVENTS_ENDPOINT"])
-    signature = hmac.new(
-        secret.encode(),
-        _signature_input("POST", endpoint.path, timestamp, event["event_id"], body),
-        hashlib.sha256,
-    ).hexdigest()
+    version, signature = _sign(
+        secret, "POST", endpoint.path, timestamp, event["event_id"], body
+    )
     request = urllib.request.Request(
         os.environ["TEL_EVENTS_ENDPOINT"],
         data=body,
@@ -124,7 +135,7 @@ def _post(event: dict) -> int:
             "Content-Type": "application/json",
             "Idempotency-Key": event["idempotency_key"],
             "X-Signature": signature,
-            "X-Signature-Version": "v1",
+            "X-Signature-Version": version,
             "X-Timestamp": timestamp,
             "X-Event-ID": event["event_id"],
             "X-Client-Instance-ID": os.environ["TEL_EVENTS_CLIENT_INSTANCE"],
