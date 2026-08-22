@@ -15,6 +15,7 @@ for entry in MANIFEST["workflows"]:
     for node in workflow["nodes"]:
         if node["type"] != "n8n-nodes-base.httpRequest":
             continue
+        assert node["typeVersion"] >= 4.2
         parameters = node["parameters"]
         assert parameters["url"].startswith("https://api.codestra.co/api/v1/")
         assert "middleware" not in parameters["url"].lower()

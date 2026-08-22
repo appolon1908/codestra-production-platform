@@ -1,0 +1,8 @@
+:18101 {
+	reverse_proxy codestra-kong-kong-gateway-1:8000 {
+		# TLS terminates at the canonical host Caddy instance. Preserve that
+		# trusted scheme across this private hop so Kong can fail closed on
+		# direct HTTP while accepting canonical HTTPS traffic.
+		header_up X-Forwarded-Proto https
+	}
+}

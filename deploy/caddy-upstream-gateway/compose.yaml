@@ -1,0 +1,25 @@
+name: codestra-caddy-upstream-gateway
+
+services:
+  api-kong-upstream:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    read_only: true
+    user: "65534:65534"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m,uid=65534,gid=65534
+      - /data:rw,noexec,nosuid,size=8m,uid=65534,gid=65534
+      - /config:rw,noexec,nosuid,size=8m,uid=65534,gid=65534
+    volumes:
+      - ./api-kong.caddy:/etc/caddy/Caddyfile:ro
+    ports:
+      - "127.0.0.1:18101:18101"
+    networks: [edge]
+
+networks:
+  edge:
+    external: true
+    name: codestra_edge
