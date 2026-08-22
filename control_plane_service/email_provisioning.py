@@ -244,11 +244,22 @@ class CampaignMailboxRegistry:
             raise ControlPlaneError("mailbox_sender_not_authorized")
         return dict(row)
 
-    def route_inbound(self, recipient: str) -> dict[str, Any]:
+    def route_inbound(self, recipient: str, tenant_id: str | None = None) -> dict[str, Any]:
         """Resolve one exact active recipient. Deliberately provides no catch-all."""
         normalized = recipient.strip().lower()
         with Connection(self.path) as db:
-            row = db.execute("SELECT * FROM cp_agent_mailbox WHERE lower(primary_email)=? AND mailbox_status='ACTIVE' AND receiving_enabled=?", (normalized,db_bool(True))).fetchone()
+            if is_postgres():
+                self._tenant(db, str(tenant_id or ""))
+            if tenant_id:
+                row = db.execute(
+                    "SELECT * FROM cp_agent_mailbox WHERE tenant_id=? AND lower(primary_email)=? AND mailbox_status='ACTIVE' AND receiving_enabled=?",
+                    (tenant_id, normalized, db_bool(True)),
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT * FROM cp_agent_mailbox WHERE lower(primary_email)=? AND mailbox_status='ACTIVE' AND receiving_enabled=?",
+                    (normalized, db_bool(True)),
+                ).fetchone()
         if not row:
             raise ControlPlaneError("inbound_recipient_not_found")
         return dict(row)
