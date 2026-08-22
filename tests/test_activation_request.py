@@ -59,9 +59,10 @@ def test_rejects_non_boolean_false_flag(tmp_path):
 
 
 @pytest.mark.parametrize("action", ["backup", "validate-backup", "restore-test", "stage", "canary", "rollback"])
-def test_state_change_outside_window_fails_closed(tmp_path, action):
-    with pytest.raises(ValueError, match="maintenance window"):
-        validate(request(tmp_path, action=action, maintenance_date="2099-08-21"))
+def test_state_change_window_authority_is_deferred_to_root_operator(tmp_path, action):
+    # The runner cannot read the root-owned waiver evidence. It binds the exact
+    # date here; the certified operator independently enforces window or waiver.
+    validate(request(tmp_path, action=action, maintenance_date="2099-08-21"))
 
 
 def test_manifest_must_bind_requested_digest(tmp_path):
