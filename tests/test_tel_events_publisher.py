@@ -146,3 +146,15 @@ def test_watermark_symlink_and_unsafe_mode_are_rejected(tmp_path):
     link.symlink_to(watermark)
     with pytest.raises(PublisherError, match="regular"):
         load_watermark(str(link), allowed_owner_uid=os.getuid())
+
+
+def test_replayed_event_payload_cannot_drift():
+    with tempfile.TemporaryDirectory() as directory:
+        ledger = DeliveryLedger(os.path.join(directory, "ledger.sqlite"))
+        event = build_call_ended_event(row("stable", 2300), "vicidial_log")
+        ledger.stage(event)
+        changed = json.loads(json.dumps(event))
+        changed["payload"]["disposition_code"] = "DIFFERENT"
+        with pytest.raises(PublisherError, match="payload differs"):
+            ledger.stage(changed)
+        ledger.close()
