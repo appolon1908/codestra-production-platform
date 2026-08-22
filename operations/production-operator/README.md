@@ -39,14 +39,16 @@ merge so it describes the immutable reviewed artifact rather than a draft.
 | `/etc/codestra/production-operator/maintenance-date` | `root:root` | `0600` | Installed from the approved tuple |
 | `/etc/codestra/production-operator/release.json` | `root:root` | `0644` | Immutable release tuple used by the forced command |
 | `/etc/codestra/production-operator/installed.sha256` | `root:root` | `0600` | Installed-file checksum manifest |
-| `/var/lib/codestra-production-operator` | `root:root` | `0700` | Evidence and rollback root |
+| `/var/lib/codestra-production-operator` | `root:codestra-production-operator` | `0710` | Traversable operator home; contents remain non-listable and individually restricted |
 | `/var/lib/codestra-production-operator/.ssh` | operator user/group | `0700` | SSH key directory |
 | `/var/lib/codestra-production-operator/.ssh/authorized_keys` | operator user/group | `0600` | One caller-supplied ED25519 key with forced command |
 | `/var/lib/codestra-production-operator/evidence` | `root:root` | `0700` | Sanitized per-action evidence |
 
 The system user is password-locked. SSH requires public-key authentication,
 has no TTY or forwarding, and applies the forced command in both `sshd_config`
-and `authorized_keys`. Sudoers enumerates nine exact command lines and contains
+and `authorized_keys`. The validator switches to the dedicated account to prove
+that the complete parent-directory chain permits reading that key. Sudoers
+enumerates nine exact command lines and contains
 neither `NOPASSWD: ALL` nor wildcard arguments.
 
 ## Installation and validation

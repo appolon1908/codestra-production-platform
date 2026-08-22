@@ -65,6 +65,12 @@ done
 rollback_dir=$(mktemp -d /var/lib/codestra-production-operator-install.XXXXXX)
 created_user=0
 installed=0
+state_dir=/var/lib/codestra-production-operator
+state_dir_existed=0
+state_dir_metadata_touched=0
+state_dir_uid=
+state_dir_gid=
+state_dir_mode=
 
 backup_path() {
   target=$1
@@ -110,6 +116,10 @@ rollback() {
     restore_path /etc/codestra/production-operator/maintenance-date maintenance-date
     sshd -t >/dev/null 2>&1 || true
   fi
+  if [ "$state_dir_metadata_touched" -eq 1 ] && [ "$state_dir_existed" -eq 1 ]; then
+    chown "$state_dir_uid:$state_dir_gid" "$state_dir" 2>/dev/null || true
+    chmod "$state_dir_mode" "$state_dir" 2>/dev/null || true
+  fi
   if [ "$created_user" -eq 1 ]; then
     userdel codestra-production-operator >/dev/null 2>&1 || true
   fi
@@ -124,10 +134,32 @@ on_failure() {
 }
 trap on_failure EXIT HUP INT TERM
 
+if ! id codestra-production-operator >/dev/null 2>&1; then
+  useradd --system --home-dir /var/lib/codestra-production-operator \
+    --shell /bin/sh --no-create-home codestra-production-operator
+  passwd -l codestra-production-operator >/dev/null
+  created_user=1
+fi
+operator_record=$(getent passwd codestra-production-operator)
+[ "$(printf '%s' "$operator_record" | cut -d: -f3)" -ne 0 ] || fail
+[ "$(printf '%s' "$operator_record" | cut -d: -f6)" = /var/lib/codestra-production-operator ] || fail
+[ "$(printf '%s' "$operator_record" | cut -d: -f7)" = /bin/sh ] || fail
+[ "$(passwd -S codestra-production-operator | awk '{print $2}')" = L ] || fail
+
+if [ -e "$state_dir" ] || [ -L "$state_dir" ]; then
+  [ -d "$state_dir" ] && [ ! -L "$state_dir" ] || fail
+  state_dir_existed=1
+  state_dir_uid=$(stat -c %u "$state_dir")
+  state_dir_gid=$(stat -c %g "$state_dir")
+  state_dir_mode=$(stat -c %a "$state_dir")
+fi
+
 install -d -o root -g root -m 0755 /usr/local/sbin /usr/local/libexec
 install -d -o root -g root -m 0755 /etc/sudoers.d /etc/ssh/sshd_config.d
 install -d -o root -g root -m 0755 /etc/codestra/production-operator
-install -d -o root -g root -m 0700 /var/lib/codestra-production-operator
+state_dir_metadata_touched=1
+install -d -o root -g codestra-production-operator -m 0710 \
+  "$state_dir"
 
 reject_target_symlink /usr/local/sbin/codestra-production-operator
 reject_target_symlink /usr/local/libexec/codestra-production-forced-command
@@ -149,18 +181,6 @@ backup_path /var/lib/codestra-production-operator/.ssh/authorized_keys authorize
 backup_path /etc/codestra/production-operator/release.json release-config
 backup_path /etc/codestra/production-operator/maintenance-date maintenance-date
 installed=1
-
-if ! id codestra-production-operator >/dev/null 2>&1; then
-  useradd --system --home-dir /var/lib/codestra-production-operator \
-    --shell /bin/sh --no-create-home codestra-production-operator
-  passwd -l codestra-production-operator >/dev/null
-  created_user=1
-fi
-operator_record=$(getent passwd codestra-production-operator)
-[ "$(printf '%s' "$operator_record" | cut -d: -f3)" -ne 0 ] || fail
-[ "$(printf '%s' "$operator_record" | cut -d: -f6)" = /var/lib/codestra-production-operator ] || fail
-[ "$(printf '%s' "$operator_record" | cut -d: -f7)" = /bin/sh ] || fail
-[ "$(passwd -S codestra-production-operator | awk '{print $2}')" = L ] || fail
 
 install -o root -g root -m 0750 "$script_dir/codestra-production-operator" \
   /usr/local/sbin/codestra-production-operator
