@@ -163,7 +163,12 @@ def ensure_plugin(admin: str, route_id: str, name: str, config: dict, apply: boo
     existing = one([item for item in plugins if item["name"] == name and item.get("enabled")], name)
     if existing:
         if apply:
-            request(admin, "PATCH", f"/plugins/{existing['id']}", plugin_form(config))
+            request(
+                admin,
+                "PATCH",
+                f"/plugins/{existing['id']}",
+                {"name": name, **plugin_form(config)},
+            )
         current = request(admin, "GET", f"/plugins/{existing['id']}")
         require_plugin(current, config, f"{name} plugin")
         return

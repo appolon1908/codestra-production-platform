@@ -10,6 +10,7 @@ from scripts.reconcile_kong_campaign_automation import (
     require_exact_fields,
     rsa_public_key_pem,
     select_managed_route,
+    ensure_plugin,
 )
 
 
@@ -49,6 +50,26 @@ def test_plugin_config_is_form_encoded_for_kong_admin_api():
         "config.claims_to_verify[]": ["exp"],
         "config.run_on_preflight": True,
     }
+
+
+def test_existing_plugin_patch_includes_immutable_plugin_name(monkeypatch):
+    calls = []
+
+    def fake_request(_admin, method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET" and path == "/routes/route-1/plugins":
+            return {"data": [{"id": "plugin-1", "name": "jwt", "enabled": True}]}
+        if method == "GET" and path == "/plugins/plugin-1":
+            return {"name": "jwt", "config": {"key_claim_name": "azp"}}
+        return {}
+
+    monkeypatch.setattr(
+        "scripts.reconcile_kong_campaign_automation.request", fake_request
+    )
+    ensure_plugin("http://kong", "route-1", "jwt", {"key_claim_name": "azp"}, True)
+    assert ("PATCH", "/plugins/plugin-1", {
+        "name": "jwt", "config.key_claim_name": "azp"
+    }) in calls
 
 
 def test_legacy_same_path_route_is_adopted_only_during_apply():
