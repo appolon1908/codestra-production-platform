@@ -43,4 +43,3 @@ def verify(env: Any) -> dict[str, int]:
 
 def run(env: Any) -> None:
     print("ODOO_FILESTORE_READ_RESULT=" + json.dumps(verify(env), sort_keys=True))
-
