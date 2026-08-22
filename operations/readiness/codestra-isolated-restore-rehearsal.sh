@@ -36,6 +36,13 @@ for candidate in \
 done
 
 cleanup() {
+    # Rehearsal memberships are isolated to the disposable cluster. Revoke
+    # explicitly where possible before removing the cluster and all its roles.
+    if docker inspect "$container" >/dev/null 2>&1; then
+        docker exec "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c 'REVOKE middleware_data_owner FROM middleware_app; REVOKE keycloak_data_owner FROM keycloak' \
+            >/dev/null 2>&1 || true
+    fi
     docker rm -f "$odoo_container" >/dev/null 2>&1 || true
     docker rm -f "$container" >/dev/null 2>&1 || true
     docker volume rm "$volume" >/dev/null 2>&1 || true
@@ -46,7 +53,24 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
-trap 'echo "RESTORE_REHEARSAL_GATE=FAIL" >&2' ERR
+trap 'exit 130' INT TERM
+on_error() {
+    local rc=$?
+    printf 'RESTORE_REHEARSAL_GATE=FAIL\nRESTORE_FAIL_LINE=%s\nRESTORE_FAIL_RC=%s\n' "${BASH_LINENO[0]}" "$rc" >&2
+    if [[ -d "$final_dir" ]]; then
+        printf 'RESTORE_REHEARSAL_GATE=FAIL\nRESTORE_FAIL_LINE=%s\nRESTORE_FAIL_RC=%s\n' "${BASH_LINENO[0]}" "$rc" > "$final_dir/FAILURE.txt"
+    fi
+    for error_log in "$work_dir"/pg-restore-*.stderr; do
+        [[ -f "$error_log" ]] || continue
+        printf 'RESTORE_ERROR_LOG=%s\n' "${error_log##*/}" >&2
+        sed -n '1,120p' "$error_log" >&2
+        [[ -d "$final_dir" ]] && cp "$error_log" "$final_dir/${error_log##*/}"
+    done
+    for diagnostic in "$work_dir"/expected-*-owners.txt "$work_dir"/restored-*-owners.txt "$work_dir"/*default-acl.txt; do
+        [[ -f "$diagnostic" && -d "$final_dir" ]] && cp "$diagnostic" "$final_dir/${diagnostic##*/}"
+    done
+}
+trap on_error ERR
 
 latest=$(find "$backup_root" -mindepth 2 -maxdepth 2 -type f -name STATUS.txt -print0 \
     | xargs -0 -r grep -l '^BACKUP_STATUS=PASS$' \
@@ -58,6 +82,19 @@ test -n "$encrypted"
 
 mkdir -p "$work_dir" "$final_dir"
 chmod 0700 "$work_dir" "$final_dir"
+
+# Capture the production role graph read-only so the rehearsal can prove its
+# temporary owner memberships never escape the disposable cluster.
+docker exec codestra-postgres-1 psql -U postgres -d postgres -At -v ON_ERROR_STOP=1 \
+    -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit from pg_roles r where r.rolname in ('middleware_app','middleware_data_owner') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname='middleware_app' order by 1" \
+    > "$work_dir/production-middleware-role-baseline.txt"
+docker exec codestra-identity-identity-db-1 psql -U keycloak -d keycloak -At -v ON_ERROR_STOP=1 \
+    -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit from pg_roles r where r.rolname in ('keycloak','keycloak_data_owner') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname='keycloak' order by 1" \
+    > "$work_dir/production-keycloak-role-baseline.txt"
+grep -qx 'middleware_data_owner|false|false|true' "$work_dir/production-middleware-role-baseline.txt"
+grep -qx 'keycloak_data_owner|false|false|true' "$work_dir/production-keycloak-role-baseline.txt"
+test "$(grep -c '^middleware_app->middleware_data_owner$' "$work_dir/production-middleware-role-baseline.txt" || true)" -eq 0
+test "$(grep -c '^keycloak->keycloak_data_owner$' "$work_dir/production-keycloak-role-baseline.txt" || true)" -eq 0
 (cd "$backup_dir" && sha256sum -c EVIDENCE-SHA256SUMS)
 (cd "$backup_dir" && sha256sum -c SHA256SUMS)
 
@@ -116,6 +153,7 @@ docker exec "$container" pg_isready -U postgres >/dev/null
 docker exec -i "$container" psql -U postgres -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
 \set rehearsal_password `cat /run/secrets/rehearsal_db_password`
 CREATE ROLE keycloak LOGIN;
+CREATE ROLE keycloak_data_owner;
 CREATE ROLE codestra_monitoring;
 CREATE ROLE middleware_app LOGIN;
 CREATE ROLE middleware_data_owner;
@@ -134,27 +172,34 @@ CREATE ROLE mw_vicidial_adapter;
 CREATE ROLE mw_webphone_session;
 CREATE ROLE n8n_app LOGIN;
 CREATE ROLE odoo_app LOGIN PASSWORD :'rehearsal_password';
+GRANT keycloak_data_owner TO keycloak;
+GRANT middleware_data_owner TO middleware_app;
 SQL
+test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select rolcanlogin from pg_roles where rolname='middleware_data_owner'")" = f
+test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select rolcanlogin from pg_roles where rolname='keycloak_data_owner'")" = f
+test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select pg_has_role('middleware_app','middleware_data_owner','MEMBER')")" = t
+test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select pg_has_role('keycloak','keycloak_data_owner','MEMBER')")" = t
 docker exec "$container" createdb -U postgres -O odoo_app codestra_odoo_restore
-docker exec "$container" createdb -U postgres -O middleware_app codestra_middleware
+docker exec "$container" createdb -U postgres -O middleware_data_owner codestra_middleware
 docker exec "$container" createdb -U postgres -O n8n_app codestra_n8n
-docker exec "$container" createdb -U postgres -O keycloak keycloak
+docker exec "$container" createdb -U postgres -O keycloak_data_owner keycloak
+test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select datname||'|'||pg_get_userbyid(datdba) from pg_database where datname='codestra_middleware'")" = 'codestra_middleware|middleware_data_owner'
+test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select datname||'|'||pg_get_userbyid(datdba) from pg_database where datname='keycloak'")" = 'keycloak|keycloak_data_owner'
 
 database_import_started_ns=$(date +%s%N)
 for pair in odoo:codestra_odoo_restore middleware:codestra_middleware n8n:codestra_n8n keycloak:keycloak; do
     file=${pair%%:*}
     database=${pair#*:}
     docker cp "$work_dir/${file}.dump" "$container:/tmp/${file}.dump" >/dev/null
-    restore_args=(--exit-on-error --no-owner)
-    case "$database" in
-        codestra_odoo_restore) restore_args+=(--role=odoo_app) ;;
-        codestra_middleware) restore_args+=(--role=middleware_app) ;;
-        codestra_n8n) restore_args+=(--role=n8n_app) ;;
-        keycloak) restore_args+=(--role=keycloak) ;;
-    esac
+    # Preserve archive ownership inside the isolated cluster. All required
+    # application and non-login owner roles exist before restoration.
+    restore_args=(--exit-on-error)
     docker exec "$container" pg_restore -U postgres -d "$database" \
-        "${restore_args[@]}" "/tmp/${file}.dump" >/dev/null
+        "${restore_args[@]}" "/tmp/${file}.dump" \
+        >"$work_dir/pg-restore-${file}.stdout" 2>"$work_dir/pg-restore-${file}.stderr"
 done
+pg_restore_errors=$(awk 'BEGIN { IGNORECASE=1 } /(^|[[:space:]])error:/ { count++ } END { print count + 0 }' "$work_dir"/pg-restore-*.stderr)
+test "$pg_restore_errors" -eq 0
 database_import_finished_ns=$(date +%s%N)
 database_import_ms=$(( (database_import_finished_ns - database_import_started_ns) / 1000000 ))
 
@@ -273,8 +318,28 @@ application_health_finished_ns=$(date +%s%N)
 application_health_ms=$(( (application_health_finished_ns - application_health_started_ns) / 1000000 ))
 measured_rto_ms=$(( (application_health_finished_ns - rehearsal_started_ns) / 1000000 ))
 
+docker exec codestra-postgres-1 psql -U postgres -d postgres -At -v ON_ERROR_STOP=1 \
+    -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit from pg_roles r where r.rolname in ('middleware_app','middleware_data_owner') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname='middleware_app' order by 1" \
+    > "$work_dir/production-middleware-role-after.txt"
+docker exec codestra-identity-identity-db-1 psql -U keycloak -d keycloak -At -v ON_ERROR_STOP=1 \
+    -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit from pg_roles r where r.rolname in ('keycloak','keycloak_data_owner') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname='keycloak' order by 1" \
+    > "$work_dir/production-keycloak-role-after.txt"
+cmp "$work_dir/production-middleware-role-baseline.txt" "$work_dir/production-middleware-role-after.txt"
+cmp "$work_dir/production-keycloak-role-baseline.txt" "$work_dir/production-keycloak-role-after.txt"
+cp "$work_dir/production-middleware-role-baseline.txt" "$final_dir/PRODUCTION-MIDDLEWARE-ROLE-BASELINE.txt"
+cp "$work_dir/production-middleware-role-after.txt" "$final_dir/PRODUCTION-MIDDLEWARE-ROLE-AFTER.txt"
+cp "$work_dir/production-keycloak-role-baseline.txt" "$final_dir/PRODUCTION-KEYCLOAK-ROLE-BASELINE.txt"
+cp "$work_dir/production-keycloak-role-after.txt" "$final_dir/PRODUCTION-KEYCLOAK-ROLE-AFTER.txt"
+
 cat > "$final_dir/RESTORE-RESULT.txt" <<EOF
 RESTORE_REHEARSAL_GATE=PASS
+ISOLATED_ROLE_MODEL=PASS
+MIDDLEWARE_DATA_OWNER_NOLOGIN=PASS
+KEYCLOAK_DATA_OWNER_NOLOGIN=PASS
+RESTORE_ROLE_MEMBERSHIP_SCOPE=ISOLATED_ONLY
+PRODUCTION_ROLE_PRIVILEGES_UNCHANGED=PASS
+PG_RESTORE=PASS
+PG_RESTORE_ERRORS=${pg_restore_errors}
 BACKUP_CHECKSUM_GATE=PASS
 INNER_CHECKSUM_GATE=PASS
 ISOLATED_NETWORK_GATE=PASS
@@ -297,5 +362,12 @@ LOCAL_RUNTIME_IMAGE_ARCHIVE_GATE=PASS
 EXACT_RUNTIME_IMAGE_ID_BINDING_GATE=PASS
 DISPOSABLE_CLEANUP_REQUIRED=YES
 EOF
-(cd "$final_dir" && sha256sum RESTORE-RESULT.txt ODOO-FILESTORE-VALIDATION.json > SHA256SUMS && sha256sum -c SHA256SUMS)
+(cd "$final_dir" && sha256sum \
+    RESTORE-RESULT.txt \
+    ODOO-FILESTORE-VALIDATION.json \
+    PRODUCTION-MIDDLEWARE-ROLE-BASELINE.txt \
+    PRODUCTION-MIDDLEWARE-ROLE-AFTER.txt \
+    PRODUCTION-KEYCLOAK-ROLE-BASELINE.txt \
+    PRODUCTION-KEYCLOAK-ROLE-AFTER.txt \
+    > SHA256SUMS && sha256sum -c SHA256SUMS)
 printf '%s\n' "$final_dir"
