@@ -298,6 +298,22 @@ class MonitoringGovernanceTests(unittest.TestCase):
                 self.assertTrue(webhook["url_file"].startswith("/run/secrets/"))
                 self.assertTrue(webhook["send_resolved"])
 
+    def test_email_provisioning_foreign_keys_match_installed_canonical_ids(self) -> None:
+        migration = (
+            ROOT / "migrations" / "control_plane" / "003_campaign_email_provisioning.sql"
+        ).read_text()
+        self.assertIn("format_type(a.atttypid,a.atttypmod)", migration)
+        self.assertIn("campaign_id_type NOT IN ('text','uuid')", migration)
+        self.assertIn("agent_id_type NOT IN ('text','uuid')", migration)
+        self.assertEqual(
+            migration.count(
+                "%s NOT NULL REFERENCES control_plane.campaign(id)"
+            ),
+            2,
+        )
+        self.assertIn("%s NOT NULL REFERENCES control_plane.agent(id)", migration)
+        self.assertEqual(migration.count("DROP POLICY IF EXISTS"), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
