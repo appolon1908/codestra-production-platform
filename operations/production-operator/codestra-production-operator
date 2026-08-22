@@ -197,6 +197,7 @@ def validate_backup_state() -> dict[str, object]:
     invocation = run_fixed([
         "/usr/bin/env",
         f"CODESTRA_BACKUP_ROOT={READINESS_BACKUP_ROOT}",
+        "CODESTRA_BACKUP_REQUIRE_EVIDENCE=true",
         str(BACKUP_STATE_VALIDATOR),
     ])
     if invocation.returncode != 0:

@@ -72,6 +72,29 @@ class BackupOperationsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("backup_age_seconds", result.stdout)
 
+    def test_readiness_check_verifies_referenced_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            backup = root / stamp
+            backup.mkdir()
+            artifact = backup / "bundle.gpg"
+            artifact.write_bytes(b"verified")
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            (backup / "EVIDENCE-SHA256SUMS").write_text(f"{digest}  bundle.gpg\n")
+            (root / "LAST_SUCCESS").write_text(stamp + "\n")
+            environment = {
+                "CODESTRA_BACKUP_ROOT": directory,
+                "CODESTRA_BACKUP_MAX_AGE_SECONDS": "120",
+                "CODESTRA_BACKUP_MIN_FREE_BYTES": "1",
+                "CODESTRA_BACKUP_REQUIRE_EVIDENCE": "true",
+            }
+            self.assertEqual(run("check-backup-state.sh", environment).returncode, 0)
+            artifact.write_bytes(b"corrupted")
+            result = run("check-backup-state.sh", environment)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("backup_evidence_invalid", result.stdout)
+
     def test_cleanup_never_deletes_and_preserves_minimum(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
