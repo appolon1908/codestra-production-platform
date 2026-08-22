@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import stat
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -20,7 +21,7 @@ from typing import Any, Iterable, Mapping, Sequence
 EVENT_TYPE = "vicidial.call.ended"
 SOURCES = ("vicidial_log", "vicidial_closer_log")
 TRANSIENT_ACKS = frozenset((408, 425, 429, 500, 502, 503, 504))
-SUCCESS_ACKS = frozenset((200, 201, 202, 204, 409))
+SUCCESS_ACKS = frozenset((200, 201, 202, 204))
 MAX_DURATION_SECONDS = 86400
 PAYLOAD_FIELDS = frozenset(
     ("call_id", "ended_at", "duration_seconds", "direction",
@@ -72,13 +73,15 @@ def load_watermark(
     allowed_group: str | None = None,
     allowed_owner_uid: int = 0,
 ) -> tuple[SourceBoundary, ...]:
-    st = os.stat(path)
-    group_read = bool(st.st_mode & 0o040)
-    if st.st_uid != allowed_owner_uid or st.st_mode & 0o007 or (group_read and not allowed_group):
-        raise PublisherError("watermark must be root-owned and private")
-    if group_read:
+    st = os.lstat(path)
+    mode = stat.S_IMODE(st.st_mode)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != allowed_owner_uid:
+        raise PublisherError("watermark must be a root-owned regular file")
+    if mode not in (0o600, 0o640):
+        raise PublisherError("watermark mode must be exactly 0600 or approved-group 0640")
+    if mode == 0o640:
         import grp
-        if grp.getgrgid(st.st_gid).gr_name != allowed_group or not (st.st_mode & 0o040):
+        if not allowed_group or grp.getgrgid(st.st_gid).gr_name != allowed_group:
             raise PublisherError("watermark group ownership is invalid")
     with open(path, encoding="utf-8") as handle:
         value = json.load(handle)
@@ -218,33 +221,60 @@ class DeliveryLedger:
         self.db.commit()
 
     def acknowledge(self, event_id: str, status: int) -> str:
+        row = self.db.execute(
+            "SELECT table_name,end_epoch,source_id,state FROM event_delivery WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        if row is None:
+            raise PublisherError("acknowledgement references unknown event")
+        if row[3] == "acknowledged":
+            return "acknowledged"
+        if row[3] == "dead_letter":
+            raise PublisherError("dead-lettered event requires operator reconciliation")
         if status not in SUCCESS_ACKS:
             if status in TRANSIENT_ACKS:
                 return self.fail(event_id, f"transient HTTP {status}")
             return self.fail(event_id, f"permanent HTTP {status}", permanent=True)
-        row = self.db.execute(
-            "SELECT table_name,end_epoch,source_id FROM event_delivery WHERE event_id=?", (event_id,)
-        ).fetchone()
-        if row is None:
-            raise PublisherError("acknowledgement references unknown event")
         now = datetime.now(timezone.utc).isoformat()
-        self.db.execute("UPDATE event_delivery SET state='acknowledged',acknowledged_at=? WHERE event_id=?", (now, event_id))
         self.db.execute(
-            "INSERT INTO publisher_cursor(table_name,end_epoch,source_id) VALUES(?,?,?) ON CONFLICT(table_name) DO UPDATE SET end_epoch=excluded.end_epoch,source_id=excluded.source_id WHERE (excluded.end_epoch,excluded.source_id) > (publisher_cursor.end_epoch,publisher_cursor.source_id)",
-            row,
+            "UPDATE event_delivery SET state='acknowledged',acknowledged_at=? "
+            "WHERE event_id=? AND state IN ('pending','retry')",
+            (now, event_id),
+        )
+        self.db.execute(
+            "INSERT INTO publisher_cursor(table_name,end_epoch,source_id) VALUES(?,?,?) "
+            "ON CONFLICT(table_name) DO UPDATE SET "
+            "end_epoch=excluded.end_epoch,source_id=excluded.source_id "
+            "WHERE (excluded.end_epoch,excluded.source_id) > "
+            "(publisher_cursor.end_epoch,publisher_cursor.source_id)",
+            row[:3],
         )
         self.db.commit()
         return "acknowledged"
 
     def fail(self, event_id: str, error: str, permanent: bool = False) -> str:
-        row = self.db.execute("SELECT attempts,state FROM event_delivery WHERE event_id=?", (event_id,)).fetchone()
+        row = self.db.execute(
+            "SELECT attempts,state FROM event_delivery WHERE event_id=?", (event_id,)
+        ).fetchone()
         if row is None:
             raise PublisherError("failure references unknown event")
+        if row[1] in ("acknowledged", "dead_letter"):
+            raise PublisherError("terminal delivery state cannot be changed")
         attempts = int(row[0]) + 1
         state = "dead_letter" if permanent or attempts >= self.max_attempts else "retry"
-        self.db.execute("UPDATE event_delivery SET attempts=?,state=?,last_error=? WHERE event_id=?", (attempts, state, str(error)[:500], event_id))
+        self.db.execute(
+            "UPDATE event_delivery SET attempts=?,state=?,last_error=? "
+            "WHERE event_id=? AND state IN ('pending','retry')",
+            (attempts, state, str(error)[:500], event_id),
+        )
         self.db.commit()
         return state
+
+    def acknowledged_count(self) -> int:
+        row = self.db.execute(
+            "SELECT COUNT(*) FROM event_delivery WHERE state='acknowledged'"
+        ).fetchone()
+        return int(row[0])
 
     def state(self, event_id: str) -> str:
         row = self.db.execute("SELECT state FROM event_delivery WHERE event_id=?", (event_id,)).fetchone()
