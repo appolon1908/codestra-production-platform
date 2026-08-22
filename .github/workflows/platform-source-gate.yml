@@ -60,9 +60,11 @@ jobs:
             sha256sum --check -
 
       - name: Run complete clean-checkout platform suite
+        env:
+          CONTROL_PLANE_DB: ${{ runner.temp }}/control-plane-ci.db
         run: |
           set -o pipefail
-          sudo --preserve-env=PATH \
+          sudo --preserve-env=PATH,CONTROL_PLANE_DB \
             "$(command -v python)" -m pytest -q |
             tee "${RUNNER_TEMP}/pytest-output.txt"
           python -m pytest -q \
