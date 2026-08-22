@@ -9,6 +9,7 @@ on:
       - "eventing/**"
       - "identity/**"
       - "integrations/**"
+      - "operations/**"
       - "config/**"
       - "deploy/**"
       - "docs/**"
