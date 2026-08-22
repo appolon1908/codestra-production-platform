@@ -51,6 +51,7 @@ SYSTEMD_ACTIONS = {
     "restore-test": "codestra-readiness-restore.service",
 }
 BACKUP_STATE_VALIDATOR = Path("/opt/codestra/operations/backup/check-backup-state.sh")
+READINESS_BACKUP_ROOT = Path("/opt/codestra/backups/production-readiness-local")
 CONFIG_DIR = Path("/etc/codestra/production-operator")
 RELEASE_CONFIG = CONFIG_DIR / "release.json"
 MAINTENANCE_DATE = CONFIG_DIR / "maintenance-date"
@@ -193,7 +194,11 @@ def validate_backup_state() -> dict[str, object]:
         raise OperatorError("backup-state validator has unsafe file type")
     if info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o755:
         raise OperatorError("backup-state validator has unsafe ownership or mode")
-    invocation = run_fixed([str(BACKUP_STATE_VALIDATOR)])
+    invocation = run_fixed([
+        "/usr/bin/env",
+        f"CODESTRA_BACKUP_ROOT={READINESS_BACKUP_ROOT}",
+        str(BACKUP_STATE_VALIDATOR),
+    ])
     if invocation.returncode != 0:
         raise OperatorError("backup-state validation failed")
     return {"validator": str(BACKUP_STATE_VALIDATOR), "returncode": 0}

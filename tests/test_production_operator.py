@@ -472,6 +472,8 @@ def test_backup_actions_use_installed_fixed_paths() -> None:
     assert '"backup": "codestra-readiness-backup.service"' in text
     assert '"restore-test": "codestra-readiness-restore.service"' in text
     assert 'Path("/opt/codestra/operations/backup/check-backup-state.sh")' in text
+    assert 'Path("/opt/codestra/backups/production-readiness-local")' in text
+    assert 'f"CODESTRA_BACKUP_ROOT={READINESS_BACKUP_ROOT}"' in text
     assert "codestra-backup.service" not in text
     assert "codestra-backup-state.service" not in text
 
