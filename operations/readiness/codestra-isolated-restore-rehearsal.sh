@@ -15,12 +15,22 @@ volume="codestra_readiness_restore_${suffix}"
 rehearsal_started_ns=$(date +%s%N)
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 validator=
+odoo_read_verifier=
 for candidate in \
     "$script_dir/../restore/validate_odoo_filestore_pair.py" \
     "$script_dir/../../restore/validate_odoo_filestore_pair.py" \
     /opt/codestra/operations/restore/validate_odoo_filestore_pair.py; do
     if [[ -f "$candidate" && -r "$candidate" ]]; then
         validator=$candidate
+        break
+    fi
+done
+for candidate in \
+    "$script_dir/../restore/verify_odoo_filestore_reads.py" \
+    "$script_dir/../../restore/verify_odoo_filestore_reads.py" \
+    /opt/codestra/operations/restore/verify_odoo_filestore_reads.py; do
+    if [[ -f "$candidate" && -r "$candidate" ]]; then
+        odoo_read_verifier=$candidate
         break
     fi
 done
@@ -69,6 +79,7 @@ test -s "$work_dir/ODOO-BACKUP-METADATA"
 test -f "$work_dir/odoo-attachments.tsv"
 grep -qx "BACKUP_ID=${backup_dir##*/}" "$work_dir/ODOO-BACKUP-METADATA"
 test -n "$validator"
+test -n "$odoo_read_verifier"
 test -f "$work_dir/restored-configuration/opt/codestra/compose/compose.yaml"
 test -f "$work_dir/restored-configuration/opt/codestra/compose/compose.live-delivery-safety.yaml"
 test -f "$work_dir/restored-configuration/etc/caddy/Caddyfile"
@@ -232,6 +243,32 @@ done
 test "$odoo_health" = healthy
 test "$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$odoo_container")" = null
 test "$(docker network inspect -f '{{.Internal}}' "$network")" = true
+
+# A healthy process and host-side hashes do not prove that Odoo can resolve the
+# restored database-keyed filestore.  Exercise every filestore-backed attachment
+# through ir.attachment and compare the bytes Odoo returns with its DB checksum.
+docker cp "$odoo_read_verifier" "$odoo_container:/tmp/verify_odoo_filestore_reads.py" >/dev/null
+docker exec -i "$odoo_container" odoo shell \
+    --config=/etc/odoo/odoo.conf --no-http --no-database-list \
+    > "$work_dir/odoo-filestore-read-result.txt" <<'PY'
+exec(compile(open("/tmp/verify_odoo_filestore_reads.py", "rb").read(), "/tmp/verify_odoo_filestore_reads.py", "exec"))
+run(env)
+PY
+grep -q '^ODOO_FILESTORE_READ_RESULT=' "$work_dir/odoo-filestore-read-result.txt"
+odoo_filestore_objects_read=$(python3 - "$work_dir/odoo-filestore-read-result.txt" <<'PY'
+import json
+import sys
+
+prefix = "ODOO_FILESTORE_READ_RESULT="
+lines = [line.strip() for line in open(sys.argv[1], encoding="utf-8") if line.startswith(prefix)]
+if len(lines) != 1:
+    raise SystemExit("expected exactly one Odoo filestore read result")
+result = json.loads(lines[0][len(prefix):])
+if result.get("read_failures") != 0 or result.get("odoo_filestore_objects_read", 0) < 1:
+    raise SystemExit("Odoo filestore read verification failed")
+print(result["odoo_filestore_objects_read"])
+PY
+)
 application_health_finished_ns=$(date +%s%N)
 application_health_ms=$(( (application_health_finished_ns - application_health_started_ns) / 1000000 ))
 measured_rto_ms=$(( (application_health_finished_ns - rehearsal_started_ns) / 1000000 ))
@@ -249,6 +286,8 @@ APPLICATION_VOLUME_RESTORE_GATE=PASS
 ODOO_DATABASE_FILESTORE_PAIR_GATE=PASS
 ODOO_DATABASE_AUTHENTICATION_GATE=PASS
 ODOO_ISOLATED_APPLICATION_HEALTH_GATE=PASS
+ODOO_FILESTORE_OBJECT_READ_GATE=PASS
+ODOO_FILESTORE_OBJECTS_READ=${odoo_filestore_objects_read}
 REPOSITORY_MATERIALIZATION_MS=${repository_materialization_ms}
 DATABASE_IMPORT_MS=${database_import_ms}
 APPLICATION_HEALTH_MS=${application_health_ms}
