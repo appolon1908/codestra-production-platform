@@ -23,7 +23,7 @@ def authorize_campaign_email(value: dict, *, simulation: bool = False) -> None:
     if str(value.get("tenant_id") or "") != "COD":
         raise ControlPlaneError("campaign_tenant_denied")
     business_unit = str(value.get("business_unit_id") or "")
-    if business_unit and business_unit != "COD":
+    if business_unit != "COD":
         raise ControlPlaneError("campaign_business_unit_denied")
     if not _enabled("COD_WEB_OUT_EMAIL_ENABLED"):
         raise ControlPlaneError("campaign_email_gate_denied")

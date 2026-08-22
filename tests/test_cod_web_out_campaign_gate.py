@@ -16,9 +16,9 @@ def canary_environment(monkeypatch):
 def test_empty_recipient_slot_allows_only_no_submit_simulation(monkeypatch):
     canary_environment(monkeypatch)
     monkeypatch.delenv("COD_WEB_OUT_CANARY_RECIPIENT", raising=False)
-    authorize_campaign_email({"campaign_id":"COD-WEB-OUT", "tenant_id":"COD", "external_submission":False}, simulation=True)
+    authorize_campaign_email({"campaign_id":"COD-WEB-OUT", "tenant_id":"COD", "business_unit_id":"COD", "external_submission":False}, simulation=True)
     with pytest.raises(ControlPlaneError, match="canary_recipient_denied"):
-        authorize_campaign_email({"campaign_id":"COD-WEB-OUT", "tenant_id":"COD", "recipient":"person@example.invalid"})
+        authorize_campaign_email({"campaign_id":"COD-WEB-OUT", "tenant_id":"COD", "business_unit_id":"COD", "recipient":"person@example.invalid"})
 
 
 def test_exact_allowlist_and_campaign_isolation(monkeypatch):
@@ -27,6 +27,7 @@ def test_exact_allowlist_and_campaign_isolation(monkeypatch):
     authorize_campaign_email({"campaign_id":"COD-WEB-OUT", "tenant_id":"COD", "business_unit_id":"COD", "recipient":"approved@example.invalid"})
     for value in (
         {"campaign_id":"COD-WEB-OUT", "tenant_id":"COD", "recipient":"other@example.invalid"},
+        {"campaign_id":"COD-WEB-OUT", "tenant_id":"COD", "business_unit_id":"", "recipient":"approved@example.invalid"},
         {"campaign_id":"COD-WEB-OUT", "tenant_id":"OTHER", "recipient":"approved@example.invalid"},
         {"campaign_id":"COD-WEB-OUT", "tenant_id":"COD", "business_unit_id":"OTHER", "recipient":"approved@example.invalid"},
         {"campaign_id":"COD-TEST-OUT", "recipient":"approved@example.invalid"},

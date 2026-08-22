@@ -101,6 +101,8 @@ def dispatch_messages() -> int:
     with current.connect() as db:
         rows = [dict(row) for row in db.execute("SELECT * FROM messages WHERE status='queued' ORDER BY created_at LIMIT 50")]
     for message in rows:
+        metadata = json.loads(message.get("content_metadata") or "{}")
+        message["business_unit_id"] = metadata.get("business_unit_id")
         if not current.circuit_allows(message["provider"], int(os.getenv("CONTROL_PLANE_CIRCUIT_COOLDOWN", "30"))):
             continue
         try:

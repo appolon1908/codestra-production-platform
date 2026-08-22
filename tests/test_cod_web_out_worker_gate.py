@@ -39,6 +39,7 @@ class CodWebOutWorkerGateTests(unittest.TestCase):
         value = {
             "channel": "email",
             "tenant_id": "COD",
+            "business_unit_id": "COD",
             "customer_id": "customer-1",
             "request_id": "request-1",
             "correlation_id": "correlation-1",
@@ -88,6 +89,17 @@ class CodWebOutWorkerGateTests(unittest.TestCase):
         result = self.store.get_message(message["message_id"], "COD")
         self.assertEqual(result["status"], "rejected")
         self.assertEqual(result["provider_error_code"], "canary_recipient_denied")
+
+    def test_message_creation_rejects_missing_business_unit(self):
+        with self.assertRaisesRegex(ValueError, "campaign_business_unit_denied"):
+            value = {
+                "channel": "email", "tenant_id": "COD", "customer_id": "customer-1",
+                "request_id": "request-1", "correlation_id": "correlation-1",
+                "idempotency_key": "missing-unit", "sender": "sender@example.invalid",
+                "recipient": "approved@example.invalid", "source_application": "n8n",
+                "campaign_id": "COD-WEB-OUT", "classification": "transactional",
+            }
+            self.store.create_message(value)
 
     def test_disabled_campaign_gate_fails_closed_before_provider(self):
         message = self.queue(key="disabled-gate")
