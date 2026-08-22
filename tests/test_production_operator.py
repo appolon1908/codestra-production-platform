@@ -502,6 +502,21 @@ def test_readiness_backup_validation_hashes_exact_evidence(monkeypatch, tmp_path
     evidence = backup / "EVIDENCE-SHA256SUMS"
     evidence.write_text("\n".join(records) + "\n")
     evidence.chmod(0o600)
+    original_lstat = Path.lstat
+
+    def root_owned_lstat(path: Path):
+        info = original_lstat(path)
+        values = list(info)
+        values[4] = 0
+        values[5] = 0
+        return os.stat_result(values)
+
+    # The production validator must remain root-owned. CI runs without root, so
+    # this fixture models root ownership while retaining the real mode/type and
+    # checksum behavior under test.
+    monkeypatch.setattr(Path, "lstat", root_owned_lstat)
+    monkeypatch.setattr(OPERATOR, "checked_root_file", lambda path: path.read_text().strip())
+    monkeypatch.setattr(OPERATOR, "checked_root_bytes", lambda path: path.read_bytes())
     monkeypatch.setattr(OPERATOR, "BACKUP_STATE_VALIDATOR", validator)
     monkeypatch.setattr(OPERATOR, "READINESS_BACKUP_ROOT", root)
     monkeypatch.setattr(
