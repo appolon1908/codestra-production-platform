@@ -46,9 +46,13 @@ def test_exact_verification_rejects_live_drift():
 
 
 def test_plugin_config_is_form_encoded_for_kong_admin_api():
-    assert plugin_form({"claims_to_verify": ["exp"], "run_on_preflight": True}) == {
+    assert plugin_form({
+        "claims_to_verify": ["exp"], "run_on_preflight": True,
+        "anonymous_enabled": False,
+    }) == {
         "config.claims_to_verify[]": ["exp"],
-        "config.run_on_preflight": True,
+        "config.run_on_preflight": "true",
+        "config.anonymous_enabled": "false",
     }
 
 
