@@ -48,11 +48,16 @@ def actual_state() -> dict[str, dict[str, dict[str, str]]]:
         "ingroups": (
             f"SELECT group_id,group_name,active FROM {SCHEMA}.vicidial_inbound_groups"
         ),
+        "statuses": (
+            "SELECT CONCAT(campaign_id,':',status),status_name,selectable,"
+            f"human_answered,category FROM {SCHEMA}.vicidial_campaign_statuses"
+        ),
     }
     fields = {
         "campaigns": ("id", "name", "active", "dial_method", "call_time", "auto", "hopper"),
         "groups": ("id", "name", "allowed"),
         "ingroups": ("id", "name", "active"),
+        "statuses": ("id", "name", "selectable", "human_answered", "category"),
     }
     state = {}
     for kind, sql in queries.items():
@@ -110,6 +115,25 @@ def build_plan(rows: list[dict[str, str]], state) -> dict:
         for group in sorted(ingroups)
         if group in state["ingroups"] and state["ingroups"][group]["active"] != "N"
     ]
+    # TEST_SYN dispositions are campaign-scoped. Existing global VICIdial
+    # statuses are reused where possible; only missing semantic codes are made.
+    required_statuses = {
+        "TEST_SYN:ANS": ("Answered", "Y", "HUMAN"),
+        "TEST_SYN:APPT": ("Appointment", "Y", "CALLBACK"),
+        "TEST_SYN:WN": ("Wrong Number", "N", "UNWORKABLE"),
+    }
+    status_creates = [
+        {
+            "id": key,
+            "campaign_id": key.split(":", 1)[0],
+            "status": key.split(":", 1)[1],
+            "name": values[0],
+            "human_answered": values[1],
+            "category": values[2],
+        }
+        for key, values in required_statuses.items()
+        if key not in state["statuses"]
+    ]
     return {
         "campaign_creates": creates,
         "campaign_unchanged": unchanged,
@@ -117,12 +141,13 @@ def build_plan(rows: list[dict[str, str]], state) -> dict:
         "group_creates": group_creates,
         "ingroup_creates": ingroup_creates,
         "ingroup_safety_updates": ingroup_safety_updates,
+        "status_creates": status_creates,
         "blockers": blockers,
     }
 
 
 def sql_for(plan: dict) -> str:
-    statements = [f"USE `{SCHEMA}`;", "LOCK TABLES vicidial_campaigns WRITE, vicidial_user_groups WRITE, vicidial_inbound_groups WRITE;"]
+    statements = [f"USE `{SCHEMA}`;", "LOCK TABLES vicidial_campaigns WRITE, vicidial_user_groups WRITE, vicidial_inbound_groups WRITE, vicidial_campaign_statuses WRITE;"]
     for item in plan["campaign_creates"]:
         statements.append(
             "INSERT INTO vicidial_campaigns"
@@ -152,6 +177,13 @@ def sql_for(plan: dict) -> str:
             "UPDATE vicidial_inbound_groups SET active='N' WHERE group_id="
             + quote(item["id"]) + ";"
         )
+    for item in plan.get("status_creates", []):
+        statements.append(
+            "INSERT INTO vicidial_campaign_statuses"
+            "(campaign_id,status,status_name,selectable,human_answered,category) VALUES("
+            + ",".join((quote(item["campaign_id"]), quote(item["status"]), quote(item["name"]), "'Y'", quote(item["human_answered"]), quote(item["category"])))
+            + ");"
+        )
     statements.extend(("UNLOCK TABLES;", "SELECT 'APPLY_COMPLETE';"))
     return "\n".join(statements) + "\n"
 
@@ -171,6 +203,9 @@ def verify(rows: list[dict[str, str]], state) -> dict:
             errors.append(f"missing ingroup {row['EXPECTED_INGROUP']}")
         elif row["EXPECTED_INGROUP"] and state["ingroups"][row["EXPECTED_INGROUP"]]["active"] != "N":
             errors.append(f"active ingroup {row['EXPECTED_INGROUP']}")
+    for status in ("ANS", "APPT", "WN"):
+        if f"TEST_SYN:{status}" not in state["statuses"]:
+            errors.append(f"missing TEST_SYN status {status}")
     return {"errors": errors, "verified": len(rows) if not errors else 0}
 
 

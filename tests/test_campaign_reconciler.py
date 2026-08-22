@@ -15,6 +15,13 @@ def test_apply_sql_is_always_disabled_and_non_dialing():
         "group_creates": [{"id": "COD_AGENTS", "campaigns": ["COD12345"]}],
         "ingroup_creates": [{"id": "COD1234I", "name": "COD-X-IN"}],
         "ingroup_safety_updates": [{"id": "TEST_IN"}],
+        "status_creates": [{
+            "campaign_id": "TEST_SYN",
+            "status": "ANS",
+            "name": "Answered",
+            "human_answered": "Y",
+            "category": "HUMAN",
+        }],
     })
     assert "'N','MANUAL'" in sql
     assert "hopper_level,auto_dial_level" in sql
@@ -23,6 +30,8 @@ def test_apply_sql_is_always_disabled_and_non_dialing():
     assert "active,group_color" in sql
     assert "hopper_level=0 WHERE campaign_id='CODSAFE1'" in sql
     assert "active='N' WHERE group_id='TEST_IN'" in sql
+    assert "vicidial_campaign_statuses" in sql
+    assert "'TEST_SYN','ANS','Answered','Y','Y','HUMAN'" in sql
 
 
 def test_sql_quotes_external_identifiers():
