@@ -48,10 +48,19 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert {method for route in KONG["routes"] for method in route["methods"]} <= {"GET", "POST"}
     assert all(route["maxBodyMb"] == 1 and route["ratePerMinute"] > 0 for route in KONG["routes"])
     assert {route["requiredScope"] for route in KONG["routes"]} == {"callbacks.read", "callbacks.write"}
+    assert KONG["consumer"] == {
+        "username": "codestra-odoo-callback-service",
+        "custom_id": "codestra-odoo-callback-service",
+    }
+    assert KONG["tenant"] == "COD" and KONG["campaign"] == "TEST_SYN"
+    assert KONG["requiredRole"] == "service"
     assert 'parser.add_argument("--apply", action="store_true")' in RECONCILER
     assert "duplicate Kong" in RECONCILER
     assert "correlation-id" in RECONCILER
-    assert "openid-connect" in RECONCILER
+    assert '"jwt"' in RECONCILER
+    assert '"pre-function"' in RECONCILER
+    assert "active_rsa_key" in RECONCILER
+    assert "claim_guard" in RECONCILER
     assert "verify_service" in RECONCILER
     assert "verify_route" in RECONCILER
     assert "verify_plugins" in RECONCILER
@@ -67,12 +76,10 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert "datetime.now(timezone.utc)" in RECONCILER
     assert '"sources": []' not in RECONCILER
     assert '"destinations": []' not in RECONCILER
-    assert "audience_required" in RECONCILER
-    assert "bearer_token_param_type" in RECONCILER
+    assert "claims_to_verify" in RECONCILER
+    assert "key_claim_name" in RECONCILER
     assert 'parser.add_argument("--evidence", type=Path, required=True)' in RECONCILER
     assert "manifest_sha256" in RECONCILER
-    assert 'name == "openid-connect" and current' in RECONCILER
-    assert "if oidc_matches(current, expected, spec):" in RECONCILER
     assert "needs_quarantine" in RECONCILER
     assert "callback-route-disabled.invalid" in RECONCILER
     assert 'correlation.get("echo_downstream"), True' in RECONCILER
