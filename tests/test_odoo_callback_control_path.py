@@ -90,6 +90,8 @@ def test_deployment_keeps_every_broad_delivery_path_disabled():
     assert 'CODESTRA_CALLBACK_SYNC_ENABLED: "true"' in DEPLOYMENT
     assert "codestra-odoo-callback-service" in DEPLOYMENT
     assert "exact reviewed addon release required" in DEPLOYMENT
+    assert "exact reviewed campaign dependency release required" in DEPLOYMENT
+    assert "/mnt/extra-addons/call_center_campaign:ro" in DEPLOYMENT
     for setting in (
         "CALLBACK_EMAIL_COMMAND_ENABLED", "CALLBACK_DELIVERY_ENABLED",
         "LIVE_EMAIL_DELIVERY", "LIVE_PSTN_DIALING", "ODOO_DELIVERY_ENABLED",

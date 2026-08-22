@@ -11,6 +11,7 @@ services:
       CODESTRA_CALLBACK_ALLOWED_CAMPAIGN: "TEST_SYN"
     volumes:
       - ${ODOO_CALLBACK_ADDON_RELEASE:?exact reviewed addon release required}:/mnt/extra-addons/codestra_appointments:ro
+      - ${ODOO_CALLBACK_CAMPAIGN_ADDON_RELEASE:?exact reviewed campaign dependency release required}:/mnt/extra-addons/call_center_campaign:ro
       - /etc/codestra/secrets/odoo-callback/client_secret:/run/secrets/odoo_callback_client_secret:ro
 
   middleware-integration-api:
