@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -184,7 +184,7 @@ def main():
     args = parser.parse_args()
     manifest_bytes = args.manifest.read_bytes()
     spec = json.loads(manifest_bytes)
-    evidence = {"checked_at": datetime.now(UTC).isoformat(),
+    evidence = {"checked_at": datetime.now(timezone.utc).isoformat(),
                 "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
                 "mode": "apply" if args.apply else "dry-run", "routes": []}
     service_spec = spec["service"]
