@@ -1,0 +1,10 @@
+CAPABILITY,EXPECTED,ACTUAL,STATUS,EVIDENCE
+Health,GET /v1/health,GET /v1/email/health,PASS,HTTP 200
+Ready,readiness,GET /v1/email/ready,PASS,live route inventory
+Send,POST /v1/email/send,POST /v1/email/messages,PARTIAL,contract drift
+Bulk,POST /v1/email/bulk,not discovered,FAIL,live OpenAPI route inventory
+Campaigns,POST/GET /v1/campaigns,not discovered,FAIL,live OpenAPI route inventory
+Message query,GET /v1/messages/:id,GET /v1/email/messages/{notification_id},PARTIAL,contract drift
+Inbound,private signed event,POST /internal/v1/beyvra/email/inbound,PARTIAL,implementation present; signed live probe pending
+Delivery events,private signed event,POST /internal/v1/beyvra/email/delivery-events,PARTIAL,implementation present; signed live probe pending
+Postal webhook,signed Postal event,POST /v1/webhooks/postal-native,PARTIAL,implementation present; signed live probe pending
