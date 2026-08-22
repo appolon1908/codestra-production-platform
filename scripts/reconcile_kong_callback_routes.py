@@ -119,6 +119,8 @@ def verify_route(route, expected, service_id, host):
     require_equal(sorted(route.get("methods") or []), sorted(expected["methods"]), expected["name"] + ".methods")
     require_equal(route.get("protocols"), ["https"], expected["name"] + ".protocols")
     require_equal(route.get("strip_path"), expected["strip_path"], expected["name"] + ".strip_path")
+    require_equal(route.get("preserve_host"), True, expected["name"] + ".preserve_host")
+    require_equal(route.get("https_redirect_status_code"), 426, expected["name"] + ".https_redirect")
     require_equal(route.get("headers") or {}, {}, expected["name"] + ".headers")
     for field in ("snis", "sources", "destinations"):
         require_equal(route.get(field) or [], [], expected["name"] + "." + field)
