@@ -157,6 +157,16 @@ docker exec codestra-postgres-1 pg_dump -U postgres -Fc codestra_odoo > "$work_d
 docker exec codestra-postgres-1 pg_dump -U postgres -Fc codestra_middleware > "$work_dir/middleware.dump"
 docker exec codestra-postgres-1 pg_dump -U postgres -Fc codestra_n8n > "$work_dir/n8n.dump"
 docker exec codestra-identity-identity-db-1 pg_dump -U keycloak -Fc keycloak > "$work_dir/keycloak.dump"
+ownership_sql="select n.nspname||'.'||c.relname||'|'||c.relkind::text||'|'||r.rolname from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_roles r on r.oid=c.relowner where n.nspname not in ('pg_catalog','information_schema') and n.nspname !~ '^pg_toast' order by 1"
+default_acl_sql="select defaclrole::regrole::text||'|'||coalesce(defaclnamespace::regnamespace::text,'')||'|'||defaclobjtype::text||'|'||defaclacl::text from pg_default_acl order by 1"
+for database in codestra_odoo codestra_middleware codestra_n8n; do
+    docker exec codestra-postgres-1 psql -U postgres -d "$database" -At -v ON_ERROR_STOP=1 \
+        -c "$ownership_sql" > "$work_dir/expected-${database}-owners.txt"
+done
+docker exec codestra-identity-identity-db-1 psql -U keycloak -d keycloak -At -v ON_ERROR_STOP=1 \
+    -c "$ownership_sql" > "$work_dir/expected-keycloak-owners.txt"
+docker exec codestra-postgres-1 psql -U postgres -d codestra_middleware -At -v ON_ERROR_STOP=1 \
+    -c "$default_acl_sql" > "$work_dir/expected-default-acl.txt"
 missing_attachment_checksums=$(docker exec codestra-postgres-1 psql -U postgres -d codestra_odoo -At -v ON_ERROR_STOP=1 \
     -c "SELECT count(*) FROM ir_attachment WHERE store_fname IS NOT NULL AND (checksum IS NULL OR btrim(checksum) = '')")
 test "$missing_attachment_checksums" -eq 0
@@ -191,6 +201,8 @@ verify_service_recovery
 (
     cd "$work_dir"
     sha256sum odoo.dump middleware.dump n8n.dump keycloak.dump \
+        expected-codestra_odoo-owners.txt expected-codestra_middleware-owners.txt \
+        expected-codestra_n8n-owners.txt expected-keycloak-owners.txt expected-default-acl.txt \
         odoo-attachments.tsv ODOO-BACKUP-METADATA \
         application-volumes.tar.gz configuration.tar.gz runtime-images.tar.gz \
         BACKUP-MANIFEST.tsv > SHA256SUMS
@@ -199,6 +211,8 @@ verify_service_recovery
 
 tar -czf "$work_dir/codestra-${stamp}.tar.gz" -C "$work_dir" \
     odoo.dump middleware.dump n8n.dump keycloak.dump \
+    expected-codestra_odoo-owners.txt expected-codestra_middleware-owners.txt \
+    expected-codestra_n8n-owners.txt expected-keycloak-owners.txt expected-default-acl.txt \
     odoo-attachments.tsv ODOO-BACKUP-METADATA \
     application-volumes.tar.gz configuration.tar.gz runtime-images.tar.gz \
     BACKUP-MANIFEST.tsv SHA256SUMS
