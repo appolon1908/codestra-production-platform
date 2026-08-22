@@ -23,6 +23,7 @@ def test_transactional_command_creates_uuid_job_and_outbox(registry):
     assert not duplicate
     assert result["entity_id"] != "TEST_SYN"
     assert result["event"]["event_kind"] == "COMMAND"
+    assert result["event"]["payload"]["job_id"] == result["job_id"]
     assert result["event"]["correlation_id"] == "corr-test-syn"
     with sqlite3.connect(registry.path) as db:
         assert db.execute("select count(*) from cp_campaign").fetchone()[0] == 1
@@ -103,3 +104,11 @@ def test_retry_then_dead_letter(registry):
     for _ in range(4):
         status=registry.fail_job(job,"DESTINATION_UNAVAILABLE","bounded safe detail",retryable=True)
     assert status == "DEAD_LETTER"
+
+
+def test_tenant_scope_rejects_invalid_value(monkeypatch):
+    class Fake:
+        def execute(self,*_): raise AssertionError("database must not be called")
+    monkeypatch.setattr("control_plane_service.mapping_registry.is_postgres",lambda:True)
+    with pytest.raises(ControlPlaneError,match="invalid_tenant"):
+        MappingRegistry._tenant_scope(Fake(),"x"*65)

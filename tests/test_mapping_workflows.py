@@ -21,3 +21,4 @@ def test_contract_preserves_required_envelope_fields():
     for field in ("schema_version","event_id","correlation_id","idempotency_key","entity_version","event_kind"):
         assert field in code
     assert "EXECUTED_NOT_VERIFIED" in code
+    assert "payload.job_id" in code

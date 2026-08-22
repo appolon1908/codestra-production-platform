@@ -159,8 +159,18 @@ class MappingRegistry:
         self.path = path
         with Connection(path) as db:
             if is_postgres():
-                db.execute("CREATE SCHEMA IF NOT EXISTS control_plane")
-            db.executescript(SCHEMA)
+                row=db.execute("SELECT to_regclass('control_plane.campaign') present").fetchone()
+                if not row or not row["present"]:
+                    raise RuntimeError("control_plane migration is required")
+            else:
+                db.executescript(SCHEMA)
+
+    @staticmethod
+    def _tenant_scope(db: Connection, tenant: str) -> None:
+        if is_postgres():
+            if not tenant or len(tenant) > 64:
+                raise ControlPlaneError("invalid_tenant")
+            db.execute("SELECT set_config('app.tenant_id', ?, true)", (tenant,))
 
     def _audit(self, db: Connection, tenant: str, actor: str, action: str,
                entity_type: str, entity_id: str, version: int | None,
@@ -179,6 +189,7 @@ class MappingRegistry:
         correlation = str(value.get("correlation_id") or new_uuid())
         try:
             with Connection(self.path) as db:
+                self._tenant_scope(db, tenant)
                 prior = db.execute("SELECT request_hash,response_json FROM cp_idempotency WHERE tenant_id=? AND operation=? AND idempotency_key=?", (tenant, operation, key)).fetchone()
                 if prior:
                     if prior["request_hash"] != digest: raise ControlPlaneError("idempotency_conflict")
@@ -201,6 +212,7 @@ class MappingRegistry:
                          entity_id: str, version: int, event_type: str,
                          key: str, correlation: str, payload: dict[str, Any]) -> dict[str, Any]:
         job_id, event_id, stamp = new_uuid(), new_uuid(), now()
+        payload = {**payload, "job_id": job_id}
         envelope = {"schema_version":"1", "event_id":event_id,
             "correlation_id":correlation, "idempotency_key":key, "tenant":tenant,
             "event_kind":"COMMAND", "event_type":event_type, "entity_type":entity_type,
@@ -268,6 +280,7 @@ class MappingRegistry:
         risk = "HIGH" if drift_code in {"IDENTITY_MISMATCH","EXTENSION_MISMATCH","UNKNOWN_EXTERNAL_RESOURCE"} else "LOW"
         different = desired != actual
         with Connection(self.path) as db:
+            self._tenant_scope(db, tenant)
             db.execute("INSERT INTO cp_reconciliation_run VALUES(?,?,?,?,?,?,?,?)", (run_id,tenant,entity_type,"COMPLETED",correlation,stamp,stamp,int(different)))
             if different:
                 db.execute("INSERT INTO cp_reconciliation_difference VALUES(?,?,?,?,?,?,?,?,?,?,?)", (new_uuid(),run_id,entity_type,entity_id,target,drift_code,risk,canonical(desired),canonical(actual),"APPROVAL_REQUIRED" if risk == "HIGH" else "OPEN",stamp))
