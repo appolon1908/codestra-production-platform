@@ -1,0 +1,193 @@
+{
+  "id": "CDST_DocumentMissing_v1",
+  "name": "CDST_DocumentMissing_v1",
+  "active": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Receive Standard Event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "crm/cdst_documentmissing_v1",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "validate",
+      "name": "Validate Trusted Envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const e=$json.body||$json; const required=['schema_version','event_id','event_type','correlation_id','idempotency_key','tenant_id','business_unit_id','campaign_id','entity_type','entity_id','actor_type','actor_id','occurred_at','automation_key','payload']; for (const k of required) if (e[k]===undefined||e[k]===null||e[k]==='') throw new Error('missing '+k); if(e.schema_version!=='1') throw new Error('unsupported schema'); if(!['HUMAN','AI','SYSTEM'].includes(e.actor_type)) throw new Error('invalid actor'); return [{json:e}];"
+      }
+    },
+    {
+      "id": "policy",
+      "name": "Middleware Authorization",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "method": "POST",
+        "url": "https://api.codestra.co/api/v1/automation/policy-check",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify($json)}}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "codestraN8nCommunicationsOAuth",
+          "name": "Codestra n8n Communications OAuth"
+        }
+      }
+    },
+    {
+      "id": "result",
+      "name": "Build Standard Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const e=$json; return [{json:{event_id:e.event_id,correlation_id:e.correlation_id,idempotency_key:e.idempotency_key,workflow_key:e.automation_key,execution_id:$execution.id,status:'COMPLETED',actions:[],completed_at:new Date().toISOString()}}];"
+      }
+    },
+    {
+      "id": "complete",
+      "name": "Return Result Through Middleware",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "method": "POST",
+        "url": "https://api.codestra.co/api/v1/integrations/n8n/results",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify($json)}}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "codestraN8nCommunicationsOAuth",
+          "name": "Codestra n8n Communications OAuth"
+        }
+      }
+    },
+    {
+      "id": "response",
+      "name": "Acknowledge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{JSON.stringify({accepted:true,event_id:$json.event_id})}}",
+        "options": {
+          "responseCode": 202
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Receive Standard Event": {
+      "main": [
+        [
+          {
+            "node": "Validate Trusted Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Trusted Envelope": {
+      "main": [
+        [
+          {
+            "node": "Middleware Authorization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Middleware Authorization": {
+      "main": [
+        [
+          {
+            "node": "Build Standard Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Standard Result": {
+      "main": [
+        [
+          {
+            "node": "Return Result Through Middleware",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Result Through Middleware": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Santo_Domingo"
+  },
+  "meta": {
+    "schema_version": "1",
+    "middleware_only": true,
+    "kong_only": true,
+    "oauth_client": "codestra-n8n-communications",
+    "direct_database_access": false,
+    "credentials_embedded": false,
+    "production_activation_requires_gate": true
+  }
+}
