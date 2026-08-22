@@ -16,6 +16,7 @@ def test_odoo_callback_identity_is_bounded_and_has_no_secret():
     assert client["directAccessGrantsEnabled"] is False
     assert client["implicitFlowEnabled"] is False
     assert client["fullScopeAllowed"] is False
+    assert client["defaultClientScopes"] == ["roles"]
     assert set(client["optionalClientScopes"]) == {"callbacks.read", "callbacks.write"}
     assert IDENTITY["serviceAccountRealmRoles"] == ["service"]
     assert IDENTITY["delivery"]["syntheticOnly"] is True
@@ -30,6 +31,10 @@ def test_identity_claims_are_exactly_cod_test_syn_and_callback_audience():
     assert mappers["callback-api-audience"]["config"]["included.client.audience"] == "codestra-callback-api"
     assert mappers["callback-tenant"]["config"]["claim.value"] == "COD"
     assert json.loads(mappers["callback-campaigns"]["config"]["claim.value"]) == ["TEST_SYN"]
+    roles = mappers["callback-service-realm-roles"]
+    assert roles["protocolMapper"] == "oidc-usermodel-realm-role-mapper"
+    assert roles["config"]["claim.name"] == "realm_access.roles"
+    assert roles["config"]["access.token.claim"] == "true"
 
 
 def test_kong_exposes_only_required_callback_surfaces():
