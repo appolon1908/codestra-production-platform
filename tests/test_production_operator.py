@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import importlib.machinery
 import importlib.util
 import os
@@ -474,9 +475,44 @@ def test_backup_actions_use_installed_fixed_paths() -> None:
     assert 'Path("/opt/codestra/operations/backup/check-backup-state.sh")' in text
     assert 'Path("/opt/codestra/backups/production-readiness-local")' in text
     assert 'f"CODESTRA_BACKUP_ROOT={READINESS_BACKUP_ROOT}"' in text
-    assert '"CODESTRA_BACKUP_REQUIRE_EVIDENCE=true"' in text
+    assert '"evidence_integrity": "PASS"' in text
+    assert 'expected_names = {f"codestra-{stamp}.tar.gz.gpg", "SHA256SUMS", "STATUS.txt"}' in text
     assert "codestra-backup.service" not in text
     assert "codestra-backup-state.service" not in text
+
+
+def test_readiness_backup_validation_hashes_exact_evidence(monkeypatch, tmp_path) -> None:
+    validator = tmp_path / "check-backup-state.sh"
+    validator.write_text("#!/bin/sh\nexit 0\n")
+    validator.chmod(0o755)
+    root = tmp_path / "readiness"
+    root.mkdir(mode=0o700)
+    stamp = "20260822T161629Z"
+    (root / "LAST_SUCCESS").write_text(stamp + "\n")
+    (root / "LAST_SUCCESS").chmod(0o600)
+    backup = root / stamp
+    backup.mkdir(mode=0o700)
+    names = [f"codestra-{stamp}.tar.gz.gpg", "SHA256SUMS", "STATUS.txt"]
+    records = []
+    for name in names:
+        target = backup / name
+        target.write_bytes(name.encode())
+        target.chmod(0o600)
+        records.append(f"{hashlib.sha256(target.read_bytes()).hexdigest()}  {name}")
+    evidence = backup / "EVIDENCE-SHA256SUMS"
+    evidence.write_text("\n".join(records) + "\n")
+    evidence.chmod(0o600)
+    monkeypatch.setattr(OPERATOR, "BACKUP_STATE_VALIDATOR", validator)
+    monkeypatch.setattr(OPERATOR, "READINESS_BACKUP_ROOT", root)
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_fixed",
+        lambda _command: subprocess.CompletedProcess(_command, 0, ""),
+    )
+    assert OPERATOR.validate_backup_state()["evidence_integrity"] == "PASS"
+    (backup / "STATUS.txt").write_bytes(b"corrupted")
+    with pytest.raises(OPERATOR.OperatorError, match="checksum mismatch"):
+        OPERATOR.validate_backup_state()
 
 
 def test_workflow_uses_restricted_pinned_operator_transport() -> None:
