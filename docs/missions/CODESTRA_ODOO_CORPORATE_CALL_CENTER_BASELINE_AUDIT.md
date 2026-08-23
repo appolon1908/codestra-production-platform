@@ -75,4 +75,3 @@ Each tranche starts from the current protected target, uses a dedicated branch, 
 ## Safety status
 
 All production activation and provider gates remain unchanged. No production readiness item is marked `PASS` solely from source inspection. Backup, restore, independent approval, immutable release, staging, rollback, canary and soak items remain `BLOCKED` or `NOT_TESTED` until their required evidence exists.
-
