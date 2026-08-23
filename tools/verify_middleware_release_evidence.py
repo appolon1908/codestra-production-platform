@@ -12,6 +12,7 @@ from pathlib import Path
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 STAGING_ONLY_DIGEST = (
     "sha256:2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff"
 )
@@ -41,7 +42,12 @@ def release_environment(path: Path) -> dict[str, str]:
     return values
 
 
-def validate(directory: Path) -> dict[str, str]:
+def validate(
+    directory: Path,
+    tuple_path: Path | None = None,
+    run_id: str | None = None,
+    artifact: str | None = None,
+) -> dict[str, str]:
     values = release_environment(directory / "RELEASE.env")
     sbom_hash = hashlib.sha256((directory / "sbom.cdx.json").read_bytes()).hexdigest()
     if values["SBOM_SHA256"] != sbom_hash:
@@ -54,6 +60,20 @@ def validate(directory: Path) -> dict[str, str]:
         raise ValueError("middleware provenance digest differs")
     if provenance["evidence"]["sbomSha256"] != sbom_hash:
         raise ValueError("middleware provenance SBOM binding differs")
+    openvex_path = directory / "vex" / "openvex.json"
+    openvex = json.loads(openvex_path.read_text())
+    if openvex.get("metadata", {}).get("source_sha") != values["SOURCE_SHA"]:
+        raise ValueError("middleware OpenVEX source SHA differs")
+    if openvex.get("metadata", {}).get("image_digest") != values["IMAGE_DIGEST"]:
+        raise ValueError("middleware OpenVEX subject digest differs")
+    product_digest = values["IMAGE_DIGEST"].replace(":", "%3A")
+    products = [
+        product.get("@id", "")
+        for statement in openvex.get("statements", [])
+        for product in statement.get("products", [])
+    ]
+    if not products or any(product_digest not in product for product in products):
+        raise ValueError("middleware OpenVEX products differ from release digest")
     builder = provenance["runDetails"]["builder"]["id"]
     if builder != (
         "https://github.com/Codestra-SRL/codestra-middleware/"
@@ -64,6 +84,34 @@ def validate(directory: Path) -> dict[str, str]:
         raise ValueError("middleware signature verification evidence is empty")
     if not (directory / "provenance-verification.txt").read_text().strip():
         raise ValueError("middleware provenance verification evidence is empty")
+    values["PROVENANCE_SHA256"] = hashlib.sha256(
+        (directory / "provenance.json").read_bytes()
+    ).hexdigest()
+    values["OPENVEX_SHA256"] = hashlib.sha256(openvex_path.read_bytes()).hexdigest()
+    if tuple_path is not None:
+        authority = json.loads(tuple_path.read_text())
+        required = {
+            "change_id", "middleware_artifact", "middleware_digest",
+            "middleware_openvex_sha256", "middleware_provenance_sha256",
+            "middleware_run_id", "middleware_sbom_sha256",
+            "middleware_source_sha", "release_version",
+        }
+        if set(authority) != required:
+            raise ValueError("protected release tuple fields are not exact")
+        expected = {
+            "middleware_source_sha": values["SOURCE_SHA"],
+            "middleware_digest": values["IMAGE_DIGEST"],
+            "middleware_sbom_sha256": values["SBOM_SHA256"],
+            "middleware_provenance_sha256": values["PROVENANCE_SHA256"],
+            "middleware_openvex_sha256": values["OPENVEX_SHA256"],
+            "middleware_run_id": run_id,
+            "middleware_artifact": artifact,
+        }
+        for key, actual in expected.items():
+            if authority[key] != actual:
+                raise ValueError(f"protected release tuple {key} mismatch")
+        if not HASH_RE.fullmatch(authority["middleware_openvex_sha256"]):
+            raise ValueError("protected release tuple hashes are malformed")
     return values
 
 
@@ -71,11 +119,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--github-env", type=Path, required=True)
+    parser.add_argument("--tuple", type=Path, required=True)
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--artifact", required=True)
     args = parser.parse_args()
-    values = validate(args.directory)
+    values = validate(args.directory, args.tuple, args.run_id, args.artifact)
     with args.github_env.open("a") as target:
         target.write(f'MIDDLEWARE_PROTECTED_SHA={values["SOURCE_SHA"]}\n')
         target.write(f'MIDDLEWARE_IMAGE_DIGEST={values["IMAGE_DIGEST"]}\n')
+        target.write(f'MIDDLEWARE_SBOM_SHA256={values["SBOM_SHA256"]}\n')
+        target.write(f'MIDDLEWARE_PROVENANCE_SHA256={values["PROVENANCE_SHA256"]}\n')
+        target.write(f'MIDDLEWARE_OPENVEX_SHA256={values["OPENVEX_SHA256"]}\n')
     return 0
 
 

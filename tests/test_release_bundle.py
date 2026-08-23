@@ -26,13 +26,16 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
                 "--workflow-ref",
                 "fixture-workflow",
                 "--middleware-sha",
-                "b" * 40,
+                "4001b0bdeaa61db97eca2d6535e67302417c296a",
                 "--middleware-image-digest",
-                "sha256:" + "c" * 64,
+                "sha256:f48206bbcbff7ad791de32a1026a95856489e6ee054ff13779facbf30ee8c28a",
                 "--middleware-signature-status",
                 "PASS",
                 "--middleware-provenance-status",
                 "PASS",
+                "--middleware-sbom-sha256", "d" * 64,
+                "--middleware-provenance-sha256", "e" * 64,
+                "--middleware-openvex-sha256", "f" * 64,
                 "--migration-revision",
                 "fixture-revision-1",
             ],
@@ -53,9 +56,11 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
         "ENABLE_VICIDIAL_WRITES",
         "PRODUCTION_DIALING",
     } <= deployment["required_flags"].keys()
-    assert deployment["release_tuple"]["middleware_protected_sha"] == "b" * 40
+    assert deployment["release_tuple"]["middleware_protected_sha"] == (
+        "4001b0bdeaa61db97eca2d6535e67302417c296a"
+    )
     assert deployment["release_tuple"]["middleware_image_digest"] == (
-        "sha256:" + "c" * 64
+        "sha256:f48206bbcbff7ad791de32a1026a95856489e6ee054ff13779facbf30ee8c28a"
     )
     sbom = json.loads((outputs[0] / "sbom.cdx.json").read_text())
     assert sbom["bomFormat"] == "CycloneDX"
@@ -83,6 +88,9 @@ def test_release_bundle_rejects_staging_only_middleware_digest(tmp_path: Path) -
             "sha256:2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff",
             "--middleware-signature-status", "PASS",
             "--middleware-provenance-status", "PASS",
+            "--middleware-sbom-sha256", "d" * 64,
+            "--middleware-provenance-sha256", "e" * 64,
+            "--middleware-openvex-sha256", "f" * 64,
             "--migration-revision", "fixture-revision-1",
         ],
         capture_output=True,
@@ -90,3 +98,26 @@ def test_release_bundle_rejects_staging_only_middleware_digest(tmp_path: Path) -
     )
     assert result.returncode != 0
     assert "staging-only middleware digest is prohibited" in result.stderr
+
+
+def test_release_bundle_rejects_superseded_middleware_digest(tmp_path: Path) -> None:
+    root = Path(__file__).parents[1]
+    result = subprocess.run(
+        [
+            sys.executable, str(root / "tools/build_release_bundle.py"),
+            "--root", str(root), "--output", str(tmp_path / "blocked-old"),
+            "--commit", "a" * 40, "--run-id", "fixture-run",
+            "--workflow-ref", "fixture-workflow", "--middleware-sha", "b" * 40,
+            "--middleware-image-digest",
+            "sha256:336c9a31648a0481737fa4bcc3eafb02a22e4b4fc66ba7b8ec1759c087e05e02",
+            "--middleware-signature-status", "PASS",
+            "--middleware-provenance-status", "PASS",
+            "--middleware-sbom-sha256", "d" * 64,
+            "--middleware-provenance-sha256", "e" * 64,
+            "--middleware-openvex-sha256", "f" * 64,
+            "--migration-revision", "fixture-revision-1",
+        ],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "superseded middleware digest" in result.stderr

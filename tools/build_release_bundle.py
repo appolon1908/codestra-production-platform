@@ -29,6 +29,9 @@ FAIL_CLOSED_FLAGS = {
 STAGING_ONLY_MIDDLEWARE_DIGEST = (
     "sha256:2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff"
 )
+SUPERSEDED_MIDDLEWARE_DIGESTS = {
+    "sha256:336c9a31648a0481737fa4bcc3eafb02a22e4b4fc66ba7b8ec1759c087e05e02",
+}
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -76,6 +79,9 @@ def build(
     middleware_image_digest: str,
     middleware_signature_status: str,
     middleware_provenance_status: str,
+    middleware_sbom_sha256: str,
+    middleware_provenance_sha256: str,
+    middleware_openvex_sha256: str,
     migration_revision: str,
 ) -> None:
     if not SHA_RE.fullmatch(commit) or not SHA_RE.fullmatch(middleware_sha):
@@ -84,12 +90,27 @@ def build(
         raise ValueError("middleware image digest must be immutable sha256")
     if middleware_image_digest == STAGING_ONLY_MIDDLEWARE_DIGEST:
         raise ValueError("staging-only middleware digest is prohibited in production")
+    if middleware_image_digest in SUPERSEDED_MIDDLEWARE_DIGESTS:
+        raise ValueError("superseded middleware digest is prohibited for new activation")
+    evidence_hashes = {
+        "middleware_sbom_sha256": middleware_sbom_sha256,
+        "middleware_provenance_sha256": middleware_provenance_sha256,
+        "middleware_openvex_sha256": middleware_openvex_sha256,
+    }
+    if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in evidence_hashes.values()):
+        raise ValueError("middleware evidence hashes must be exact sha256 values")
     if middleware_signature_status != "PASS":
         raise ValueError("middleware production signature verification is required")
     if middleware_provenance_status != "PASS":
         raise ValueError("middleware production provenance verification is required")
     if not migration_revision or migration_revision == "REQUIRED":
         raise ValueError("exact migration revision is required")
+    tuple_authority_path = root / "config" / "production-release-tuple.json"
+    tuple_authority = json.loads(tuple_authority_path.read_text())
+    if tuple_authority["middleware_source_sha"] != middleware_sha:
+        raise ValueError("protected tuple middleware source SHA mismatch")
+    if tuple_authority["middleware_digest"] != middleware_image_digest:
+        raise ValueError("protected tuple middleware digest mismatch")
     output.mkdir(parents=True, exist_ok=True)
     files = tracked_files(root)
     archive = output / f"codestra-production-platform-{commit}.tar.gz"
@@ -152,6 +173,9 @@ def build(
                 "middleware_image_digest": middleware_image_digest,
                 "middleware_signature_verification": middleware_signature_status,
                 "middleware_provenance_verification": middleware_provenance_status,
+                **evidence_hashes,
+                "change_id": tuple_authority["change_id"],
+                "release_version": tuple_authority["release_version"],
                 "migration_revision": migration_revision,
                 "jetstream_contract_sha256": sha256(
                     root / "eventing/jetstream_contract.json"
@@ -160,7 +184,7 @@ def build(
                     root / "config/keycloak-production-contract.env.example"
                 ),
                 "release_tuple_authority_sha256": sha256(
-                    root / "docs/SERVER_A_PRODUCTION_RELEASE_TUPLE.md"
+                    tuple_authority_path
                 ),
             },
         },
@@ -192,6 +216,9 @@ def main() -> int:
     parser.add_argument("--middleware-image-digest", required=True)
     parser.add_argument("--middleware-signature-status", required=True)
     parser.add_argument("--middleware-provenance-status", required=True)
+    parser.add_argument("--middleware-sbom-sha256", required=True)
+    parser.add_argument("--middleware-provenance-sha256", required=True)
+    parser.add_argument("--middleware-openvex-sha256", required=True)
     parser.add_argument("--migration-revision", required=True)
     args = parser.parse_args()
     build(
@@ -204,6 +231,9 @@ def main() -> int:
         args.middleware_image_digest,
         args.middleware_signature_status,
         args.middleware_provenance_status,
+        args.middleware_sbom_sha256,
+        args.middleware_provenance_sha256,
+        args.middleware_openvex_sha256,
         args.migration_revision,
     )
     return 0

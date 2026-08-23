@@ -1,0 +1,11 @@
+{
+  "change_id": "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01",
+  "middleware_artifact": "exact-main-production-4001b0bdeaa61db97eca2d6535e67302417c296a-32607307145-1",
+  "middleware_digest": "sha256:f48206bbcbff7ad791de32a1026a95856489e6ee054ff13779facbf30ee8c28a",
+  "middleware_openvex_sha256": "9ff255251e919085799f08162325d5e2397868b65baac1141993fbdaff5f5de8",
+  "middleware_provenance_sha256": "d34fc9223574491553cd038b952ee523abe5b7e704d21e278d04a18afa92c4e4",
+  "middleware_run_id": "32607307145",
+  "middleware_sbom_sha256": "6b512d330780cb74ea5ee6d23c04f9529b9b199a59e54970d31a93bda2bd9282",
+  "middleware_source_sha": "4001b0bdeaa61db97eca2d6535e67302417c296a",
+  "release_version": "codestra-production-2026.08.23.1"
+}

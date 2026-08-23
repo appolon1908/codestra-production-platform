@@ -88,7 +88,10 @@ def select_managed_route(routes, expected, host, apply):
         if candidate.get("hosts") == [host]
         and set(candidate.get("paths") or []) == expected_paths
         and set(candidate.get("methods") or []) == expected_methods
-        and candidate.get("protocols") == ["https"]
+        # Adopt both the desired route and the HTTPS-only shape emitted by the
+        # previous reconciler so --apply can migrate it without creating an
+        # overlapping callback route.
+        and candidate.get("protocols") in (["http"], ["https"])
         and candidate.get("strip_path") == expected["strip_path"]
         and not (candidate.get("headers") or {})
         and not (candidate.get("snis") or [])
@@ -119,7 +122,9 @@ def verify_route(route, expected, service_id, host):
     require_equal(route.get("hosts"), [host], expected["name"] + ".hosts")
     require_equal(route.get("paths"), expected["paths"], expected["name"] + ".paths")
     require_equal(sorted(route.get("methods") or []), sorted(expected["methods"]), expected["name"] + ".methods")
-    require_equal(route.get("protocols"), ["https"], expected["name"] + ".protocols")
+    # TLS is terminated by the host Caddy listener.  Kong's private proxy
+    # listener is deliberately HTTP-only and is not published externally.
+    require_equal(route.get("protocols"), ["http"], expected["name"] + ".protocols")
     require_equal(route.get("strip_path"), expected["strip_path"], expected["name"] + ".strip_path")
     require_equal(route.get("preserve_host"), True, expected["name"] + ".preserve_host")
     require_equal(route.get("https_redirect_status_code"), 426, expected["name"] + ".https_redirect")
@@ -274,7 +279,7 @@ def main():
         payload = {
             "name": expected["name"], "service": {"id": service["id"]},
             "hosts": [spec["host"]], "paths": expected["paths"],
-            "methods": expected["methods"], "protocols": ["https"],
+            "methods": expected["methods"], "protocols": ["http"],
             "strip_path": expected["strip_path"], "preserve_host": True,
             "https_redirect_status_code": 426, "headers": {}, "snis": [],
         }
