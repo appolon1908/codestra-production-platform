@@ -1,0 +1,5 @@
+# Apply only to the codestra-email-reseller project.
+services:
+  api:
+    environment:
+      TELNEXA_BASE_URL: https://10.40.0.4/telnexa
