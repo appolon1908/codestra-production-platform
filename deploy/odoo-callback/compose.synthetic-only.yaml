@@ -3,7 +3,10 @@ services:
     environment:
       CODESTRA_CALLBACK_SYNC_ENABLED: "true"
       CODESTRA_CALLBACK_API_BASE_URL: "https://api.codestra.co/api/v1"
-      CODESTRA_CALLBACK_TOKEN_URL: "https://auth.codestra.co/realms/codestra/protocol/openid-connect/token"
+      # Odoo and Keycloak share the private identity network. Tokens still use
+      # the canonical public issuer; only acquisition avoids the public-DNS
+      # hairpin and its legacy relay.
+      CODESTRA_CALLBACK_TOKEN_URL: "http://keycloak:8080/realms/codestra/protocol/openid-connect/token"
       CODESTRA_CALLBACK_CLIENT_ID: "codestra-odoo-callback-service"
       CODESTRA_CALLBACK_CLIENT_SECRET_FILE: "/run/secrets/odoo_callback_client_secret"
       CODESTRA_CALLBACK_CA_FILE: "/etc/ssl/certs/ca-certificates.crt"
