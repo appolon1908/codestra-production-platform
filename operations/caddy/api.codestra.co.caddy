@@ -6,7 +6,7 @@ api.codestra.co {
 	request_body {
 		max_size 10MB
 	}
-	@realtime path /ws/agent /api/v1/realtime/sessions /healthz /readyz
+	@realtime path /ws/agent /api/v1/realtime/sessions /healthz /readyz /version
 	handle @realtime {
 		reverse_proxy 127.0.0.1:18102 {
 			header_up X-Real-IP {remote_host}
