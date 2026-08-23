@@ -92,6 +92,9 @@ def test_kong_exposes_only_required_callback_surfaces():
 def test_deployment_keeps_every_broad_delivery_path_disabled():
     assert 'CODESTRA_CALLBACK_SYNC_ENABLED: "true"' in DEPLOYMENT
     assert 'CODESTRA_CALLBACK_TOKEN_URL: "http://keycloak:8080/realms/codestra/protocol/openid-connect/token"' in DEPLOYMENT
+    assert 'CALLBACK_JWT_ISSUER: "https://auth.codestra.co/realms/codestra"' in DEPLOYMENT
+    assert 'CALLBACK_JWT_AUDIENCE: "codestra-callback-api"' in DEPLOYMENT
+    assert 'CALLBACK_JWT_JWKS_URL: "http://keycloak:8080/realms/codestra/protocol/openid-connect/certs"' in DEPLOYMENT
     assert "codestra-odoo-callback-service" in DEPLOYMENT
     assert "exact reviewed addon release required" in DEPLOYMENT
     assert "exact reviewed campaign dependency release required" in DEPLOYMENT
