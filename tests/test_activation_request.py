@@ -62,6 +62,8 @@ def test_rejects_non_boolean_false_flag(tmp_path):
 @pytest.mark.parametrize("action", [
     "backup", "validate-backup", "restore-test", "stage", "canary", "rollback",
     "stage-control-plane", "validate-control-plane", "rollback-control-plane",
+    "activate-control-plane", "enable-production-web-traffic",
+    "disable-production-web-traffic",
 ])
 def test_state_change_window_authority_is_deferred_to_root_operator(tmp_path, action):
     # The runner cannot read the root-owned waiver evidence. It binds the exact

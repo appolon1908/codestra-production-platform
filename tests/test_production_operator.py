@@ -36,6 +36,9 @@ EXPECTED_ACTIONS = {
     "stage-control-plane",
     "validate-control-plane",
     "rollback-control-plane",
+    "activate-control-plane",
+    "enable-production-web-traffic",
+    "disable-production-web-traffic",
 }
 
 
@@ -131,6 +134,141 @@ def test_extra_and_unsafe_arguments_fail_closed(monkeypatch, argv) -> None:
 def test_non_root_fails_closed(monkeypatch) -> None:
     monkeypatch.setattr(os, "geteuid", lambda: 1000)
     assert OPERATOR.main(["status"]) == 2
+
+
+def test_activation_requires_exact_stage_and_validation_evidence(monkeypatch):
+    monkeypatch.setattr(OPERATOR, "require_action_evidence", lambda action, config: Path(f"/{action}.json"))
+    monkeypatch.setattr(OPERATOR, "validate_backup_state", lambda: {"backup_stamp": "20260823T000000Z"})
+    monkeypatch.setattr(OPERATOR, "validate_control_plane_rollback", lambda: {"rollback_stamp": "20260823T000001Z"})
+    monkeypatch.setattr(OPERATOR, "load_pointer", lambda path: None)
+    monkeypatch.setattr(OPERATOR, "validate_control_plane", lambda config: {"control_plane": "PASS"})
+    monkeypatch.setattr(OPERATOR, "verify_middleware_runtime", lambda config: {"middleware_runtime_digest": "PASS"})
+    written = {}
+    monkeypatch.setattr(OPERATOR, "atomic_root_json", lambda path, value: written.update(value))
+    config = OPERATOR.load_release_config()
+    result = OPERATOR.activate_control_plane(config)
+    assert written["protected_sha"] == config["protected_sha"]
+    assert result["rollback_ready"] == "PASS"
+
+
+def test_web_traffic_pointer_never_enables_customer_channels(monkeypatch):
+    monkeypatch.setattr(OPERATOR, "core_web_health", lambda config: {"core_web_dependencies": "PASS"})
+    gates = []
+    monkeypatch.setattr(OPERATOR, "kong_traffic_gate", lambda enabled: gates.append(enabled))
+    monkeypatch.setattr(OPERATOR, "probe_core_web", lambda expected: None)
+    written = {}
+    monkeypatch.setattr(OPERATOR, "atomic_root_json", lambda path, value: written.update(value))
+    result = OPERATOR.set_core_web_traffic(OPERATOR.load_release_config(), True)
+    assert result["core_web_api_traffic"] == "ENABLED"
+    assert written["customer_wide_email"] is False
+    assert written["sms_production"] is False
+    assert written["voice_production"] is False
+    assert written["pstn_dialing"] is False
+    assert gates == [False]
+
+
+def test_core_web_health_rejects_running_without_healthcheck(monkeypatch):
+    config = OPERATOR.load_release_config()
+    monkeypatch.setattr(OPERATOR, "load_pointer", lambda path: {
+        "protected_sha": config["protected_sha"], "image_digest": config["image_digest"]
+    })
+    monkeypatch.setattr(OPERATOR, "validate_control_plane", lambda value: {})
+    monkeypatch.setattr(OPERATOR, "verify_middleware_runtime", lambda value: {})
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda name: {
+        "State": {"Running": True, "Health": {}}
+    })
+    with pytest.raises(OPERATOR.OperatorError, match="dependency unhealthy"):
+        OPERATOR.core_web_health(config)
+
+
+def test_core_web_health_requires_auth_and_caddy_readiness(monkeypatch):
+    config = OPERATOR.load_release_config()
+    monkeypatch.setattr(OPERATOR, "load_pointer", lambda path: {
+        "protected_sha": config["protected_sha"], "image_digest": config["image_digest"]
+    })
+    monkeypatch.setattr(OPERATOR, "validate_control_plane", lambda value: {})
+    monkeypatch.setattr(OPERATOR, "verify_middleware_runtime", lambda value: {})
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda name: {
+        "State": {"Running": True, "Health": {"Status": "healthy"}}
+    })
+    calls = []
+    monkeypatch.setattr(OPERATOR, "probe_auth_gateway", lambda: calls.append("auth"))
+    monkeypatch.setattr(OPERATOR, "probe_core_web", lambda expected: calls.append(expected))
+    result = OPERATOR.core_web_health(config)
+    assert calls == ["auth", {401, 503}]
+    assert result["auth_gateway_readiness"] == "PASS"
+    assert result["caddy_serving_path"] == "PASS"
+
+
+def test_auth_gateway_probe_rejects_non_private_address(monkeypatch):
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda name: {
+        "State": {"Running": True},
+        "NetworkSettings": {"Networks": {
+            OPERATOR.AUTH_GATEWAY_NETWORK: {"IPAddress": "203.0.113.10"}
+        }},
+    })
+    with pytest.raises(OPERATOR.OperatorError, match="not private"):
+        OPERATOR.probe_auth_gateway()
+
+
+def test_worker_healthcheck_is_not_disabled():
+    compose = (ROOT / "deploy/control-plane/compose.yaml").read_text(encoding="utf-8")
+    worker = compose.split("  worker:\n", 1)[1]
+    assert "disable: true" not in worker
+    assert "control-plane-worker-heartbeat" in worker
+
+
+def test_activation_rejects_incomplete_rollback_bundle(monkeypatch):
+    monkeypatch.setattr(
+        OPERATOR,
+        "checked_root_file",
+        lambda path, expected_mode=0o600: (
+            "codestra_control_plane" if path.name == "database-owner" else "20260823T000000Z"
+        ),
+    )
+    backup = OPERATOR.CONTROL_PLANE_BACKUP_ROOT / "20260823T000000Z"
+    monkeypatch.setattr(OPERATOR.Path, "lstat", lambda self: type("S", (), {
+        "st_mode": 0o40700, "st_uid": 0, "st_gid": 0
+    })())
+    monkeypatch.setattr(OPERATOR.Path, "is_symlink", lambda self: False)
+    monkeypatch.setattr(OPERATOR, "checked_root_bytes", lambda path: b"")
+    with pytest.raises(OPERATOR.OperatorError, match="dump is empty"):
+        OPERATOR.validate_control_plane_rollback()
+
+
+def test_rollback_bundle_rejects_changed_dump(monkeypatch):
+    monkeypatch.setattr(
+        OPERATOR,
+        "checked_root_file",
+        lambda path, expected_mode=0o600: {
+            "LAST_SUCCESS": "20260823T000000Z",
+            "database-owner": "codestra_control_plane",
+            "control-plane.sql.sha256": "0" * 64,
+            "api-image-id": "sha256:" + "1" * 64,
+            "worker-image-id": "sha256:" + "2" * 64,
+        }[path.name],
+    )
+    monkeypatch.setattr(OPERATOR.Path, "lstat", lambda self: type("S", (), {
+        "st_mode": 0o40700, "st_uid": 0, "st_gid": 0
+    })())
+    monkeypatch.setattr(OPERATOR.Path, "is_symlink", lambda self: False)
+    monkeypatch.setattr(OPERATOR, "checked_root_bytes", lambda path: b"valid-prefix-truncated")
+    with pytest.raises(OPERATOR.OperatorError, match="checksum mismatch"):
+        OPERATOR.validate_control_plane_rollback()
+
+
+def test_middleware_runtime_requires_false_delivery_flags(monkeypatch):
+    config = OPERATOR.load_release_config()
+    safe = [f"{name}=false" for name in OPERATOR.MIDDLEWARE_REQUIRED_FALSE_FLAGS]
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda name: {
+        "Config": {
+            "Image": f"{OPERATOR.MIDDLEWARE_IMAGE}@{config['image_digest']}",
+            "Env": [*safe, "CALLBACK_DELIVERY_ENABLED=true"],
+        },
+        "State": {"Health": {"Status": "healthy"}},
+    })
+    with pytest.raises(OPERATOR.OperatorError, match="delivery flag unsafe"):
+        OPERATOR.verify_middleware_runtime(config)
 
 
 def test_maintenance_window_exact_boundary(monkeypatch) -> None:
