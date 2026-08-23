@@ -1,0 +1,27 @@
+schema: codestra.runtime-architecture-remediation.v1
+canonical_api_host: api.codestra.co
+canonical_websocket_url: wss://api.codestra.co/ws/agent
+provider_owners:
+  klyrow: {private_address: 10.40.0.4, private_base_url: "https://10.40.0.4:18000", protocol: rest_signed_webhook, auth_method: scoped_service_token_hmac}
+  telnexa: {private_address: 10.40.0.4, private_base_url: "https://telnexa.internal.codestra.agency:8443", protocol: rest_signed_webhook, auth_method: scoped_service_token_hmac}
+  vicidial: {private_address: 10.40.0.2, protocol: private_adapter_signed_events, auth_method: mtls_hmac}
+endpoint_overrides:
+  - {project: codestra-email-reseller, service: api, variable: TELNEXA_BASE_URL, value: "https://telnexa.internal.codestra.agency:8443", owner: telnexa}
+  - {project: codestra-integration-control-plane, service: api, variable: KLYROW_BASE_URL, value: "https://10.40.0.4:18000", owner: klyrow}
+  - {project: codestra-integration-control-plane, service: api, variable: TELNEXA_BASE_URL, value: "https://telnexa.internal.codestra.agency:8443", owner: telnexa}
+  - {project: codestra-integration-control-plane, service: worker, variable: KLYROW_BASE_URL, value: "https://10.40.0.4:18000", owner: klyrow}
+  - {project: codestra-integration-control-plane, service: worker, variable: TELNEXA_BASE_URL, value: "https://telnexa.internal.codestra.agency:8443", owner: telnexa}
+  - {project: codestra-sms-api, service: event-worker, variable: TELNEXA_BASE_URL, value: "https://telnexa.internal.codestra.agency:8443", owner: telnexa}
+  - {project: private-integration, service: gateway, variable: TELNEXA_BASE_URL, value: "https://telnexa.internal.codestra.agency:8443", owner: telnexa}
+  - {project: codestra-websocket-gateway, service: gateway, variable: PUBLIC_WS_URL, value: "wss://api.codestra.co/ws/agent", owner: middleware}
+forbidden_shared_paths:
+  - {source: codestra-odoo-1, target: codestra-beyvra-email-api-1, remove: [codestra_backend, codestra_edge], replacement: codestra-provider-email}
+  - {source: codestra-odoo-1, target: codestra-private-vicidial-ingress-1, remove: [codestra_edge], replacement: codestra-provider-voice}
+  - {source: codestra-odoo-1, target: codestra-sms-api-api-1, remove: [codestra_edge], replacement: codestra-provider-sms}
+  - {source: codestra-odoo-1, target: codestra-sms-api-event-worker-1, remove: [codestra_edge], replacement: codestra-provider-sms}
+  - {source: codestra-odoo-internal-proxy, target: codestra-beyvra-email-api-1, remove: [codestra_backend], replacement: codestra-provider-email}
+  - {source: codestra-n8n-1, target: codestra-beyvra-email-api-1, remove: [codestra_backend, codestra_edge], replacement: codestra-provider-email}
+  - {source: codestra-n8n-1, target: codestra-private-vicidial-ingress-1, remove: [codestra_edge], replacement: codestra-provider-voice}
+  - {source: codestra-n8n-1, target: codestra-sms-api-api-1, remove: [codestra_edge], replacement: codestra-provider-sms}
+  - {source: codestra-n8n-1, target: codestra-sms-api-event-worker-1, remove: [codestra_edge], replacement: codestra-provider-sms}
+  - {source: codestra-n8n-internal-proxy, target: codestra-beyvra-email-api-1, remove: [codestra_backend], replacement: codestra-provider-email}

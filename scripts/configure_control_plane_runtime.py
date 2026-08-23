@@ -61,7 +61,7 @@ def main() -> None:
         "CONTROL_PLANE_ODOO_URL": "http://codestra-odoo-1:8069/codestra/api/v1/events",
         "CONTROL_PLANE_N8N_URL": "http://codestra-n8n-1:5678/webhook/codestra-{event_type}",
         "ODOO_BASE_URL": "http://codestra-odoo-1:8069", "N8N_BASE_URL": "http://codestra-n8n-1:5678",
-        "TELNEXA_BASE_URL": "https://10.40.0.2/telnexa", "KLYROW_BASE_URL": "https://10.40.0.2/klyrow",
+        "TELNEXA_BASE_URL": "https://telnexa.internal.codestra.agency:8443", "KLYROW_BASE_URL": "https://10.40.0.4:18000",
         "KYQRA_BASE_URL": "http://kyqra:3100", "KYQRA_MODE": "test",
         "TELNEXA_MODE": "simulator", "KLYROW_MODE": "test", "CONTROL_PLANE_OUTBOUND_ENABLED": "true",
     }

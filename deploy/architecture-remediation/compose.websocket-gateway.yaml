@@ -1,0 +1,5 @@
+# Apply only to the codestra-websocket-gateway project.
+services:
+  gateway:
+    environment:
+      PUBLIC_WS_URL: wss://api.codestra.co/ws/agent
