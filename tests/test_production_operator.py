@@ -50,6 +50,14 @@ def test_action_set_is_exact() -> None:
     }
 
 
+def test_control_plane_stage_builds_and_reads_back_protected_sha() -> None:
+    source = OPERATOR_PATH.read_text()
+    assert 'f"VCS_REF={config[\'protected_sha\']}"' in source
+    assert 'api_env.get("SOURCE_SHA") != config["protected_sha"]' in source
+    assert 'api_env.get("RELEASE_ID") != config["protected_sha"]' in source
+    assert "control-plane version endpoint readback mismatch" in source
+
+
 def _archive(tmp_path: Path, member: tarfile.TarInfo) -> Path:
     archive = tmp_path / "release.tar.gz"
     with tarfile.open(archive, "w:gz") as bundle:

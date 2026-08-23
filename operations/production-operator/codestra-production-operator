@@ -488,6 +488,29 @@ def validate_control_plane(config: dict[str, str]) -> dict[str, object]:
     worker = docker_inspect(CONTROL_PLANE_WORKER)
     if worker["State"].get("Health", {}).get("Status") != "healthy":
         raise OperatorError("control-plane worker is not healthy")
+    api_env = dict(
+        item.split("=", 1)
+        for item in health["Config"]["Env"]
+        if "=" in item
+    )
+    if api_env.get("SOURCE_SHA") != config["protected_sha"]:
+        raise OperatorError("control-plane source SHA environment readback mismatch")
+    if api_env.get("RELEASE_ID") != config["protected_sha"]:
+        raise OperatorError("control-plane release ID environment readback mismatch")
+    version_response = run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_API, "python", "-c",
+        (
+            "import urllib.request;"
+            "print(urllib.request.urlopen("
+            "'http://127.0.0.1:8096/version',timeout=3).read().decode())"
+        ),
+    ], timeout=30)
+    version = json.loads(version_response.stdout)
+    if (
+        version.get("source_sha") != config["protected_sha"]
+        or version.get("release_id") != config["protected_sha"]
+    ):
+        raise OperatorError("control-plane version endpoint readback mismatch")
     query = (
         "select count(*) from information_schema.tables where "
         "table_schema='control_plane' and table_name in "
@@ -572,7 +595,11 @@ def stage_control_plane(config: dict[str, str]) -> dict[str, object]:
     try:
         for migration in sorted((release / "migrations/control_plane").glob("*.sql")):
             run_bytes(["/usr/bin/docker", "exec", "-i", CONTROL_PLANE_DB_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", CONTROL_PLANE_DB], stdin=migration.read_bytes(), timeout=300)
-        run_bytes([*compose, "build", "--pull=false"], timeout=1800)
+        run_bytes([
+            *compose, "build", "--pull=false",
+            "--build-arg", f"VCS_REF={config['protected_sha']}",
+            "--build-arg", f"BUILD_CREATED={stamp}",
+        ], timeout=1800)
         run_bytes([*compose, "up", "--detach", "--remove-orphans"], timeout=300)
         wait_control_plane_health()
         result = validate_control_plane(config)
