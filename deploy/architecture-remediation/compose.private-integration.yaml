@@ -2,7 +2,7 @@
 services:
   gateway:
     environment:
-      TELNEXA_BASE_URL: https://10.40.0.4/telnexa
-    networks: !reset [provider_voice]
+      TELNEXA_BASE_URL: https://telnexa.internal.codestra.agency:8443
+    networks: !override [provider_voice]
 networks:
   provider_voice: {name: codestra-provider-voice, external: true}

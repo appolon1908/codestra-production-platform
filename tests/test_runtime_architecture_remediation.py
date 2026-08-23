@@ -18,7 +18,7 @@ def test_provider_address_ownership_is_exact():
     for item in contract()["endpoint_overrides"]:
         if item["owner"] in {"klyrow", "telnexa"}:
             assert "10.40.0.2" not in item["value"]
-            assert "10.40.0.4" in item["value"]
+            assert item["value"] == owners[item["owner"]]["private_base_url"]
 
 
 def test_canonical_websocket_authority():

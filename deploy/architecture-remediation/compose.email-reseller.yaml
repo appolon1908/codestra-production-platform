@@ -2,4 +2,4 @@
 services:
   api:
     environment:
-      TELNEXA_BASE_URL: https://10.40.0.4/telnexa
+      TELNEXA_BASE_URL: https://telnexa.internal.codestra.agency:8443

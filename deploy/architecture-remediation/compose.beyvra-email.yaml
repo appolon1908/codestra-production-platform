@@ -3,8 +3,8 @@
 # central PostgreSQL service by compose.core-provider-networks.yaml.
 services:
   api:
-    networks: !reset [provider_email]
+    networks: !override [provider_email]
   worker:
-    networks: !reset [provider_email]
+    networks: !override [provider_email]
 networks:
   provider_email: {name: codestra-provider-email, external: true}

@@ -1,14 +1,13 @@
-# Apply only to the codestra-sms-api project. !reset is the Docker Compose
-# merge tag: it removes the inherited public edge attachment before adding the
-# provider-only egress network.
+# Apply only to the codestra-sms-api project. !override replaces the inherited
+# public edge attachment with the listed database and provider-only networks.
 services:
   api:
     environment:
-      TELNEXA_BASE_URL: https://10.40.0.4/telnexa
-    networks: !reset [sms_data, provider_sms]
+      TELNEXA_BASE_URL: https://telnexa.internal.codestra.agency:8443
+    networks: !override [sms_data, provider_sms]
   event-worker:
     environment:
-      TELNEXA_BASE_URL: https://10.40.0.4/telnexa
-    networks: !reset [sms_data, provider_sms]
+      TELNEXA_BASE_URL: https://telnexa.internal.codestra.agency:8443
+    networks: !override [sms_data, provider_sms]
 networks:
   provider_sms: {name: codestra-provider-sms, external: true}
