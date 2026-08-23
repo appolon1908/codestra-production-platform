@@ -43,7 +43,10 @@ services:
         strip_path: false
       - name: control-plane-automation
         hosts: [api.codestra.co]
-        paths: [/api/v1/automation]
+        paths:
+          - /api/v1/automation/authorize
+          - /api/v1/automation/execute
+          - /api/v1/automation/results
         methods: [POST]
         strip_path: false
         plugins:
@@ -56,7 +59,10 @@ services:
         strip_path: false
       - name: control-plane-system-admin
         hosts: [api.codestra.co]
-        paths: [/v1/admin/system]
+        paths:
+          - /v1/admin/system/health
+          - /v1/admin/system/readiness
+          - /v1/admin/system/databases
         methods: [GET]
         strip_path: false
     plugins:

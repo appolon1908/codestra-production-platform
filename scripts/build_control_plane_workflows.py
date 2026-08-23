@@ -28,7 +28,7 @@ for(const key of ['event_id','correlation_id','tenant_id','idempotency_key']) {
   if(!b[key] && !(key==='event_id' && h['x-event-id'])) throw new Error(key+'_required');
 }
 const eventId=String(b.event_id||h['x-event-id']);
-return [{json:{...b,event_id:eventId,workflow_key:WORKFLOW,actor_type:'SYSTEM',actor_id:'n8n',schema_version:'1',business_unit_id:String(b.business_unit_id||'default'),campaign_id:String(b.campaign_id||'none'),entity_type:String(b.entity_type||'event'),entity_id:String(b.entity_id||eventId),automation_key:String(b.automation_key||WORKFLOW),payload:b.payload||{}}}];
+return [{json:{...b,event_id:eventId,customer_id:String(b.customer_id||b.entity_id||eventId),workflow_key:WORKFLOW,actor_type:'SYSTEM',actor_id:'n8n',schema_version:'1',business_unit_id:String(b.business_unit_id||'default'),campaign_id:String(b.campaign_id||'none'),entity_type:String(b.entity_type||'event'),entity_id:String(b.entity_id||eventId),automation_key:String(b.automation_key||WORKFLOW),payload:b.payload||{}}}];
 """.replace("EVENT_TYPE", json.dumps(event_type)).replace("WORKFLOW", json.dumps(name))
 
 
