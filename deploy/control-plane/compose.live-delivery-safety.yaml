@@ -3,9 +3,7 @@ x-live-delivery-safety: &live-delivery-safety
     LIVE_SMS_DELIVERY: "false"
     LIVE_EMAIL_DELIVERY: "false"
     LIVE_PSTN_DIALING: "false"
-  volumes:
-    - /opt/codestra/safety/live-delivery-admission.sh:/usr/local/bin/live-delivery-admission:ro
-  entrypoint: ["/usr/local/bin/live-delivery-admission"]
+  entrypoint: ["/opt/venv/bin/python", "-m", "control_plane_service.admission"]
 
 services:
   api:
