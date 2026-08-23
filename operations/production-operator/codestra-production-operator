@@ -239,6 +239,7 @@ def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
         command,
         check=False,
         text=True,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         timeout=1800,

@@ -58,6 +58,11 @@ def test_control_plane_stage_builds_and_reads_back_protected_sha() -> None:
     assert "control-plane version endpoint readback mismatch" in source
 
 
+def test_fixed_probes_cannot_consume_operator_credentials() -> None:
+    source = OPERATOR_PATH.read_text()
+    assert "stdin=subprocess.DEVNULL" in source
+
+
 def _archive(tmp_path: Path, member: tarfile.TarInfo) -> Path:
     archive = tmp_path / "release.tar.gz"
     with tarfile.open(archive, "w:gz") as bundle:
