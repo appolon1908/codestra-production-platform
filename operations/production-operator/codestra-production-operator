@@ -76,6 +76,8 @@ EVIDENCE_DIR = Path("/var/lib/codestra-production-operator/evidence")
 LOCK_FILE = Path("/run/lock/codestra-production-operator.lock")
 DATE_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])")
 STANDBY_CONTAINER = "codestra-production-standby-approved"
+STANDBY_ENTRYPOINT = ["/opt/venv/bin/python"]
+STANDBY_COMMAND = ["-c", "import time; time.sleep(3600)"]
 MIDDLEWARE_IMAGE = "ghcr.io/codestra-srl/codestra-middleware"
 CONTROL_PLANE_PROJECT = "codestra-integration-control-plane"
 CONTROL_PLANE_RELEASE_ROOT = Path("/opt/codestra/releases/control-plane")
@@ -341,14 +343,20 @@ def stage_standby(config: dict[str, str]) -> dict[str, object]:
             "/usr/bin/docker", "create", "--name", STANDBY_CONTAINER,
             "--network", "none", "--read-only", "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+            "--entrypoint", STANDBY_ENTRYPOINT[0],
             "--env", "PSTN_DIALING=DISABLED", "--env", "PRODUCTION_DIALING=DISABLED",
             "--env", "SEND_EVENTS=false", "--env", "ENABLE_EXTERNAL_DELIVERY=false",
             "--env", "LIVE_WRITE=false", "--env", "ODOO_WRITE=false",
-            "--env", "N8N_DELIVERY_ENABLED=false", subject,
+            "--env", "N8N_DELIVERY_ENABLED=false", subject, *STANDBY_COMMAND,
         ], timeout=120)
         run_bytes(["/usr/bin/docker", "start", STANDBY_CONTAINER], timeout=60)
     current = docker_inspect(STANDBY_CONTAINER)
-    if current["Config"]["Image"] != subject or current["HostConfig"]["NetworkMode"] != "none":
+    if (
+        current["Config"]["Image"] != subject
+        or current["HostConfig"]["NetworkMode"] != "none"
+        or current["Config"].get("Entrypoint") != STANDBY_ENTRYPOINT
+        or current["Config"].get("Cmd") != STANDBY_COMMAND
+    ):
         raise OperatorError("standby isolation read-back failed")
     time.sleep(5)
     if not docker_inspect(STANDBY_CONTAINER)["State"]["Running"]:
@@ -359,7 +367,13 @@ def stage_standby(config: dict[str, str]) -> dict[str, object]:
 def certify_standby(config: dict[str, str]) -> dict[str, object]:
     current = docker_inspect(STANDBY_CONTAINER)
     subject = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
-    if current["Config"]["Image"] != subject or current["HostConfig"]["NetworkMode"] != "none" or not current["State"]["Running"]:
+    if (
+        current["Config"]["Image"] != subject
+        or current["HostConfig"]["NetworkMode"] != "none"
+        or current["Config"].get("Entrypoint") != STANDBY_ENTRYPOINT
+        or current["Config"].get("Cmd") != STANDBY_COMMAND
+        or not current["State"]["Running"]
+    ):
         raise OperatorError("standby certification mismatch")
     return {"subject": subject, "network_mode": "none"}
 

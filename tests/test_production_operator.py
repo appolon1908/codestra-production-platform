@@ -690,6 +690,12 @@ def test_stage_uses_exact_digest_and_isolated_standby() -> None:
     assert '"--network", "none"' in text
     assert '"--read-only", "--cap-drop", "ALL"' in text
     assert '"ENABLE_EXTERNAL_DELIVERY=false"' in text
+    assert 'STANDBY_ENTRYPOINT = ["/opt/venv/bin/python"]' in text
+    assert 'STANDBY_COMMAND = ["-c", "import time; time.sleep(3600)"]' in text
+    assert '"--entrypoint", STANDBY_ENTRYPOINT[0]' in text
+    assert 'subject, *STANDBY_COMMAND' in text
+    assert 'current["Config"].get("Entrypoint") != STANDBY_ENTRYPOINT' in text
+    assert 'current["Config"].get("Cmd") != STANDBY_COMMAND' in text
     assert 'subject not in image.get("RepoDigests", [])' in text
 
 
