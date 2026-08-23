@@ -690,6 +690,14 @@ def test_stage_uses_exact_digest_and_isolated_standby() -> None:
     assert '"--network", "none"' in text
     assert '"--read-only", "--cap-drop", "ALL"' in text
     assert '"ENABLE_EXTERNAL_DELIVERY=false"' in text
+    assert 'STANDBY_ENTRYPOINT = ["/opt/venv/bin/python"]' in text
+    assert 'STANDBY_COMMAND = ["-c", "import threading; threading.Event().wait()"]' in text
+    assert '"--entrypoint", STANDBY_ENTRYPOINT[0]' in text
+    assert 'subject, *STANDBY_COMMAND' in text
+    assert "standby_configuration_matches(existing, subject)" in text
+    assert '["/usr/bin/docker", "rm", STANDBY_CONTAINER]' in text
+    assert 'host.get("ReadonlyRootfs") is True' in text
+    assert 'host.get("CapDrop") == ["ALL"]' in text
     assert 'subject not in image.get("RepoDigests", [])' in text
 
 

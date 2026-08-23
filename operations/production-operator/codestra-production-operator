@@ -76,6 +76,8 @@ EVIDENCE_DIR = Path("/var/lib/codestra-production-operator/evidence")
 LOCK_FILE = Path("/run/lock/codestra-production-operator.lock")
 DATE_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])")
 STANDBY_CONTAINER = "codestra-production-standby-approved"
+STANDBY_ENTRYPOINT = ["/opt/venv/bin/python"]
+STANDBY_COMMAND = ["-c", "import threading; threading.Event().wait()"]
 MIDDLEWARE_IMAGE = "ghcr.io/codestra-srl/codestra-middleware"
 CONTROL_PLANE_PROJECT = "codestra-integration-control-plane"
 CONTROL_PLANE_RELEASE_ROOT = Path("/opt/codestra/releases/control-plane")
@@ -315,6 +317,20 @@ def docker_inspect(name: str) -> dict[str, object]:
     return json.loads(result.stdout)[0]
 
 
+def standby_configuration_matches(current: dict[str, object], subject: str) -> bool:
+    config = current["Config"]
+    host = current["HostConfig"]
+    return bool(
+        config["Image"] == subject
+        and config.get("Entrypoint") == STANDBY_ENTRYPOINT
+        and config.get("Cmd") == STANDBY_COMMAND
+        and host["NetworkMode"] == "none"
+        and host.get("ReadonlyRootfs") is True
+        and host.get("CapDrop") == ["ALL"]
+        and "no-new-privileges" in host.get("SecurityOpt", [])
+    )
+
+
 def stage_standby(config: dict[str, str]) -> dict[str, object]:
     credential = sys.stdin.buffer.read(16384)
     if not credential or len(credential) >= 16384 or any(item in credential for item in (b"\x00", b"\n", b"\r")):
@@ -331,24 +347,34 @@ def stage_standby(config: dict[str, str]) -> dict[str, object]:
     finally:
         credential = b""
         shutil.rmtree(docker_config, ignore_errors=True)
+    create_standby = False
     try:
         existing = docker_inspect(STANDBY_CONTAINER)
         if existing["Config"]["Image"] != subject:
             raise OperatorError("standby exists with a different digest")
-        run_bytes(["/usr/bin/docker", "start", STANDBY_CONTAINER], timeout=60)
+        if standby_configuration_matches(existing, subject):
+            run_bytes(["/usr/bin/docker", "start", STANDBY_CONTAINER], timeout=60)
+        else:
+            if existing["State"].get("Running"):
+                run_bytes(["/usr/bin/docker", "stop", "--time", "20", STANDBY_CONTAINER], timeout=60)
+            run_bytes(["/usr/bin/docker", "rm", STANDBY_CONTAINER], timeout=60)
+            create_standby = True
     except subprocess.CalledProcessError:
+        create_standby = True
+    if create_standby:
         run_bytes([
             "/usr/bin/docker", "create", "--name", STANDBY_CONTAINER,
             "--network", "none", "--read-only", "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+            "--entrypoint", STANDBY_ENTRYPOINT[0],
             "--env", "PSTN_DIALING=DISABLED", "--env", "PRODUCTION_DIALING=DISABLED",
             "--env", "SEND_EVENTS=false", "--env", "ENABLE_EXTERNAL_DELIVERY=false",
             "--env", "LIVE_WRITE=false", "--env", "ODOO_WRITE=false",
-            "--env", "N8N_DELIVERY_ENABLED=false", subject,
+            "--env", "N8N_DELIVERY_ENABLED=false", subject, *STANDBY_COMMAND,
         ], timeout=120)
         run_bytes(["/usr/bin/docker", "start", STANDBY_CONTAINER], timeout=60)
     current = docker_inspect(STANDBY_CONTAINER)
-    if current["Config"]["Image"] != subject or current["HostConfig"]["NetworkMode"] != "none":
+    if not standby_configuration_matches(current, subject):
         raise OperatorError("standby isolation read-back failed")
     time.sleep(5)
     if not docker_inspect(STANDBY_CONTAINER)["State"]["Running"]:
@@ -359,7 +385,7 @@ def stage_standby(config: dict[str, str]) -> dict[str, object]:
 def certify_standby(config: dict[str, str]) -> dict[str, object]:
     current = docker_inspect(STANDBY_CONTAINER)
     subject = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
-    if current["Config"]["Image"] != subject or current["HostConfig"]["NetworkMode"] != "none" or not current["State"]["Running"]:
+    if not standby_configuration_matches(current, subject) or not current["State"]["Running"]:
         raise OperatorError("standby certification mismatch")
     return {"subject": subject, "network_mode": "none"}
 
