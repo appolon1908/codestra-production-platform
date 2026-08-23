@@ -464,6 +464,19 @@ def validate_control_plane(config: dict[str, str]) -> dict[str, object]:
             "postal_inbound_adapter": "PASS", "external_delivery": "DISABLED"}
 
 
+def wait_control_plane_health(timeout_seconds: int = 120) -> None:
+    """Wait for Docker's scheduled health probe without accepting unhealthy state."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        health = docker_inspect(CONTROL_PLANE_API)["State"].get("Health", {}).get("Status")
+        if health == "healthy":
+            return
+        if health == "unhealthy":
+            raise OperatorError("control-plane API became unhealthy")
+        time.sleep(2)
+    raise OperatorError("control-plane API health check timed out")
+
+
 def stage_control_plane(config: dict[str, str]) -> dict[str, object]:
     archive, release = control_plane_paths(config)
     expected = checked_root_file(CONTROL_PLANE_ARCHIVE_CHECKSUM, expected_mode=0o644)
@@ -505,7 +518,7 @@ def stage_control_plane(config: dict[str, str]) -> dict[str, object]:
             run_bytes(["/usr/bin/docker", "exec", "-i", CONTROL_PLANE_DB_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", CONTROL_PLANE_DB], stdin=migration.read_bytes(), timeout=300)
         run_bytes([*compose, "build", "--pull=false"], timeout=1800)
         run_bytes([*compose, "up", "--detach", "--remove-orphans"], timeout=300)
-        time.sleep(10)
+        wait_control_plane_health()
         result = validate_control_plane(config)
     except Exception:
         rollback_control_plane(config)
