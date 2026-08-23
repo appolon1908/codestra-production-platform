@@ -82,6 +82,29 @@ def test_control_plane_archive_rejects_unsafe_members(
         OPERATOR.validate_control_plane_archive(archive, "e" * 40)
 
 
+def test_wait_control_plane_health_accepts_scheduled_probe(monkeypatch):
+    states = iter(["starting", "starting", "healthy"])
+    monkeypatch.setattr(
+        OPERATOR,
+        "docker_inspect",
+        lambda _container: {"State": {"Health": {"Status": next(states)}}},
+    )
+    monkeypatch.setattr(OPERATOR.time, "sleep", lambda _seconds: None)
+
+    OPERATOR.wait_control_plane_health(timeout_seconds=120)
+
+
+def test_wait_control_plane_health_rejects_unhealthy(monkeypatch):
+    monkeypatch.setattr(
+        OPERATOR,
+        "docker_inspect",
+        lambda _container: {"State": {"Health": {"Status": "unhealthy"}}},
+    )
+
+    with pytest.raises(OPERATOR.OperatorError, match="became unhealthy"):
+        OPERATOR.wait_control_plane_health(timeout_seconds=120)
+
+
 @pytest.fixture(autouse=True)
 def fixed_release_tuple(monkeypatch):
     monkeypatch.setattr(
