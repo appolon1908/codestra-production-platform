@@ -1,0 +1,15 @@
+[Unit]
+Description=Publish Codestra backup and restore certification metrics
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/codestra/operations/monitoring/exporters/recovery_metrics.sh
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/codestra/backups/brain-certification /opt/codestra/evidence
+ReadWritePaths=/var/lib/node_exporter/textfile_collector

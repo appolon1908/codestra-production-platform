@@ -24,7 +24,9 @@ COPY --chown=10001:10001 control_plane_service /app/control_plane_service
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    SOURCE_SHA=${VCS_REF} \
+    RELEASE_ID=${VCS_REF}
 USER 10001:10001
 HEALTHCHECK --interval=20s --timeout=3s --retries=5 CMD ["/opt/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8096/health')"]
 CMD ["/opt/venv/bin/python", "-m", "control_plane_service.server"]
