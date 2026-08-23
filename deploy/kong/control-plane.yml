@@ -46,6 +46,11 @@ services:
         paths: [/api/v1/health]
         methods: [GET]
         strip_path: false
+      - name: control-plane-system-admin
+        hosts: [api.codestra.co]
+        paths: [/v1/admin/system]
+        methods: [GET]
+        strip_path: false
     plugins:
       - name: openid-connect
         config:
@@ -71,7 +76,8 @@ services:
               local scopes = {}
               for value in string.gmatch(claims.scope or "", "%S+") do scopes[value] = true end
               local required
-              if path:find("^/api/v1/results/messages/") then required = "communications.result.write"
+              if path:find("^/v1/admin/system/") then required = "platform.admin"
+              elseif path:find("^/api/v1/results/messages/") then required = "communications.result.write"
               elseif path:find("^/api/v1/control/messages/.+/dispatch$") then required = "communications.message.dispatch"
               elseif path == "/api/v1/control/messages" then required = "communications.message.create"
               elseif path:find("^/api/v1/messages/.+/events$") then required = "communications.message.events.read"
@@ -95,6 +101,11 @@ services:
               end
               kong.service.request.set_header("X-Authenticated-Client", claims.azp or "unknown")
               kong.service.request.set_header("X-Authenticated-Tenant", claims.tenant)
+              if required == "platform.admin" then
+                kong.service.request.set_header("X-Authenticated-Role", "platform_admin")
+              else
+                kong.service.request.set_header("X-Authenticated-Role", "tenant_admin")
+              end
               local gateway_secret = os.getenv("KONG_CONTROL_PLANE_GATEWAY_SECRET")
               if not gateway_secret or gateway_secret == "" then
                 return kong.response.exit(503,{error="gateway_identity_unavailable"})

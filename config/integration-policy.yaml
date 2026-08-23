@@ -1,0 +1,205 @@
+version: 1
+owner: codestra-security-architecture
+default_decision: deny
+canonical_identity_issuer: https://auth.codestra.co
+canonical_api_edge: https://api.codestra.co
+
+systems:
+  keycloak:
+    class: identity
+    owner: identity-platform
+    host: server-a
+    private_address: codestra-identity-keycloak-1:8080
+    public_address: https://auth.codestra.co
+    business_role: identity
+    data_owner: identity-platform
+    interfaces: [oidc, oauth2, jwks]
+    database_owner: identity-db
+    allowed_callers: [kong, middleware, odoo, n8n]
+    allowed_targets: [identity-db]
+  kong:
+    class: api_gateway
+    owner: platform-security
+    host: server-a
+    private_address: codestra-kong-kong-gateway-1:8000
+    public_address: https://api.codestra.co
+    business_role: protected_api_edge
+    data_owner: platform-security
+    interfaces: [https, gateway]
+    database_owner: kong-db
+    allowed_callers: [users, websites, odoo, n8n, services]
+    allowed_targets: [middleware, keycloak, kong-db]
+  middleware:
+    class: integration_authority
+    owner: middleware-platform
+    host: server-a
+    private_address: codestra-middleware-integration-api-1:8096
+    public_address: https://api.codestra.co
+    business_role: authorization_policy_orchestration
+    data_owner: middleware-platform
+    interfaces: [rest, webhook, event_bus, admin_api]
+    database_owner: middleware-db
+    allowed_callers: [kong, odoo, n8n, klyrow, telnexa, vicidial]
+    allowed_targets: [middleware-db, keycloak, odoo, n8n, klyrow, telnexa, vicidial, nats, redis]
+  odoo:
+    class: business_system_of_record
+    owner: business-applications
+    host: server-a
+    private_address: codestra-odoo-internal-proxy:8443
+    public_address: private
+    business_role: crm_business_records
+    data_owner: business-applications
+    interfaces: [authenticated_api, controller, orm]
+    database_owner: odoo-db
+    allowed_callers: [middleware]
+    allowed_targets: [middleware, kong, keycloak, odoo-db]
+    forbidden_targets: [klyrow, postal, telnexa, jasmin, vicidial-db]
+  n8n:
+    class: asynchronous_automation
+    owner: automation-platform
+    host: server-a
+    private_address: codestra-n8n-internal-proxy:8443
+    public_address: private_authenticated
+    business_role: workflow_sequencing
+    data_owner: automation-platform
+    interfaces: [authenticated_webhook, rest]
+    database_owner: n8n-db
+    allowed_callers: [middleware]
+    allowed_targets: [middleware, n8n-db, approved-external-connectors]
+    forbidden_targets: [odoo-db, middleware-db, klyrow-db, telnexa-db, vicidial-db]
+  klyrow:
+    class: email_execution
+    owner: communications-platform
+    host: server-c
+    private_address: 10.40.0.4
+    public_address: private
+    business_role: email_saas_execution
+    data_owner: communications-platform
+    interfaces: [rest, smtp, signed_webhook]
+    database_owner: klyrow-db
+    allowed_callers: [middleware, postal]
+    allowed_targets: [postal, middleware, klyrow-db]
+    forbidden_targets: [odoo, odoo-db]
+  postal:
+    class: smtp_transport
+    owner: communications-platform
+    host: server-c
+    private_address: 10.40.0.4
+    public_address: private
+    business_role: smtp_transport
+    data_owner: communications-platform
+    interfaces: [smtp, provider_api, event_callback]
+    database_owner: postal-db
+    allowed_callers: [klyrow]
+    allowed_targets: [klyrow, postal-db]
+    forbidden_targets: [odoo, odoo-db]
+  telnexa:
+    class: sms_platform
+    owner: communications-platform
+    host: server-c
+    private_address: 10.40.0.4
+    public_address: private
+    business_role: sms_policy_execution
+    data_owner: communications-platform
+    interfaces: [rest, signed_webhook]
+    database_owner: telnexa-db
+    allowed_callers: [middleware, jasmin]
+    allowed_targets: [jasmin, middleware, telnexa-db]
+    forbidden_targets: [odoo, odoo-db]
+  jasmin:
+    class: sms_gateway
+    owner: communications-platform
+    host: server-c
+    private_address: 10.40.0.4
+    public_address: private
+    business_role: smpp_execution
+    data_owner: communications-platform
+    interfaces: [http_api, smpp]
+    database_owner: jasmin-db
+    allowed_callers: [telnexa]
+    allowed_targets: [telnexa, jasmin-db, smpp-provider]
+    forbidden_targets: [odoo, odoo-db]
+  vicidial:
+    class: voice_execution
+    owner: voice-platform
+    host: server-b
+    private_address: 10.40.0.2
+    public_address: private
+    business_role: contact_center_execution
+    data_owner: voice-platform
+    interfaces: [private_adapter, signed_events, websocket]
+    database_owner: vicidial-db
+    allowed_callers: [middleware]
+    allowed_targets: [middleware, vicidial-db]
+    forbidden_targets: [odoo, odoo-db]
+  nats:
+    class: event_bus
+    owner: middleware-platform
+    host: server-a
+    private_address: private
+    public_address: none
+    business_role: durable_events
+    data_owner: middleware-platform
+    interfaces: [nats]
+    database_owner: none
+    allowed_callers: [middleware]
+    allowed_targets: []
+  redis:
+    class: ephemeral_state
+    owner: platform-operations
+    host: server-a
+    private_address: codestra-redis-1:6379
+    public_address: none
+    business_role: cache_queue_lease
+    data_owner: platform-operations
+    interfaces: [redis]
+    database_owner: none
+    allowed_callers: [middleware, n8n]
+    allowed_targets: []
+
+service_accounts:
+  odoo-integration-service: {system: odoo, scopes: [odoo.intent.submit, odoo.result.read]}
+  n8n-automation-service: {system: n8n, scopes: [automation.execute, middleware.action.request]}
+  klyrow-provider-service: {system: klyrow, scopes: [email.event.submit]}
+  telnexa-provider-service: {system: telnexa, scopes: [sms.event.submit]}
+  vicidial-event-service: {system: vicidial, scopes: [voice.event.submit]}
+  webhook-dispatch-service: {system: middleware, scopes: [webhook.dispatch]}
+
+source_scan:
+  extensions: [.py, .js, .ts, .tsx, .xml, .json, .yaml, .yml, .toml, .ini, .conf]
+  excluded_roots: [.git, docs, evidence, reports, tests]
+  rules:
+    - {id: odoo-provider-direct, source_roots: [odoo_addons], pattern: '(?i)(https?://[^"''\\s]*(klyrow|postal|telnexa|jasmin)|10\\.40\\.0\\.4|(?:KLYROW|POSTAL|TELNEXA|JASMIN)_(?:URL|DSN|HOST|TOKEN|SECRET))'}
+    - {id: odoo-vicidial-db-direct, source_roots: [odoo_addons], pattern: '(?i)(vicidial.*(mysql|mariadb|3306)|mysql.*vicidial)'}
+    - {id: n8n-database-direct, source_roots: [n8n], pattern: '(?i)(n8n-nodes-base\\.(postgres|mysql|microsoftSql)|postgres(ql)?://|mysql://)'}
+    - {id: provider-odoo-direct, source_roots: [integrations, tel_events], pattern: '(?i)(odoo.*(/web/dataset|/jsonrpc)|odoo-db|codestra-odoo-1:5432)'}
+  prohibited_secret_patterns:
+    - '(?i)(password|api_key|secret|token)\\s*[=:]\\s*["''](?!CHANGE_ME|test-|example|\\$\\{)[^"'']{8,}["'']'
+
+runtime:
+  prohibited_public_ports: [5432, 6379, 4222, 3306, 8001, 8444]
+  approved_destinations: [10.40.0.1, 10.40.0.2, 10.40.0.3, 10.40.0.4, 127.0.0.1, api.codestra.co, auth.codestra.co, authorization.internal.codestra.agency, codestra-integration-control-plane-api-1, codestra-n8n-1, codestra-odoo-1, codestra-odoo19-module-staging-odoo-1, codestra-postgres-1, dialer.codestra.agency, edge.internal.codestra.agency, gateway, host.docker.internal, keycloak, klyrow.internal.codestra.agency, kong-db, localhost, middleware, n8n, n8n.codestra.agency, n8n.internal.codestra.agency, odoo, odoo-provisioning-callback, odoo.internal.codestra.agency, postgres, provisioning-service, scraper.internal.codestra.agency, sms-postgres, telnexa.internal.codestra.agency, turns, webhook, wss.codestra.agency]
+  approved_service_accounts: [cod-web-out-email-production, codestra-agent-auth-gateway, codestra-middleware-odoo-results, codestra-middleware-production, codestra-n8n-production, codestra-odoo-callback-service, codestra-provisioning-service-staging, codestra-reseller-portal]
+  connector_destination_rules:
+    - {variable_pattern: 'KLYROW.*(URL|HOST)', allowed: [10.40.0.4, klyrow.internal.codestra.agency, auth.codestra.co]}
+    - {variable_pattern: 'TELNEXA.*(URL|HOST)', allowed: [10.40.0.4, telnexa.internal.codestra.agency]}
+    - {variable_pattern: 'VICIDIAL.*(URL|HOST)', allowed: [10.40.0.2, authorization.internal.codestra.agency, edge.internal.codestra.agency]}
+  database_network_owners:
+    codestra-kong_kong_backend: [kong]
+    codestra-identity_identity_db: [keycloak]
+    codestra_sms_data: [telnexa]
+  database_ownership:
+    odoo_app: codestra_odoo
+    n8n_app: codestra_n8n
+    middleware_app: codestra_middleware
+    control_plane_app: control_plane
+    email_reseller_app: email_reseller
+    beyvra_email: beyvra_email
+  forbidden_network_peers:
+    - {left: '^codestra-odoo-(1|internal-proxy)$', right: '^codestra-(beyvra-email-api-1|sms-api-(api|event-worker)-1|private-vicidial-ingress-1)$'}
+    - {left: '^codestra-n8n-(1|internal-proxy)$', right: '^codestra-(beyvra-email-api-1|sms-api-(api|event-worker)-1|private-vicidial-ingress-1)$'}
+  forbidden_shared_networks:
+    odoo: [klyrow, telnexa, vicidial]
+    n8n: [odoo-db, middleware-db, klyrow-db, telnexa-db, vicidial-db]
+
+exceptions: []

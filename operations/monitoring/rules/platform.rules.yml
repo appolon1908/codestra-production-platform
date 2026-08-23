@@ -426,6 +426,23 @@ groups:
       runbook: operations/runbooks/alerts/unexpected-production-callbacks-enabled.md
       runbook_url: https://runbooks.codestra.agency/alerts/unexpected-production-callbacks-enabled
       dashboard: monitoring-evidence://application/unexpected-production-callbacks-enabled
+  - alert: CodestraIntegrationArchitectureViolation
+    expr: codestra_integration_architecture_critical_findings > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: integration-governance
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Integration architecture constitution violation detected
+      description: Integration architecture constitution violation detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: critical findings > 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/integration-architecture-violation.md
+      runbook_url: https://runbooks.codestra.agency/alerts/integration-architecture-violation
+      dashboard: monitoring-evidence://application/integration-architecture-violation
 - name: voice
   rules:
   - alert: CodestraVicidialUnavailable

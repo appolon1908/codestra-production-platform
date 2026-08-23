@@ -6,7 +6,7 @@ import pytest
 from tools.validate_activation_request import CHANGE_ID, REQUIRED_FALSE_FLAGS, validate
 
 SHA = "24c49e08e53d5e3b9894b0b6f959a942533ed276"
-DIGEST = "sha256:f48206bbcbff7ad791de32a1026a95856489e6ee054ff13779facbf30ee8c28a"
+DIGEST = "sha256:09d4bd0f7b2376e0a06d3efae27a6642429389fa7e3277791ec0b36584e87175"
 OLD_DIGEST = "sha256:336c9a31648a0481737fa4bcc3eafb02a22e4b4fc66ba7b8ec1759c087e05e02"
 
 
@@ -62,6 +62,8 @@ def test_rejects_non_boolean_false_flag(tmp_path):
 @pytest.mark.parametrize("action", [
     "backup", "validate-backup", "restore-test", "stage", "canary", "rollback",
     "stage-control-plane", "validate-control-plane", "rollback-control-plane",
+    "activate-control-plane", "enable-production-web-traffic",
+    "disable-production-web-traffic",
 ])
 def test_state_change_window_authority_is_deferred_to_root_operator(tmp_path, action):
     # The runner cannot read the root-owned waiver evidence. It binds the exact
