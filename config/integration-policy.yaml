@@ -182,13 +182,16 @@ runtime:
     codestra-kong_kong_backend: [kong]
     codestra-identity_identity_db: [keycloak]
     codestra_sms_data: [telnexa]
-  database_boundaries:
-    - {container_pattern: '^codestra-postgres-1$', allowed_peer_patterns: ['middleware', 'control-plane', 'backup', 'postgres-exporter']}
-    - {container_pattern: 'identity-db', allowed_peer_patterns: ['keycloak', 'identity-db', 'backup', 'postgres-exporter']}
-    - {container_pattern: 'kong-db', allowed_peer_patterns: ['kong-gateway', 'kong-db', 'backup', 'postgres-exporter']}
-    - {container_pattern: 'n8n.*postgres', allowed_peer_patterns: ['n8n', 'backup', 'postgres-exporter']}
-    - {container_pattern: 'odoo.*postgres', allowed_peer_patterns: ['odoo', 'backup', 'postgres-exporter']}
-    - {container_pattern: 'sms.*postgres', allowed_peer_patterns: ['sms-api', 'backup', 'postgres-exporter']}
+  database_ownership:
+    odoo_app: codestra_odoo
+    n8n_app: codestra_n8n
+    middleware_app: codestra_middleware
+    control_plane_app: control_plane
+    email_reseller_app: email_reseller
+    beyvra_email: beyvra_email
+  forbidden_network_peers:
+    - {left: '^codestra-odoo-(1|internal-proxy)$', right: '^codestra-(beyvra-email-api-1|sms-api-(api|event-worker)-1|private-vicidial-ingress-1)$'}
+    - {left: '^codestra-n8n-(1|internal-proxy)$', right: '^codestra-(beyvra-email-api-1|sms-api-(api|event-worker)-1|private-vicidial-ingress-1)$'}
   forbidden_shared_networks:
     odoo: [klyrow, telnexa, vicidial]
     n8n: [odoo-db, middleware-db, klyrow-db, telnexa-db, vicidial-db]

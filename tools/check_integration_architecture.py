@@ -186,16 +186,20 @@ def validate_runtime(snapshot_path: Path, policy: dict[str, Any]) -> list[Findin
     for endpoint in snapshot.get("public_endpoints", []):
         if endpoint.get("registered") is not True:
             findings.append(Finding("critical", "unregistered-public-endpoint", str(endpoint.get("path")), "public endpoint absent from registry"))
-    for boundary in policy["runtime"].get("database_boundaries", []):
-        database_pattern = re.compile(boundary["container_pattern"])
-        allowed_patterns = [re.compile(pattern) for pattern in boundary["allowed_peer_patterns"]]
-        for database in (item for item in containers if database_pattern.search(item.get("name", ""))):
-            database_networks = set(database.get("networks", []))
-            for peer in containers:
-                if peer is database or not database_networks.intersection(peer.get("networks", [])):
-                    continue
-                if not any(pattern.search(peer.get("name", "")) for pattern in allowed_patterns):
-                    findings.append(Finding("critical", "cross-application-db-network", database["name"], f"unapproved network peer: {peer.get('name')}"))
+    ownership = policy["runtime"].get("database_ownership", {})
+    observed_access = snapshot.get("database_access", [])
+    if ownership and not observed_access:
+        findings.append(Finding("critical", "database-access-unverified", "runtime", "database ACL readback is absent"))
+    for access in observed_access:
+        if access.get("connect") and ownership.get(access.get("role")) != access.get("database"):
+            findings.append(Finding("critical", "cross-application-db-access", str(access.get("role")), f"CONNECT allowed to {access.get('database')}"))
+    for rule in policy["runtime"].get("forbidden_network_peers", []):
+        left_pattern, right_pattern = re.compile(rule["left"]), re.compile(rule["right"])
+        for left in (item for item in containers if left_pattern.search(item.get("name", ""))):
+            for right in (item for item in containers if right_pattern.search(item.get("name", ""))):
+                shared = set(left.get("networks", [])).intersection(right.get("networks", []))
+                if shared:
+                    findings.append(Finding("critical", "forbidden-shared-network", left["name"], f"shares {','.join(sorted(shared))} with {right['name']}"))
     return findings
 
 

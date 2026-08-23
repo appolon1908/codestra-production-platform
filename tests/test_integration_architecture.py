@@ -46,6 +46,7 @@ def test_runtime_fixture_fails_closed_on_each_critical_boundary():
     assert {finding.rule for finding in findings} == {
         "private-port-published", "unknown-runtime-destination",
         "unknown-service-account", "unregistered-public-endpoint",
+        "cross-application-db-access", "forbidden-shared-network",
     }
 
 

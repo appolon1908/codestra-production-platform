@@ -39,9 +39,19 @@ def main() -> int:
             "outbound_destinations": [],
             "unknown_service_accounts": False,
         })
+    database_access = []
+    query = """WITH r(role) AS (VALUES ('odoo_app'),('n8n_app'),('middleware_app'),('control_plane_app'),('email_reseller_app'),('beyvra_email')), d(db) AS (VALUES ('codestra_odoo'),('codestra_n8n'),('codestra_middleware'),('control_plane'),('email_reseller'),('beyvra_email')) SELECT role||'|'||db||'|'||has_database_privilege(role,db,'CONNECT') FROM r CROSS JOIN d ORDER BY role,db;"""
+    try:
+        rows = subprocess.check_output(["docker", "exec", "-u", "postgres", "codestra-postgres-1", "psql", "-XAt", "-d", "postgres", "-c", query], text=True).splitlines()
+        for row in rows:
+            role, database, allowed = row.split("|")
+            database_access.append({"role": role, "database": database, "connect": allowed == "true"})
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        database_access = []
     payload = {
         "schema": "codestra.runtime-architecture.v1",
         "containers": sorted(containers, key=lambda value: value["name"]),
+        "database_access": database_access,
         "public_endpoints": [],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
