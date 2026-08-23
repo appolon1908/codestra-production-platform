@@ -29,6 +29,12 @@ def evidence(tmp_path: Path, digest: str = "sha256:" + "c" * 64) -> Path:
     }))
     (tmp_path / "signature-verification.txt").write_text("verified\n")
     (tmp_path / "provenance-verification.txt").write_text("verified\n")
+    (tmp_path / "vex").mkdir()
+    encoded_digest = digest.replace(":", "%3A")
+    (tmp_path / "vex" / "openvex.json").write_text(json.dumps({
+        "metadata": {"source_sha": source, "image_digest": digest},
+        "statements": [{"products": [{"@id": f"pkg:oci/middleware@{encoded_digest}"}]}],
+    }))
     return tmp_path
 
 
@@ -50,4 +56,14 @@ def test_mismatched_sbom_is_rejected(tmp_path: Path) -> None:
     directory = evidence(tmp_path)
     (directory / "sbom.cdx.json").write_text('{"changed":true}\n')
     with pytest.raises(ValueError, match="SBOM hash differs"):
+        validate(directory)
+
+
+def test_mismatched_openvex_subject_is_rejected(tmp_path: Path) -> None:
+    directory = evidence(tmp_path)
+    openvex_path = directory / "vex" / "openvex.json"
+    openvex = json.loads(openvex_path.read_text())
+    openvex["metadata"]["image_digest"] = "sha256:" + "d" * 64
+    openvex_path.write_text(json.dumps(openvex))
+    with pytest.raises(ValueError, match="OpenVEX subject digest differs"):
         validate(directory)

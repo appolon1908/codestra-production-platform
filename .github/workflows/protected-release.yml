@@ -121,6 +121,9 @@ jobs:
             --middleware-image-digest "${MIDDLEWARE_IMAGE_DIGEST}" \
             --middleware-signature-status "PASS" \
             --middleware-provenance-status "PASS" \
+            --middleware-sbom-sha256 "${MIDDLEWARE_SBOM_SHA256}" \
+            --middleware-provenance-sha256 "${MIDDLEWARE_PROVENANCE_SHA256}" \
+            --middleware-openvex-sha256 "${MIDDLEWARE_OPENVEX_SHA256}" \
             --migration-revision "${MIDDLEWARE_MIGRATION_REVISION}"
           install -m 0644 middleware-signature-verification.json \
             dist/middleware-signature-verification.json
@@ -138,6 +141,8 @@ jobs:
             dist/middleware-trivy.json
           install -m 0644 middleware-release/grype-vex.json \
             dist/middleware-grype-vex.json
+          install -m 0644 middleware-release/vex/openvex.json \
+            dist/middleware-openvex.json
           install -m 0644 middleware-release/SHA256SUMS \
             dist/middleware-source-SHA256SUMS
           (cd dist && sha256sum \
@@ -145,7 +150,7 @@ jobs:
             middleware-provenance-verification.json \
             middleware-sbom-verification.json \
             middleware-RELEASE.env middleware-sbom.cdx.json \
-            middleware-provenance.json middleware-trivy.json \
+            middleware-provenance.json middleware-openvex.json middleware-trivy.json \
             middleware-grype-vex.json middleware-source-SHA256SUMS \
             >> manifest.sha256)
           (cd dist && sha256sum --check manifest.sha256)

@@ -6,7 +6,8 @@ import pytest
 from tools.validate_activation_request import CHANGE_ID, REQUIRED_FALSE_FLAGS, validate
 
 SHA = "24c49e08e53d5e3b9894b0b6f959a942533ed276"
-DIGEST = "sha256:336c9a31648a0481737fa4bcc3eafb02a22e4b4fc66ba7b8ec1759c087e05e02"
+DIGEST = "sha256:f48206bbcbff7ad791de32a1026a95856489e6ee054ff13779facbf30ee8c28a"
+OLD_DIGEST = "sha256:336c9a31648a0481737fa4bcc3eafb02a22e4b4fc66ba7b8ec1759c087e05e02"
 
 
 def request(tmp_path, **changes):
@@ -71,6 +72,16 @@ def test_state_change_window_authority_is_deferred_to_root_operator(tmp_path, ac
 def test_manifest_must_bind_requested_digest(tmp_path):
     args = request(tmp_path, digest="sha256:" + "1" * 64)
     with pytest.raises(ValueError, match="manifest digest"):
+        validate(args)
+
+
+def test_superseded_digest_is_denied_even_when_manifest_matches(tmp_path):
+    args = request(tmp_path, digest=OLD_DIGEST)
+    manifest = json.loads(open(args.manifest, encoding="utf-8").read())
+    manifest["release_tuple"]["middleware_image_digest"] = OLD_DIGEST
+    with open(args.manifest, "w", encoding="utf-8") as stream:
+        json.dump(manifest, stream)
+    with pytest.raises(ValueError, match="superseded"):
         validate(args)
 
 

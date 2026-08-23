@@ -54,6 +54,20 @@ def validate(directory: Path) -> dict[str, str]:
         raise ValueError("middleware provenance digest differs")
     if provenance["evidence"]["sbomSha256"] != sbom_hash:
         raise ValueError("middleware provenance SBOM binding differs")
+    openvex_path = directory / "vex" / "openvex.json"
+    openvex = json.loads(openvex_path.read_text())
+    if openvex.get("metadata", {}).get("source_sha") != values["SOURCE_SHA"]:
+        raise ValueError("middleware OpenVEX source SHA differs")
+    if openvex.get("metadata", {}).get("image_digest") != values["IMAGE_DIGEST"]:
+        raise ValueError("middleware OpenVEX subject digest differs")
+    product_digest = values["IMAGE_DIGEST"].replace(":", "%3A")
+    products = [
+        product.get("@id", "")
+        for statement in openvex.get("statements", [])
+        for product in statement.get("products", [])
+    ]
+    if not products or any(product_digest not in product for product in products):
+        raise ValueError("middleware OpenVEX products differ from release digest")
     builder = provenance["runDetails"]["builder"]["id"]
     if builder != (
         "https://github.com/Codestra-SRL/codestra-middleware/"
@@ -64,6 +78,10 @@ def validate(directory: Path) -> dict[str, str]:
         raise ValueError("middleware signature verification evidence is empty")
     if not (directory / "provenance-verification.txt").read_text().strip():
         raise ValueError("middleware provenance verification evidence is empty")
+    values["PROVENANCE_SHA256"] = hashlib.sha256(
+        (directory / "provenance.json").read_bytes()
+    ).hexdigest()
+    values["OPENVEX_SHA256"] = hashlib.sha256(openvex_path.read_bytes()).hexdigest()
     return values
 
 
@@ -76,6 +94,9 @@ def main() -> int:
     with args.github_env.open("a") as target:
         target.write(f'MIDDLEWARE_PROTECTED_SHA={values["SOURCE_SHA"]}\n')
         target.write(f'MIDDLEWARE_IMAGE_DIGEST={values["IMAGE_DIGEST"]}\n')
+        target.write(f'MIDDLEWARE_SBOM_SHA256={values["SBOM_SHA256"]}\n')
+        target.write(f'MIDDLEWARE_PROVENANCE_SHA256={values["PROVENANCE_SHA256"]}\n')
+        target.write(f'MIDDLEWARE_OPENVEX_SHA256={values["OPENVEX_SHA256"]}\n')
     return 0
 
 
