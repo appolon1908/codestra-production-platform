@@ -120,9 +120,11 @@ readback make operations fail closed.
 verifies the installed immutable digest, and creates only the fixed standby
 container with network mode `none`, a read-only root filesystem, all
 capabilities dropped, and production-delivery flags disabled. It does not
-start the application API: the container runs a fixed Python sleep command so
+start the application API: the container runs a fixed inert Python wait so
 artifact identity and hardened container settings can be certified without
-requiring production authorization or database configuration. It does not
+requiring production authorization or database configuration. A stale stopped
+container for the same digest is recreated only when its configuration differs,
+so staging is idempotent across operator upgrades and delayed approvals. It does not
 replace active middleware or alter proxy routing. Backup validation and restore
 continue to use the fixed, root-owned `codestra-readiness-backup.service` and
 `codestra-readiness-restore.service` units. `validate-backup` invokes only the
