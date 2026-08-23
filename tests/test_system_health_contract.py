@@ -31,6 +31,18 @@ def test_component_status_fails_closed_when_probe_is_not_configured(monkeypatch)
     assert server.component_status("odoo") == {"status": "unknown", "latency_ms": None}
 
 
+def test_outbound_safe_mode_requires_every_production_gate(monkeypatch):
+    monkeypatch.setenv("CONTROL_PLANE_OUTBOUND_ENABLED", "true")
+    monkeypatch.setenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false")
+    monkeypatch.setenv("TELNEXA_MODE", "simulator")
+    monkeypatch.setenv("KLYROW_MODE", "test")
+    assert server.production_delivery_enabled() is False
+    monkeypatch.setenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "true")
+    monkeypatch.setenv("TELNEXA_MODE", "production")
+    monkeypatch.setenv("KLYROW_MODE", "production")
+    assert server.production_delivery_enabled() is True
+
+
 def test_admin_system_routes_are_platform_admin_only():
     source = open(server.__file__, encoding="utf-8").read()
     for path in (

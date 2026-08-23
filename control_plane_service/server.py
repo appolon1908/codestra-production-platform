@@ -102,6 +102,15 @@ def database_snapshot() -> dict[str, str]:
     return {name: statuses.get(name, "unknown") for name in names}
 
 
+def production_delivery_enabled() -> bool:
+    return (
+        os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED", "false") == "true"
+        and os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") == "true"
+        and os.getenv("TELNEXA_MODE", "simulator") == "production"
+        and os.getenv("KLYROW_MODE", "test") == "production"
+    )
+
+
 def identity(source: str) -> tuple[str, str]:
     prefix = source.upper()
     secret = os.getenv("N8N_MIDDLEWARE_HMAC_SECRET", "") if source == "n8n" else ""
@@ -285,11 +294,11 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path in {"/ready", "/readyz"}:
             try: STORE.list_events(None, limit=1)
             except Exception: return self.send_json(503, {"status": "not_ready"})
-            return self.send_json(200, {"status": "ready", "outbound_safe_mode": os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED", "false") != "true"})
+            return self.send_json(200, {"status": "ready", "outbound_safe_mode": not production_delivery_enabled()})
         if parsed.path == "/v1/ready":
             try: STORE.list_messages("__readiness__", limit=1)
             except Exception: return self.send_json(503, {"status": "not_ready"})
-            production_enabled=os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED","false")=="true" and os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED","false")=="true" and os.getenv("TELNEXA_MODE","simulator")=="production" and os.getenv("KLYROW_MODE","test")=="production"
+            production_enabled=production_delivery_enabled()
             return self.send_json(200, {"status":"ready","providers":{"telnexa":os.getenv("TELNEXA_MODE","simulator"),"klyrow":os.getenv("KLYROW_MODE","test")},"production_delivery_enabled":production_enabled})
         if parsed.path == "/metrics":
             raw = (STORE.metrics()+MAPPINGS.metrics()).encode(); self.send_response(200); self.send_header("Content-Type", "text/plain; version=0.0.4"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); return self.wfile.write(raw)
