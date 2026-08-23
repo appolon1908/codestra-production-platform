@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic Codestra integration architecture recertification
+
+[Timer]
+OnBootSec=10m
+OnUnitActiveSec=15m
+RandomizedDelaySec=2m
+Persistent=true
+Unit=codestra-integration-architecture-audit.service
+
+[Install]
+WantedBy=timers.target

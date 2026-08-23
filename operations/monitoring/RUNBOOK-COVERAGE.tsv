@@ -21,6 +21,7 @@ CodestraUnexpectedWorkflowActivation	operations/runbooks/alerts/unexpected-workf
 CodestraUnexpectedWriteEnablement	operations/runbooks/alerts/unexpected-write-enablement.md	13/13	monitoring-owner-registry	PASS
 CodestraUnexpectedSendEventsEnabled	operations/runbooks/alerts/unexpected-send-events-enabled.md	13/13	monitoring-owner-registry	PASS
 CodestraUnexpectedProductionCallbacksEnabled	operations/runbooks/alerts/unexpected-production-callbacks-enabled.md	13/13	monitoring-owner-registry	PASS
+CodestraIntegrationArchitectureViolation	operations/runbooks/alerts/integration-architecture-violation.md	13/13	monitoring-owner-registry	PASS
 CodestraVicidialUnavailable	operations/runbooks/alerts/vicidial-unavailable.md	13/13	monitoring-owner-registry	PASS
 CodestraAsteriskUnavailable	operations/runbooks/alerts/asterisk-unavailable.md	13/13	monitoring-owner-registry	PASS
 CodestraTrunkUnavailable	operations/runbooks/alerts/trunk-unavailable.md	13/13	monitoring-owner-registry	PASS

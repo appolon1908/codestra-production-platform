@@ -21,6 +21,7 @@ unexpected-workflow-activation	CodestraUnexpectedWorkflowActivation	critical	n8n
 unexpected-write-enablement	CodestraUnexpectedWriteEnablement	critical	integration	production	write enablement > 0	1m	operations/runbooks/alerts/unexpected-write-enablement.md	COVERED
 unexpected-send-events-enabled	CodestraUnexpectedSendEventsEnabled	critical	integration	production	SEND_EVENTS != 0	1m	operations/runbooks/alerts/unexpected-send-events-enabled.md	COVERED
 unexpected-production-callbacks-enabled	CodestraUnexpectedProductionCallbacksEnabled	critical	callback	production	PRODUCTION_CALLBACKS_ENABLED != 0	1m	operations/runbooks/alerts/unexpected-production-callbacks-enabled.md	COVERED
+integration-architecture-violation	CodestraIntegrationArchitectureViolation	critical	integration-governance	production	critical findings > 0	1m	operations/runbooks/alerts/integration-architecture-violation.md	COVERED
 vicidial-unavailable	CodestraVicidialUnavailable	critical	vicidial	production	service_up = 0	2m	operations/runbooks/alerts/vicidial-unavailable.md	COVERED
 asterisk-unavailable	CodestraAsteriskUnavailable	critical	asterisk	production	service_up = 0	2m	operations/runbooks/alerts/asterisk-unavailable.md	COVERED
 trunk-unavailable	CodestraTrunkUnavailable	critical	voice-trunk	production	trunk_up = 0	2m	operations/runbooks/alerts/trunk-unavailable.md	COVERED
