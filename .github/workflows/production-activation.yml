@@ -71,6 +71,9 @@ jobs:
             --digest "${IMAGE_DIGEST}" --change-id "${CHANGE_ID}" \
             --maintenance-date "${MAINTENANCE_DATE}" \
             --manifest "${RUNNER_TEMP}/release/deployment-manifest.json"
+          python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+          python tools/check_integration_architecture.py \
+            --evidence "${RUNNER_TEMP}/integration-architecture.json"
       - name: Preserve fail-closed result
         run: |
           printf '%s\n' \

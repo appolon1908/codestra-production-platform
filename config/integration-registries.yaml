@@ -1,0 +1,66 @@
+version: 1
+connectors:
+  - {connector_id: mw-odoo-v1, source_system: middleware, target_system: odoo, direction: bidirectional, protocol: authenticated_api, base_endpoint: private, private_endpoint: codestra-odoo-internal-proxy:8443, auth_method: scoped_service_token, service_account: odoo-integration-service, required_scopes: [odoo.callback.write], timeout_seconds: 10, retry_policy: bounded_exponential_v1, circuit_breaker_policy: standard_v1, rate_limit_policy: tenant_v1, schema_version: 1, enabled: true, environment: production, business_owner: business-applications, technical_owner: middleware-platform}
+  - {connector_id: mw-n8n-v1, source_system: middleware, target_system: n8n, direction: bidirectional, protocol: authenticated_webhook, base_endpoint: private, private_endpoint: codestra-n8n-internal-proxy:8443, auth_method: scoped_service_token_hmac, service_account: n8n-automation-service, required_scopes: [automation.execute], timeout_seconds: 10, retry_policy: bounded_exponential_v1, circuit_breaker_policy: standard_v1, rate_limit_policy: tenant_v1, schema_version: 1, enabled: true, environment: production, business_owner: automation-platform, technical_owner: middleware-platform}
+  - {connector_id: mw-klyrow-v1, source_system: middleware, target_system: klyrow, direction: bidirectional, protocol: rest_signed_webhook, base_endpoint: private, private_endpoint: 10.40.0.4, auth_method: scoped_service_token_hmac, service_account: klyrow-provider-service, required_scopes: [email.execute, email.event.submit], timeout_seconds: 15, retry_policy: bounded_exponential_v1, circuit_breaker_policy: provider_v1, rate_limit_policy: tenant_channel_v1, schema_version: 1, enabled: false, environment: production, business_owner: communications-platform, technical_owner: middleware-platform}
+  - {connector_id: mw-telnexa-v1, source_system: middleware, target_system: telnexa, direction: bidirectional, protocol: rest_signed_webhook, base_endpoint: private, private_endpoint: 10.40.0.4, auth_method: scoped_service_token_hmac, service_account: telnexa-provider-service, required_scopes: [sms.execute, sms.event.submit], timeout_seconds: 15, retry_policy: bounded_exponential_v1, circuit_breaker_policy: provider_v1, rate_limit_policy: tenant_channel_v1, schema_version: 1, enabled: false, environment: production, business_owner: communications-platform, technical_owner: middleware-platform}
+  - {connector_id: mw-vicidial-v1, source_system: middleware, target_system: vicidial, direction: bidirectional, protocol: private_adapter_signed_events, base_endpoint: private, private_endpoint: 10.40.0.2, auth_method: mtls_hmac, service_account: vicidial-event-service, required_scopes: [voice.execute, voice.event.submit], timeout_seconds: 10, retry_policy: bounded_exponential_v1, circuit_breaker_policy: provider_v1, rate_limit_policy: tenant_campaign_v1, schema_version: 1, enabled: false, environment: production, business_owner: voice-platform, technical_owner: middleware-platform}
+endpoint_defaults: &endpoint_defaults
+  version: 1
+  exposure: kong_protected
+  auth_required: true
+  service_account: scoped-caller
+  required_scope: route-policy
+  tenant_required: true
+  campaign_required: false
+  idempotency_required: false
+  rate_limit: tenant_v1
+  request_schema: registered-openapi
+  response_schema: registered-openapi
+  owner: middleware-platform
+  status: active
+endpoints:
+  - {endpoint_id: healthz-v1, system: middleware, method: GET, path: /healthz, version: 1, exposure: public_health, auth_required: false, service_account: none, required_scope: none, tenant_required: false, campaign_required: false, idempotency_required: false, rate_limit: health_v1, request_schema: none, response_schema: health-v1, owner: middleware-platform, status: active}
+  - {endpoint_id: readyz-v1, system: middleware, method: GET, path: /readyz, version: 1, exposure: public_health, auth_required: false, service_account: none, required_scope: none, tenant_required: false, campaign_required: false, idempotency_required: false, rate_limit: health_v1, request_schema: none, response_schema: readiness-v1, owner: middleware-platform, status: active}
+  - {endpoint_id: version-v1, system: middleware, method: GET, path: /version, version: 1, exposure: public_health, auth_required: false, service_account: none, required_scope: none, tenant_required: false, campaign_required: false, idempotency_required: false, rate_limit: health_v1, request_schema: none, response_schema: version-v1, owner: middleware-platform, status: active}
+  - {endpoint_id: events-ingest-v1, system: middleware, method: POST, path: /v1/events, version: 1, exposure: kong_protected, auth_required: true, service_account: webhook-dispatch-service, required_scope: event.submit, tenant_required: true, campaign_required: false, idempotency_required: true, rate_limit: tenant_v1, request_schema: integration-event-envelope-v1, response_schema: accepted-v1, owner: middleware-platform, status: active}
+  - {endpoint_id: forms-submit-v1, system: middleware, method: POST, path: '/v1/forms/{form_id}/submit', version: 1, exposure: kong_protected, auth_required: true, service_account: website-form-client, required_scope: form.submit, tenant_required: false, campaign_required: true, idempotency_required: true, rate_limit: public_form_v1, request_schema: form-submission-v1, response_schema: accepted-v1, owner: business-applications, status: registered}
+  - {<<: *endpoint_defaults, endpoint_id: control-v1, system: middleware, method: POST, path: /api/v1/control, idempotency_required: true}
+  - {<<: *endpoint_defaults, endpoint_id: control-patch-v1, system: middleware, method: PATCH, path: /api/v1/control, idempotency_required: true}
+  - {<<: *endpoint_defaults, endpoint_id: messages-read-v1, system: middleware, method: GET, path: /api/v1/messages}
+  - {<<: *endpoint_defaults, endpoint_id: control-events-v1, system: middleware, method: POST, path: /api/v1/events, idempotency_required: true}
+  - {<<: *endpoint_defaults, endpoint_id: results-v1, system: middleware, method: POST, path: /api/v1/results, idempotency_required: true}
+  - {<<: *endpoint_defaults, endpoint_id: reconciliation-read-v1, system: middleware, method: GET, path: /api/v1/reconciliation}
+  - {<<: *endpoint_defaults, endpoint_id: reconciliation-run-v1, system: middleware, method: POST, path: /api/v1/reconciliation, idempotency_required: true}
+  - {<<: *endpoint_defaults, endpoint_id: control-health-v1, system: middleware, method: GET, path: /api/v1/health}
+  - {<<: *endpoint_defaults, endpoint_id: crawler-jobs-v1, system: middleware, method: POST, path: /v1/crawler/jobs, idempotency_required: true}
+  - {<<: *endpoint_defaults, endpoint_id: sms-create-v1, system: middleware, method: POST, path: /v1/messages/sms, idempotency_required: true}
+  - {<<: *endpoint_defaults, endpoint_id: email-create-v1, system: middleware, method: POST, path: /v1/messages/email, idempotency_required: true}
+  - {<<: *endpoint_defaults, endpoint_id: messages-list-v1, system: middleware, method: GET, path: /v1/messages}
+  - {<<: *endpoint_defaults, endpoint_id: messages-detail-v1, system: middleware, method: GET, path: '/v1/messages/{message_id}'}
+  - {<<: *endpoint_defaults, endpoint_id: legacy-health-v1, system: middleware, method: GET, path: /health, exposure: private}
+  - {<<: *endpoint_defaults, endpoint_id: legacy-ready-v1, system: middleware, method: GET, path: /ready, exposure: private}
+  - {<<: *endpoint_defaults, endpoint_id: metrics-v1, system: middleware, method: GET, path: /metrics, exposure: private, required_scope: metrics.read}
+  - {<<: *endpoint_defaults, endpoint_id: source-events-v1, system: middleware, method: POST, path: '/api/v1/events/{source}', idempotency_required: true}
+  - {<<: *endpoint_defaults, endpoint_id: preference-check-v1, system: middleware, method: POST, path: /api/v1/preferences/check, idempotency_required: true}
+  - {<<: *endpoint_defaults, endpoint_id: ops-summary-v1, system: middleware, method: GET, path: /api/v1/ops/summary, required_scope: operations.read}
+  - {<<: *endpoint_defaults, endpoint_id: ops-events-v1, system: middleware, method: GET, path: /api/v1/ops/events, required_scope: operations.read}
+  - {<<: *endpoint_defaults, endpoint_id: realtime-session-v1, system: middleware, method: GET, path: /api/v1/realtime/sessions, required_scope: realtime.session}
+  - {<<: *endpoint_defaults, endpoint_id: agent-websocket-v1, system: middleware, method: GET, path: /ws/agent, required_scope: realtime.connect, request_schema: websocket-upgrade-v1, response_schema: websocket-events-v1}
+webhooks:
+  - {webhook_id: klyrow-events-v1, sender: klyrow, receiver: middleware, path: /v1/webhooks/klyrow, authentication: hmac_timestamp, schema: integration-event-envelope-v1, retry_policy: bounded_exponential_v1, idempotency: event_id_payload_hash, owner: communications-platform, dlq: true, reconciliation: true, enabled: false}
+  - {webhook_id: telnexa-events-v1, sender: telnexa, receiver: middleware, path: /v1/webhooks/telnexa, authentication: hmac_timestamp, schema: integration-event-envelope-v1, retry_policy: bounded_exponential_v1, idempotency: event_id_payload_hash, owner: communications-platform, dlq: true, reconciliation: true, enabled: false}
+  - {webhook_id: vicidial-events-v1, sender: vicidial, receiver: middleware, path: /v1/webhooks/vicidial, authentication: mtls_hmac_timestamp, schema: integration-event-envelope-v1, retry_policy: bounded_exponential_v1, idempotency: event_id_payload_hash, owner: voice-platform, dlq: true, reconciliation: true, enabled: false}
+protocols:
+  - {protocol_id: postgres-app-owned-v1, protocol: PostgreSQL, owner: platform-database, approved_callers: [owning-application], public: false, authentication: per_application_role}
+  - {protocol_id: redis-ephemeral-v1, protocol: Redis, owner: platform-operations, approved_callers: [middleware, n8n], public: false, authentication: scoped_secret}
+  - {protocol_id: nats-events-v1, protocol: NATS, owner: middleware-platform, approved_callers: [middleware], public: false, authentication: scoped_credentials}
+  - {protocol_id: smtp-klyrow-postal-v1, protocol: SMTP, owner: communications-platform, approved_callers: [klyrow], public: false, authentication: scoped_smtp_credential}
+  - {protocol_id: smpp-telnexa-jasmin-v1, protocol: SMPP, owner: communications-platform, approved_callers: [telnexa], public: false, authentication: scoped_smpp_credential}
+schemas:
+  - {schema_name: integration-event-envelope, version: 1, owner: middleware-platform, compatibility: backward, producer: all-connectors, consumer: middleware}
+retry_policies:
+  bounded_exponential_v1: {max_attempts: 5, initial_delay_seconds: 2, max_delay_seconds: 300, jitter: full, retryable_classes: [timeout, dependency_down, rate_limited, server_error]}
+circuit_breaker_policies:
+  standard_v1: {failure_threshold: 3, open_seconds: 30, half_open_probes: 1}
+  provider_v1: {failure_threshold: 3, open_seconds: 60, half_open_probes: 1}

@@ -127,7 +127,7 @@ class FailureHandlingTests(unittest.TestCase):
         before = yaml.safe_load((root / "operations/monitoring/rules/platform.rules.yml").read_text())
         after = yaml.safe_load((root / "operations/monitoring/rules/platform.rules.yml").read_text())
         self.assertEqual(before, after)
-        self.assertEqual(sum(len(group["rules"]) for group in before["groups"]), 76)
+        self.assertEqual(sum(len(group["rules"]) for group in before["groups"]), 77)
 
     def test_recovery_after_restoration_delivers_resolved(self) -> None:
         dispatcher = IsolatedDispatcher()

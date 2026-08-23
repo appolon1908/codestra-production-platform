@@ -28,6 +28,7 @@ No threshold in this file is claimed to be production-proven. Every rule carries
 | `CodestraUnexpectedWriteEnablement` | `write enablement > 0` | `1m` | candidate; tune after deployment |
 | `CodestraUnexpectedSendEventsEnabled` | `SEND_EVENTS != 0` | `1m` | candidate; tune after deployment |
 | `CodestraUnexpectedProductionCallbacksEnabled` | `PRODUCTION_CALLBACKS_ENABLED != 0` | `1m` | candidate; tune after deployment |
+| `CodestraIntegrationArchitectureViolation` | `critical findings > 0` | `1m` | candidate; tune after deployment |
 | `CodestraVicidialUnavailable` | `service_up = 0` | `2m` | candidate; tune after deployment |
 | `CodestraAsteriskUnavailable` | `service_up = 0` | `2m` | candidate; tune after deployment |
 | `CodestraTrunkUnavailable` | `trunk_up = 0` | `2m` | candidate; tune after deployment |

@@ -129,6 +129,11 @@ jobs:
             docker compose -f deploy/control-plane/compose.yaml config --quiet
           docker build -f deploy/control-plane/Dockerfile -t codestra-control-plane:ci .
 
+      - name: Enforce integration constitution
+        run: |
+          python tools/check_integration_architecture.py \
+            --evidence "${RUNNER_TEMP}/integration-architecture.json"
+
       - name: Validate Git whitespace
         run: git diff --check "${{ github.event.pull_request.base.sha }}..HEAD"
 
