@@ -72,7 +72,10 @@ jobs:
             --dir middleware-release
           (cd middleware-release && sha256sum --check --strict SHA256SUMS)
           python tools/verify_middleware_release_evidence.py \
-            --directory middleware-release --github-env middleware-release-verified.env
+            --directory middleware-release --github-env middleware-release-verified.env \
+            --tuple config/production-release-tuple.json \
+            --run-id "${MIDDLEWARE_RELEASE_RUN_ID}" \
+            --artifact "${MIDDLEWARE_RELEASE_ARTIFACT}"
           cat middleware-release-verified.env >> "${GITHUB_ENV}"
           source middleware-release-verified.env
           subject="ghcr.io/codestra-srl/codestra-middleware@${MIDDLEWARE_IMAGE_DIGEST}"

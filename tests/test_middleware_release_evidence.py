@@ -67,3 +67,26 @@ def test_mismatched_openvex_subject_is_rejected(tmp_path: Path) -> None:
     openvex_path.write_text(json.dumps(openvex))
     with pytest.raises(ValueError, match="OpenVEX subject digest differs"):
         validate(directory)
+
+
+def test_protected_tuple_must_match_release_and_selection(tmp_path: Path) -> None:
+    directory = evidence(tmp_path)
+    values = validate(directory)
+    authority = {
+        "change_id": "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01",
+        "middleware_artifact": "fixture-artifact",
+        "middleware_digest": values["IMAGE_DIGEST"],
+        "middleware_openvex_sha256": values["OPENVEX_SHA256"],
+        "middleware_provenance_sha256": values["PROVENANCE_SHA256"],
+        "middleware_run_id": "123",
+        "middleware_sbom_sha256": values["SBOM_SHA256"],
+        "middleware_source_sha": values["SOURCE_SHA"],
+        "release_version": "fixture-release",
+    }
+    tuple_path = tmp_path / "tuple.json"
+    tuple_path.write_text(json.dumps(authority))
+    validate(directory, tuple_path, "123", "fixture-artifact")
+    authority["middleware_run_id"] = "456"
+    tuple_path.write_text(json.dumps(authority))
+    with pytest.raises(ValueError, match="middleware_run_id mismatch"):
+        validate(directory, tuple_path, "123", "fixture-artifact")

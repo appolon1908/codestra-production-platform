@@ -105,6 +105,12 @@ def build(
         raise ValueError("middleware production provenance verification is required")
     if not migration_revision or migration_revision == "REQUIRED":
         raise ValueError("exact migration revision is required")
+    tuple_authority_path = root / "config" / "production-release-tuple.json"
+    tuple_authority = json.loads(tuple_authority_path.read_text())
+    if tuple_authority["middleware_source_sha"] != middleware_sha:
+        raise ValueError("protected tuple middleware source SHA mismatch")
+    if tuple_authority["middleware_digest"] != middleware_image_digest:
+        raise ValueError("protected tuple middleware digest mismatch")
     output.mkdir(parents=True, exist_ok=True)
     files = tracked_files(root)
     archive = output / f"codestra-production-platform-{commit}.tar.gz"
@@ -168,6 +174,8 @@ def build(
                 "middleware_signature_verification": middleware_signature_status,
                 "middleware_provenance_verification": middleware_provenance_status,
                 **evidence_hashes,
+                "change_id": tuple_authority["change_id"],
+                "release_version": tuple_authority["release_version"],
                 "migration_revision": migration_revision,
                 "jetstream_contract_sha256": sha256(
                     root / "eventing/jetstream_contract.json"
@@ -176,7 +184,7 @@ def build(
                     root / "config/keycloak-production-contract.env.example"
                 ),
                 "release_tuple_authority_sha256": sha256(
-                    root / "docs/SERVER_A_PRODUCTION_RELEASE_TUPLE.md"
+                    tuple_authority_path
                 ),
             },
         },

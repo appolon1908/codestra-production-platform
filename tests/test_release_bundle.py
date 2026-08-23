@@ -26,9 +26,9 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
                 "--workflow-ref",
                 "fixture-workflow",
                 "--middleware-sha",
-                "b" * 40,
+                "4001b0bdeaa61db97eca2d6535e67302417c296a",
                 "--middleware-image-digest",
-                "sha256:" + "c" * 64,
+                "sha256:f48206bbcbff7ad791de32a1026a95856489e6ee054ff13779facbf30ee8c28a",
                 "--middleware-signature-status",
                 "PASS",
                 "--middleware-provenance-status",
@@ -56,9 +56,11 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
         "ENABLE_VICIDIAL_WRITES",
         "PRODUCTION_DIALING",
     } <= deployment["required_flags"].keys()
-    assert deployment["release_tuple"]["middleware_protected_sha"] == "b" * 40
+    assert deployment["release_tuple"]["middleware_protected_sha"] == (
+        "4001b0bdeaa61db97eca2d6535e67302417c296a"
+    )
     assert deployment["release_tuple"]["middleware_image_digest"] == (
-        "sha256:" + "c" * 64
+        "sha256:f48206bbcbff7ad791de32a1026a95856489e6ee054ff13779facbf30ee8c28a"
     )
     sbom = json.loads((outputs[0] / "sbom.cdx.json").read_text())
     assert sbom["bomFormat"] == "CycloneDX"
