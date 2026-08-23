@@ -28,7 +28,7 @@ while read -r host path trust; do
     verify_route "$host" "$path" "$trust"
 done <<'EOF'
 crm.codestra.agency /web/health public
-api.codestra.agency /healthz public
+api.codestra.co /healthz public
 n8n.codestra.agency /healthz public
 auth.codestra.co /realms/master public
 phone.codestra.agency /ping public
