@@ -15,6 +15,7 @@ on:
       - "deploy/**"
       - "docs/**"
       - "n8n/**"
+      - "odoo_addons/**"
       - "schemas/**"
       - "scripts/**"
       - "tel_events/**"

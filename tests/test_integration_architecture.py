@@ -1,4 +1,5 @@
 from pathlib import Path
+from copy import deepcopy
 
 import yaml
 
@@ -54,3 +55,16 @@ def test_machine_policy_and_registries_are_secret_free():
     serialized = yaml.safe_dump({"policy": POLICY, "registries": REGISTRIES}).lower()
     assert "password:" not in serialized
     assert "client_secret:" not in serialized
+
+
+def test_forbidden_connector_edge_fails_closed():
+    registries = deepcopy(REGISTRIES)
+    forbidden = deepcopy(registries["connectors"][0])
+    forbidden.update({"connector_id": "odoo-vicidial-direct", "source_system": "odoo", "target_system": "vicidial"})
+    registries["connectors"].append(forbidden)
+    assert "connector-edge" in {finding.rule for finding in validate(ROOT, POLICY, registries, None)}
+
+
+def test_odoo_only_changes_trigger_architecture_ci():
+    workflow = (ROOT / ".github/workflows/platform-source-gate.yml").read_text()
+    assert '"odoo_addons/**"' in workflow

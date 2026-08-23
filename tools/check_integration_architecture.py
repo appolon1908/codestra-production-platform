@@ -170,7 +170,9 @@ def validate_runtime(snapshot_path: Path, policy: dict[str, Any]) -> list[Findin
     snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
     findings: list[Finding] = []
     prohibited_ports = set(policy["runtime"]["prohibited_public_ports"])
-    containers = snapshot.get("containers", [])
+    approved_destinations = set(policy["runtime"].get("approved_destinations", []))
+    approved_identities = set(policy["runtime"].get("approved_service_accounts", []))
+    containers = [item for item in snapshot.get("containers", []) if item.get("environment", "production") == "production"]
     for container in containers:
         name = container.get("name", "<unknown>")
         for binding in container.get("published_ports", []):
@@ -179,9 +181,13 @@ def validate_runtime(snapshot_path: Path, policy: dict[str, Any]) -> list[Findin
             if int(binding["container_port"]) in prohibited_ports and binding.get("host_ip") in {"", "0.0.0.0", "::"}:
                 findings.append(Finding("critical", "private-port-published", name, f"port {binding['container_port']} must remain private"))
         for destination in container.get("outbound_destinations", []):
-            if destination.get("registered") is not True:
+            if destination.get("registered") is not True and destination.get("destination") not in approved_destinations:
                 findings.append(Finding("critical", "unknown-runtime-destination", name, str(destination.get("destination"))))
-        if container.get("unknown_service_accounts"):
+            for rule in policy["runtime"].get("connector_destination_rules", []):
+                if re.search(rule["variable_pattern"], str(destination.get("variable", "")), re.I) and destination.get("destination") not in set(rule["allowed"]):
+                    findings.append(Finding("critical", "connector-destination-drift", name, f"{destination.get('variable')} resolves to unapproved {destination.get('destination')}"))
+        identities = {item.get("identity") for item in container.get("service_accounts", [])}
+        if container.get("unknown_service_accounts") or identities - approved_identities:
             findings.append(Finding("critical", "unknown-service-account", name, "runtime uses an unregistered service identity"))
     for endpoint in snapshot.get("public_endpoints", []):
         if endpoint.get("registered") is not True:
@@ -228,6 +234,15 @@ def validate(root: Path, policy: dict[str, Any], registries: dict[str, Any], run
         findings += require_fields("connector", identity, item, CONNECTOR_FIELDS)
         if item.get("source_system") not in systems or item.get("target_system") not in systems:
             findings.append(Finding("critical", "connector-system", identity, "source or target is unregistered"))
+        else:
+            source = systems[item["source_system"]]
+            target = systems[item["target_system"]]
+            if item["target_system"] not in source.get("allowed_targets", []):
+                findings.append(Finding("critical", "connector-edge", identity, "target is not allowed by source policy"))
+            if item["source_system"] not in target.get("allowed_callers", []):
+                findings.append(Finding("critical", "connector-edge", identity, "source is not an allowed caller of target"))
+            if item["target_system"] in source.get("forbidden_targets", []) or item["source_system"] in target.get("forbidden_targets", []):
+                findings.append(Finding("critical", "connector-edge", identity, "edge is explicitly forbidden"))
         if not isinstance(item.get("timeout_seconds"), int) or item.get("timeout_seconds", 0) <= 0:
             findings.append(Finding("critical", "connector-timeout", identity, "positive timeout is required"))
         if str(item.get("auth_method", "")).lower() in {"none", "plaintext"}:
