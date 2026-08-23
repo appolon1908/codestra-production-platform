@@ -7,11 +7,15 @@ import os
 import time
 import urllib.request
 import urllib.parse
+from pathlib import Path
 
 from .core import Store
 from .providers import submit
 
 MAX_ATTEMPTS = int(os.getenv("CONTROL_PLANE_MAX_ATTEMPTS", "5"))
+WORKER_HEARTBEAT_FILE = Path(
+    os.getenv("CONTROL_PLANE_WORKER_HEARTBEAT_FILE", "/tmp/control-plane-worker-heartbeat")
+)
 
 
 def delivery_request(target_name: str, target: str, row: object) -> urllib.request.Request:
@@ -134,7 +138,10 @@ def dispatch_messages() -> int:
 
 def main() -> None:
     while True:
-        once(); dispatch_messages(); time.sleep(1)
+        once()
+        dispatch_messages()
+        WORKER_HEARTBEAT_FILE.write_text(str(time.time()), encoding="ascii")
+        time.sleep(1)
 
 
 if __name__ == "__main__":

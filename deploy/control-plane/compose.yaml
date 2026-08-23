@@ -76,7 +76,15 @@ services:
     security_opt: [no-new-privileges:true]
     networks: [edge, backend]
     healthcheck:
-      disable: true
+      test:
+        - CMD
+        - python
+        - -c
+        - "import pathlib,time; p=pathlib.Path('/tmp/control-plane-worker-heartbeat'); assert p.is_file() and time.time()-float(p.read_text(encoding='ascii')) < 10"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
 volumes:
   control_plane_data:
 secrets:
