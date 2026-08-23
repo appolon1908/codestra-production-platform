@@ -120,6 +120,8 @@ jobs:
 
           schema = json.loads(Path("schemas/integration-event-envelope-v1.schema.json").read_text())
           Draft202012Validator.check_schema(schema)
+          contact_center_schema = json.loads(Path("schemas/contact-center-event-envelope-v1.schema.json").read_text())
+          Draft202012Validator.check_schema(contact_center_schema)
           manifest = json.loads(Path("n8n/control-plane/workflow-manifest.json").read_text())
           assert manifest["defaults"]["active"] is False
           names = [item["name"] for item in manifest["workflows"]]

@@ -2,7 +2,7 @@
 
 Date: 2026-08-23
 
-Authoritative specification: [PR #93](https://github.com/appolon1908-hue/codestra-production-platform/pull/93), `docs/missions/CODESTRA_ODOO_CORPORATE_CALL_CENTER_FULL_CODEX_MISSION.md`
+Authoritative specification: [PR #93](https://github.com/appolon1908-hue/codestra-production-platform/pull/93), pinned for this audit to immutable commit [`7826b9e95d61e4ac9fac65c50d0084567c0f3fff`](https://github.com/appolon1908-hue/codestra-production-platform/commit/7826b9e95d61e4ac9fac65c50d0084567c0f3fff), `docs/missions/CODESTRA_ODOO_CORPORATE_CALL_CENTER_FULL_CODEX_MISSION.md`
 
 ## Baselines audited
 
@@ -59,7 +59,7 @@ These components are not equivalent to mission completion. In particular, the ex
 
 Each tranche starts from the current protected target, uses a dedicated branch, runs repository CI, resolves every review thread, and requires an independent approval of the exact final head. Later tranches must rebase or merge the updated protected baseline and may not self-declare an upstream gate satisfied.
 
-1. Baseline audit and mission traceability (this change; documentation only).
+1. Baseline audit, mission traceability, and the tested canonical contact-center event-envelope contract (this change).
 2. Canonical core schema, compatibility map, restartable migrations, ACLs and negative tenant tests.
 3. Reliable event API, inbox/outbox semantics, OpenAPI contracts and authorization tests.
 4. Agent desktop, screen-pop, interaction timeline and mandatory wrap-up.
