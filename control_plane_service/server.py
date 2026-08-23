@@ -32,6 +32,7 @@ from .crm import ACTIVITY_FIELDS, CREATE_FIELDS, PATCH_FIELDS, CrmService, reque
 from .forms import FormService, ORIGINS
 from .mapping_registry import MappingRegistry
 from .postal_runtime import PostalInbox, production_adapter
+from .automation import authorize_automation, execute_automation, record_execution_result
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
 STORE = Store(DB)
@@ -438,6 +439,34 @@ class Handler(BaseHTTPRequestHandler):
         try: value = json.loads(body)
         except json.JSONDecodeError: return self.send_json(422, {"error": "invalid_json"})
         tenant = op[2] or value.get("tenant_id")
+        if parsed.path == "/api/v1/automation/authorize":
+            if not tenant: return self.send_json(422, {"error": "tenant_required"})
+            try: result = authorize_automation(STORE, value, tenant)
+            except ControlPlaneError as exc: return self.send_json(403, {"error": str(exc)})
+            STORE.audit(op[0], op[1], "automation.authorized", "automation", str(value.get("event_id")),
+                        tenant, str(value.get("correlation_id")), {"workflow_key": value.get("automation_key")})
+            return self.send_json(200, result)
+        if parsed.path == "/api/v1/automation/execute":
+            if not tenant: return self.send_json(422, {"error": "tenant_required"})
+            try: result = execute_automation(STORE, value, tenant)
+            except ControlPlaneError as exc:
+                return self.send_json(409 if str(exc) == "idempotency_conflict" else 403,
+                                      {"error": str(exc)})
+            STORE.audit(op[0], op[1], "automation.executed", "automation",
+                        str(value.get("event_id")), tenant, str(value.get("correlation_id")),
+                        {"workflow_key": value.get("automation_key"),
+                         "actions": result.get("executed_actions")})
+            return self.send_json(202, result)
+        if parsed.path == "/api/v1/automation/results":
+            if not tenant: return self.send_json(422, {"error": "tenant_required"})
+            try: result = record_execution_result(STORE, value, tenant)
+            except ControlPlaneError as exc:
+                return self.send_json(409 if str(exc) == "idempotency_conflict" else 422,
+                                      {"error": str(exc)})
+            STORE.audit(op[0], op[1], "automation.result.recorded", "automation",
+                        str(value.get("execution_id")), tenant, str(value.get("correlation_id")),
+                        {"workflow_key": value.get("workflow_key"), "status": value.get("status")})
+            return self.send_json(200 if result.duplicate else 202, result.__dict__)
         if parsed.path == "/api/v1/control/campaigns":
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
             value["tenant_id"] = tenant

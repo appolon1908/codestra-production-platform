@@ -1,4 +1,8 @@
-from control_plane_service.automation import authorize_automation, record_execution_result
+from control_plane_service.automation import (
+    authorize_automation,
+    execute_automation,
+    record_execution_result,
+)
 from control_plane_service.core import ControlPlaneError, Store
 
 
@@ -29,6 +33,9 @@ def test_policy_is_tenant_bound_and_fail_closed_for_communications(tmp_path, mon
 
 def test_result_is_durable_and_idempotent(tmp_path):
     store = Store(str(tmp_path / "control-plane.db"))
+    authorized = authorize_automation(store, envelope(), "COD")
+    execution = execute_automation(store, authorized, "COD")
+    assert execution["business_process_status"] == "RUNNING"
     result = {"event_id":"evt-1", "correlation_id":"corr-1", "idempotency_key":"result-1",
               "workflow_key":"test_syn_followup", "execution_id":"exec-1", "status":"COMPLETED",
               "actions":[], "completed_at":"2026-08-22T00:00:01Z"}

@@ -36,14 +36,27 @@ def test_workflows_are_inactive_authenticated_idempotent_and_context_preserving(
     for item in workflows()[1:]:
         assert item["active"] is False
         assert item["settings"]["errorWorkflow"] == "CodestraCP90"
-        webhook, validation = item["nodes"]
+        assert len(item["nodes"]) == 6
+        webhook, validation, authorize, execute, result, callback = item["nodes"]
         assert webhook["parameters"]["authentication"] == "headerAuth"
         assert webhook["credentials"]["httpHeaderAuth"]["id"] == "codestraMiddlewareHeaderAuth"
         code = validation["parameters"]["jsCode"]
         for required in ("correlation_id", "tenant_id", "customer_id", "idempotency_key"):
             assert required in code
         assert "$getWorkflowStaticData" not in code
-        assert "httpRequest" not in json.dumps(item)
+        assert authorize["type"] == "n8n-nodes-base.httpRequest"
+        assert authorize["parameters"]["url"].endswith("/api/v1/automation/authorize")
+        assert execute["type"] == "n8n-nodes-base.httpRequest"
+        assert execute["parameters"]["url"].endswith("/api/v1/automation/execute")
+        assert callback["type"] == "n8n-nodes-base.httpRequest"
+        assert callback["parameters"]["url"].endswith("/api/v1/automation/results")
+        assert "MIDDLEWARE_INTERNAL_URL" in json.dumps((authorize, execute, callback))
+        assert authorize["parameters"]["nodeCredentialType"] == "oAuth2Api"
+        assert execute["parameters"]["nodeCredentialType"] == "oAuth2Api"
+        assert callback["parameters"]["nodeCredentialType"] == "oAuth2Api"
+        assert "10.40.0.4" not in json.dumps(item)
+        assert result["name"] == "Build governed completion"
+        assert "executed_actions" in result["parameters"]["jsCode"]
 
 
 def test_manifest_matches_exports_and_contains_no_secrets():

@@ -19,7 +19,7 @@ services:
       SYSTEM_KONG_HEALTH_URL: http://codestra-kong-kong-gateway-1:8001/status
       SYSTEM_MIDDLEWARE_HEALTH_URL: http://codestra-middleware-integration-api-1:8095/readyz
       SYSTEM_ODOO_HEALTH_URL: http://codestra-odoo-1:8069/web/health
-      SYSTEM_N8N_HEALTH_URL: http://codestra-n8n-1:5678/healthz/readiness
+      SYSTEM_N8N_HEALTH_URL: http://n8n-main:5678/healthz/readiness
       POSTAL_INBOUND_ENABLED: "false"
       COD_WEB_OUT_CANARY_RECIPIENT_FILE: /run/secrets/cod_web_out_canary_recipient
       KLYROW_ALLOWED_CAMPAIGN: COD-WEB-OUT
@@ -111,3 +111,4 @@ networks:
   identity:
     name: codestra-identity_identity_service
     external: true
+
