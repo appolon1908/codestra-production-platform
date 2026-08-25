@@ -7,9 +7,10 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def test_kong_control_plane_is_host_method_auth_and_size_bounded():
     policy=(ROOT/"deploy/kong/control-plane.yml").read_text()
-    for value in ("api.codestra.co","openid-connect","codestra-control-plane","request-size-limiting","rate-limiting","correlation-id"):
+    for value in ("api.codestra.co","openid-connect","codestra-integration-control-plane-api-1","request-size-limiting","rate-limiting","correlation-id"):
         assert value in policy
-    assert "methods: [POST]" in policy and "http://codestra-control-plane" in policy
+    assert "methods: [POST]" in policy
+    assert "http://codestra-integration-control-plane-api-1:8096" in policy
 
 def test_callers_have_distinct_scopes_and_cross_tenant_denial():
     policy=(ROOT/"deploy/kong/scope-policy.lua").read_text()
