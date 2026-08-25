@@ -1,0 +1,132 @@
+#!/usr/bin/python3
+"""Fail-closed compatibility wrapper for the Server B VICIdial operator."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+CORE_OPERATOR = Path("/usr/local/libexec/codestra-vicidial-operator-core")
+ASTERISK = "/usr/sbin/asterisk"
+SAFETY_ACTION = "telephony-safety-status"
+LEGACY_ACTIONS = {
+    "inventory",
+    "status",
+    "backup",
+    "validate-backup",
+    "restore-test",
+    "validate-runtime",
+    "stage",
+    "deploy",
+    "restart-controlled",
+    "failure-test-start",
+    "failure-test-stop",
+    "rollback-plan",
+    "rollback",
+    "collect-evidence",
+}
+COMMANDS = {
+    "channels": [ASTERISK, "-rx", "core show channels count"],
+    "bridges": [ASTERISK, "-rx", "bridge show all"],
+    "contacts": [ASTERISK, "-rx", "pjsip show contacts"],
+    "endpoints": [ASTERISK, "-rx", "pjsip show endpoints"],
+    "registrations": [ASTERISK, "-rx", "pjsip show registrations"],
+}
+ALLOWED_FIELDS = {
+    "ACTIVE_CALLS",
+    "ACTIVE_CHANNELS",
+    "ACTIVE_BRIDGES",
+    "PJSIP_CONTACTS",
+    "PJSIP_ENDPOINTS",
+    "PJSIP_REGISTRATIONS",
+    "SIP_REGISTRATION_CLASSIFICATION",
+}
+
+
+def run_asterisk(command: list[str]) -> str:
+    result = subprocess.run(
+        command,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("approved Asterisk readback failed")
+    return result.stdout
+
+
+def required_count(pattern: str, value: str, label: str) -> int:
+    matches = re.findall(pattern, value, flags=re.MULTILINE | re.IGNORECASE)
+    if len(matches) != 1:
+        raise RuntimeError(f"unable to parse {label}")
+    return int(matches[0])
+
+
+def object_count(value: str, label: str) -> int:
+    if re.search(r"No objects found\.", value, flags=re.IGNORECASE):
+        return 0
+    return required_count(r"Objects found:\s*([0-9]+)", value, label)
+
+
+def bridge_count(value: str) -> int:
+    if re.search(r"No bridges found\.", value, flags=re.IGNORECASE):
+        return 0
+    return required_count(r"([0-9]+)\s+bridges?\s+listed\.", value, "bridges")
+
+
+def safety_status() -> dict[str, int | str]:
+    channels = run_asterisk(COMMANDS["channels"])
+    calls = required_count(r"^([0-9]+) active calls$", channels, "active calls")
+    channel_count = required_count(
+        r"^([0-9]+) active channels$", channels, "active channels"
+    )
+    registrations = object_count(
+        run_asterisk(COMMANDS["registrations"]), "registrations"
+    )
+    if calls or channel_count:
+        classification = "ACTIVE_CALL_DEPENDENT"
+    elif registrations:
+        classification = "IDLE_INFRASTRUCTURE"
+    else:
+        classification = "NONE"
+    result: dict[str, int | str] = {
+        "ACTIVE_CALLS": calls,
+        "ACTIVE_CHANNELS": channel_count,
+        "ACTIVE_BRIDGES": bridge_count(run_asterisk(COMMANDS["bridges"])),
+        "PJSIP_CONTACTS": object_count(run_asterisk(COMMANDS["contacts"]), "contacts"),
+        "PJSIP_ENDPOINTS": object_count(
+            run_asterisk(COMMANDS["endpoints"]), "endpoints"
+        ),
+        "PJSIP_REGISTRATIONS": registrations,
+        "SIP_REGISTRATION_CLASSIFICATION": classification,
+    }
+    if set(result) != ALLOWED_FIELDS:
+        raise RuntimeError("unsafe output schema")
+    return result
+
+
+def main() -> int:
+    if os.geteuid() != 0 or len(sys.argv) != 2:
+        return 64
+    action = sys.argv[1]
+    if action == SAFETY_ACTION:
+        try:
+            print(json.dumps(safety_status(), sort_keys=True, separators=(",", ":")))
+            return 0
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            print('{"ERROR":"TELEPHONY_SAFETY_READBACK_FAILED"}')
+            return 1
+    if action in LEGACY_ACTIONS and CORE_OPERATOR.is_file():
+        os.execv(str(CORE_OPERATOR), [str(CORE_OPERATOR), action])
+    return 64
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

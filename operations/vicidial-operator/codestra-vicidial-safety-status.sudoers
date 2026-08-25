@@ -1,0 +1,2 @@
+Cmnd_Alias CODESTRA_VICIDIAL_SAFETY_STATUS = /usr/local/sbin/codestra-vicidial-operator telephony-safety-status
+codestra-admin ALL=(root) NOPASSWD: CODESTRA_VICIDIAL_SAFETY_STATUS
