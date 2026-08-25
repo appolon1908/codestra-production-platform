@@ -5,6 +5,13 @@ approved a maintenance window and the independent WebSocket databases have an
 approved, healthy state-synchronization design. Never place credentials in this
 document, command history, or evidence.
 
+The selected design is PostgreSQL 16 physical streaming replication: one
+read/write primary and one read-only hot standby, with manual fenced promotion.
+The gateway image must first support passive-standby startup because the current
+image performs a global session-ownership UPDATE during startup. Do not point a
+second running gateway at the writable primary and do not point the current image
+at a read-only replica.
+
 ```text
 CHANGE_ID=<approved change record>
 OWNER=<on-call platform owner>
@@ -96,4 +103,15 @@ ROLLBACK_TRIGGER=any health/auth/state/routing/monitoring/error threshold failur
 ROLLBACK_COMMAND=restore exact primary-routing backup; validate; reload
 FAILBACK_COMMAND=restore exact primary-routing backup; validate; reload; certify
 SUCCESS_CRITERIA=single traffic owner, valid WSS, state integrity, monitoring up
+DATABASE_PRECHECK=primary writable; standby in recovery/read-only; sender and WAL receiver streaming
+REPLICATION_LAG_THRESHOLD=5 seconds, subject to approved production RPO
+PROMOTION_COMMAND=approved pg_ctl promote equivalent after old-primary fencing
+FENCING_COMMAND=stop old primary PostgreSQL and remove its HA endpoint before promotion
+OLD_PRIMARY_DEMOTION=re-seed former primary from new authority before reconnecting it
+TRAFFIC_SWITCH=atomic Caddy realtime upstream change after database promotion checks
+POST_PROMOTION_DB_CHECK=one writable authority; old authority fenced; migration and state hashes match
+AUTH_STATE_CHECK=replicated synthetic single-use ticket authenticates exactly once
+EVENT_REPLAY_CHECK=synthetic event, ordinal, sequence and replay cursor remain identical
+ROLLBACK=restore traffic only to a synchronized writable authority; never a stale former primary
+FAILBACK=re-seed, stream, fence, promote, validate state, then atomically restore traffic
 ```

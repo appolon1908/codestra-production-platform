@@ -48,6 +48,14 @@ def test_failover_runbook_is_fail_closed_and_reversible() -> None:
         "FAILBACK_COMMAND=",
         "RTO_TARGET=",
         "SUCCESS_CRITERIA=",
+        "DATABASE_PRECHECK=",
+        "REPLICATION_LAG_THRESHOLD=",
+        "PROMOTION_COMMAND=",
+        "FENCING_COMMAND=",
+        "OLD_PRIMARY_DEMOTION=",
+        "POST_PROMOTION_DB_CHECK=",
+        "AUTH_STATE_CHECK=",
+        "EVENT_REPLAY_CHECK=",
     ):
         assert field in RUNBOOK
     assert "Do not switch traffic" in RUNBOOK
