@@ -219,7 +219,6 @@ def main():
             "methods": expected["methods"], "protocols": ["https"],
             "strip_path": expected["strip_path"], "preserve_host": True,
             "https_redirect_status_code": 426, "headers": {}, "snis": [],
-            "sources": [], "destinations": [],
         }
         if args.apply:
             endpoint = "/routes/%s" % route["id"] if route else "/routes"

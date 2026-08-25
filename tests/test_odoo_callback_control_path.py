@@ -74,6 +74,7 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert "callback-route-disabled.invalid" in RECONCILER
     assert 'correlation.get("echo_downstream"), True' in RECONCILER
     assert 'rate.get("limit_by"), "ip"' in RECONCILER
+    assert '"sources": [], "destinations": []' not in RECONCILER
 
 
 def test_deployment_keeps_every_broad_delivery_path_disabled():
