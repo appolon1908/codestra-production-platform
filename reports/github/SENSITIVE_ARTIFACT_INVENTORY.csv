@@ -1,2 +1,13 @@
 path,bytes,git_policy,classification
 "config/postgresql-runtime-policy.sql.example",1348,"not-ignored","sensitive-extension"
+"deploy/kong-production-standby/identity-registry/001_certifier_scopes.sql",361,"not-ignored","sensitive-extension"
+"identity/migrations/20260822_klyrow_canonical_issuer.sql",1176,"not-ignored","sensitive-extension"
+"migrations/control_plane/000_runtime_store.sql",6080,"not-ignored","sensitive-extension"
+"migrations/control_plane/001_canonical_registry.sql",9155,"not-ignored","sensitive-extension"
+"migrations/control_plane/002_runtime_rbac.sql",1243,"not-ignored","sensitive-extension"
+"migrations/control_plane/003_campaign_email_provisioning.sql",5336,"not-ignored","sensitive-extension"
+"migrations/control_plane/004_campaign_scoped_channel_gate.sql",2401,"not-ignored","sensitive-extension"
+"migrations/control_plane/005_postal_inbound_inbox.sql",1006,"not-ignored","sensitive-extension"
+"operations/database-rbac/reconcile_application_role.sql",7343,"not-ignored","sensitive-extension"
+"vicidial/ops/reconciliation-db-grants-revoke.sql.template",605,"not-ignored","sensitive-extension"
+"vicidial/ops/reconciliation-db-grants.sql.template",1459,"not-ignored","sensitive-extension"
