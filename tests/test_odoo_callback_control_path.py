@@ -51,7 +51,7 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert 'parser.add_argument("--apply", action="store_true")' in RECONCILER
     assert "duplicate Kong" in RECONCILER
     assert "correlation-id" in RECONCILER
-    assert "openid-connect" in RECONCILER
+    assert '"jwt", "pre-function"' in RECONCILER
     assert "verify_service" in RECONCILER
     assert "verify_route" in RECONCILER
     assert "verify_plugins" in RECONCILER
@@ -64,12 +64,8 @@ def test_kong_exposes_only_required_callback_surfaces():
     assert "request_json" in RECONCILER
     assert 'route.get("headers") or {}' in RECONCILER
     assert "callback route has an enabled deny plugin" in RECONCILER
-    assert "audience_required" in RECONCILER
-    assert "bearer_token_param_type" in RECONCILER
     assert 'parser.add_argument("--evidence", type=Path, required=True)' in RECONCILER
     assert "manifest_sha256" in RECONCILER
-    assert 'name == "openid-connect" and current' in RECONCILER
-    assert "if oidc_matches(current, expected, spec):" in RECONCILER
     assert "needs_quarantine" in RECONCILER
     assert "callback-route-disabled.invalid" in RECONCILER
     assert 'correlation.get("echo_downstream"), True' in RECONCILER

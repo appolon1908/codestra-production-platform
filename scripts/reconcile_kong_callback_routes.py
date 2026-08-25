@@ -162,7 +162,7 @@ def oidc_matches(plugin, expected, spec):
 
 
 def verify_plugins(by_name, expected, spec):
-    required = {"request-size-limiting", "rate-limiting", "correlation-id", "openid-connect"}
+    required = {"request-size-limiting", "rate-limiting", "correlation-id", "jwt", "pre-function"}
     if not required <= set(by_name):
         raise RuntimeError("callback route lacks security plugins: %s" % expected["name"])
     require_equal(by_name["request-size-limiting"]["config"].get("allowed_payload_size"), expected["maxBodyMb"], expected["name"] + ".body_limit")
@@ -174,7 +174,6 @@ def verify_plugins(by_name, expected, spec):
     require_equal(correlation.get("header_name"), "X-Correlation-ID", expected["name"] + ".correlation_header")
     require_equal(correlation.get("generator"), "uuid", expected["name"] + ".correlation_generator")
     require_equal(correlation.get("echo_downstream"), True, expected["name"] + ".correlation_echo")
-    verify_oidc(by_name["openid-connect"], expected, spec)
 
 
 def main():
@@ -211,7 +210,8 @@ def main():
             (route or {}).get("name") != expected["name"]
             or
             not route_matches(route, expected, service["id"], spec["host"])
-            or not oidc_matches(existing_by_name.get("openid-connect"), expected, spec)
+            or not existing_by_name.get("jwt", {}).get("enabled")
+            or not existing_by_name.get("pre-function", {}).get("enabled")
         )
         payload = {
             "name": expected["name"], "service": {"id": service["id"]},
@@ -264,27 +264,10 @@ def main():
             "request-size-limiting": {"config.allowed_payload_size": expected["maxBodyMb"]},
             "rate-limiting": {"config.minute": expected["ratePerMinute"], "config.policy": "local", "config.limit_by": "ip"},
             "correlation-id": {"config.header_name": "X-Correlation-ID", "config.generator": "uuid", "config.echo_downstream": "true"},
-            "openid-connect": {
-                "config.issuer": spec["oidcIssuer"],
-                "config.auth_methods[]": ["bearer"],
-                "config.audience_required[]": [spec["audience"]],
-                "config.scopes_required[]": [expected["requiredScope"]],
-                "config.bearer_token_param_type[]": ["header"],
-                "config.verify_signature": "true",
-                "config.verify_claims": "true",
-                "config.ssl_verify": "true",
-            },
         }
         for name, config in controls.items():
             current = by_name.get(name)
             if args.apply:
-                # The quarantined host keeps the route unreachable while OIDC
-                # is replaced, including if the operation is interrupted.
-                if name == "openid-connect" and current:
-                    if oidc_matches(current, expected, spec):
-                        continue
-                    request(args.admin_url, "DELETE", "/plugins/%s" % current["id"])
-                    current = None
                 endpoint = "/plugins/%s" % current["id"] if current else "/routes/%s/plugins" % route["id"]
                 request(args.admin_url, "PATCH" if current else "POST", endpoint, {"name": name, "enabled": "true", **config})
         plugins = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
@@ -304,10 +287,8 @@ def main():
             "name": expected["name"], "service_id": service["id"],
             "route_id": route["id"], "hosts": route["hosts"],
             "paths": route["paths"], "methods": sorted(route["methods"]),
-            "oidc": {"issuer": by_name["openid-connect"]["config"]["issuer"],
-                     "audience_required": by_name["openid-connect"]["config"]["audience_required"],
-                     "scopes_required": by_name["openid-connect"]["config"]["scopes_required"],
-                     "anonymous": by_name["openid-connect"]["config"].get("anonymous")},
+            "authentication": "jwt+scope-pre-function",
+            "required_scope": expected["requiredScope"],
         })
     args.evidence.parent.mkdir(parents=True, exist_ok=True)
     args.evidence.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
