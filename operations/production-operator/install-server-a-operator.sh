@@ -42,7 +42,7 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
-a38ee2613e529367b478d62b8601c20843a138355e43831c770a07713a00de94  codestra-production-operator
+41b95b0b0808e8c381cc6c7f6f6663245ae592f000719104834e6d7250727636  codestra-production-operator
 bc9d2105978a7c5c63e0e455e5b8313b7cdbdc1872220dc5685ca1130c55cd42  codestra-production-forced-command
 bbc8bc30f11d7e32e204433467cb4b320f04b2615f4bcafbee791c94ca44b2de  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd

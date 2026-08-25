@@ -5,6 +5,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import subprocess
 import tarfile
@@ -287,6 +288,7 @@ def test_status_action_has_positive_dispatch(monkeypatch) -> None:
             "active_channels_zero": True,
             "required_runtime_flags_false": True,
             "sip_registration_performed": False,
+            "sip_registration_safe": True,
         },
     )
     monkeypatch.setattr(
@@ -299,19 +301,29 @@ def test_status_action_has_positive_dispatch(monkeypatch) -> None:
     assert result["returncode"] == 0
 
 
-def test_vicidial_probe_uses_restricted_absolute_asterisk_command(monkeypatch) -> None:
+def telephony_readback(*, calls=0, channels=0, registrations=1, classification="IDLE_INFRASTRUCTURE"):
+    return json.dumps(
+        {
+            "ACTIVE_CALLS": calls,
+            "ACTIVE_CHANNELS": channels,
+            "ACTIVE_BRIDGES": 0,
+            "PJSIP_CONTACTS": 2,
+            "PJSIP_ENDPOINTS": 3,
+            "PJSIP_REGISTRATIONS": registrations,
+            "SIP_REGISTRATION_CLASSIFICATION": classification,
+        }
+    )
+
+
+def test_vicidial_probe_uses_restricted_sanitized_operator_action(monkeypatch) -> None:
     commands = []
     safe_entries = [f"{name}=false" for name in OPERATOR.CANONICAL_FALSE_FLAGS]
 
     def fake_run(command):
         commands.append(command)
-        if command[-1] == "core show channels count":
-            return subprocess.CompletedProcess(command, 0, "0 active channels\n0 active calls\n", "")
-        if command[-1] == "pjsip show registrations":
-            return subprocess.CompletedProcess(command, 0, "No objects found.\n", "")
+        if command[:2] == ["/usr/bin/ssh", "codestra-vicidial"]:
+            return subprocess.CompletedProcess(command, 0, telephony_readback(), "")
         if command[:2] == ["/usr/bin/docker", "inspect"]:
-            import json
-
             return subprocess.CompletedProcess(command, 0, json.dumps(safe_entries), "")
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -319,16 +331,19 @@ def test_vicidial_probe_uses_restricted_absolute_asterisk_command(monkeypatch) -
     state = OPERATOR.safety_state()
 
     assert state["telephony_probe_pass"] is True
-    assert commands[:2] == [
+    assert state["sip_registration_safe"] is True
+    assert commands[0] == [
+        "/usr/bin/ssh",
+        "codestra-vicidial",
+        "/usr/bin/sudo -n /usr/local/sbin/codestra-vicidial-operator telephony-safety-status",
+    ]
+    assert [
+        command for command in commands if command[:2] == ["/usr/bin/ssh", "codestra-vicidial"]
+    ] == [
         [
             "/usr/bin/ssh",
             "codestra-vicidial",
-            "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'core show channels count'",
-        ],
-        [
-            "/usr/bin/ssh",
-            "codestra-vicidial",
-            "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'pjsip show registrations'",
+            "/usr/bin/sudo -n /usr/local/sbin/codestra-vicidial-operator telephony-safety-status",
         ],
     ]
 
@@ -342,13 +357,9 @@ def test_runtime_safety_flags_fail_closed(monkeypatch, missing_or_enabled) -> No
         safe_entries[-1] = safe_entries[-1].partition("=")[0] + f"={missing_or_enabled}"
 
     def fake_run(command):
-        if command[-1] == "core show channels count":
-            return subprocess.CompletedProcess(command, 0, "0 active channels\n0 active calls\n", "")
-        if command[-1] == "pjsip show registrations":
-            return subprocess.CompletedProcess(command, 0, "No objects found.\n", "")
+        if command[:2] == ["/usr/bin/ssh", "codestra-vicidial"]:
+            return subprocess.CompletedProcess(command, 0, telephony_readback(), "")
         if command[:2] == ["/usr/bin/docker", "inspect"]:
-            import json
-
             return subprocess.CompletedProcess(command, 0, json.dumps(safe_entries), "")
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -362,14 +373,18 @@ def test_nonzero_asterisk_counters_never_match_zero(monkeypatch, count) -> None:
     safe_entries = [f"{name}=false" for name in OPERATOR.CANONICAL_FALSE_FLAGS]
 
     def fake_run(command):
-        if command[-1] == "core show channels count":
-            output = f"{count} active channels\n{count} active calls\n"
-            return subprocess.CompletedProcess(command, 0, output, "")
-        if command[-1] == "pjsip show registrations":
-            return subprocess.CompletedProcess(command, 0, "No objects found.\n", "")
+        if command[:2] == ["/usr/bin/ssh", "codestra-vicidial"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                telephony_readback(
+                    calls=count,
+                    channels=count,
+                    classification="ACTIVE_CALL_DEPENDENT",
+                ),
+                "",
+            )
         if command[:2] == ["/usr/bin/docker", "inspect"]:
-            import json
-
             return subprocess.CompletedProcess(command, 0, json.dumps(safe_entries), "")
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -390,6 +405,7 @@ def test_diagnostics_and_rollback_remain_available_when_unsafe(monkeypatch, acti
             "active_channels_zero": False,
             "required_runtime_flags_false": False,
             "sip_registration_performed": True,
+            "sip_registration_safe": False,
         },
     )
     monkeypatch.setattr(
@@ -412,6 +428,7 @@ def test_rollback_remains_available_when_unsafe(monkeypatch) -> None:
             "active_channels_zero": False,
             "required_runtime_flags_false": False,
             "sip_registration_performed": True,
+            "sip_registration_safe": False,
         },
     )
     monkeypatch.setattr(OPERATOR, "remove_standby", lambda _config: {"candidate_present": False})
@@ -430,6 +447,7 @@ def test_preflight_rejects_unsafe_runtime(monkeypatch) -> None:
             "active_channels_zero": True,
             "required_runtime_flags_false": True,
             "sip_registration_performed": False,
+            "sip_registration_safe": True,
         },
     )
     with pytest.raises(OPERATOR.OperatorError, match="not fail-closed"):

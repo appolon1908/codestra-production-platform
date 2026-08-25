@@ -79,11 +79,9 @@ CONTROL_PLANE_DB_CONTAINER = "codestra-postgres-1"
 CONTROL_PLANE_DB = "control_plane"
 CONTROL_PLANE_API = "codestra-integration-control-plane-api-1"
 CONTROL_PLANE_WORKER = "codestra-integration-control-plane-worker-1"
-VICIDIAL_CHANNELS_COMMAND = (
-    "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'core show channels count'"
-)
-VICIDIAL_REGISTRATIONS_COMMAND = (
-    "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'pjsip show registrations'"
+VICIDIAL_SAFETY_COMMAND = (
+    "/usr/bin/sudo -n /usr/local/sbin/codestra-vicidial-operator "
+    "telephony-safety-status"
 )
 
 
@@ -545,11 +543,8 @@ def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
 
 
 def safety_state() -> dict[str, object]:
-    channel = run_fixed(
-        ["/usr/bin/ssh", "codestra-vicidial", VICIDIAL_CHANNELS_COMMAND]
-    )
-    registrations = run_fixed(
-        ["/usr/bin/ssh", "codestra-vicidial", VICIDIAL_REGISTRATIONS_COMMAND]
+    readback = run_fixed(
+        ["/usr/bin/ssh", "codestra-vicidial", VICIDIAL_SAFETY_COMMAND]
     )
     runtime = run_fixed(
         [
@@ -572,15 +567,52 @@ def safety_state() -> dict[str, object]:
     flags_false = all(
         runtime_flags.get(name) == "false" for name in CANONICAL_FALSE_FLAGS
     )
-    calls = re.findall(r"(?m)^([0-9]+) active calls$", channel.stdout)
-    channels = re.findall(r"(?m)^([0-9]+) active channels$", channel.stdout)
+    telephony: dict[str, object] = {}
+    if readback.returncode == 0:
+        try:
+            value = json.loads(readback.stdout)
+            required = {
+                "ACTIVE_CALLS",
+                "ACTIVE_CHANNELS",
+                "ACTIVE_BRIDGES",
+                "PJSIP_CONTACTS",
+                "PJSIP_ENDPOINTS",
+                "PJSIP_REGISTRATIONS",
+                "SIP_REGISTRATION_CLASSIFICATION",
+            }
+            if set(value) != required:
+                raise ValueError("unexpected telephony schema")
+            if any(
+                not isinstance(value[name], int) or value[name] < 0
+                for name in required - {"SIP_REGISTRATION_CLASSIFICATION"}
+            ):
+                raise ValueError("invalid telephony count")
+            if value["SIP_REGISTRATION_CLASSIFICATION"] not in {
+                "NONE",
+                "IDLE_INFRASTRUCTURE",
+                "ACTIVE_CALL_DEPENDENT",
+                "STALE",
+                "UNKNOWN",
+            }:
+                raise ValueError("invalid registration classification")
+            telephony = value
+        except (json.JSONDecodeError, TypeError, ValueError):
+            telephony = {}
+    classification = telephony.get("SIP_REGISTRATION_CLASSIFICATION", "UNKNOWN")
+    registrations = telephony.get("PJSIP_REGISTRATIONS")
     return {
         "pstatus": run_fixed(["/usr/bin/systemctl", "is-system-running"]).returncode,
-        "telephony_probe_pass": channel.returncode == 0 and registrations.returncode == 0,
-        "active_calls_zero": calls == ["0"],
-        "active_channels_zero": channels == ["0"],
+        "telephony_probe_pass": bool(telephony),
+        "active_calls": telephony.get("ACTIVE_CALLS"),
+        "active_channels": telephony.get("ACTIVE_CHANNELS"),
+        "active_bridges": telephony.get("ACTIVE_BRIDGES"),
+        "active_calls_zero": telephony.get("ACTIVE_CALLS") == 0,
+        "active_channels_zero": telephony.get("ACTIVE_CHANNELS") == 0,
         "required_runtime_flags_false": flags_false,
-        "sip_registration_performed": "No objects found." not in registrations.stdout,
+        "sip_registrations": registrations,
+        "sip_registration_classification": classification,
+        "sip_registration_performed": isinstance(registrations, int) and registrations > 0,
+        "sip_registration_safe": classification in {"NONE", "IDLE_INFRASTRUCTURE"},
     }
 
 
@@ -609,7 +641,7 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         and state["active_calls_zero"]
         and state["active_channels_zero"]
         and state["required_runtime_flags_false"]
-        and not state["sip_registration_performed"]
+        and state["sip_registration_safe"]
     )
     if action not in SAFETY_BYPASS_ACTIONS and not safe_for_activation:
         raise OperatorError("runtime safety state is not fail-closed")
