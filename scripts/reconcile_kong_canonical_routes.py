@@ -27,7 +27,11 @@ def main() -> int:
     manifest = json.loads(args.manifest.read_text())
     all_routes = request(args.admin_url, "GET", "/routes?size=1000")["data"]
     managed_names = {route["name"] for route in manifest["routes"]}
-    allowed_names = managed_names | set(manifest.get("allowedExistingRouteNames", []))
+    owned = manifest.get("ownedProductionRoutes", [])
+    owned_names = {route["name"] for route in owned}
+    if len(owned_names) != len(owned):
+        raise RuntimeError("duplicate owned production route declaration")
+    allowed_names = managed_names | owned_names | set(manifest.get("allowedExistingRouteNames", []))
     unexpected_public = sorted(
         route.get("name") or route["id"] for route in all_routes
         if manifest["canonicalHost"] in (route.get("hosts") or [])

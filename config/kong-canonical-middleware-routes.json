@@ -2,6 +2,17 @@
   "canonicalHost": "api.codestra.co",
   "legacyHost": "api.codestra.agency",
   "allowedExistingRouteNames": ["codestra-token-validation-certification"],
+  "ownedProductionRoutes": [
+    {"name": "cod-web-out-email-production", "classification": "REQUIRED_PRODUCTION", "owner": "control-plane", "source": "deploy/kong/control-plane.yml"},
+    {"name": "codestra-callback-control", "classification": "REQUIRED_PRODUCTION", "owner": "callback-control", "source": "config/kong-callback-routes.json"},
+    {"name": "codestra-callback-read", "classification": "REQUIRED_PRODUCTION", "owner": "callback-control", "source": "config/kong-callback-routes.json"},
+    {"name": "codestra-campaign-policy-check", "classification": "REQUIRED_PRODUCTION", "owner": "campaign-automation", "source": "config/kong-campaign-automation-routes.json"},
+    {"name": "codestra-campaign-result-submit", "classification": "REQUIRED_PRODUCTION", "owner": "campaign-automation", "source": "config/kong-campaign-automation-routes.json"},
+    {"name": "codestra-communication-canonical-read", "classification": "REQUIRED_PRODUCTION", "owner": "control-plane", "source": "deploy/kong/control-plane.yml"},
+    {"name": "codestra-communication-canonical-write", "classification": "REQUIRED_PRODUCTION", "owner": "control-plane", "source": "deploy/kong/control-plane.yml"},
+    {"name": "codestra-communication-oauth-shadow-create", "classification": "REQUIRED_PRODUCTION", "owner": "control-plane", "source": "deploy/kong/control-plane.yml"},
+    {"name": "codestra-mail-api", "classification": "REQUIRED_PRODUCTION", "owner": "mail-platform", "source": "deploy/mail-platform/kong-mail-routes.yaml"}
+  ],
   "routes": [
     {"name": "crm-route", "path": "/v1/crm", "methods": ["GET", "POST", "PATCH", "OPTIONS"], "auth": "key-auth", "maxBodyMb": 2, "ratePerMinute": 120},
     {"name": "email-route", "path": "/v1/email", "methods": ["GET", "POST"], "auth": "key-auth", "maxBodyMb": 10, "ratePerMinute": 60},

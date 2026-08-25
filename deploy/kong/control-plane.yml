@@ -2,7 +2,7 @@ _format_version: "3.0"
 _transform: true
 services:
   - name: codestra-control-plane
-    url: http://codestra-control-plane:8096
+    url: http://codestra-integration-control-plane-api-1:8096
     connect_timeout: 3000
     read_timeout: 30000
     write_timeout: 30000

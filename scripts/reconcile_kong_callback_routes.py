@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+UTC = timezone.utc
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode

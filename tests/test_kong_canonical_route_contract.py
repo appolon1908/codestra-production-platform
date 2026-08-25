@@ -26,3 +26,14 @@ def test_reconciler_is_dry_run_by_default_and_fail_closed():
     assert "required auth plugin absent" in SOURCE
     assert "limiter readback mismatch" in SOURCE
     assert "unexpected_public" in SOURCE
+
+
+def test_every_additional_public_route_has_an_owner_and_source():
+    owned = MANIFEST["ownedProductionRoutes"]
+    assert len(owned) == 9
+    assert len({route["name"] for route in owned}) == 9
+    for route in owned:
+        assert route["classification"] == "REQUIRED_PRODUCTION"
+        assert route["owner"]
+        assert route["source"]
+    assert "ownedProductionRoutes" in SOURCE
