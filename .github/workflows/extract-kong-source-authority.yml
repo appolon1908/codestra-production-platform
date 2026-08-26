@@ -82,9 +82,13 @@ jobs:
           import json
           from pathlib import Path
 
-          # This test exercises Kong-owned implementation and belongs only in the
-          # standalone Kong repository after the source boundary is applied.
-          Path("tests/test_kong_campaign_automation.py").unlink(missing_ok=True)
+          # These tests exercise Kong-owned implementations and belong only in
+          # the standalone Kong repository after this source boundary is applied.
+          for relative in (
+              "tests/test_kong_campaign_automation.py",
+              "tests/test_kong_production_standby.py",
+          ):
+              Path(relative).unlink(missing_ok=True)
 
           # Keep the platform-owned Odoo identity and disabled-delivery tests, but
           # replace direct imports of moved Kong files with the immutable repo lock.
@@ -135,6 +139,11 @@ jobs:
           Path(".github/workflows/extract-kong-source-authority.yml").unlink()
           PY
 
+          # Stage the complete ownership-boundary change before tests. Release
+          # bundle tooling uses git ls-files and must observe staged deletions.
+          git add --all
+          git diff --cached --check
+
       - name: Install platform test dependencies
         run: |
           sudo apt-get update
@@ -170,7 +179,6 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add --all
           git diff --cached --check
           git commit -m 'refactor: move Kong source authority to standalone repository'
           git push origin HEAD:refactor/extract-kong-source-authority-20260826
