@@ -54,12 +54,26 @@ def test_admin_system_routes_are_platform_admin_only():
     assert 'self.auth_operator({"platform_admin"})' in source
 
 
-def test_kong_system_route_requires_platform_admin_scope_and_role_header():
-    kong = (ROOT / "deploy/kong/control-plane.yml").read_text()
-    assert "paths: [/v1/admin/system]" in kong
-    assert 'required = "platform.admin"' in kong
-    assert 'set_header("X-Authenticated-Role", "platform_admin")' in kong
-    assert 'set_header("X-Authenticated-Role", "tenant_admin")' in kong
+def test_kong_system_route_contract_is_pinned_to_standalone_authority():
+    import json
+
+    lock = json.loads((ROOT / "config/kong-source.lock.json").read_text())
+    route = next(
+        row
+        for row in lock["public_routes"]
+        if row["route"] == "control-plane-system-admin"
+    )
+    assert route["methods"] == ["GET"]
+    assert route["paths"] == ["/v1/admin/system"]
+    assert route["hosts"] == ["api.codestra.co"]
+    assert (
+        lock["security_contracts"]["system_admin_required_scope"]
+        == "platform.admin"
+    )
+    assert lock["security_contracts"]["authenticated_role_headers"] == [
+        "platform_admin",
+        "tenant_admin",
+    ]
 
 
 def test_production_compose_configures_private_dependency_probes():

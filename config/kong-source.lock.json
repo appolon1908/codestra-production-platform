@@ -1,0 +1,132 @@
+{
+  "commit": "007055bbd05b9cd1c7cc33d3810ec17a3ec9fbba",
+  "component": "kong-gateway",
+  "local_implementation_paths_must_be_absent": [
+    "deploy/kong",
+    "deploy/kong-production-standby",
+    "operations/kong-database",
+    "config/kong-callback-routes.json",
+    "config/kong-campaign-automation-routes.json",
+    "config/kong-canonical-middleware-routes.json"
+  ],
+  "manifest_path": "MIGRATION_MANIFEST.json",
+  "manifest_schema": "codestra.kong.repository-migration.v1",
+  "production_state_changed": false,
+  "public_routes": [
+    {
+      "hosts": [
+        "api.codestra.co"
+      ],
+      "methods": [
+        "PATCH",
+        "POST"
+      ],
+      "paths": [
+        "/api/v1/control"
+      ],
+      "route": "control-plane-control",
+      "service": "codestra-control-plane"
+    },
+    {
+      "hosts": [
+        "api.codestra.co"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "paths": [
+        "/api/v1/messages"
+      ],
+      "route": "communication-message-read",
+      "service": "codestra-control-plane"
+    },
+    {
+      "hosts": [
+        "api.codestra.co"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "paths": [
+        "/api/v1/events"
+      ],
+      "route": "control-plane-events",
+      "service": "codestra-control-plane"
+    },
+    {
+      "hosts": [
+        "api.codestra.co"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "paths": [
+        "/api/v1/results"
+      ],
+      "route": "control-plane-results",
+      "service": "codestra-control-plane"
+    },
+    {
+      "hosts": [
+        "api.codestra.co"
+      ],
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "paths": [
+        "/api/v1/reconciliation"
+      ],
+      "route": "control-plane-reconciliation",
+      "service": "codestra-control-plane"
+    },
+    {
+      "hosts": [
+        "api.codestra.co"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "paths": [
+        "/api/v1/health"
+      ],
+      "route": "control-plane-health",
+      "service": "codestra-control-plane"
+    },
+    {
+      "hosts": [
+        "api.codestra.co"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "paths": [
+        "/v1/admin/system"
+      ],
+      "route": "control-plane-system-admin",
+      "service": "codestra-control-plane"
+    }
+  ],
+  "repository": "appolon1908-hue/Kong",
+  "required_paths": [
+    "config/kong-callback-routes.json",
+    "config/kong-campaign-automation-routes.json",
+    "deploy/kong-production-standby/compose.standby.yaml",
+    "deploy/kong/control-plane.yml",
+    "deploy/kong/scope-policy.lua",
+    "operations/kong-database/README.md",
+    "scripts/reconcile_kong_canonical_routes.py",
+    "tests/test_kong_route_authority_hardening.py"
+  ],
+  "schema": "codestra.platform.external-source-lock.v1",
+  "security_contracts": {
+    "authenticated_role_headers": [
+      "platform_admin",
+      "tenant_admin"
+    ],
+    "system_admin_required_scope": "platform.admin"
+  },
+  "source_platform_sha": "f3a16308194378a7b1580e04943dc98d64619077",
+  "source_route_pr": 130,
+  "source_route_sha": "b340023f5e74e1f9154fc97590c9b6a48caa8b99"
+}

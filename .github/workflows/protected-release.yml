@@ -41,8 +41,7 @@ jobs:
             "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9"
           python -m pip install -e 'vicidial[test]'
           python -m pytest -q
-          python -m pytest -q \
-            deploy/kong-production-standby/auth-middleware/test_token_validation.py
+          python tools/verify_kong_source_lock.py --online
           python -m pip_audit --local
 
       - name: Install checksum-verified Cosign

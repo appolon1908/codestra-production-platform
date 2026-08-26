@@ -145,14 +145,21 @@ def endpoint_discovery(root: Path, registries: dict[str, Any]) -> list[Finding]:
             for method in operations:
                 if method.lower() in {"get", "post", "put", "patch", "delete"}:
                     discovered.add((method.upper(), path, str(openapi_path.relative_to(root))))
-    kong_path = root / "deploy/kong/control-plane.yml"
-    if kong_path.exists():
-        kong = load_yaml(kong_path)
-        for service in kong.get("services", []):
-            for route in service.get("routes", []):
-                for path in route.get("paths", []):
-                    for method in route.get("methods", ["ANY"]):
-                        discovered.add((str(method).upper(), str(path), str(kong_path.relative_to(root))))
+    kong_lock_path = root / "config/kong-source.lock.json"
+    if kong_lock_path.exists():
+        kong_lock = json.loads(
+            kong_lock_path.read_text(encoding="utf-8")
+        )
+        for route in kong_lock.get("public_routes", []):
+            for route_path in route.get("paths", []):
+                for method in route.get("methods", ["ANY"]):
+                    discovered.add(
+                        (
+                            str(method).upper(),
+                            str(route_path),
+                            str(kong_lock_path.relative_to(root)),
+                        )
+                    )
     caddy_path = root / "operations/caddy/api.codestra.co.caddy"
     if caddy_path.exists():
         for line in caddy_path.read_text(encoding="utf-8").splitlines():

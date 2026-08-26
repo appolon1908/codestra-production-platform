@@ -3,8 +3,7 @@ from pathlib import Path
 
 
 IDENTITY = json.loads(Path("config/keycloak-odoo-callback-client.json").read_text())
-KONG = json.loads(Path("config/kong-callback-routes.json").read_text())
-RECONCILER = Path("scripts/reconcile_kong_callback_routes.py").read_text()
+KONG_LOCK = json.loads(Path("config/kong-source.lock.json").read_text())
 DEPLOYMENT = Path("deploy/odoo-callback/compose.synthetic-only.yaml").read_text()
 
 
@@ -38,56 +37,12 @@ def test_identity_claims_are_exactly_cod_test_syn_and_callback_audience():
     assert roles["config"]["access.token.claim"] == "true"
 
 
-def test_kong_exposes_only_required_callback_surfaces():
-    assert KONG["host"] == "api.codestra.co"
-    assert KONG["service"]["host"] == "codestra-middleware-integration-api-1"
-    assert KONG["service"]["port"] == 8095
-    assert {path for route in KONG["routes"] for path in route["paths"]} == {
-        "/api/v1/control/callbacks", "/api/v1/callbacks"
-    }
-    assert {method for route in KONG["routes"] for method in route["methods"]} <= {"GET", "POST"}
-    assert all(route["maxBodyMb"] == 1 and route["ratePerMinute"] > 0 for route in KONG["routes"])
-    assert {route["requiredScope"] for route in KONG["routes"]} == {"callbacks.read", "callbacks.write"}
-    assert KONG["consumer"] == {
-        "username": "codestra-odoo-callback-service",
-        "custom_id": "codestra-odoo-callback-service",
-    }
-    assert KONG["tenant"] == "COD" and KONG["campaign"] == "TEST_SYN"
-    assert KONG["requiredRole"] == "service"
-    assert 'parser.add_argument("--apply", action="store_true")' in RECONCILER
-    assert "duplicate Kong" in RECONCILER
-    assert "correlation-id" in RECONCILER
-    assert '"jwt"' in RECONCILER
-    assert '"pre-function"' in RECONCILER
-    assert "active_rsa_key" in RECONCILER
-    assert "claim_guard" in RECONCILER
-    assert "verify_service" in RECONCILER
-    assert "verify_route" in RECONCILER
-    assert "verify_plugins" in RECONCILER
-    assert "select_managed_route" in RECONCILER
-    assert "conflicting live route" in RECONCILER
-    assert "partial legacy route overlap" in RECONCILER
-    assert "all_rows" in RECONCILER
-    assert '"request-termination"' in RECONCILER
-    assert '"config.status_code": 503' in RECONCILER
-    assert "request_json" in RECONCILER
-    assert 'route.get("headers") or {}' in RECONCILER
-    assert "callback route has an enabled deny plugin" in RECONCILER
-    assert "datetime.now(timezone.utc)" in RECONCILER
-    assert '"sources": []' not in RECONCILER
-    assert '"destinations": []' not in RECONCILER
-    assert "claims_to_verify" in RECONCILER
-    assert "key_claim_name" in RECONCILER
-    assert 'parser.add_argument("--evidence", type=Path, required=True)' in RECONCILER
-    assert "manifest_sha256" in RECONCILER
-    assert "needs_quarantine" in RECONCILER
-    assert "callback-route-disabled.invalid" in RECONCILER
-    assert 'correlation.get("echo_downstream"), True' in RECONCILER
-    assert 'rate.get("limit_by"), "ip"' in RECONCILER
-    assert 'route.get("protocols"), ["http"]' in RECONCILER
-    assert '"protocols": ["http"]' in RECONCILER
-    assert 'candidate.get("protocols") in (["http"], ["https"])' in RECONCILER
-
+def test_kong_callback_contract_is_pinned_to_standalone_authority():
+    assert KONG_LOCK["repository"] == "appolon1908-hue/Kong"
+    assert KONG_LOCK["commit"] == "007055bbd05b9cd1c7cc33d3810ec17a3ec9fbba"
+    assert KONG_LOCK["production_state_changed"] is False
+    assert "config/kong-callback-routes.json" in KONG_LOCK["required_paths"]
+    assert "config/kong-campaign-automation-routes.json" in KONG_LOCK["required_paths"]
 
 def test_deployment_keeps_every_broad_delivery_path_disabled():
     assert 'CODESTRA_CALLBACK_SYNC_ENABLED: "true"' in DEPLOYMENT

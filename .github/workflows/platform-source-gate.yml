@@ -67,8 +67,7 @@ jobs:
           sudo --preserve-env=PATH \
             "$(command -v python)" -m pytest -q |
             tee "${RUNNER_TEMP}/pytest-output.txt"
-          python -m pytest -q \
-            deploy/kong-production-standby/auth-middleware/test_token_validation.py
+          python tools/verify_kong_source_lock.py --online
           python - "${RUNNER_TEMP}/pytest-output.txt" <<'PY'
           import re
           import sys
