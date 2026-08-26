@@ -77,6 +77,16 @@ def test_offload_service_uses_protected_non_home_ssh_authority():
     assert "Host codestra-shared-backup" in ssh_config
     assert "IdentityFile /etc/codestra/secrets/shared-postgresql/ssh-home/.ssh/id_ed25519" in ssh_config
     assert "StrictHostKeyChecking yes" in ssh_config and "BatchMode yes" in ssh_config
+    resolved = subprocess.run(
+        ["ssh", "-F", str(PACKAGE / "codestra-shared-backup.ssh.conf"), "-G", "codestra-shared-backup"],
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.lower()
+    assert "hostname 10.40.0.2" in resolved
+    assert "identitiesonly yes" in resolved
+    assert "stricthostkeychecking true" in resolved
+    assert "identityfile /etc/codestra/secrets/shared-postgresql/ssh-home/.ssh/id_ed25519" in resolved
 
 
 def test_nonroot_stage_and_portable_checksum_relocation(tmp_path):
