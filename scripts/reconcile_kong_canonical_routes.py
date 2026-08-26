@@ -10,7 +10,7 @@ from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 
-def request(base: str, method: str, path: str, payload=None):
+def request(base: str, method: str, path: str, payload=None) -> dict:
     data = None if payload is None else urlencode(payload, doseq=True).encode()
     url = path if path.startswith(("http://", "https://")) else base.rstrip("/") + path
     with urlopen(Request(url, method=method, data=data), timeout=10) as response:
@@ -61,6 +61,12 @@ def require_config_subset(actual: dict, expected: dict, label: str) -> None:
         require_equal(actual.get(key), value, f"{label}.{key}")
 
 
+def form_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return value
+
+
 def enabled_plugins(base: str, route_id: str) -> dict[str, dict]:
     plugins = all_rows(base, f"/routes/{route_id}/plugins?size=1000")
     grouped: dict[str, list[dict]] = {}
@@ -84,9 +90,6 @@ def security_authority(root: Path, expected: dict) -> None:
         )
         require_equal(route["paths"], expected["paths"], f"{route_name}.authority.paths")
         require_equal(sorted(route["methods"]), sorted(expected["methods"]), f"{route_name}.authority.methods")
-        require_equal(manifest["host"], expected["hosts"][0], f"{route_name}.authority.host")
-        require_equal(manifest["service"]["host"], expected["serviceHost"], f"{route_name}.authority.serviceHost")
-        require_equal(manifest["service"]["port"], expected["servicePort"], f"{route_name}.authority.servicePort")
     elif path.name == "kong-campaign-automation-routes.json":
         route = one(
             [item for item in manifest["routes"] if item["name"] == route_name],
@@ -94,11 +97,11 @@ def security_authority(root: Path, expected: dict) -> None:
         )
         require_equal([route["path"]], expected["paths"], f"{route_name}.authority.paths")
         require_equal(expected["methods"], ["POST"], f"{route_name}.authority.methods")
-        require_equal(manifest["host"], expected["hosts"][0], f"{route_name}.authority.host")
-        require_equal(manifest["service"]["host"], expected["serviceHost"], f"{route_name}.authority.serviceHost")
-        require_equal(manifest["service"]["port"], expected["servicePort"], f"{route_name}.authority.servicePort")
     else:
         raise RuntimeError(f"unsupported route security authority: {path}")
+    require_equal(manifest["host"], expected["hosts"][0], f"{route_name}.authority.host")
+    require_equal(manifest["service"]["host"], expected["serviceHost"], f"{route_name}.authority.serviceHost")
+    require_equal(manifest["service"]["port"], expected["servicePort"], f"{route_name}.authority.servicePort")
 
 
 def verify_contract_route(
@@ -113,15 +116,10 @@ def verify_contract_route(
         [item for item in routes if item.get("name") == expected["name"]],
         f"contract route {expected['name']}",
     )
-    for field, manifest_key in (
-        ("hosts", "hosts"),
-        ("paths", "paths"),
-        ("methods", "methods"),
-        ("protocols", "protocols"),
-    ):
+    for field in ("hosts", "paths", "methods", "protocols"):
         require_equal(
             sorted(route.get(field) or []),
-            sorted(expected[manifest_key]),
+            sorted(expected[field]),
             f"{expected['name']}.{field}",
         )
     require_equal(route.get("strip_path"), expected["stripPath"], f"{expected['name']}.strip_path")
@@ -155,7 +153,7 @@ def ensure_plugin(
 ) -> dict:
     plugins = enabled_plugins(admin, route_id)
     plugin = plugins.get(name)
-    form = {f"config.{key}": value for key, value in expected_config.items()}
+    form = {f"config.{key}": form_value(value) for key, value in expected_config.items()}
     if plugin is None:
         if not apply:
             raise RuntimeError(f"required route plugin absent: {name}")
@@ -176,10 +174,10 @@ def verify_managed_route(
     services: dict[str, dict],
     apply: bool,
 ) -> dict:
-    route = one(
-        [item for item in routes if item.get("name") == expected["name"]],
-        f"managed route {expected['name']}",
-    )
+    matches = [item for item in routes if item.get("name") == expected["name"]]
+    if len(matches) != 1:
+        raise RuntimeError(f"expected exactly one managed route: {expected['name']}")
+    route = matches[0]
     require_equal(sorted(route.get("paths") or []), [expected["path"]], f"{expected['name']}.paths")
     require_equal(sorted(route.get("methods") or []), sorted(expected["methods"]), f"{expected['name']}.methods")
     desired_hosts = [manifest["canonicalHost"]]
@@ -204,7 +202,13 @@ def verify_managed_route(
     plugins = enabled_plugins(admin, route["id"])
     if expected["auth"] not in plugins:
         raise RuntimeError(f"required auth plugin absent: {expected['name']}")
-    ensure_plugin(admin, route["id"], "request-size-limiting", {"allowed_payload_size": expected["maxBodyMb"]}, apply)
+    ensure_plugin(
+        admin,
+        route["id"],
+        "request-size-limiting",
+        {"allowed_payload_size": expected["maxBodyMb"]},
+        apply,
+    )
     ensure_plugin(
         admin,
         route["id"],
@@ -252,8 +256,10 @@ def main() -> int:
         raise RuntimeError("legacyHostEnabled must be an explicit boolean")
 
     routes = all_rows(args.admin_url, "/routes?size=1000")
-    service_rows = all_rows(args.admin_url, "/services?size=1000")
-    services = {service["id"]: service for service in service_rows}
+    services = {
+        service["id"]: service
+        for service in all_rows(args.admin_url, "/services?size=1000")
+    }
     managed_names = {route["name"] for route in manifest["routes"]}
     contract_names = {route["name"] for route in manifest["contractRoutes"]}
     approved_names = managed_names | contract_names
