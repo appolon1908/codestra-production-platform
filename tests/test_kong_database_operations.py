@@ -1,0 +1,89 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = ROOT / "operations" / "kong-database"
+
+
+def test_backup_is_encrypted_checksummed_retained_and_off_host():
+    value = (PACKAGE / "kong-database-backup.sh").read_text()
+    assert "pg_dump" in value and "--format=custom" in value
+    assert "gpg" in value and "--encrypt" in value
+    assert "sha256sum -c" in value
+    assert "restic backup" in value
+    assert "--keep-daily 14" in value
+    assert "--keep-weekly 8" in value
+    assert "--keep-monthly 12" in value
+    assert "POSTGRES_PASSWORD" not in value
+
+
+def test_restore_is_isolated_and_never_targets_production():
+    value = (PACKAGE / "kong-database-restore-rehearsal.sh").read_text()
+    assert "docker network create --internal" in value
+    assert "PUBLIC_PORTS=0" in value
+    assert "codestra-kong_kong_db_data" not in value
+    assert "--exit-on-error" in value
+    assert "kong health" in value
+    for topology in ("services", "routes", "plugins"):
+        assert f"restored_{topology}" in value
+
+
+def test_metrics_and_alerts_cover_production_database_gates():
+    metrics = (PACKAGE / "kong-database-metrics.sh").read_text()
+    rules = (PACKAGE / "kong-database.rules.yml").read_text()
+    for metric in (
+        "connections",
+        "lock_waits",
+        "deadlocks_total",
+        "disk_used_percent",
+        "backup_age_seconds",
+        "migration_up_to_date",
+        "replication_lag_seconds",
+    ):
+        assert f"codestra_kong_db_{metric}" in metrics
+        assert f"codestra_kong_db_{metric}" in rules or metric in {
+            "deadlocks_total"
+        }
+    for alert in (
+        "KongDatabaseUnavailable",
+        "KongDatabaseConnectionsWarning",
+        "KongDatabaseConnectionsCritical",
+        "KongDatabaseDiskWarning",
+        "KongDatabaseDiskCritical",
+        "KongDatabaseBackupStale",
+        "KongDatabaseBackupJobFailed",
+        "KongDatabaseRestoreRehearsalOverdue",
+        "KongDatabaseDeadlockDetected",
+        "KongDatabaseMigrationMismatch",
+        "KongDatabaseReplicationDisconnected",
+        "KongDatabaseReplicationLagHigh",
+    ):
+        assert f"alert: {alert}" in rules
+
+
+def test_units_are_root_controlled_and_persistent():
+    service = (PACKAGE / "codestra-kong-database-backup.service").read_text()
+    timer = (PACKAGE / "codestra-kong-database-backup.timer").read_text()
+    assert "User=root" in service
+    assert "NoNewPrivileges=true" in service
+    assert "ProtectSystem=strict" in service
+    assert "Persistent=true" in timer
+    assert "OnCalendar=" in timer
+
+
+def test_restore_rehearsal_is_scheduled_and_persistent():
+    service = (PACKAGE / "codestra-kong-database-restore.service").read_text()
+    timer = (PACKAGE / "codestra-kong-database-restore.timer").read_text()
+    assert "kong-database-restore-rehearsal" in service
+    assert "NoNewPrivileges=true" in service
+    assert "OnCalendar=monthly" in timer
+    assert "Persistent=true" in timer
+
+
+def test_database_runtime_authority_is_pinned_private_and_secret_free():
+    value = (ROOT / "deploy" / "kong" / "compose.database.yaml").read_text()
+    assert "postgres@sha256:" in value
+    assert "internal: true" in value
+    assert '127.0.0.1:5432' not in value
+    assert "KONG_PG_PASSWORD:?required" in value
+    assert "changeme" not in value.lower()
