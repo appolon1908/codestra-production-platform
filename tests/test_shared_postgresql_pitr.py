@@ -97,7 +97,7 @@ def authority(tmp_path: Path, overrides=None):
     return path, values
 
 
-def test_source_has_valid_pitr_and_base_backup_contracts():
+def test_source_preserves_tar_fetch_pitr_and_exact_remote_readback_contracts():
     config = (PACKAGE / "postgresql-pitr.conf").read_text()
     base = (PACKAGE / "create-base-backup.sh").read_text()
     for setting in (
@@ -109,22 +109,29 @@ def test_source_has_valid_pitr_and_base_backup_contracts():
         "max_replication_slots",
     ):
         assert setting in config
-    assert "-Fp -X stream" in base
+    assert "-Ft -X fetch" in base
     assert "backup_manifest" in base and "pg_verifybackup" in base
-    assert "shred -u" in base and "--encrypt" in base and "restic dump" in base
+    assert 'find "$work/verify/pg_wal"' in base
+    assert "FORMAT=tar" in base and "WAL_METHOD=fetch" in base
+    assert "shred -u" in base and "--encrypt" in base
+    assert "restic ls --json" in base and "restic dump" in base
+    assert "expected exactly one restic path" in base
 
 
-def test_base_backup_uses_a_nonroot_runtime_passfile_copy():
+def test_base_backup_uses_root_authority_and_nonroot_runtime_passfile_copy():
     source = (PACKAGE / "create-base-backup.sh").read_text()
+    integration = (
+        ROOT / "tests/integration/shared_postgresql_base_backup_helper.sh"
+    ).read_text()
     assert 'safe_root_secret "$passfile"' in source
     assert 'runtime_passfile="$work/pgpass"' in source
     assert 'install -m 0600 -o "$postgres_uid" -g "$postgres_gid"' in source
     assert '-v "$runtime_passfile:/run/secrets/pgpass:ro"' in source
     assert '-v "$passfile:/run/secrets/pgpass:ro"' not in source
-    assert "test -r \"$PGPASSFILE\"" in source
-    assert "ACTUAL_BASE_BACKUP_HELPER=PASS" in (
-        ROOT / "tests/integration/shared_postgresql_base_backup_helper.sh"
-    ).read_text()
+    assert 'test -r "$PGPASSFILE"' in source
+    assert "ACTUAL_BASE_BACKUP_HELPER=PASS" in integration
+    assert "ROOT_AUTHORITY_PASSFILE=PASS" in integration
+    assert "NON_ROOT_CONTAINER_PASSFILE_READABILITY=PASS" in integration
 
 
 def test_nonroot_stage_and_portable_checksum_relocation(tmp_path):
@@ -156,9 +163,13 @@ def test_nonroot_stage_and_portable_checksum_relocation(tmp_path):
             *command,
         ]
     wal = "000000010000000000000001"
-    env = {**os.environ, "CODESTRA_SHARED_WAL_STAGE": str(stage)}
-    result = subprocess.run(command, env=env)
-    assert result.returncode == 0 and (stage / wal).read_bytes() == source.read_bytes()
+    result = subprocess.run(
+        command,
+        env={**os.environ, "CODESTRA_SHARED_WAL_STAGE": str(stage)},
+    )
+    assert result.returncode == 0
+    assert (stage / wal).read_bytes() == source.read_bytes()
+
     first = tmp_path / "first"
     second = tmp_path / "second"
     first.mkdir()
@@ -203,7 +214,8 @@ def test_nonroot_stage_accepts_timeline_history(tmp_path):
             *command,
         ]
     result = subprocess.run(
-        command, env={**os.environ, "CODESTRA_SHARED_WAL_STAGE": str(stage)}
+        command,
+        env={**os.environ, "CODESTRA_SHARED_WAL_STAGE": str(stage)},
     )
     assert result.returncode == 0
     assert (stage / "00000002.history").read_text() == "timeline history"
@@ -256,7 +268,7 @@ def test_validator_rejects_bad_evidence(tmp_path, mutation, gate):
     assert gate in result.stdout
 
 
-def test_validator_rejects_symlink_and_world_readable_evidence(tmp_path):
+def test_validator_rejects_symlink_world_readable_and_duplicate_keys(tmp_path):
     auth, values = authority(tmp_path)
     target = Path(values["SHARED_BACKUP_EVIDENCE"])
     target.chmod(0o644)
@@ -267,13 +279,9 @@ def test_validator_rejects_symlink_and_world_readable_evidence(tmp_path):
     auth.write_text(auth.read_text().replace(str(target), str(link)))
     assert "FILE_SECURITY" in run_validator(auth).stdout
 
-
-def test_validator_rejects_duplicate_approval_keys(tmp_path):
-    auth, _ = authority(tmp_path)
-    auth.write_text(auth.read_text() + "SHARED_RTO_SECONDS=901\n")
-    result = run_validator(auth)
-    assert result.returncode != 0
-    assert "APPROVAL_FILE_DUPLICATE_KEY" in result.stdout
+    duplicate, _ = authority(tmp_path / "duplicate")
+    duplicate.write_text(duplicate.read_text() + "SHARED_RTO_SECONDS=901\n")
+    assert "APPROVAL_FILE_DUPLICATE_KEY" in run_validator(duplicate).stdout
 
 
 def test_validator_requires_all_live_ha_evidence(tmp_path):
@@ -304,7 +312,7 @@ def test_validator_accepts_bounded_restore_based_ha_deferral(tmp_path):
         {
             "SHARED_HA_DECISION": "FORMALLY_NOT_REQUIRED_FOR_THIS_RELEASE",
             "SHARED_HA_RATIONALE": "isolated restore proves the approved release RTO",
-            "SHARED_HA_ACCEPTED_RISK": "single-host outage requires restore before service recovery",
+            "SHARED_HA_ACCEPTED_RISK": "single-host outage requires restore before recovery",
             "SHARED_HA_REVIEW_DATE": review_date,
             "SHARED_MEASURED_RESTORE_RTO_SECONDS": "600",
         },
@@ -329,7 +337,7 @@ def test_validator_rejects_contradictory_or_expired_ha_deferral(tmp_path):
     assert "HA_RTO_CONTRADICTION" in run_validator(auth).stdout
 
     expired, _ = authority(
-        tmp_path,
+        tmp_path / "expired",
         {
             "SHARED_HA_DECISION": "FORMALLY_NOT_REQUIRED_FOR_THIS_RELEASE",
             "SHARED_HA_RATIONALE": "restore-only release",
@@ -354,17 +362,16 @@ def test_validator_template_and_inactive_window_fail_closed(tmp_path):
     assert "RESTART_WINDOW_INACTIVE" in run_validator(auth).stdout
 
 
-def test_wal_worker_has_verified_bounded_retention_and_metrics():
+def test_wal_worker_uses_locked_exact_snapshot_readback_and_bounded_retention():
     worker = (PACKAGE / "codestra-shared-postgres-archive-wal.sh").read_text()
     rules = (PACKAGE / "shared-postgres.rules.yml").read_text()
-    assert "restic dump" in worker and "OFFHOST_STATUS=PASS" not in worker
+    assert "flock -w 300" in worker
+    assert "restic ls --json" in worker and "restic dump" in worker
+    assert "expected exactly one restic WAL path" in worker
     assert "STATUS=PASS" in worker and "wal-retention-days" in worker
-    assert "-mtime" in worker
-    assert "recorded_artifact" in worker and "continue" in worker
+    assert "-mtime" in worker and "recorded_artifact" in worker
+    assert "CODESTRA_SHARED_POSTGRES_PRUNE_HELPER" in worker
     assert "wal_spool_disk_critical" in worker
-    assert "critical WAL spool filesystem usage" in worker
-    assert "codestra-shared-postgresql-restic.lock" in worker
-    assert "exit 1" not in worker
     assert "SharedPostgresWALSpoolCleanupFailure" in rules
 
 
@@ -380,7 +387,6 @@ def test_restic_maintenance_is_locked_checked_pruned_and_monitored():
     ).read_text()
     metrics = (PACKAGE / "shared-postgres-metrics.sh").read_text()
     rules = (PACKAGE / "shared-postgres.rules.yml").read_text()
-
     assert "flock -w 300" in maintenance
     assert maintenance.count("restic check") == 2
     assert "restic prune" in maintenance
@@ -400,7 +406,7 @@ def test_restic_maintenance_is_locked_checked_pruned_and_monitored():
         assert alert in rules
 
 
-def test_metrics_publish_database_failure_instead_of_leaving_stale_success():
+def test_metrics_publish_database_failure_instead_of_stale_success():
     metrics = (PACKAGE / "shared-postgres-metrics.sh").read_text()
     rules = (PACKAGE / "shared-postgres.rules.yml").read_text()
     assert "postgres_up=0" in metrics
@@ -450,8 +456,9 @@ def test_spool_cleanup_removes_only_verified_expired_wal(tmp_path):
     assert (state / "wal_cleanup_failures_total").read_text().strip() == "1"
 
 
-def test_runbook_prohibits_early_migration_and_overwrite():
+def test_runbook_preserves_tar_fetch_and_blocks_early_migration():
     text = (PACKAGE / "PITR_RUNBOOK.md").read_text()
+    assert "pg_basebackup -Ft -X fetch" in text
     assert "Only after PITR PASS" in text
     assert "Do not migrate middleware" in text
     assert "Never restore over production" in text
