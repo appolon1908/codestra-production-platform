@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 from tools.check_control_plane_api_surface import (
@@ -53,7 +54,7 @@ def test_missing_contract_and_implementation_layers_are_explicit_and_owned() -> 
 
 def test_strict_predeployment_api_coverage_gate_fails_closed() -> None:
     result = subprocess.run(
-        ["python", "tools/check_control_plane_api_surface.py", "--strict"],
+        [sys.executable, "tools/check_control_plane_api_surface.py", "--strict"],
         cwd=ROOT,
         text=True,
         capture_output=True,
