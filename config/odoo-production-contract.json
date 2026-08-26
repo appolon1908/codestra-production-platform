@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "public_browser": {
+    "host": "crm.codestra.agency",
+    "edge": "host-caddy",
+    "default_upstream": "codestra-odoo-1:8069",
+    "realtime_paths": ["/websocket", "/websocket/*"],
+    "realtime_upstream": "codestra-odoo-1:8072",
+    "reseller_paths": ["/reseller", "/reseller/*"],
+    "reseller_auth_boundary": "codestra-reseller-portal-oidc-gateway-1:4180"
+  },
+  "private_integration": {
+    "host": "odoo.internal.codestra.agency",
+    "network": "codestra-internal-integration",
+    "allowed_cidr": "10.254.41.0/28",
+    "upstream": "codestra-odoo-1:8069",
+    "routes": [
+      {"methods": ["POST"], "path": "/api/v1/integration/results"},
+      {"methods": ["POST"], "path": "/codestra/api/v1/call-events"},
+      {"methods": ["GET", "HEAD"], "path": "/web/health"}
+    ],
+    "default_response": 404,
+    "outside_network_response": 403
+  },
+  "kong_crm_api": {
+    "hosts": ["api.codestra.agency", "api.codestra.co"],
+    "path": "/v1/crm",
+    "upstream": "codestra-kong-service-auth-adapter-1:8080/crm",
+    "required_plugins": ["key-auth", "rate-limiting", "request-size-limiting", "cors"]
+  },
+  "runtime_security": {
+    "public_odoo_ports": 0,
+    "proxy_mode": true,
+    "list_db": false,
+    "required_oci_labels": [
+      "org.opencontainers.image.source",
+      "org.opencontainers.image.revision"
+    ]
+  }
+}

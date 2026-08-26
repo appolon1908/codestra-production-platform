@@ -77,6 +77,22 @@ services:
     cap_drop: [ALL]
     restart: unless-stopped
 
+  redis-exporter:
+    image: docker.io/oliver006/redis_exporter@sha256:178f95efe97b733ab10e8721c54bee838c125e1e666734dc27a956886fff7a8a
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_USER: redis-monitoring
+      REDIS_PASSWORD_FILE: /run/secrets/redis_monitoring_password
+    secrets:
+      - source: redis_monitoring_credential
+        target: redis_monitoring_password
+    networks: [monitoring, backend]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+
   cadvisor:
     image: gcr.io/cadvisor/cadvisor@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
     privileged: false
@@ -119,3 +135,5 @@ volumes:
 secrets:
   postgres_monitoring_credential:
     file: /etc/codestra/secrets/monitoring-runtime/postgres_exporter_password
+  redis_monitoring_credential:
+    file: /etc/codestra/secrets/monitoring-runtime/redis_exporter_password

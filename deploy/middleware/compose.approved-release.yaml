@@ -1,0 +1,29 @@
+# Apply last, after compose.middleware-runtime.yaml and feature overrides.
+x-approved-middleware: &approved-middleware
+  image: ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b
+  environment: &webphone-disabled
+    WEBPHONE_ENDPOINT_ADAPTER_URL: ""
+    WEBPHONE_KEYCLOAK_ENABLED: "false"
+    WEBPHONE_SESSION_ISSUER_ENABLED: "false"
+    WEBPHONE_STAGING_PROVISIONING_ENABLED: "false"
+    PRODUCTION_WEBRTC_ENABLED: "false"
+
+services:
+  middleware-event-gateway: *approved-middleware
+  middleware-integration-api: *approved-middleware
+  middleware-scraper-odoo-delivery-worker: *approved-middleware
+  middleware-odoo-result-worker: *approved-middleware
+  middleware-n8n-runtime-worker: *approved-middleware
+  middleware-social-n8n-delivery-worker: *approved-middleware
+  middleware-postly-polling-worker: *approved-middleware
+  middleware-policy-engine: *approved-middleware
+  middleware-extension-allocator: *approved-middleware
+  middleware-telephony-provisioning: *approved-middleware
+  middleware-pjsip-adapter: *approved-middleware
+  middleware-reconciliation-worker: *approved-middleware
+  middleware-notification-worker: *approved-middleware
+  middleware-evidence-runner: *approved-middleware
+  middleware-vicidial-adapter: *approved-middleware
+  middleware-webphone-session-issuer: *approved-middleware
+  middleware-scheduler: *approved-middleware
+  middleware-sync-worker: *approved-middleware
