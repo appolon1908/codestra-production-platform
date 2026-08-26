@@ -52,6 +52,48 @@ jobs:
           python scripts/validate_odoo_call_followup_docker_release.py
       - name: Validate shell and Compose
         run: deploy/odoo/call-followup-release/validate.sh
+      - name: Install checksum-verified Gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          archive="${RUNNER_TEMP}/gitleaks.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --output "${archive}"
+          echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum --check -
+          tar -xzf "${archive}" -C "${RUNNER_TEMP}" gitleaks
+          install -m 0755 "${RUNNER_TEMP}/gitleaks" "${RUNNER_TEMP}/gitleaks-bin"
+      - name: Scan candidate and report safe finding metadata
+        run: |
+          report="${RUNNER_TEMP}/gitleaks-report.json"
+          set +e
+          "${RUNNER_TEMP}/gitleaks-bin" dir \
+            --no-banner \
+            --redact \
+            --exit-code 1 \
+            --report-format json \
+            --report-path "${report}" \
+            .
+          status=$?
+          set -e
+          python - "${report}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          findings = json.loads(path.read_text()) if path.exists() else []
+          for finding in findings:
+              print(
+                  "GITLEAKS_FINDING="
+                  f"{finding.get('RuleID', 'unknown')} "
+                  f"{finding.get('File', 'unknown')}:"
+                  f"{finding.get('StartLine', 0)}"
+              )
+          print(f"GITLEAKS_FINDING_COUNT={len(findings)}")
+          PY
+          exit "${status}"
 
   build:
     needs: validate
