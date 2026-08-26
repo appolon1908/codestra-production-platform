@@ -9,14 +9,27 @@ Production remains fail-closed until `validate-change-authority.sh` returns
 database mutation, middleware migration, or traffic change.
 
 The intended sequence is: fresh logical/off-host backup, restore precheck,
-consumer inventory, approved restart, WAL archive proof, encrypted physical base
-backup, isolated production-generated PITR, and only then middleware write freeze.
-The archive authority must be independent from the PostgreSQL host. Secrets live
-under the approved protected secret backend, never in this repository.
+consumer inventory, an enforceable HA decision, approved restart, WAL archive
+proof, encrypted physical base backup, isolated production-generated PITR, and
+only then middleware write freeze. The archive authority must be independent from
+the PostgreSQL host. Secrets live under the approved protected secret backend,
+never in this repository.
 
-Rollback boundary: if PostgreSQL or any consumer fails after the configuration
-restart, restore the captured configuration within the approved window, restart
-PostgreSQL, validate every consumer, and stop before middleware migration.
+`SHARED_HA_DECISION=REQUIRED` is accepted only with fresh replica, streaming,
+fencing, and stable-private-authority evidence. A formal HA deferral is accepted
+only with named rationale, accepted risk, a future review date, and a measured
+restore RTO within the approved RTO.
+
+The base-backup helper mounts only a temporary non-root-readable copy of the
+root-owned backup passfile. WAL publication, base-backup publication, and weekly
+restic maintenance share one lock. The maintenance timer runs repository checks,
+retention, pruning, post-prune verification, and usage/capacity metric updates.
+
+Rollback boundary: if PostgreSQL, repository maintenance, or any consumer fails
+after the configuration restart, restore the captured configuration within the
+approved window, restart PostgreSQL, validate every consumer, and stop before
+middleware migration.
 
 Change authority: GitHub issue #107. All `PENDING` decisions must be replaced by
-accountable approvals before deployment.
+accountable approvals and the executable integration rehearsals must pass before
+deployment.
