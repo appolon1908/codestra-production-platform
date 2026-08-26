@@ -1,0 +1,52 @@
+name: Split Kong migration bundle for transfer
+
+on:
+  push:
+    branches:
+      - migration/export-kong-authority-20260826
+    paths:
+      - .github/workflows/resplit-kong-bundle.yml
+
+permissions:
+  contents: write
+
+jobs:
+  split:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Re-split verified base64 bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          directory=migration/kong-export
+          test -s "$directory/KONG_SOURCE_BUNDLE.sha256"
+          test -s "$directory/KONG_SOURCE_BUNDLE.part-000"
+          temporary=$(mktemp -d)
+          trap 'rm -rf "$temporary"' EXIT
+          cat "$directory"/KONG_SOURCE_BUNDLE.part-* > "$temporary/bundle.b64"
+          base64 --decode "$temporary/bundle.b64" > "$temporary/KONG_SOURCE_BUNDLE.tar.gz"
+          (
+            cd "$temporary"
+            sed -E 's#^([0-9a-f]{64})[[:space:]]+.*#\1  KONG_SOURCE_BUNDLE.tar.gz#' \
+              "$GITHUB_WORKSPACE/$directory/KONG_SOURCE_BUNDLE.sha256" \
+              > KONG_SOURCE_BUNDLE.sha256
+            sha256sum -c KONG_SOURCE_BUNDLE.sha256
+          )
+          rm -f "$directory"/KONG_SOURCE_BUNDLE.part-*
+          split -b 30000 -d -a 3 "$temporary/bundle.b64" \
+            "$directory/KONG_SOURCE_BUNDLE.part-"
+          test "$(find "$directory" -maxdepth 1 -type f -name 'KONG_SOURCE_BUNDLE.part-*' | wc -l)" -ge 2
+      - name: Commit transfer parts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add migration/kong-export/KONG_SOURCE_BUNDLE.part-*
+          git diff --cached --check
+          git commit -m 'build: split Kong migration bundle for transfer'
+          git push origin HEAD:migration/export-kong-authority-20260826
