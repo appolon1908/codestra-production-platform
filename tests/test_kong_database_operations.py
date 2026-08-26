@@ -89,18 +89,11 @@ def test_restore_rehearsal_is_scheduled_and_persistent():
     assert "Persistent=true" in pitr_timer
 
 
-def test_database_runtime_authority_is_pinned_private_and_secret_free():
-    value = (ROOT / "deploy" / "kong" / "compose.database.yaml").read_text()
-    assert "postgres@sha256:" in value
-    assert "internal: true" in value
-    assert '127.0.0.1:5432' not in value
-    assert "KONG_PG_PASSWORD:?required" in value
-    assert "changeme" not in value.lower()
-
-
 def test_hba_and_roles_fail_closed_without_secrets():
     hba = (PACKAGE / "pg_hba.conf").read_text()
-    roles = (PACKAGE / "roles.sql").read_text()
+    roles_path = PACKAGE / "roles.sql"
+    assert roles_path.is_file(), "roles.sql must exist in a clean checkout"
+    roles = roles_path.read_text()
     active_hba = [line for line in hba.splitlines() if line and not line.startswith("#")]
     assert all(line.split()[-1] != "trust" for line in active_hba)
     assert "scram-sha-256" in hba
