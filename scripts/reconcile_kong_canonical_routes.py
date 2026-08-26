@@ -1,124 +1,316 @@
 #!/usr/bin/env python3
-"""Fail-closed canonical-host reconciliation for proven public Kong routes."""
+"""Fail-closed reconciliation for the canonical public Kong route surface."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 
 def request(base: str, method: str, path: str, payload=None):
     data = None if payload is None else urlencode(payload, doseq=True).encode()
-    with urlopen(Request(base.rstrip("/") + path, method=method, data=data), timeout=10) as response:
+    url = path if path.startswith(("http://", "https://")) else base.rstrip("/") + path
+    with urlopen(Request(url, method=method, data=data), timeout=10) as response:
         raw = response.read()
-        return json.loads(raw) if raw else None
+        return json.loads(raw) if raw else {}
+
+
+def safe_next(base: str, value: str | None) -> str | None:
+    if not value:
+        return None
+    base_url = urlsplit(base)
+    resolved = urlsplit(urljoin(base.rstrip("/") + "/", value))
+    if (resolved.scheme, resolved.netloc) != (base_url.scheme, base_url.netloc):
+        raise RuntimeError("unsafe Kong pagination URL")
+    return resolved.geturl()
+
+
+def all_rows(base: str, path: str) -> list[dict]:
+    rows: list[dict] = []
+    seen: set[str] = set()
+    next_url: str | None = path
+    while next_url:
+        if next_url in seen:
+            raise RuntimeError("Kong pagination loop detected")
+        seen.add(next_url)
+        page = request(base, "GET", next_url)
+        rows.extend(page.get("data", []))
+        next_url = safe_next(base, page.get("next"))
+    return rows
+
+
+def one(rows: list[dict], label: str) -> dict:
+    if len(rows) != 1:
+        raise RuntimeError(f"expected exactly one {label}")
+    return rows[0]
+
+
+def require_equal(actual, expected, label: str) -> None:
+    if actual != expected:
+        raise RuntimeError(
+            f"{label} drift: expected={json.dumps(expected, sort_keys=True)} "
+            f"actual={json.dumps(actual, sort_keys=True)}"
+        )
+
+
+def require_config_subset(actual: dict, expected: dict, label: str) -> None:
+    for key, value in expected.items():
+        require_equal(actual.get(key), value, f"{label}.{key}")
+
+
+def enabled_plugins(base: str, route_id: str) -> dict[str, dict]:
+    plugins = all_rows(base, f"/routes/{route_id}/plugins?size=1000")
+    grouped: dict[str, list[dict]] = {}
+    for plugin in plugins:
+        if plugin.get("enabled"):
+            grouped.setdefault(plugin["name"], []).append(plugin)
+    duplicates = sorted(name for name, values in grouped.items() if len(values) != 1)
+    if duplicates:
+        raise RuntimeError(f"duplicate enabled route plugins: {duplicates}")
+    return {name: values[0] for name, values in grouped.items()}
+
+
+def security_authority(root: Path, expected: dict) -> None:
+    path = root / expected["securityAuthority"]
+    manifest = json.loads(path.read_text())
+    route_name = expected["name"]
+    if path.name == "kong-callback-routes.json":
+        route = one(
+            [item for item in manifest["routes"] if item["name"] == route_name],
+            f"security authority route {route_name}",
+        )
+        require_equal(route["paths"], expected["paths"], f"{route_name}.authority.paths")
+        require_equal(sorted(route["methods"]), sorted(expected["methods"]), f"{route_name}.authority.methods")
+        require_equal(manifest["host"], expected["hosts"][0], f"{route_name}.authority.host")
+        require_equal(manifest["service"]["host"], expected["serviceHost"], f"{route_name}.authority.serviceHost")
+        require_equal(manifest["service"]["port"], expected["servicePort"], f"{route_name}.authority.servicePort")
+    elif path.name == "kong-campaign-automation-routes.json":
+        route = one(
+            [item for item in manifest["routes"] if item["name"] == route_name],
+            f"security authority route {route_name}",
+        )
+        require_equal([route["path"]], expected["paths"], f"{route_name}.authority.paths")
+        require_equal(expected["methods"], ["POST"], f"{route_name}.authority.methods")
+        require_equal(manifest["host"], expected["hosts"][0], f"{route_name}.authority.host")
+        require_equal(manifest["service"]["host"], expected["serviceHost"], f"{route_name}.authority.serviceHost")
+        require_equal(manifest["service"]["port"], expected["servicePort"], f"{route_name}.authority.servicePort")
+    else:
+        raise RuntimeError(f"unsupported route security authority: {path}")
+
+
+def verify_contract_route(
+    admin: str,
+    root: Path,
+    expected: dict,
+    routes: list[dict],
+    services: dict[str, dict],
+) -> dict:
+    security_authority(root, expected)
+    route = one(
+        [item for item in routes if item.get("name") == expected["name"]],
+        f"contract route {expected['name']}",
+    )
+    for field, manifest_key in (
+        ("hosts", "hosts"),
+        ("paths", "paths"),
+        ("methods", "methods"),
+        ("protocols", "protocols"),
+    ):
+        require_equal(
+            sorted(route.get(field) or []),
+            sorted(expected[manifest_key]),
+            f"{expected['name']}.{field}",
+        )
+    require_equal(route.get("strip_path"), expected["stripPath"], f"{expected['name']}.strip_path")
+    require_equal(route.get("preserve_host"), expected["preserveHost"], f"{expected['name']}.preserve_host")
+    service = services[route["service"]["id"]]
+    require_equal(service.get("host"), expected["serviceHost"], f"{expected['name']}.service.host")
+    require_equal(service.get("port"), expected["servicePort"], f"{expected['name']}.service.port")
+    plugins = enabled_plugins(admin, route["id"])
+    missing = sorted(set(expected["requiredPlugins"]) - set(plugins))
+    if missing:
+        raise RuntimeError(f"contract plugin drift: {expected['name']}: missing={missing}")
+    return {
+        "ROUTE": ";".join(expected["paths"]),
+        "METHOD": ";".join(expected["methods"]),
+        "CALLER": "authenticated Codestra client",
+        "AUTH": "dedicated exact security authority",
+        "EXPECTED_HOST": ";".join(expected["hosts"]),
+        "EXPECTED_UPSTREAM": f"{expected['serviceHost']}:{expected['servicePort']}",
+        "KONG_PRESENT": "PASS",
+        "STATUS": "PASS",
+        "SECURITY_AUTHORITY": expected["securityAuthority"],
+    }
+
+
+def ensure_plugin(
+    admin: str,
+    route_id: str,
+    name: str,
+    expected_config: dict,
+    apply: bool,
+) -> dict:
+    plugins = enabled_plugins(admin, route_id)
+    plugin = plugins.get(name)
+    form = {f"config.{key}": value for key, value in expected_config.items()}
+    if plugin is None:
+        if not apply:
+            raise RuntimeError(f"required route plugin absent: {name}")
+        request(admin, "POST", f"/routes/{route_id}/plugins", {"name": name, **form})
+        plugin = enabled_plugins(admin, route_id)[name]
+    elif apply:
+        request(admin, "PATCH", f"/plugins/{plugin['id']}", {"name": name, **form})
+        plugin = enabled_plugins(admin, route_id)[name]
+    require_config_subset(plugin.get("config", {}), expected_config, f"{name} plugin")
+    return plugin
+
+
+def verify_managed_route(
+    admin: str,
+    manifest: dict,
+    expected: dict,
+    routes: list[dict],
+    services: dict[str, dict],
+    apply: bool,
+) -> dict:
+    route = one(
+        [item for item in routes if item.get("name") == expected["name"]],
+        f"managed route {expected['name']}",
+    )
+    require_equal(sorted(route.get("paths") or []), [expected["path"]], f"{expected['name']}.paths")
+    require_equal(sorted(route.get("methods") or []), sorted(expected["methods"]), f"{expected['name']}.methods")
+    desired_hosts = [manifest["canonicalHost"]]
+    if manifest["legacyHostEnabled"]:
+        desired_hosts.append(manifest["legacyHost"])
+    desired_hosts = sorted(desired_hosts)
+    if apply:
+        request(
+            admin,
+            "PATCH",
+            f"/routes/{route['id']}",
+            {
+                "hosts[]": desired_hosts,
+                "methods[]": expected["methods"],
+                "paths[]": [expected["path"]],
+                "https_redirect_status_code": 426,
+            },
+        )
+        route = request(admin, "GET", f"/routes/{route['id']}")
+    require_equal(sorted(route.get("hosts") or []), desired_hosts, f"{expected['name']}.hosts")
+    require_equal(route.get("https_redirect_status_code"), 426, f"{expected['name']}.https_redirect")
+    plugins = enabled_plugins(admin, route["id"])
+    if expected["auth"] not in plugins:
+        raise RuntimeError(f"required auth plugin absent: {expected['name']}")
+    ensure_plugin(admin, route["id"], "request-size-limiting", {"allowed_payload_size": expected["maxBodyMb"]}, apply)
+    ensure_plugin(
+        admin,
+        route["id"],
+        "rate-limiting",
+        {"minute": expected["ratePerMinute"], "policy": "local", "limit_by": "consumer"},
+        apply,
+    )
+    ensure_plugin(
+        admin,
+        route["id"],
+        "correlation-id",
+        {"header_name": "X-Correlation-ID", "generator": "uuid", "echo_downstream": True},
+        apply,
+    )
+    service = services[route["service"]["id"]]
+    return {
+        "ROUTE": expected["path"],
+        "METHOD": ";".join(expected["methods"]),
+        "CALLER": "production application/provider",
+        "AUTH": expected["auth"],
+        "EXPECTED_HOST": manifest["canonicalHost"],
+        "EXPECTED_UPSTREAM": f"{service.get('host')}:{service.get('port')}",
+        "KONG_PRESENT": "PASS",
+        "STATUS": "PASS",
+    }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--admin-url", required=True)
-    parser.add_argument("--manifest", type=Path, default=Path("config/kong-canonical-middleware-routes.json"))
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path("config/kong-canonical-middleware-routes.json"),
+    )
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
+    root = Path(__file__).resolve().parents[1]
     manifest = json.loads(args.manifest.read_text())
-    all_routes = request(args.admin_url, "GET", "/routes?size=1000")["data"]
+    require_equal(manifest.get("schema"), "codestra.kong.canonical-routes.v2", "manifest.schema")
+    if "allowedExistingRouteNames" in manifest:
+        raise RuntimeError("name-only public route allowlists are forbidden")
+    if not isinstance(manifest.get("legacyHostEnabled"), bool):
+        raise RuntimeError("legacyHostEnabled must be an explicit boolean")
+
+    routes = all_rows(args.admin_url, "/routes?size=1000")
+    service_rows = all_rows(args.admin_url, "/services?size=1000")
+    services = {service["id"]: service for service in service_rows}
     managed_names = {route["name"] for route in manifest["routes"]}
-    contract_names = {route["name"] for route in manifest.get("contractRoutes", [])}
-    allowed_names = managed_names | contract_names | set(manifest.get("allowedExistingRouteNames", []))
-    unexpected_public = sorted(
-        route.get("name") or route["id"] for route in all_routes
-        if manifest["canonicalHost"] in (route.get("hosts") or [])
-        and route.get("name") not in allowed_names
+    contract_names = {route["name"] for route in manifest["contractRoutes"]}
+    approved_names = managed_names | contract_names
+    unverified_names = set(manifest.get("unverifiedExistingRouteNames", []))
+    if approved_names & unverified_names:
+        raise RuntimeError("a route cannot be both approved and unverified")
+
+    public_hosts = {manifest["canonicalHost"], manifest["legacyHost"]}
+    public_routes = [
+        route for route in routes if public_hosts.intersection(route.get("hosts") or [])
+    ]
+    unverified_public = sorted(
+        route.get("name") or route["id"]
+        for route in public_routes
+        if route.get("name") in unverified_names
     )
-    matrix = []
-    services = request(args.admin_url, "GET", "/services?size=1000")["data"]
-    service_by_id = {service["id"]: service for service in services}
-    for expected in manifest.get("contractRoutes", []):
-        matches = [route for route in all_routes if route.get("name") == expected["name"]]
-        if len(matches) != 1:
-            raise RuntimeError(f"expected exactly one contract route: {expected['name']}")
-        route = matches[0]
-        for field in ("hosts", "paths", "methods"):
-            if sorted(route.get(field) or []) != sorted(expected[field]):
-                raise RuntimeError(f"contract {field} drift: {expected['name']}")
-        service = service_by_id[route["service"]["id"]]
-        if service.get("host") != expected["serviceHost"] or service.get("port") != expected["servicePort"]:
-            raise RuntimeError(f"contract upstream drift: {expected['name']}")
-        plugins = request(args.admin_url, "GET", f"/routes/{route['id']}/plugins")["data"]
-        enabled = {plugin["name"] for plugin in plugins if plugin.get("enabled")}
-        missing = set(expected["requiredPlugins"]) - enabled
-        if missing:
-            raise RuntimeError(f"contract plugin drift: {expected['name']}: {sorted(missing)}")
-        matrix.append({
-            "ROUTE": ";".join(expected["paths"]),
-            "METHOD": ";".join(expected["methods"]),
-            "CALLER": "authenticated Codestra client",
-            "AUTH": "jwt",
-            "EXPECTED_HOST": ";".join(expected["hosts"]),
-            "EXPECTED_UPSTREAM": f"{expected['serviceHost']}:{expected['servicePort']}",
-            "KONG_PRESENT": "PASS",
-            "STATUS": "PASS",
-        })
-    for expected in manifest["routes"]:
-        matches = request(args.admin_url, "GET", "/routes?" + urlencode({"name": expected["name"]}))["data"]
-        if len(matches) != 1:
-            raise RuntimeError(f"expected exactly one existing route: {expected['name']}")
-        route = matches[0]
-        if sorted(route.get("paths") or []) != [expected["path"]] or sorted(route.get("methods") or []) != sorted(expected["methods"]):
-            raise RuntimeError(f"source/live method or path drift: {expected['name']}")
-        original_hosts = route.get("hosts") or []
-        hosts = sorted(set(original_hosts + [manifest["canonicalHost"], manifest["legacyHost"]]))
-        plugins = request(args.admin_url, "GET", f"/routes/{route['id']}/plugins")["data"]
-        enabled_plugins = {plugin["name"]: plugin for plugin in plugins if plugin.get("enabled")}
-        enabled = set(enabled_plugins)
-        if expected["auth"] not in enabled:
-            raise RuntimeError(f"required auth plugin absent: {expected['name']}")
-        if args.apply:
-            request(args.admin_url, "PATCH", f"/routes/{route['id']}", {
-                "hosts[]": hosts,
-                "methods[]": expected["methods"],
-                "paths[]": [expected["path"]],
-                "https_redirect_status_code": 426,
-            })
-            if "request-size-limiting" in enabled:
-                request(args.admin_url, "PATCH", f"/plugins/{enabled_plugins['request-size-limiting']['id']}", {
-                    "config.allowed_payload_size": expected["maxBodyMb"],
-                })
-            else:
-                request(args.admin_url, "POST", f"/routes/{route['id']}/plugins", {
-                    "name": "request-size-limiting", "config.allowed_payload_size": expected["maxBodyMb"],
-                })
-            if "rate-limiting" in enabled:
-                request(args.admin_url, "PATCH", f"/plugins/{enabled_plugins['rate-limiting']['id']}", {
-                    "config.minute": expected["ratePerMinute"], "config.policy": "local",
-                    "config.limit_by": "consumer",
-                })
-            else:
-                request(args.admin_url, "POST", f"/routes/{route['id']}/plugins", {
-                    "name": "rate-limiting", "config.minute": expected["ratePerMinute"],
-                    "config.policy": "local", "config.limit_by": "consumer",
-                })
-            verified = {plugin["name"]: plugin for plugin in request(args.admin_url, "GET", f"/routes/{route['id']}/plugins")["data"] if plugin.get("enabled")}
-            size = verified.get("request-size-limiting", {}).get("config", {}).get("allowed_payload_size")
-            rate = verified.get("rate-limiting", {}).get("config", {})
-            if size != expected["maxBodyMb"] or rate.get("minute") != expected["ratePerMinute"] or rate.get("policy") != "local" or rate.get("limit_by") != "consumer":
-                raise RuntimeError(f"limiter readback mismatch: {expected['name']}")
-        matrix.append({
-            "ROUTE": expected["path"], "METHOD": ";".join(expected["methods"]),
-            "CALLER": "production application/provider", "AUTH": expected["auth"],
-            "EXPECTED_HOST": manifest["canonicalHost"], "EXPECTED_UPSTREAM": route["service"]["id"],
-            "KONG_PRESENT": "PASS", "STATUS": "PASS" if args.apply or manifest["canonicalHost"] in original_hosts else "DRIFT",
-        })
-    args.evidence.write_text(json.dumps(matrix, indent=2, sort_keys=True) + "\n")
-    print("REQUIRED_PUBLIC_ROUTES_PRESENT=" + ("PASS" if args.apply else "DRY_RUN"))
-    print(f"UNNECESSARY_PUBLIC_ROUTES={len(unexpected_public)}")
+    unexpected_public = sorted(
+        route.get("name") or route["id"]
+        for route in public_routes
+        if route.get("name") not in approved_names | unverified_names
+    )
+    if unverified_public:
+        print("UNVERIFIED_PUBLIC_ROUTE_NAMES=" + ";".join(unverified_public))
+        raise RuntimeError("name-only public routes require exact source contracts")
     if unexpected_public:
         print("UNEXPECTED_PUBLIC_ROUTE_NAMES=" + ";".join(unexpected_public))
-        return 2
+        raise RuntimeError("unexpected public Kong routes")
+
+    matrix: list[dict] = []
+    for expected in manifest["contractRoutes"]:
+        matrix.append(verify_contract_route(args.admin_url, root, expected, routes, services))
+    for expected in manifest["routes"]:
+        matrix.append(
+            verify_managed_route(
+                args.admin_url,
+                manifest,
+                expected,
+                routes,
+                services,
+                args.apply,
+            )
+        )
+
+    routes_after = all_rows(args.admin_url, "/routes?size=1000") if args.apply else routes
+    legacy_routes = sorted(
+        route.get("name") or route["id"]
+        for route in routes_after
+        if manifest["legacyHost"] in (route.get("hosts") or [])
+    )
+    if not manifest["legacyHostEnabled"] and legacy_routes:
+        print("LEGACY_PUBLIC_ROUTE_NAMES=" + ";".join(legacy_routes))
+        raise RuntimeError("legacy public host remains enabled")
+
+    args.evidence.write_text(json.dumps(matrix, indent=2, sort_keys=True) + "\n")
+    print("REQUIRED_PUBLIC_ROUTES_PRESENT=PASS")
+    print("UNNECESSARY_PUBLIC_ROUTES=0")
+    print("LEGACY_PUBLIC_ROUTES=0" if not legacy_routes else f"LEGACY_PUBLIC_ROUTES={len(legacy_routes)}")
     return 0
 
 
