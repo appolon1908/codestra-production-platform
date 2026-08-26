@@ -65,7 +65,7 @@ test -s "$work/provisioning.sqlite3"
   sha256sum -c PLAINTEXT-SHA256SUMS
   tar -czf "$archive" .
 )
-gpg --homedir "$gpg_home" --batch --yes --trust-model always \
+gpg --homedir "$gpg_home" --no-random-seed-file --batch --yes --trust-model always \
   --recipient "$gpg_recipient" --encrypt \
   --output "$final/databases-${stamp}.tar.gz.gpg" "$archive"
 (
@@ -76,8 +76,16 @@ gpg --homedir "$gpg_home" --batch --yes --trust-model always \
 
 offhost=PENDING
 if [[ -n "$remote" ]]; then
+  remote_host=${remote%%:*}
+  remote_root=${remote#*:}
+  test "$remote_host" != "$remote" -a -n "$remote_root"
+  ssh -o BatchMode=yes "$remote_host" "install -d -m 0700 '$remote_root/$stamp'"
   scp -q -o BatchMode=yes -o IdentitiesOnly=yes \
-    "$final/databases-${stamp}.tar.gz.gpg" "$final/SHA256SUMS" "$remote/$stamp/"
+    "$final/databases-${stamp}.tar.gz.gpg" "$final/SHA256SUMS" "$remote_host:$remote_root/$stamp/"
+  ssh -o BatchMode=yes "$remote_host" \
+    "cd '$remote_root/$stamp' && sha256sum -c SHA256SUMS >/dev/null && sha256sum 'databases-${stamp}.tar.gz.gpg'" \
+    > "$final/REMOTE-SHA256SUMS"
+  diff -u <(awk '{print $1}' "$final/SHA256SUMS") <(awk '{print $1}' "$final/REMOTE-SHA256SUMS")
   offhost=PASS
 fi
 cat > "$final/STATUS.txt" <<EOF

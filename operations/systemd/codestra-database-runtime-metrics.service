@@ -1,0 +1,14 @@
+[Unit]
+Description=Export canonical Codestra database runtime metrics
+After=docker.service
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/codestra/operations/monitoring/exporters/database_runtime_metrics.sh
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/node_exporter/textfile_collector
+NoNewPrivileges=true
+

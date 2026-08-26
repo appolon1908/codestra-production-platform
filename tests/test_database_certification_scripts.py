@@ -6,6 +6,7 @@ BACKUP = (ROOT / "operations/database-certification/backup-all-databases.sh").re
 RESTORE = (ROOT / "operations/database-certification/restore-all-databases.sh").read_text()
 METRICS = (ROOT / "operations/monitoring/exporters/database_certification_metrics.sh").read_text()
 RULES = (ROOT / "operations/monitoring/rules/database-certification.rules.yml").read_text()
+RUNTIME = (ROOT / "operations/monitoring/exporters/database_runtime_metrics.sh").read_text()
 
 
 def test_backup_covers_every_discovered_database_authority():
@@ -37,6 +38,9 @@ def test_restore_is_isolated_and_cleans_up():
 def test_offhost_is_fail_closed_not_falsely_certified():
     assert "offhost=PENDING" in BACKUP
     assert "OFFHOST_COPY=${offhost}" in BACKUP
+    assert "sha256sum -c SHA256SUMS" in BACKUP
+    assert "REMOTE-SHA256SUMS" in BACKUP
+    assert "diff -u" in BACKUP
 
 
 def test_database_certification_is_scheduled_and_monitored():
@@ -45,3 +49,6 @@ def test_database_certification_is_scheduled_and_monitored():
     assert "CodestraDatabaseRestoreOverdue" in RULES
     assert "CodestraWebsocketReplicationDown" in RULES
     assert "CodestraWebsocketStandbyUnexpectedlyWritable" in RULES
+    assert "CodestraCanonicalDatabaseDown" in RULES
+    assert "codestra_database_connections" in RUNTIME
+    assert "codestra_websocket_db_standby_in_recovery" in RUNTIME

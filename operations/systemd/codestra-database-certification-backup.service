@@ -7,10 +7,10 @@ Wants=network-online.target
 Type=oneshot
 User=root
 Group=root
+EnvironmentFile=-/etc/codestra/backup/database-certification.env
 ExecStart=/opt/codestra/operations/database-certification/backup-all-databases.sh
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=read-only
 ReadWritePaths=/opt/codestra/backups /var/lib/docker/volumes/codestra-provisioning-service_state/_data
 NoNewPrivileges=true
-

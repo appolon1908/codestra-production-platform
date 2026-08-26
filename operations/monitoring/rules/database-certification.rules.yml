@@ -1,6 +1,26 @@
 groups:
   - name: database-certification
     rules:
+      - alert: CodestraCanonicalDatabaseDown
+        expr: codestra_database_up == 0
+        for: 2m
+        labels: {severity: critical, environment: production, service: database}
+        annotations: {summary: A canonical production database is unavailable}
+      - alert: CodestraCanonicalDatabaseConnectionsWarning
+        expr: codestra_database_connections / clamp_min(codestra_database_max_connections, 1) >= 0.70
+        for: 15m
+        labels: {severity: warning, environment: production, service: database}
+        annotations: {summary: A production database exceeds 70 percent connection utilization}
+      - alert: CodestraCanonicalDatabaseConnectionsCritical
+        expr: codestra_database_connections / clamp_min(codestra_database_max_connections, 1) >= 0.85
+        for: 5m
+        labels: {severity: critical, environment: production, service: database}
+        annotations: {summary: A production database exceeds 85 percent connection utilization}
+      - alert: CodestraCanonicalDatabaseLockWait
+        expr: codestra_database_waiting_locks > 0
+        for: 5m
+        labels: {severity: warning, environment: production, service: database}
+        annotations: {summary: A production database has waiting locks}
       - alert: CodestraDatabaseBackupStale
         expr: (time() - codestra_database_backup_last_success_timestamp_seconds > 86400) or absent(codestra_database_backup_last_success_timestamp_seconds)
         for: 15m
