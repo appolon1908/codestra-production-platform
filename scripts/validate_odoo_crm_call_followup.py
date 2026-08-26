@@ -37,6 +37,8 @@ REQUIRED_FILES = {
     "README.md",
 }
 
+DISPOSABLE_TEST = ROOT / "scripts" / "test_odoo_crm_call_followup_disposable.sh"
+
 
 def fail(errors: list[str], message: str) -> None:
     errors.append(message)
@@ -48,6 +50,9 @@ def main() -> int:
     for relative in sorted(REQUIRED_FILES):
         if not (MODULE / relative).is_file():
             fail(errors, f"missing required file: {relative}")
+
+    if not DISPOSABLE_TEST.is_file():
+        fail(errors, "missing disposable Odoo 19 install/upgrade/uninstall gate")
 
     if MANIFEST.is_file():
         try:
@@ -83,6 +88,16 @@ def main() -> int:
             ET.parse(xml_file)
         except ET.ParseError as exc:
             fail(errors, f"XML parse error in {xml_file.relative_to(ROOT)}: {exc}")
+
+    view_source = (MODULE / "views" / "call_followup_views.xml").read_text(
+        encoding="utf-8"
+    )
+    if 'default_period="today"' in view_source:
+        fail(errors, "Odoo 19 does not accept today as a date-filter default_period")
+    if '<group expand="' in view_source:
+        fail(errors, "Odoo 19 search-view groups do not accept the expand attribute")
+    if "('ended_at', '&gt;=', 'today')" not in view_source or "('ended_at', '&lt;', 'today +1d')" not in view_source:
+        fail(errors, "Calls Today must use the Odoo 19 relative-date domain")
 
     python_and_js = "\n".join(
         path.read_text(encoding="utf-8")

@@ -16,8 +16,8 @@
                 <filter name="scheduled" string="Scheduled" domain="[('schedule_kind', '!=', 'none'), ('callback_at', '!=', False)]"/>
                 <filter name="completed" string="Completed" domain="[('state', '=', 'completed')]"/>
                 <separator/>
-                <filter name="today" string="Calls Today" date="ended_at" default_period="today"/>
-                <group expand="0" string="Group By">
+                <filter name="today" string="Calls Today" domain="[('ended_at', '&gt;=', 'today'), ('ended_at', '&lt;', 'today +1d')]"/>
+                <group>
                     <filter name="group_agent" string="Agent" context="{'group_by': 'agent_id'}"/>
                     <filter name="group_outcome" string="Outcome" context="{'group_by': 'disposition'}"/>
                     <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>

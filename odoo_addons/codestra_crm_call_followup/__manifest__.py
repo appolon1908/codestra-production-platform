@@ -4,7 +4,6 @@
     "summary": "Modern post-call CRM workflow, callback calendar, and appointment reminders",
     "description": """
 Codestra CRM Call Follow-up
-===========================
 
 Provides an idempotent post-call popup for agents, structured outcomes and notes,
 callback/appointment scheduling, a 30-minute in-app preparation reminder, and a

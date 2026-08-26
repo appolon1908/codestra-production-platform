@@ -7,7 +7,7 @@ class CrmLead(models.Model):
     codestra_call_followup_ids = fields.One2many(
         "codestra.crm.call.followup",
         "lead_id",
-        string="Call Follow-ups",
+        string="Call History",
     )
     codestra_call_followup_count = fields.Integer(
         string="Call Follow-ups",
