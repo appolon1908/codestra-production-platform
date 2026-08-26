@@ -37,7 +37,7 @@ def main() -> int:
         fail("duplicate alert names")
 
     matrix = list(csv.DictReader((MON / "RULE-COVERAGE-MATRIX.tsv").open(), delimiter="\t"))
-    if len(matrix) != 66 or len(critical) != 66:
+    if not matrix or len(matrix) != len(critical):
         fail(f"coverage mismatch matrix={len(matrix)} critical={len(critical)}")
     critical_names = {rule["alert"] for rule in critical}
     if {row["alertname"] for row in matrix} != critical_names:

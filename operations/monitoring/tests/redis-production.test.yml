@@ -1,0 +1,70 @@
+rule_files:
+  - ../rules/redis-production.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: RedisExporterMissing
+        exp_alerts:
+          - exp_labels:
+              job: redis
+              severity: critical
+              service: redis
+            exp_annotations:
+              summary: Redis exporter target is absent
+      - eval_time: 3m
+        alertname: RedisDown
+        exp_alerts:
+          - exp_labels:
+              job: redis
+              severity: critical
+              service: redis
+            exp_annotations:
+              summary: Redis is unavailable to the restricted exporter
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="redis",instance="redis-exporter:9121"}'
+        values: '1x10'
+      - series: 'redis_up{job="redis",instance="redis-exporter:9121"}'
+        values: '1x10'
+      - series: 'redis_exporter_last_scrape_error{job="redis",instance="redis-exporter:9121",err=""}'
+        values: '0x10'
+      - series: 'redis_blocked_clients{job="redis",instance="redis-exporter:9121"}'
+        values: '0x10'
+      - series: 'redis_memory_used_bytes{job="redis",instance="redis-exporter:9121"}'
+        values: '1000000x10'
+      - series: 'redis_memory_max_bytes{job="redis",instance="redis-exporter:9121"}'
+        values: '805306368x10'
+      - series: 'redis_aof_enabled{job="redis",instance="redis-exporter:9121"}'
+        values: '1x10'
+      - series: 'redis_aof_last_write_status{job="redis",instance="redis-exporter:9121"}'
+        values: '1x10'
+      - series: 'redis_aof_last_bgrewrite_status{job="redis",instance="redis-exporter:9121"}'
+        values: '1x10'
+      - series: 'redis_rdb_last_bgsave_status{job="redis",instance="redis-exporter:9121"}'
+        values: '1x10'
+      - series: 'redis_rdb_changes_since_last_save{job="redis",instance="redis-exporter:9121"}'
+        values: '0x10'
+      - series: 'redis_connected_slaves{job="redis",instance="redis-exporter:9121"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RedisExporterMissing
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: RedisDown
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: RedisAOFFailure
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: RedisRDBFailure
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: RedisUnexpectedReplicaState
+        exp_alerts: []

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "current_image": "odoo@sha256:f54272f31d5f77e4146b887efb3761c98480317daf687e4b4b5e76ed8bcc08c5",
+  "current_oci_revision": null,
+  "approved_next_image": "ghcr.io/codestra-srl/codestra-odoo@sha256:1ee19d98ddbdfbc3e733f371e16648a04e21a388460e08541660871ae2f25f45",
+  "approved_next_source": "https://github.com/Codestra-SRL/codestra-odoo-addons",
+  "approved_next_revision": "33f41a61add664061732b88c8e180bba5ed8bd86",
+  "approved_next_release_run": 32929335670,
+  "approved_next_sbom": "PASS",
+  "approved_next_provenance": "PASS",
+  "approved_next_signature": "PASS",
+  "deployment_state": "BLOCKED_PENDING_SHARED_CLUSTER_PITR_AND_CONTROLLED_MAINTENANCE",
+  "public_ports": 0,
+  "database": "codestra_odoo",
+  "filestore_volume": "codestra_odoo_data"
+}

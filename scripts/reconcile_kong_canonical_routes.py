@@ -27,13 +27,42 @@ def main() -> int:
     manifest = json.loads(args.manifest.read_text())
     all_routes = request(args.admin_url, "GET", "/routes?size=1000")["data"]
     managed_names = {route["name"] for route in manifest["routes"]}
-    allowed_names = managed_names | set(manifest.get("allowedExistingRouteNames", []))
+    contract_names = {route["name"] for route in manifest.get("contractRoutes", [])}
+    allowed_names = managed_names | contract_names | set(manifest.get("allowedExistingRouteNames", []))
     unexpected_public = sorted(
         route.get("name") or route["id"] for route in all_routes
         if manifest["canonicalHost"] in (route.get("hosts") or [])
         and route.get("name") not in allowed_names
     )
     matrix = []
+    services = request(args.admin_url, "GET", "/services?size=1000")["data"]
+    service_by_id = {service["id"]: service for service in services}
+    for expected in manifest.get("contractRoutes", []):
+        matches = [route for route in all_routes if route.get("name") == expected["name"]]
+        if len(matches) != 1:
+            raise RuntimeError(f"expected exactly one contract route: {expected['name']}")
+        route = matches[0]
+        for field in ("hosts", "paths", "methods"):
+            if sorted(route.get(field) or []) != sorted(expected[field]):
+                raise RuntimeError(f"contract {field} drift: {expected['name']}")
+        service = service_by_id[route["service"]["id"]]
+        if service.get("host") != expected["serviceHost"] or service.get("port") != expected["servicePort"]:
+            raise RuntimeError(f"contract upstream drift: {expected['name']}")
+        plugins = request(args.admin_url, "GET", f"/routes/{route['id']}/plugins")["data"]
+        enabled = {plugin["name"] for plugin in plugins if plugin.get("enabled")}
+        missing = set(expected["requiredPlugins"]) - enabled
+        if missing:
+            raise RuntimeError(f"contract plugin drift: {expected['name']}: {sorted(missing)}")
+        matrix.append({
+            "ROUTE": ";".join(expected["paths"]),
+            "METHOD": ";".join(expected["methods"]),
+            "CALLER": "authenticated Codestra client",
+            "AUTH": "jwt",
+            "EXPECTED_HOST": ";".join(expected["hosts"]),
+            "EXPECTED_UPSTREAM": f"{expected['serviceHost']}:{expected['servicePort']}",
+            "KONG_PRESENT": "PASS",
+            "STATUS": "PASS",
+        })
     for expected in manifest["routes"]:
         matches = request(args.admin_url, "GET", "/routes?" + urlencode({"name": expected["name"]}))["data"]
         if len(matches) != 1:
