@@ -1,0 +1,16 @@
+[Unit]
+Description=Codestra all-database encrypted certification backup
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/codestra/operations/database-certification/backup-all-databases.sh
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/codestra/backups /var/lib/docker/volumes/codestra-provisioning-service_state/_data
+NoNewPrivileges=true
+

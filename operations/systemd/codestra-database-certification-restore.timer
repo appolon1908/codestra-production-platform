@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly Codestra isolated all-database restore rehearsal
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00 UTC
+RandomizedDelaySec=900
+Persistent=true
+Unit=codestra-database-certification-restore.service
+
+[Install]
+WantedBy=timers.target
+

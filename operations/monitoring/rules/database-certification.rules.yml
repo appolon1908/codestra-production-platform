@@ -1,0 +1,39 @@
+groups:
+  - name: database-certification
+    rules:
+      - alert: CodestraDatabaseBackupStale
+        expr: (time() - codestra_database_backup_last_success_timestamp_seconds > 86400) or absent(codestra_database_backup_last_success_timestamp_seconds)
+        for: 15m
+        labels: {severity: critical, environment: production, service: database-backup}
+        annotations:
+          summary: Database certification backup is older than 24 hours
+      - alert: CodestraDatabaseOffhostBackupMissing
+        expr: (codestra_database_backup_offhost_ok != 1) or absent(codestra_database_backup_offhost_ok)
+        for: 15m
+        labels: {severity: critical, environment: production, service: database-backup}
+        annotations:
+          summary: Database backup is not verified in an independent failure domain
+      - alert: CodestraDatabaseRestoreOverdue
+        expr: (time() - codestra_database_restore_last_success_timestamp_seconds > 604800) or absent(codestra_database_restore_last_success_timestamp_seconds)
+        for: 1h
+        labels: {severity: critical, environment: production, service: database-restore}
+        annotations:
+          summary: Isolated database restore rehearsal is overdue
+      - alert: CodestraWebsocketReplicationDown
+        expr: (codestra_websocket_db_replication_streaming != 1) or absent(codestra_websocket_db_replication_streaming)
+        for: 2m
+        labels: {severity: critical, environment: production, service: websocket-database}
+        annotations:
+          summary: WebSocket PostgreSQL streaming replication is unavailable
+      - alert: CodestraWebsocketStandbyUnexpectedlyWritable
+        expr: (codestra_websocket_db_standby_in_recovery != 1) or absent(codestra_websocket_db_standby_in_recovery)
+        for: 1m
+        labels: {severity: critical, environment: production, service: websocket-database}
+        annotations:
+          summary: WebSocket standby database is unexpectedly writable
+      - alert: CodestraWebsocketReplicationLag
+        expr: codestra_websocket_db_replication_lag_bytes > 16777216
+        for: 5m
+        labels: {severity: warning, environment: production, service: websocket-database}
+        annotations:
+          summary: WebSocket database replication lag exceeds 16 MiB
