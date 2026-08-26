@@ -1,6 +1,10 @@
 groups:
   - name: shared-postgresql-recovery
     rules:
+      - alert: SharedPostgresUnavailable
+        expr: codestra_shared_postgres_up == 0
+        for: 1m
+        labels: {severity: critical}
       - alert: SharedPostgresWALArchiveFailure
         expr: increase(codestra_shared_postgres_wal_archive_failures_total[10m]) > 0
         for: 1m
@@ -25,7 +29,27 @@ groups:
         expr: codestra_shared_postgres_disk_used_percent >= 90
         for: 5m
         labels: {severity: critical}
+      - alert: SharedPostgresWALSpoolDiskCritical
+        expr: codestra_shared_postgres_wal_spool_disk_critical == 1
+        for: 1m
+        labels: {severity: critical}
       - alert: SharedPostgresWALSpoolCleanupFailure
         expr: increase(codestra_shared_postgres_wal_cleanup_failures_total[15m]) > 0
         for: 1m
+        labels: {severity: critical}
+      - alert: SharedPostgresResticMaintenanceFailure
+        expr: increase(codestra_shared_postgres_restic_maintenance_failures_total[15m]) > 0
+        for: 1m
+        labels: {severity: critical}
+      - alert: SharedPostgresResticMaintenanceStale
+        expr: codestra_shared_postgres_restic_maintenance_last_success_timestamp_seconds == 0 or time() - codestra_shared_postgres_restic_maintenance_last_success_timestamp_seconds > 777600
+        for: 1h
+        labels: {severity: critical}
+      - alert: SharedPostgresResticCapacityWarning
+        expr: codestra_shared_postgres_restic_repository_capacity_bytes > 0 and codestra_shared_postgres_restic_repository_used_bytes / codestra_shared_postgres_restic_repository_capacity_bytes >= 0.80
+        for: 30m
+        labels: {severity: warning}
+      - alert: SharedPostgresResticCapacityCritical
+        expr: codestra_shared_postgres_restic_repository_capacity_bytes > 0 and codestra_shared_postgres_restic_repository_used_bytes / codestra_shared_postgres_restic_repository_capacity_bytes >= 0.90
+        for: 10m
         labels: {severity: critical}
