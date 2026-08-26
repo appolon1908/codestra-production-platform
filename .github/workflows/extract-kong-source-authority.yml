@@ -42,7 +42,7 @@ jobs:
               block_start = value.index(
                   '    kong_path = root / "deploy/kong/control-plane.yml"'
               )
-              block_end = value.index("\n\n    for compose_path in", block_start)
+              block_end = value.index("\n    caddy_path =", block_start)
               new = (
                   '    kong_lock_path = root / "config/kong-source.lock.json"\n'
                   '    if kong_lock_path.exists():\n'
