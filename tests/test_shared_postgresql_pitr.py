@@ -70,9 +70,13 @@ def test_source_has_valid_pitr_and_base_backup_contracts():
 
 def test_offload_service_uses_protected_non_home_ssh_authority():
     unit = (PACKAGE / "codestra-shared-postgres-wal-offload.service").read_text()
+    ssh_config = (PACKAGE / "codestra-shared-backup.ssh.conf").read_text()
     assert "ProtectHome=true" in unit
     assert "Environment=HOME=/etc/codestra/secrets/shared-postgresql/ssh-home" in unit
     assert "ReadOnlyPaths=/etc/codestra/secrets/shared-postgresql" in unit
+    assert "Host codestra-shared-backup" in ssh_config
+    assert "IdentityFile /etc/codestra/secrets/shared-postgresql/ssh-home/.ssh/id_ed25519" in ssh_config
+    assert "StrictHostKeyChecking yes" in ssh_config and "BatchMode yes" in ssh_config
 
 
 def test_nonroot_stage_and_portable_checksum_relocation(tmp_path):
