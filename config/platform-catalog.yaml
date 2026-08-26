@@ -120,7 +120,7 @@ features:
     lifecycle: source_ready
     runtime_default: disabled
     side_effects: internal_writes
-    deployment_candidate: true
+    deployment_candidate: false
     dependencies: [kong, keycloak, n8n, shared-postgresql]
     contracts: [config/kong-campaign-automation-routes.json]
   - feature_id: middleware-webhook-ingress
@@ -282,6 +282,13 @@ known_gaps:
     required_before_server_push: true
     affected_features: [public-api-edge, middleware-callback-api, middleware-campaign-automation]
     remediation: Finish PR 130 and retain one exact route registry referencing dedicated security profiles.
+  - gap_id: campaign-lifecycle-entrypoints
+    severity: critical
+    status: open
+    owner: middleware-platform
+    required_before_server_push: true
+    affected_features: [middleware-campaign-automation]
+    remediation: Implement campaign-design preview, owner approval, disabled provisioning, durable outbox execution, status/readback, and separately gated activation before deployment candidacy.
   - gap_id: control-plane-openapi-coverage
     severity: high
     status: open
