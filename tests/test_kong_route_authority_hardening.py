@@ -209,6 +209,11 @@ def test_read_only_route_exporter_redacts_secret_values_without_exporting_creden
             "X-Safe-Header: safe-value",
         ],
         "upstream_url": "https://user:do-not-export@example.invalid/path",
+        "token_url": "https://hooks.example.invalid/path?token=do-not-export-query",
+        "api_key_url": (
+            "https://hooks.example.invalid/path?safe=value&api_key=do-not-export-query"
+        ),
+        "safe_url": "https://hooks.example.invalid/path?offset=next",
     }
     sanitized = module.sanitize(value)
     assert sanitized["client_secret"]["redacted"] is True
@@ -219,6 +224,9 @@ def test_read_only_route_exporter_redacts_secret_values_without_exporting_creden
     assert sanitized["headers"][1]["redacted"] is True
     assert sanitized["headers"][2] == "X-Safe-Header: safe-value"
     assert sanitized["upstream_url"]["redacted"] is True
+    assert sanitized["token_url"]["redacted"] is True
+    assert sanitized["api_key_url"]["redacted"] is True
+    assert sanitized["safe_url"] == "https://hooks.example.invalid/path?offset=next"
     rendered = json.dumps(sanitized)
     assert "do-not-export" not in rendered
     assert "method=\"GET\"" in source

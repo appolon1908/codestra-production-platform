@@ -14,7 +14,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -124,7 +124,11 @@ def sensitive_scalar(value: object, key: str) -> bool:
         if header_name in SENSITIVE_HEADER_NAMES:
             return True
     parsed = urlsplit(stripped)
-    return bool(parsed.scheme and (parsed.username or parsed.password))
+    if not parsed.scheme:
+        return False
+    if parsed.username or parsed.password:
+        return True
+    return any(sensitive_key(name) for name, _ in parse_qsl(parsed.query, keep_blank_values=True))
 
 
 def sanitize(value, key: str = ""):
