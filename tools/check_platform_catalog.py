@@ -112,6 +112,15 @@ def _local_reference(reference: str) -> bool:
     return not reference.startswith(EXTERNAL_PREFIXES)
 
 
+def _repository_evidence_file(root: Path, reference: str) -> bool:
+    path = Path(reference)
+    if not _local_reference(reference) or path.is_absolute() or ".." in path.parts:
+        return False
+    repository_root = root.resolve()
+    candidate = (repository_root / path).resolve()
+    return candidate.is_relative_to(repository_root) and candidate.is_file()
+
+
 def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
     findings: list[Finding] = []
     if catalog.get("version") != 1:
@@ -237,7 +246,7 @@ def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
                 ))
             else:
                 for reference in resolution["evidence"]:
-                    if not _local_reference(reference) or not (root / reference).is_file():
+                    if not _repository_evidence_file(root, reference):
                         findings.append(Finding(
                             "critical",
                             "gap-resolution-evidence",

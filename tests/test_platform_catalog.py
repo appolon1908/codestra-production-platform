@@ -93,11 +93,17 @@ def test_resolved_gap_requires_structured_existing_evidence() -> None:
     assert gap["gap_id"] not in {item.location for item in blockers}
 
 
-def test_resolved_gap_rejects_missing_or_external_evidence() -> None:
+def test_resolved_gap_rejects_non_repository_evidence() -> None:
     value = catalog()
     gap = next(item for item in value["known_gaps"] if item["required_before_server_push"])
     gap["status"] = "resolved"
-    for reference in ("docs/missing-resolution-evidence.md", "external:unverified"):
+    for reference in (
+        "docs/missing-resolution-evidence.md",
+        "external:unverified",
+        "/etc/passwd",
+        "../outside-repository",
+        "docs/../AGENTS.md",
+    ):
         gap["resolution"] = {"summary": "Claimed resolution.", "evidence": [reference]}
         rules = {item.rule for item in validate_catalog(ROOT, value)}
         assert "gap-resolution-evidence" in rules
