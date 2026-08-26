@@ -104,8 +104,22 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 docker exec "$gateway" kong health >/dev/null
+evidence_dir="/var/lib/codestra-kong-database/evidence/pitr/$suffix"
+mkdir -p "$evidence_dir"
+chmod 0700 "$evidence_dir"
+cat >"$evidence_dir/result.txt" <<EOF
+WAL_ARCHIVE_REHEARSAL=PASS
+PITR_REHEARSAL=PASS
+BACKUP_TIMESTAMP=$stamp
+ARCHIVED_SEGMENTS=$archived
+RECOVERED_MARKER_ROWS=1
+KONG_SCHEMA_BOOT=PASS
+PUBLIC_PORTS=0
+EOF
+printf '%s\n' "$suffix" >/var/lib/codestra-kong-database/LAST_PITR_SUCCESS
 echo 'WAL_ARCHIVE_REHEARSAL=PASS'
 echo 'PITR_REHEARSAL=PASS'
 echo "ARCHIVED_SEGMENTS=$archived"
 echo 'RECOVERED_MARKER_ROWS=1'
 echo 'KONG_SCHEMA_BOOT=PASS'
+echo "PITR_EVIDENCE=$evidence_dir/result.txt"
