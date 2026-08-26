@@ -29,4 +29,4 @@ ENV PATH=/opt/venv/bin:$PATH \
     RELEASE_ID=${VCS_REF}
 USER 10001:10001
 HEALTHCHECK --interval=20s --timeout=3s --retries=5 CMD ["/opt/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8096/health')"]
-CMD ["/opt/venv/bin/python", "-m", "control_plane_service.server"]
+CMD ["/opt/venv/bin/python", "-m", "control_plane_service.application"]
