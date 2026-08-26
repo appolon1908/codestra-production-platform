@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
+import sys
 from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, urlopen
@@ -79,7 +81,7 @@ def enabled_plugins(base: str, route_id: str) -> dict[str, dict]:
     return {name: values[0] for name, values in grouped.items()}
 
 
-def security_authority(root: Path, expected: dict) -> None:
+def security_authority(root: Path, expected: dict) -> tuple[Path, dict, dict]:
     path = root / expected["securityAuthority"]
     manifest = json.loads(path.read_text())
     route_name = expected["name"]
@@ -102,6 +104,72 @@ def security_authority(root: Path, expected: dict) -> None:
     require_equal(manifest["host"], expected["hosts"][0], f"{route_name}.authority.host")
     require_equal(manifest["service"]["host"], expected["serviceHost"], f"{route_name}.authority.serviceHost")
     require_equal(manifest["service"]["port"], expected["servicePort"], f"{route_name}.authority.servicePort")
+    return path, manifest, route
+
+
+def security_module(root: Path, module_name: str):
+    scripts = str(root / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    return importlib.import_module(module_name)
+
+
+def verify_security_plugins(
+    root: Path,
+    authority_path: Path,
+    manifest: dict,
+    authority_route: dict,
+    plugins: dict[str, dict],
+    expected: dict,
+) -> None:
+    required = set(expected["requiredPlugins"])
+    require_equal(set(plugins), required, f"{expected['name']}.route_plugins")
+    if authority_path.name == "kong-callback-routes.json":
+        callback = security_module(root, "reconcile_kong_callback_routes")
+        callback.verify_plugins(plugins, authority_route, manifest)
+        return
+    if authority_path.name != "kong-campaign-automation-routes.json":
+        raise RuntimeError(f"unsupported route security authority: {authority_path}")
+
+    campaign = security_module(root, "reconcile_kong_campaign_automation")
+    campaign.require_plugin(
+        plugins["jwt"],
+        {
+            "key_claim_name": "azp",
+            "claims_to_verify": ["exp"],
+            "header_names": ["authorization"],
+            "run_on_preflight": True,
+        },
+        f"{expected['name']}.jwt",
+    )
+    campaign.require_plugin(
+        plugins["post-function"],
+        {"access": [campaign.claim_guard(manifest, authority_route["scope"])]},
+        f"{expected['name']}.claim_guard",
+    )
+    campaign.require_plugin(
+        plugins["request-size-limiting"],
+        {"allowed_payload_size": authority_route["max_body_mb"]},
+        f"{expected['name']}.body_limit",
+    )
+    campaign.require_plugin(
+        plugins["rate-limiting"],
+        {
+            "minute": authority_route["rate_per_minute"],
+            "policy": "local",
+            "limit_by": "consumer",
+        },
+        f"{expected['name']}.rate_limit",
+    )
+    campaign.require_plugin(
+        plugins["correlation-id"],
+        {
+            "header_name": "X-Correlation-ID",
+            "generator": "uuid",
+            "echo_downstream": True,
+        },
+        f"{expected['name']}.correlation_id",
+    )
 
 
 def verify_contract_route(
@@ -111,7 +179,7 @@ def verify_contract_route(
     routes: list[dict],
     services: dict[str, dict],
 ) -> dict:
-    security_authority(root, expected)
+    authority_path, authority_manifest, authority_route = security_authority(root, expected)
     route = one(
         [item for item in routes if item.get("name") == expected["name"]],
         f"contract route {expected['name']}",
@@ -131,6 +199,14 @@ def verify_contract_route(
     missing = sorted(set(expected["requiredPlugins"]) - set(plugins))
     if missing:
         raise RuntimeError(f"contract plugin drift: {expected['name']}: missing={missing}")
+    verify_security_plugins(
+        root,
+        authority_path,
+        authority_manifest,
+        authority_route,
+        plugins,
+        expected,
+    )
     return {
         "ROUTE": ";".join(expected["paths"]),
         "METHOD": ";".join(expected["methods"]),
