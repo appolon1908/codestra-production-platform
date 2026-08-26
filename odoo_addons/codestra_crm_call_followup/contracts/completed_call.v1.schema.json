@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codestra.co/contracts/odoo/crm-call-followup/completed_call.v1.schema.json",
+  "title": "Codestra Odoo CRM completed-call registration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "event_id",
+    "company_id",
+    "ended_at"
+  ],
+  "properties": {
+    "api_version": {
+      "const": "1.0"
+    },
+    "payload_version": {
+      "const": "1.0",
+      "deprecated": true
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "call_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "default": "middleware"
+    },
+    "company_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "agent_user_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "agent_login": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 320
+    },
+    "lead_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "partner_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "customer_name": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "customer_email": {
+      "type": "string",
+      "maxLength": 320
+    },
+    "started_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})?$"
+    },
+    "ended_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})?$"
+    },
+    "duration_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 86400
+    },
+    "call_direction": {
+      "enum": [
+        "inbound",
+        "outbound",
+        "unknown"
+      ]
+    },
+    "direction": {
+      "enum": [
+        "inbound",
+        "outbound",
+        "unknown",
+        "incoming",
+        "outgoing",
+        "in",
+        "out"
+      ],
+      "deprecated": true
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "agent_user_id"
+      ],
+      "not": {
+        "required": [
+          "agent_login"
+        ]
+      }
+    },
+    {
+      "required": [
+        "agent_login"
+      ],
+      "not": {
+        "required": [
+          "agent_user_id"
+        ]
+      }
+    }
+  ]
+}
