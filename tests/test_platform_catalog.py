@@ -49,6 +49,19 @@ def test_deployment_gate_reports_known_middleware_blockers() -> None:
     assert "shared-postgresql-runtime-pitr" in rules
 
 
+def test_accepted_risk_cannot_bypass_required_server_push_gap() -> None:
+    value = catalog()
+    gap = next(
+        item
+        for item in value["known_gaps"]
+        if item["required_before_server_push"]
+        and item["affected_features"]
+    )
+    gap["status"] = "accepted_risk"
+    blockers = deployment_blockers(value, {gap["affected_features"][0]})
+    assert gap["gap_id"] in {item.location for item in blockers}
+
+
 def test_duplicate_public_route_is_rejected() -> None:
     value = catalog()
     value["apis"].append(copy.deepcopy(value["apis"][0]))
