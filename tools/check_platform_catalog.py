@@ -234,7 +234,10 @@ def deployment_blockers(catalog: dict[str, Any], requested_features: set[str]) -
     for gap in catalog.get("known_gaps", []):
         if not gap.get("required_before_server_push"):
             continue
-        if gap.get("status") in {"resolved", "accepted_risk"}:
+        # A risk classification is not deployment authorization. Required
+        # server-push gaps remain blocking until source-controlled resolution
+        # evidence is present and the gap is explicitly resolved.
+        if gap.get("status") == "resolved" and gap.get("resolution"):
             continue
         affected = set(gap.get("affected_features", []))
         if requested_features.intersection(affected):
