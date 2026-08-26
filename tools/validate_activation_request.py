@@ -9,10 +9,14 @@ import re
 from pathlib import Path
 
 CHANGE_ID = "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01"
+SUPERSEDED_DIGESTS = {
+    "sha256:336c9a31648a0481737fa4bcc3eafb02a22e4b4fc66ba7b8ec1759c087e05e02",
+}
 ACTIONS = {
     "preflight", "backup", "validate-backup", "restore-test", "stage",
     "canary", "status", "rollback", "collect-evidence",
     "stage-control-plane", "validate-control-plane", "rollback-control-plane",
+    "activate-control-plane", "enable-production-web-traffic", "disable-production-web-traffic",
 }
 REQUIRED_FALSE_FLAGS = {
     "CALLBACK_DISPATCH",
@@ -36,6 +40,8 @@ def validate(args: argparse.Namespace) -> None:
         raise ValueError("protected SHA is malformed")
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", args.digest):
         raise ValueError("image digest is malformed")
+    if args.digest in SUPERSEDED_DIGESTS:
+        raise ValueError("middleware digest is superseded for new activation")
     if args.change_id != CHANGE_ID:
         raise ValueError("change identifier mismatch")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.maintenance_date):

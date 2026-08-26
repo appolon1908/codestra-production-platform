@@ -13,13 +13,39 @@ services:
       CRM_KONG_SHARED_SECRET_SHA256_FILE: /run/secrets/crm_gateway_secret_verifier
       KONG_GATEWAY_SHARED_SECRET_SHA256_FILE: /run/secrets/kong_gateway_secret_verifier
       CONTROL_PLANE_TRUSTED_PROXY_CIDRS: ${CONTROL_PLANE_TRUSTED_PROXY_CIDRS:-172.19.0.18/32}
+      IMAGE_DIGEST: ${CONTROL_PLANE_IMAGE_DIGEST:-unknown}
+      SYSTEM_DATABASE_NAMES: odoo,keycloak,middleware,control_plane,n8n,kong
+      SYSTEM_KEYCLOAK_HEALTH_URL: http://codestra-identity-keycloak-1:9000/health/ready
+      SYSTEM_KONG_HEALTH_URL: http://codestra-kong-kong-gateway-1:8001/status
+      SYSTEM_MIDDLEWARE_HEALTH_URL: http://codestra-middleware-integration-api-1:8095/readyz
+      SYSTEM_ODOO_HEALTH_URL: http://codestra-odoo-1:8069/web/health
+      SYSTEM_N8N_HEALTH_URL: http://codestra-n8n-1:5678/healthz/readiness
+      POSTAL_INBOUND_ENABLED: "false"
+      COD_WEB_OUT_CANARY_RECIPIENT_FILE: /run/secrets/cod_web_out_canary_recipient
+      KLYROW_ALLOWED_CAMPAIGN: COD-WEB-OUT
+      KLYROW_URL: https://10.40.0.4:18000/v1/email/send
+      KLYROW_OIDC_TOKEN_URL: https://auth.codestra.co/realms/codestra/protocol/openid-connect/token
+      KLYROW_OIDC_CLIENT_ID: cod-web-out-email-production
+      KLYROW_OIDC_CLIENT_SECRET_FILE: /run/secrets/klyrow_oidc_client_secret
+      KLYROW_MTLS_CA_FILE: /run/secrets/klyrow_mtls_ca
+      KLYROW_MTLS_CERT_FILE: /run/secrets/klyrow_mtls_cert
+      KLYROW_MTLS_KEY_FILE: /run/secrets/klyrow_mtls_key
     ports: ["127.0.0.1:8096:8096"]
-    secrets: [control_plane_database_url, crm_gateway_secret_verifier, kong_gateway_secret_verifier]
+    secrets:
+      - control_plane_database_url
+      - crm_gateway_secret_verifier
+      - kong_gateway_secret_verifier
+    volumes:
+      - /etc/codestra/runtime-secrets/control-plane/cod-web-out-canary-recipient:/run/secrets/cod_web_out_canary_recipient:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-oidc-client-secret:/run/secrets/klyrow_oidc_client_secret:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-ca:/run/secrets/klyrow_mtls_ca:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-cert:/run/secrets/klyrow_mtls_cert:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-key:/run/secrets/klyrow_mtls_key:ro
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    networks: [edge, backend]
+    networks: [edge, backend, identity]
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8096/health')"]
       interval: 20s
@@ -34,14 +60,38 @@ services:
     env_file: ${CONTROL_PLANE_ENV_FILE:-/etc/codestra/secrets/control-plane.env}
     environment:
       CONTROL_PLANE_DATABASE_URL_FILE: /run/secrets/control_plane_database_url
-    secrets: [control_plane_database_url]
+      COD_WEB_OUT_CANARY_RECIPIENT_FILE: /run/secrets/cod_web_out_canary_recipient
+      KLYROW_ALLOWED_CAMPAIGN: COD-WEB-OUT
+      KLYROW_URL: https://10.40.0.4:18000/v1/email/send
+      KLYROW_OIDC_TOKEN_URL: https://auth.codestra.co/realms/codestra/protocol/openid-connect/token
+      KLYROW_OIDC_CLIENT_ID: cod-web-out-email-production
+      KLYROW_OIDC_CLIENT_SECRET_FILE: /run/secrets/klyrow_oidc_client_secret
+      KLYROW_MTLS_CA_FILE: /run/secrets/klyrow_mtls_ca
+      KLYROW_MTLS_CERT_FILE: /run/secrets/klyrow_mtls_cert
+      KLYROW_MTLS_KEY_FILE: /run/secrets/klyrow_mtls_key
+    secrets:
+      - control_plane_database_url
+    volumes:
+      - /etc/codestra/runtime-secrets/control-plane/cod-web-out-canary-recipient:/run/secrets/cod_web_out_canary_recipient:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-oidc-client-secret:/run/secrets/klyrow_oidc_client_secret:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-ca:/run/secrets/klyrow_mtls_ca:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-cert:/run/secrets/klyrow_mtls_cert:ro
+      - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-key:/run/secrets/klyrow_mtls_key:ro
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     networks: [edge, backend]
     healthcheck:
-      disable: true
+      test:
+        - CMD
+        - python
+        - -c
+        - "import pathlib,time; p=pathlib.Path('/tmp/control-plane-worker-heartbeat'); assert p.is_file() and time.time()-float(p.read_text(encoding='ascii')) < 10"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
 volumes:
   control_plane_data:
 secrets:
@@ -57,4 +107,7 @@ networks:
     external: true
   backend:
     name: codestra_backend
+    external: true
+  identity:
+    name: codestra-identity_identity_service
     external: true

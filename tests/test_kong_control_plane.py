@@ -31,6 +31,9 @@ def test_trusted_proxy_headers_also_require_gateway_secret(monkeypatch,tmp_path)
     assert handler.auth_operator({"tenant_admin"}) is None and denied[0][0]==403
     handler.headers["X-Codestra-Gateway-Secret"]=secret
     assert handler.auth_operator({"tenant_admin"}) == ("n8n","tenant_admin","COD")
+    assert handler.auth_operator({"platform_admin"}) is None
+    handler.headers["X-Authenticated-Role"]="platform_admin"
+    assert handler.auth_operator({"platform_admin"}) == ("n8n","platform_admin","COD")
 
 def test_canonical_message_routes_and_scopes_are_explicit():
     kong=(ROOT/"deploy/kong/control-plane.yml").read_text()

@@ -7,12 +7,12 @@ import argparse
 import hashlib
 import json
 from datetime import datetime, timezone
-
-UTC = timezone.utc
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from reconcile_kong_campaign_automation import active_rsa_key, rsa_public_key_pem
 
 
 def request(base, method, path, payload=None):
@@ -88,7 +88,10 @@ def select_managed_route(routes, expected, host, apply):
         if candidate.get("hosts") == [host]
         and set(candidate.get("paths") or []) == expected_paths
         and set(candidate.get("methods") or []) == expected_methods
-        and candidate.get("protocols") == ["https"]
+        # Adopt both the desired route and the HTTPS-only shape emitted by the
+        # previous reconciler so --apply can migrate it without creating an
+        # overlapping callback route.
+        and candidate.get("protocols") in (["http"], ["https"])
         and candidate.get("strip_path") == expected["strip_path"]
         and not (candidate.get("headers") or {})
         and not (candidate.get("snis") or [])
@@ -119,7 +122,9 @@ def verify_route(route, expected, service_id, host):
     require_equal(route.get("hosts"), [host], expected["name"] + ".hosts")
     require_equal(route.get("paths"), expected["paths"], expected["name"] + ".paths")
     require_equal(sorted(route.get("methods") or []), sorted(expected["methods"]), expected["name"] + ".methods")
-    require_equal(route.get("protocols"), ["https"], expected["name"] + ".protocols")
+    # TLS is terminated by the host Caddy listener.  Kong's private proxy
+    # listener is deliberately HTTP-only and is not published externally.
+    require_equal(route.get("protocols"), ["http"], expected["name"] + ".protocols")
     require_equal(route.get("strip_path"), expected["strip_path"], expected["name"] + ".strip_path")
     require_equal(route.get("preserve_host"), True, expected["name"] + ".preserve_host")
     require_equal(route.get("https_redirect_status_code"), 426, expected["name"] + ".https_redirect")
@@ -138,24 +143,53 @@ def route_matches(route, expected, service_id, host):
         return False
 
 
-def verify_oidc(plugin, expected, spec):
-    if not plugin or not plugin.get("enabled"):
-        raise RuntimeError("callback route lacks enabled OIDC: %s" % expected["name"])
-    oidc = plugin["config"]
-    require_equal(oidc.get("issuer"), spec["oidcIssuer"], expected["name"] + ".issuer")
-    require_equal(oidc.get("auth_methods"), ["bearer"], expected["name"] + ".auth_methods")
-    require_equal(oidc.get("audience_required"), [spec["audience"]], expected["name"] + ".audience")
-    require_equal(oidc.get("scopes_required"), [expected["requiredScope"]], expected["name"] + ".scope")
-    require_equal(oidc.get("bearer_token_param_type"), ["header"], expected["name"] + ".bearer_source")
-    require_equal(oidc.get("verify_signature"), True, expected["name"] + ".signature")
-    require_equal(oidc.get("verify_claims"), True, expected["name"] + ".claims")
-    require_equal(oidc.get("ssl_verify"), True, expected["name"] + ".tls")
-    require_equal(oidc.get("anonymous"), None, expected["name"] + ".anonymous")
+def claim_guard(spec, required_scope):
+    values = {key: json.dumps(spec[key]) for key in (
+        "issuer", "audience", "tenant", "campaign", "requiredRole"
+    )}
+    client = json.dumps(spec["consumer"]["custom_id"])
+    scope = json.dumps(required_scope)
+    return (
+        "local h=kong.request.get_header('authorization') or '';"
+        "local t=h:match('[Bb]earer%s+(.+)') or '';"
+        "local p=t:match('^[^.]+%.([^.]+)%.') or '';"
+        "p=p:gsub('-','+'):gsub('_','/');p=p..string.rep('=',(4-#p%4)%4);"
+        "local raw=ngx.decode_base64(p);local c=raw and require('cjson.safe').decode(raw) or {};"
+        "local scopes={};for x in string.gmatch(c.scope or '','%S+') do scopes[x]=true end;"
+        "local campaigns={};for _,x in ipairs(c.campaigns or {}) do campaigns[x]=true end;"
+        "local roles={};for _,x in ipairs((c.realm_access or {}).roles or {}) do roles[x]=true end;"
+        "if c.iss~=" + values["issuer"] + " then return kong.response.exit(401,{error='invalid_issuer'}) end;"
+        "if c.azp~=" + client + " then return kong.response.exit(403,{error='service_identity_denied'}) end;"
+        "local a=c.aud;local aud=a==" + values["audience"] + ";"
+        "if type(a)=='table' then for _,v in ipairs(a) do if v==" + values["audience"] + " then aud=true end end end;"
+        "if not aud then return kong.response.exit(401,{error='invalid_audience'}) end;"
+        "if c.tenant_id~=" + values["tenant"] + " or not campaigns[" + values["campaign"] + "] "
+        "then return kong.response.exit(403,{error='tenant_campaign_denied'}) end;"
+        "if not roles[" + values["requiredRole"] + "] then return kong.response.exit(403,{error='role_denied'}) end;"
+        "if not scopes[" + scope + "] then return kong.response.exit(403,{error='insufficient_scope'}) end"
+    )
 
 
-def oidc_matches(plugin, expected, spec):
+def verify_auth_plugins(by_name, expected, spec):
+    jwt = by_name.get("jwt")
+    guard = by_name.get("pre-function")
+    if not jwt or not jwt.get("enabled") or not guard or not guard.get("enabled"):
+        raise RuntimeError("callback route lacks enabled JWT claim enforcement: %s" % expected["name"])
+    config = jwt["config"]
+    require_equal(config.get("header_names"), ["authorization"], expected["name"] + ".jwt_headers")
+    require_equal(config.get("uri_param_names"), [], expected["name"] + ".jwt_uri_params")
+    require_equal(config.get("cookie_names"), [], expected["name"] + ".jwt_cookies")
+    require_equal(config.get("claims_to_verify"), ["exp"], expected["name"] + ".jwt_expiry")
+    require_equal(config.get("key_claim_name"), "azp", expected["name"] + ".jwt_key_claim")
+    require_equal(config.get("run_on_preflight"), False, expected["name"] + ".jwt_preflight")
+    require_equal(config.get("secret_is_base64"), False, expected["name"] + ".jwt_secret_encoding")
+    require_equal(config.get("anonymous"), None, expected["name"] + ".jwt_anonymous")
+    require_equal(guard["config"].get("access"), [claim_guard(spec, expected["requiredScope"])], expected["name"] + ".claim_guard")
+
+
+def auth_matches(by_name, expected, spec):
     try:
-        verify_oidc(plugin, expected, spec)
+        verify_auth_plugins(by_name, expected, spec)
         return True
     except RuntimeError:
         return False
@@ -174,6 +208,7 @@ def verify_plugins(by_name, expected, spec):
     require_equal(correlation.get("header_name"), "X-Correlation-ID", expected["name"] + ".correlation_header")
     require_equal(correlation.get("generator"), "uuid", expected["name"] + ".correlation_generator")
     require_equal(correlation.get("echo_downstream"), True, expected["name"] + ".correlation_echo")
+    verify_auth_plugins(by_name, expected, spec)
 
 
 def main():
@@ -181,13 +216,42 @@ def main():
     parser.add_argument("--admin-url", required=True)
     parser.add_argument("--manifest", type=Path, default=Path("config/kong-callback-routes.json"))
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--jwks-url", required=True)
+    parser.add_argument("--active-kid")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     manifest_bytes = args.manifest.read_bytes()
     spec = json.loads(manifest_bytes)
-    evidence = {"checked_at": datetime.now(UTC).isoformat(),
+    evidence = {"checked_at": datetime.now(timezone.utc).isoformat(),
                 "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
                 "mode": "apply" if args.apply else "dry-run", "routes": []}
+    signing_key = active_rsa_key(args.jwks_url, args.active_kid)
+    public_key = rsa_public_key_pem(signing_key)
+    consumers = all_rows(args.admin_url, "/consumers?size=1000")
+    consumer = one(
+        [row for row in consumers if row.get("username") == spec["consumer"]["username"]],
+        "callback service consumer",
+    )
+    if args.apply:
+        endpoint = "/consumers/%s" % consumer["id"] if consumer else "/consumers"
+        consumer = request(args.admin_url, "PATCH" if consumer else "POST", endpoint, spec["consumer"])
+    elif not consumer:
+        raise RuntimeError("callback service consumer is absent")
+    require_equal(consumer.get("username"), spec["consumer"]["username"], "consumer.username")
+    require_equal(consumer.get("custom_id"), spec["consumer"]["custom_id"], "consumer.custom_id")
+    credentials = request(args.admin_url, "GET", "/consumers/%s/jwt" % consumer["id"]).get("data", [])
+    credential = one(
+        [row for row in credentials if row.get("key") == spec["consumer"]["custom_id"]],
+        "callback JWT credential",
+    )
+    credential_payload = {"key": spec["consumer"]["custom_id"], "algorithm": "RS256", "rsa_public_key": public_key}
+    if args.apply:
+        endpoint = "/consumers/%s/jwt/%s" % (consumer["id"], credential["id"]) if credential else "/consumers/%s/jwt" % consumer["id"]
+        credential = request(args.admin_url, "PATCH" if credential else "POST", endpoint, credential_payload)
+    elif not credential:
+        raise RuntimeError("callback JWT credential is absent")
+    for field, value in credential_payload.items():
+        require_equal(credential.get(field), value, "credential." + field)
     service_spec = spec["service"]
     service = singleton(args.admin_url, "services", service_spec["name"])
     if args.apply:
@@ -210,13 +274,12 @@ def main():
             (route or {}).get("name") != expected["name"]
             or
             not route_matches(route, expected, service["id"], spec["host"])
-            or not existing_by_name.get("jwt", {}).get("enabled")
-            or not existing_by_name.get("pre-function", {}).get("enabled")
+            or not auth_matches(existing_by_name, expected, spec)
         )
         payload = {
             "name": expected["name"], "service": {"id": service["id"]},
             "hosts": [spec["host"]], "paths": expected["paths"],
-            "methods": expected["methods"], "protocols": ["https"],
+            "methods": expected["methods"], "protocols": ["http"],
             "strip_path": expected["strip_path"], "preserve_host": True,
             "https_redirect_status_code": 426, "headers": {}, "snis": [],
         }
@@ -264,12 +327,20 @@ def main():
             "request-size-limiting": {"config.allowed_payload_size": expected["maxBodyMb"]},
             "rate-limiting": {"config.minute": expected["ratePerMinute"], "config.policy": "local", "config.limit_by": "ip"},
             "correlation-id": {"config.header_name": "X-Correlation-ID", "config.generator": "uuid", "config.echo_downstream": "true"},
+            "jwt": {"header_names": ["authorization"], "uri_param_names": [], "cookie_names": [],
+                    "claims_to_verify": ["exp"], "key_claim_name": "azp", "run_on_preflight": False,
+                    "secret_is_base64": False, "anonymous": None},
+            "pre-function": {"access": [claim_guard(spec, expected["requiredScope"])]},
         }
         for name, config in controls.items():
             current = by_name.get(name)
             if args.apply:
                 endpoint = "/plugins/%s" % current["id"] if current else "/routes/%s/plugins" % route["id"]
-                request(args.admin_url, "PATCH" if current else "POST", endpoint, {"name": name, "enabled": "true", **config})
+                if name in {"jwt", "pre-function"}:
+                    request_json(args.admin_url, "PATCH" if current else "POST", endpoint,
+                                 {"name": name, "enabled": True, "config": config})
+                else:
+                    request(args.admin_url, "PATCH" if current else "POST", endpoint, {"name": name, "enabled": "true", **config})
         plugins = request(args.admin_url, "GET", "/routes/%s/plugins" % route["id"]).get("data", [])
         by_name = {plugin["name"]: plugin for plugin in plugins if plugin.get("enabled")}
         verify_plugins(by_name, expected, spec)
@@ -287,8 +358,8 @@ def main():
             "name": expected["name"], "service_id": service["id"],
             "route_id": route["id"], "hosts": route["hosts"],
             "paths": route["paths"], "methods": sorted(route["methods"]),
-            "authentication": "jwt+scope-pre-function",
-            "required_scope": expected["requiredScope"],
+            "auth": {"consumer_id": consumer["id"], "jwt_key": credential["key"],
+                     "required_scope": expected["requiredScope"], "claim_guard": "PASS"},
         })
     args.evidence.parent.mkdir(parents=True, exist_ok=True)
     args.evidence.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")

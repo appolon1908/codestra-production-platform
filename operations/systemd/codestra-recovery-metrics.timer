@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Codestra backup and restore certification metrics
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=5m
+Persistent=true
+Unit=codestra-recovery-metrics.service
+
+[Install]
+WantedBy=timers.target

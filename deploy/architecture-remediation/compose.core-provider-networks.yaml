@@ -1,0 +1,18 @@
+# Apply only to the core codestra project. Odoo and n8n remain exclusively on
+# their application/database and governed internal-integration networks.
+services:
+  postgres:
+    networks:
+      - backend
+      - provider_email
+  middleware:
+    networks:
+      - backend
+      - edge
+      - provider_email
+      - provider_sms
+      - provider_voice
+networks:
+  provider_email: {name: codestra-provider-email, external: true}
+  provider_sms: {name: codestra-provider-sms, external: true}
+  provider_voice: {name: codestra-provider-voice, external: true}

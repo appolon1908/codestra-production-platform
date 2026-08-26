@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import re
+import hashlib
 import unicodedata
-import uuid
 from email import policy
 from email.parser import BytesParser
 from pathlib import PurePath
@@ -28,7 +28,7 @@ MAX_ATTACHMENTS = 20
 
 
 class ExactRouter(Protocol):
-    def route_inbound(self, recipient: str) -> dict[str, Any]: ...
+    def route_inbound(self, recipient: str, tenant_id: str | None = None) -> dict[str, Any]: ...
 
 
 class MalwareScanner(Protocol):
@@ -70,7 +70,7 @@ class PostalInboundAdapter:
             raise ControlPlaneError("inbound_metadata_required")
         if not raw_message or len(raw_message) > MAX_MESSAGE_BYTES:
             raise ControlPlaneError("inbound_message_size_denied")
-        route = self.router.route_inbound(recipient)
+        route = self.router.route_inbound(recipient, tenant_id)
         if route.get("tenant_id") != tenant_id:
             raise ControlPlaneError("inbound_tenant_mismatch")
         message = BytesParser(policy=policy.default).parsebytes(raw_message)
@@ -102,7 +102,7 @@ class PostalInboundAdapter:
             if result != "CLEAN":
                 self.storage.put_quarantine(
                     tenant_id=tenant_id,
-                    object_key=f"quarantine/{uuid.uuid4()}/{filename}", content=content,
+                    object_key=f"quarantine/{provider_event_id}/{hashlib.sha256(content).hexdigest()}/{filename}", content=content,
                     metadata={"scan_result": result, "provider_event_id": provider_event_id,
                               "correlation_id": correlation_id, "mime_type": mime_type},
                 )
@@ -112,7 +112,7 @@ class PostalInboundAdapter:
         for (filename, mime_type, content), scan_result in zip(pending, scan_results):
             reference = self.storage.put_clean(
                 tenant_id=tenant_id,
-                object_key=f"messages/{uuid.uuid4()}/{filename}", content=content,
+                object_key=f"messages/{provider_event_id}/{hashlib.sha256(content).hexdigest()}/{filename}", content=content,
                 metadata={"scan_result": scan_result, "provider_event_id": provider_event_id,
                           "correlation_id": correlation_id, "mime_type": mime_type},
             )

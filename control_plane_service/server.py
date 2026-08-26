@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hmac
 import hashlib
+import base64
+import binascii
 import json
 import os
 import uuid
 import urllib.parse
+import urllib.request
 import ipaddress
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -27,12 +31,84 @@ from .providers import ProviderError, crawler_action, submit_crawler
 from .crm import ACTIVITY_FIELDS, CREATE_FIELDS, PATCH_FIELDS, CrmService, request_hash
 from .forms import FormService, ORIGINS
 from .mapping_registry import MappingRegistry
+from .postal_runtime import PostalInbox, production_adapter
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
 STORE = Store(DB)
 MAPPINGS = MappingRegistry(DB)
+POSTAL_INBOX = PostalInbox(DB)
 TTL = int(os.getenv("CONTROL_PLANE_HMAC_TTL", "300"))
 MAX_BODY = int(os.getenv("CONTROL_PLANE_MAX_BODY", "524288"))
+
+SYSTEM_COMPONENTS = ("keycloak", "kong", "middleware", "odoo", "n8n")
+
+
+def release_identity() -> dict[str, str]:
+    return {
+        "service": "codestra-control-plane",
+        "source_sha": os.getenv("SOURCE_SHA", "unknown"),
+        "release_id": os.getenv("RELEASE_ID", "unknown"),
+        "image_digest": os.getenv("IMAGE_DIGEST", "unknown"),
+    }
+
+
+def component_status(name: str) -> dict[str, object]:
+    """Probe an explicitly configured private health URL and return no internals."""
+    url = os.getenv(f"SYSTEM_{name.upper()}_HEALTH_URL", "").strip()
+    if not url:
+        return {"status": "unknown", "latency_ms": None}
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(url, timeout=2) as response:  # nosec B310
+            ready = 200 <= response.status < 300
+    except Exception:
+        ready = False
+    return {
+        "status": "ready" if ready else "unavailable",
+        "latency_ms": round((time.monotonic() - started) * 1000),
+    }
+
+
+def system_snapshot() -> dict[str, object]:
+    try:
+        STORE.list_events(None, limit=1)
+        database = {"status": "ready", "latency_ms": None}
+    except Exception:
+        database = {"status": "unavailable", "latency_ms": None}
+    components = {name: component_status(name) for name in SYSTEM_COMPONENTS}
+    components["postgresql"] = database
+    return components
+
+
+def database_snapshot() -> dict[str, str]:
+    """Return logical DB readiness through each application's private probe."""
+    names = [
+        name.strip()
+        for name in os.getenv(
+            "SYSTEM_DATABASE_NAMES",
+            "odoo,keycloak,middleware,control_plane,n8n,kong",
+        ).split(",")
+        if name.strip()
+    ]
+    statuses: dict[str, str] = {}
+    try:
+        STORE.list_events(None, limit=1)
+        statuses["control_plane"] = "ready"
+    except Exception:
+        statuses["control_plane"] = "unavailable"
+    for name in names:
+        if name != "control_plane":
+            statuses[name] = str(component_status(name)["status"])
+    return {name: statuses.get(name, "unknown") for name in names}
+
+
+def production_delivery_enabled() -> bool:
+    return (
+        os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED", "false") == "true"
+        and os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") == "true"
+        and os.getenv("TELNEXA_MODE", "simulator") == "production"
+        and os.getenv("KLYROW_MODE", "test") == "production"
+    )
 
 
 def identity(source: str) -> tuple[str, str]:
@@ -86,9 +162,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-Correlation-ID")
         self.send_header("Access-Control-Max-Age", "600"); self.end_headers()
 
-    def body(self) -> bytes:
+    def body(self, maximum: int = MAX_BODY) -> bytes:
         length = int(self.headers.get("Content-Length", "0"))
-        if length < 1 or length > MAX_BODY:
+        if length < 1 or length > maximum:
             raise ControlPlaneError("invalid_body_size")
         return self.rfile.read(length)
 
@@ -101,12 +177,15 @@ class Handler(BaseHTTPRequestHandler):
             proxy_cidrs=[]; peer=None
         client=self.headers.get("X-Authenticated-Client","")
         tenant=self.headers.get("X-Authenticated-Tenant","")
+        gateway_role=self.headers.get("X-Authenticated-Role", "tenant_admin")
         gateway_verifier=verifier("KONG_GATEWAY_SHARED_SECRET")
         gateway_secret=self.headers.get("X-Codestra-Gateway-Secret","")
         gateway_valid=bool(gateway_verifier) and hmac.compare_digest(
             gateway_verifier,hashlib.sha256(gateway_secret.encode()).hexdigest())
-        if peer is not None and client and tenant and gateway_valid and any(peer in network for network in proxy_cidrs):
-            return (client,"tenant_admin",tenant)
+        if peer is not None and client and gateway_valid and gateway_role in roles and any(peer in network for network in proxy_cidrs):
+            if gateway_role == "tenant_admin" and not tenant:
+                self.send_json(403, {"error": "forbidden"}); return None
+            return (client,gateway_role,tenant or None)
         raw = self.headers.get("Authorization", "").removeprefix("Bearer ")
         value = operator(raw)
         if not value or value[1] not in roles:
@@ -208,20 +287,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path in {"/health", "/v1/health", "/api/v1/health", "/livez"}:
+        if parsed.path in {"/health", "/healthz", "/v1/health", "/api/v1/health", "/livez"}:
             return self.send_json(200, {"status": "alive"})
+        if parsed.path == "/version":
+            return self.send_json(200, release_identity())
         if parsed.path in {"/ready", "/readyz"}:
             try: STORE.list_events(None, limit=1)
             except Exception: return self.send_json(503, {"status": "not_ready"})
-            return self.send_json(200, {"status": "ready", "outbound_safe_mode": os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED", "false") != "true"})
+            return self.send_json(200, {"status": "ready", "outbound_safe_mode": not production_delivery_enabled()})
         if parsed.path == "/v1/ready":
             try: STORE.list_messages("__readiness__", limit=1)
             except Exception: return self.send_json(503, {"status": "not_ready"})
-            production_enabled=os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED","false")=="true" and os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED","false")=="true" and os.getenv("TELNEXA_MODE","simulator")=="production" and os.getenv("KLYROW_MODE","test")=="production"
+            production_enabled=production_delivery_enabled()
             return self.send_json(200, {"status":"ready","providers":{"telnexa":os.getenv("TELNEXA_MODE","simulator"),"klyrow":os.getenv("KLYROW_MODE","test")},"production_delivery_enabled":production_enabled})
         if parsed.path == "/metrics":
             raw = (STORE.metrics()+MAPPINGS.metrics()).encode(); self.send_response(200); self.send_header("Content-Type", "text/plain; version=0.0.4"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); return self.wfile.write(raw)
         if self.crm_get(parsed): return
+        if parsed.path in {"/v1/admin/system/health", "/v1/admin/system/readiness", "/v1/admin/system/databases"}:
+            system_operator = self.auth_operator({"platform_admin"})
+            if not system_operator: return
+            if parsed.path == "/v1/admin/system/databases":
+                databases = database_snapshot()
+                code = 200 if all(value == "ready" for value in databases.values()) else 503
+                return self.send_json(code, {"status": "ready" if code == 200 else "not_ready", "databases": databases})
+            components = system_snapshot()
+            code = 200 if all(value["status"] == "ready" for value in components.values()) else 503
+            return self.send_json(code, {"status": "ready" if code == 200 else "not_ready", "components": components})
         op = self.auth_operator({"platform_admin", "operations", "support", "auditor", "tenant_admin"})
         if not op: return
         query = parse_qs(parsed.query); tenant = op[2] or query.get("tenant_id", [None])[0]
@@ -264,6 +355,40 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/v1/integrations/postal/inbound":
+            if os.getenv("POSTAL_INBOUND_ENABLED", "false") != "true":
+                return self.send_json(503, {"error": "postal_inbound_disabled"})
+            maximum = int(os.getenv("POSTAL_MAX_WEBHOOK_BYTES", "36700160"))
+            try: body = self.body(maximum)
+            except (ControlPlaneError, ValueError): return self.send_json(413, {"error": "invalid_body_size"})
+            api_key, secret = identity("postal")
+            supplied = self.headers.get("Authorization", "").removeprefix("Bearer ")
+            digest = os.getenv("POSTAL_MIDDLEWARE_API_KEY_SHA256", "")
+            if not credential_matches(supplied, api_key, digest):
+                return self.send_json(401, {"error": "invalid_api_key"})
+            event_id = self.headers.get("X-Event-Id", "")
+            timestamp = self.headers.get("X-Timestamp", "")
+            signature = self.headers.get("X-Signature", "")
+            correlation = self.headers.get("X-Correlation-Id", "")
+            try:
+                verify_signature(secret, timestamp, event_id, "postal", body, signature, TTL)
+                value = json.loads(body)
+                if not isinstance(value, dict): raise ControlPlaneError("object_required")
+                tenant = str(value.get("tenant_id") or "")
+                recipient = str(value.get("recipient") or "")
+                if not tenant or not recipient or not correlation:
+                    raise ControlPlaneError("inbound_metadata_required")
+                raw_message = base64.b64decode(str(value.get("raw_message_base64") or ""), validate=True)
+                result, duplicate = POSTAL_INBOX.run(
+                    tenant_id=tenant, provider_event_id=event_id, correlation_id=correlation,
+                    recipient=recipient, raw_message=raw_message, adapter=production_adapter(DB))
+                return self.send_json(200 if duplicate else 201, {**result, "duplicate": duplicate})
+            except (json.JSONDecodeError, binascii.Error, ValueError):
+                return self.send_json(422, {"error": "invalid_inbound_payload", "correlation_id": correlation})
+            except ControlPlaneError as exc:
+                message = str(exc)
+                code = 409 if message in {"inbound_idempotency_conflict", "inbound_processing"} else 503 if message.endswith(("_unavailable", "_not_configured")) else 403 if message in {"invalid_signature", "expired_signature"} else 422
+                return self.send_json(code, {"error": message, "correlation_id": correlation})
         if parsed.path.startswith("/v1/forms/"):
             origin = self.headers.get("Origin", "")
             try:

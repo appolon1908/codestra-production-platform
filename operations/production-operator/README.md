@@ -6,7 +6,9 @@ protected commit.
 
 The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
 `restore-test`, `stage`, `canary`, `status`, `rollback`, `collect-evidence`,
-`stage-control-plane`, `validate-control-plane`, or `rollback-control-plane`.
+`stage-control-plane`, `validate-control-plane`, `activate-control-plane`,
+`rollback-control-plane`, `enable-production-web-traffic`, or
+`disable-production-web-traffic`.
 There is no shell, Docker-group membership, host/path input, arbitrary unit, or
 command argument. `preflight`, `status`, and `collect-evidence` are read-only.
 Every other action except emergency `rollback` requires
@@ -27,9 +29,9 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `a38ee2613e529367b478d62b8601c20843a138355e43831c770a07713a00de94` |
-| `codestra-production-forced-command` | `bc9d2105978a7c5c63e0e455e5b8313b7cdbdc1872220dc5685ca1130c55cd42` |
-| `codestra-production-operator.sudoers` | `bbc8bc30f11d7e32e204433467cb4b320f04b2615f4bcafbee791c94ca44b2de` |
+| `codestra-production-operator` | `0d218c880582ac21286b779309b0e7802a50809a6d14f4c3559e1c74ec03edc9` |
+| `codestra-production-forced-command` | `bcd05989b44a51828f3b3406e1cd7b9d128a587d68e084a36f2ffbbe26803f3b` |
+| `codestra-production-operator.sudoers` | `93e56b18fa54a61192a5a62fe972a74abec37816af8ca977c67cd1bdd75195b9` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
 
@@ -118,8 +120,21 @@ readback make operations fail closed.
 verifies the installed immutable digest, and creates only the fixed standby
 container with network mode `none`, a read-only root filesystem, all
 capabilities dropped, and production-delivery flags disabled. It does not
+start the application API: the container runs a fixed inert Python wait so
+artifact identity and hardened container settings can be certified without
+requiring production authorization or database configuration. A stale stopped
+container for the same digest is recreated only when its configuration differs,
+so staging is idempotent across operator upgrades and delayed approvals. It does not
 replace active middleware or alter proxy routing. Backup validation and restore
 continue to use the fixed, root-owned `codestra-readiness-backup.service` and
 `codestra-readiness-restore.service` units. `validate-backup` invokes only the
 fixed root-owned `/opt/codestra/operations/backup/check-backup-state.sh` and
 rejects unsafe file type, ownership, mode, or nonzero validation status.
+
+`activate-control-plane` requires exact-tuple PASS evidence from both staging
+and validation, a validated encrypted backup, a rollback snapshot, healthy
+control-plane services, and exact middleware runtime digests before atomically
+committing the active-release pointer. Validation failure invokes the bounded
+control-plane rollback. The Web/API traffic actions update only a root-owned
+core traffic pointer after validating the active tuple and core dependencies;
+they always persist email, SMS, voice, and PSTN as disabled.

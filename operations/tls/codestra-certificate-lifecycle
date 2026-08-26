@@ -13,4 +13,4 @@ CERTIFICATE_MANIFEST="$manifest" /usr/local/sbin/check-certificate-expiry || exp
 if ((expiry_status > 0)); then
   logger -p daemon.warning -t certificate-lifecycle -- "certificate expiry threshold active status=$expiry_status; Prometheus metrics published"
 fi
-/usr/local/sbin/check-public-tls api.codestra.agency auth.codestra.agency crm.codestra.agency n8n.codestra.agency n8n-staging.codestra.agency bridge-staging.codestra.agency phone.codestra.agency monitoring.codestra.co
+/usr/local/sbin/check-public-tls api.codestra.co auth.codestra.co crm.codestra.agency n8n.codestra.agency n8n-staging.codestra.agency bridge-staging.codestra.agency phone.codestra.agency monitoring.codestra.co
