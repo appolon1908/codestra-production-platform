@@ -1,0 +1,23 @@
+services:
+  postgres:
+    # Restart-required activation layer. Apply only after the protected change
+    # validator returns SHARED_POSTGRES_CUTOVER_GO=YES.
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=/usr/local/sbin/codestra-shared-postgres-stage-wal.sh %p %f
+      - -c
+      - archive_timeout=60s
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - wal_compression=on
+    volumes:
+      - /usr/local/sbin/codestra-shared-postgres-stage-wal.sh:/usr/local/sbin/codestra-shared-postgres-stage-wal.sh:ro
+      - /var/spool/codestra/postgresql-shared/wal:/var/spool/codestra/postgresql-shared/wal
