@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codestra.co/contracts/odoo/crm-call-followup/completed_call.response.v1.schema.json",
+  "title": "Codestra Odoo CRM completed-call registration response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "status",
+    "created",
+    "replayed",
+    "followup_id",
+    "event_id",
+    "correlation_id",
+    "state",
+    "next_action"
+  ],
+  "properties": {
+    "api_version": {
+      "const": "1.0"
+    },
+    "status": {
+      "const": "accepted"
+    },
+    "created": {
+      "type": "boolean"
+    },
+    "replayed": {
+      "type": "boolean"
+    },
+    "followup_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "correlation_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        {
+          "const": false
+        }
+      ]
+    },
+    "state": {
+      "enum": [
+        "pending",
+        "completed",
+        "cancelled"
+      ]
+    },
+    "next_action": {
+      "enum": [
+        "post_call_popup",
+        "none"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "replayed": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "created": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "created": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "replayed": {
+            "const": false
+          }
+        }
+      }
+    }
+  ]
+}
