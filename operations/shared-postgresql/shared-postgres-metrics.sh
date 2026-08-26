@@ -15,8 +15,14 @@ base_last=/opt/codestra/backups/postgresql-shared/base/LAST_SUCCESS
 pitr_last=/var/lib/codestra-shared-postgresql/LAST_PITR_SUCCESS
 base_epoch=0
 pitr_epoch=0
+cleanup_deleted=0
+cleanup_failed=0
+spool_bytes=0
 [[ -f "$base_last" ]] && base_epoch="$(stat -c %Y "$base_last")"
 [[ -f "$pitr_last" ]] && pitr_epoch="$(stat -c %Y "$pitr_last")"
+[[ -f /var/lib/codestra-shared-postgresql/wal_cleanup_deleted_total ]] && cleanup_deleted="$(</var/lib/codestra-shared-postgresql/wal_cleanup_deleted_total)"
+[[ -f /var/lib/codestra-shared-postgresql/wal_cleanup_failures_total ]] && cleanup_failed="$(</var/lib/codestra-shared-postgresql/wal_cleanup_failures_total)"
+[[ -d /var/spool/codestra/postgresql-shared/wal ]] && spool_bytes="$(du -sb /var/spool/codestra/postgresql-shared/wal | awk '{print $1}')"
 cat >"$temporary" <<EOF
 codestra_shared_postgres_wal_archived_total $archived
 codestra_shared_postgres_wal_archive_failures_total $failed
@@ -24,6 +30,9 @@ codestra_shared_postgres_wal_last_success_timestamp_seconds $last_epoch
 codestra_shared_postgres_base_backup_last_success_timestamp_seconds $base_epoch
 codestra_shared_postgres_pitr_last_success_timestamp_seconds $pitr_epoch
 codestra_shared_postgres_disk_used_percent $disk_used
+codestra_shared_postgres_wal_spool_bytes $spool_bytes
+codestra_shared_postgres_wal_cleanup_deleted_total $cleanup_deleted
+codestra_shared_postgres_wal_cleanup_failures_total $cleanup_failed
 EOF
 chmod 0644 "$temporary"
 mv "$temporary" "$output"

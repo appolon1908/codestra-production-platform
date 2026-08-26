@@ -25,3 +25,7 @@ groups:
         expr: codestra_shared_postgres_disk_used_percent >= 90
         for: 5m
         labels: {severity: critical}
+      - alert: SharedPostgresWALSpoolCleanupFailure
+        expr: increase(codestra_shared_postgres_wal_cleanup_failures_total[15m]) > 0
+        for: 1m
+        labels: {severity: critical}
