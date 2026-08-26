@@ -16,29 +16,36 @@
    the encryption public key and dedicated off-host credential. PostgreSQL
    receives no private decryption key, object-store credential, or unrelated
    secret.
-5. Keep the authoritative backup passfile root-owned and mode `0600`. The
+5. When the restic authority uses SFTP, keep `ProtectHome=true`; use a dedicated
+   protected SSH home below `/etc/codestra/secrets/shared-postgresql/ssh-home`, a
+   pinned `known_hosts`, `IdentitiesOnly=yes`, public-key-only authentication, and
+   the separately reviewed restricted remote command. Never fall back to a user
+   home directory or broad remote shell authority.
+6. Keep the authoritative backup passfile root-owned and mode `0600`. The
    base-backup helper creates a temporary `0600` copy owned by the exact
    PostgreSQL container UID/GID, proves that non-root identity can read it, mounts
    only the temporary copy, and securely removes it after the run.
-6. Install `postgresql-pitr.conf`; capture the previous effective configuration.
-7. Restart PostgreSQL once inside the approved window. Validate every database
+7. Install `postgresql-pitr.conf`; capture the previous effective configuration.
+8. Restart PostgreSQL once inside the approved window. Validate every database
    and application consumer before continuing.
-8. Force a WAL switch, require `archive_mode=on`, zero new archive failures,
+9. Force a WAL switch, require `archive_mode=on`, zero new archive failures,
    encrypted remote WAL, and matching local/remote SHA-256.
-9. Run `create-base-backup.sh`. It uses PostgreSQL 17 plain format with streamed
-   WAL, requires and verifies `backup_manifest`, archives the completed directory,
-   encrypts it, creates relocatable checksums, verifies the remote objects, and
-   securely removes temporary plaintext. Retrieve it and verify it in isolation.
-10. Create pre/post markers around a recorded recovery target, archive actual WAL,
+10. Run `create-base-backup.sh`. It uses PostgreSQL 17 tar format with fetched WAL
+    (`pg_basebackup -Ft -X fetch`), verifies that the fetched WAL is present,
+    requires and verifies `backup_manifest`, encrypts a portable bundle, creates
+    relocatable checksums, resolves the exact paths in the exact restic snapshot,
+    verifies every remote object, and securely removes temporary plaintext.
+    Retrieve it and verify it in isolation.
+11. Create pre/post markers around a recorded recovery target, archive actual WAL,
     recover into isolated PostgreSQL with `restore_command`, and prove the pre
     marker exists while the post marker does not. Verify every shared database and
     application-role connection. Publish only sanitized evidence.
-11. Enable `codestra-shared-postgres-restic-maintenance.timer`. The maintenance
-    service shares the repository lock with WAL and base-backup publication,
-    performs repository checks before and after pruning, applies WAL/base
-    retention, publishes repository usage/capacity metrics, and fails closed on
-    corruption or an invalid configured capacity.
-12. Only after PITR PASS may the middleware release enter write freeze.
+12. Enable `codestra-shared-postgres-restic-maintenance.timer`. WAL publication,
+    base-backup publication, and repository maintenance share one repository lock.
+    The maintenance service performs a repository check before and after pruning,
+    applies WAL/base retention, publishes repository usage/capacity metrics, and
+    fails closed on corruption or an exceeded configured hard capacity.
+13. Only after PITR PASS may the middleware release enter write freeze.
 
 ## Repository maintenance evidence
 
@@ -76,8 +83,8 @@ bash tests/integration/shared_postgresql_pitr_execution.sh
 ```
 
 They expose no public port and use no production data or secrets. The first runs
-the actual production base-backup helper with a root-only authority passfile and a
-non-root PostgreSQL utility container. The second proves PostgreSQL 17 base backup,
-manifest verification, encrypted-artifact relocation, `restore_command` WAL
-recovery, and timestamp PITR with the pre-target marker present and the post-target
-marker absent.
+the actual production tar/fetched-WAL base-backup helper with a root-only authority
+passfile and a non-root PostgreSQL utility container. The second proves PostgreSQL
+17 base backup, manifest verification, encrypted-artifact relocation,
+`restore_command` WAL recovery, and timestamp PITR with the pre-target marker
+present and the post-target marker absent.
