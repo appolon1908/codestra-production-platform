@@ -22,28 +22,39 @@ class CalendarEvent(models.Model):
         if self.env.context.get("skip_codestra_followup_sync"):
             return result
 
-        if {"start", "stop", "active"}.intersection(values):
-            for event in self.filtered("codestra_call_followup_id"):
-                followup_values = {}
-                if "start" in values:
-                    followup_values["callback_at"] = event.start
-                if {"start", "stop"}.intersection(values) and event.start and event.stop:
-                    duration = int(
-                        max(1, round((event.stop - event.start).total_seconds() / 60))
+        watched = {"start", "stop", "active", "location"}
+        if not watched.intersection(values):
+            return result
+
+        for event in self.filtered("codestra_call_followup_id"):
+            followup_values = {}
+            if "start" in values:
+                followup_values["callback_at"] = event.start
+            if {"start", "stop"}.intersection(values) and event.start and event.stop:
+                followup_values["duration_minutes"] = int(
+                    max(
+                        1,
+                        round(
+                            (event.stop - event.start).total_seconds()
+                            / 60
+                        ),
                     )
-                    followup_values["duration_minutes"] = duration
-                if "active" in values and not event.active:
-                    followup_values.update(
-                        {
-                            "schedule_kind": "none",
-                            "callback_at": False,
-                            "calendar_event_id": False,
-                        }
-                    )
-                if followup_values:
-                    event.codestra_call_followup_id._write_from_workflow(
-                        followup_values
-                    )
+                )
+            if "location" in values:
+                followup_values["meeting_location"] = event.location or False
+            if "active" in values and not event.active:
+                followup_values.update(
+                    {
+                        "schedule_kind": "none",
+                        "callback_at": False,
+                        "calendar_event_id": False,
+                        "meeting_location": False,
+                    }
+                )
+            if followup_values:
+                event.codestra_call_followup_id._write_from_workflow(
+                    followup_values
+                )
         return result
 
     @api.ondelete(at_uninstall=False)
@@ -57,5 +68,6 @@ class CalendarEvent(models.Model):
                     "schedule_kind": "none",
                     "callback_at": False,
                     "calendar_event_id": False,
+                    "meeting_location": False,
                 }
             )
