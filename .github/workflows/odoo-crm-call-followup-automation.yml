@@ -1,0 +1,41 @@
+name: Odoo CRM Call Follow-up Automation
+
+on:
+  pull_request:
+    paths:
+      - "odoo_addons/codestra_crm_call_followup_automation/**"
+      - "scripts/validate_odoo_crm_call_followup_automation.py"
+      - ".github/workflows/odoo-crm-call-followup-automation.yml"
+  push:
+    branches:
+      - "feature/odoo19-crm-call-followup-automation-v2"
+    paths:
+      - "odoo_addons/codestra_crm_call_followup_automation/**"
+      - "scripts/validate_odoo_crm_call_followup_automation.py"
+      - ".github/workflows/odoo-crm-call-followup-automation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: odoo-crm-followup-automation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Reject whitespace and conflict markers
+        run: |
+          git diff --check
+          ! git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- . ':!*.md'
+      - name: Compile Python
+        run: python -m compileall -q odoo_addons/codestra_crm_call_followup_automation scripts/validate_odoo_crm_call_followup_automation.py
+      - name: Validate durable automation invariants
+        run: python scripts/validate_odoo_crm_call_followup_automation.py
