@@ -46,12 +46,14 @@ directory. The overlay mounts that dependency read-only and fails closed when th
 release authority is missing; do not accept registry warnings for an installed but
 unavailable module.
 
-The staging database currently contains `call_center_campaign 19.0.3.0.2`. Set
-`ODOO_CALL_CENTER_ADDON_RELEASE` to the independently reviewed, immutable
-`Codestra-SRL/codestra-odoo-addons` release whose manifest matches that installed
-version. The overlay mounts only `call_center_campaign` over the older staging
-checkout. Abort on a database/manifest version mismatch; never copy into or deploy
-the dirty staging checkout.
+The staging database contains an installed call-center module set whose source must
+remain version-aligned during registry validation. Set `ODOO_CALL_CENTER_ADDON_RELEASE`
+to one independently reviewed, immutable `Codestra-SRL/codestra-odoo-addons` release
+whose manifests match all five installed versions: `call_center_core`,
+`call_center_campaign`, `call_center_compliance`, `call_center_lead_validation`, and
+`call_center_orchestration`. The overlay mounts those modules over the older staging
+checkout. Abort on any database/manifest mismatch; never copy into or deploy the
+dirty staging checkout.
 
 Use synthetic `.invalid` identities. Validate queued recipients and retry state in
 Odoo's mail models; do not deliver test messages to real customer addresses.
