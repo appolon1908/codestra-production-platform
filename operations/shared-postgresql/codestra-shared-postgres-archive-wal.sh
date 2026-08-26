@@ -20,7 +20,9 @@ disk_used="$(df -P "$stage" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
 [[ "$disk_used" =~ ^[0-9]+$ ]]
 if (( disk_used >= 90 )); then
   printf 'critical WAL spool filesystem usage: %s%%\n' "$disk_used" >&2
-  exit 1
+  printf '1\n' >"$metrics_state/wal_spool_disk_critical"
+else
+  printf '0\n' >"$metrics_state/wal_spool_disk_critical"
 fi
 
 RESTIC_REPOSITORY="$(<"$authority/restic-repository")"
@@ -35,7 +37,19 @@ for source_path in "$stage"/[0-9A-F]*; do
   [[ -f "$source_path" && ! -L "$source_path" ]]
   [[ "$source_path" == *.offhost ]] && continue
   wal_name="${source_path##*/}"
-  [[ "$wal_name" =~ ^[0-9A-F]{24}(\.[0-9A-F]{8}\.backup)?$ ]]
+  [[ "$wal_name" =~ ^([0-9A-F]{24}(\.[0-9A-F]{8}\.backup)?|[0-9A-F]{8}\.history)$ ]]
+  marker="$source_path.offhost"
+  if [[ -f "$marker" && ! -L "$marker" ]] \
+    && grep -qx 'EVIDENCE_TYPE=WAL_OFFHOST' "$marker" \
+    && grep -qx 'STATUS=PASS' "$marker"; then
+    recorded_artifact="$(awk -F= '$1=="ARTIFACT_PATH"{print substr($0,index($0,"=")+1)}' "$marker")"
+    recorded_hash="$(awk -F= '$1=="ARTIFACT_SHA256"{print $2}' "$marker")"
+    if [[ "$recorded_artifact" == "$spool"/* && -f "$recorded_artifact" && ! -L "$recorded_artifact" \
+      && "$recorded_hash" =~ ^[0-9a-f]{64}$ \
+      && "$(sha256sum "$recorded_artifact" | awk '{print $1}')" == "$recorded_hash" ]]; then
+      continue
+    fi
+  fi
   artifact="$spool/$wal_name.gpg"
   if [[ ! -s "$artifact" ]]; then
     temporary="$(mktemp "$spool/.${wal_name}.XXXXXX")"
@@ -54,7 +68,6 @@ for source_path in "$stage"/[0-9A-F]*; do
   [[ "$remote_hash" == "$expected_hash" ]]
   captured_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   expires_at="$(date -u -d "+${retention_days} days" +%Y-%m-%dT%H:%M:%SZ)"
-  marker="$source_path.offhost"
   marker_tmp="${marker}.partial"
   cat >"$marker_tmp" <<EOF
 CHANGE_ID=$(<"$authority/current-change-id")

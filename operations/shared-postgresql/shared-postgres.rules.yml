@@ -6,7 +6,7 @@ groups:
         for: 1m
         labels: {severity: critical}
       - alert: SharedPostgresWALArchiveStale
-        expr: time() - codestra_shared_postgres_wal_last_success_timestamp_seconds > 600
+        expr: time() - codestra_shared_postgres_wal_offhost_last_success_timestamp_seconds > 600
         for: 5m
         labels: {severity: critical}
       - alert: SharedPostgresBaseBackupStale

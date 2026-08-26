@@ -4,7 +4,7 @@ umask 077
 
 wal_name="${1:?WAL name required}"
 destination="${2:?restore destination required}"
-[[ "$wal_name" =~ ^[0-9A-F]{24}(\.[0-9A-F]{8}\.backup)?$ ]]
+[[ "$wal_name" =~ ^([0-9A-F]{24}(\.[0-9A-F]{8}\.backup)?|[0-9A-F]{8}\.history)$ ]]
 [[ "$destination" != *..* ]]
 artifact="/recovery-archive/$wal_name.gpg"
 checksum="$artifact.sha256"

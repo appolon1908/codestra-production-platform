@@ -4,7 +4,7 @@ umask 077
 
 source_path="${1:?WAL source path required}"
 wal_name="${2:?WAL name required}"
-[[ "$wal_name" =~ ^[0-9A-F]{24}(\.[0-9A-F]{8}\.backup)?$ ]]
+[[ "$wal_name" =~ ^([0-9A-F]{24}(\.[0-9A-F]{8}\.backup)?|[0-9A-F]{8}\.history)$ ]]
 [[ "$source_path" != *..* && -f "$source_path" ]]
 
 # This directory is provisioned root:postgres 0770. PostgreSQL receives no
