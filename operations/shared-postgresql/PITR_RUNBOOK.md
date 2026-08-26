@@ -14,10 +14,11 @@
    and application consumer before continuing.
 6. Force a WAL switch, require `archive_mode=on`, zero new archive failures,
    encrypted remote WAL, and matching local/remote SHA-256.
-7. Run `create-base-backup.sh`. It uses PostgreSQL 17 plain format with streamed
-   WAL, requires and verifies `backup_manifest`, archives the completed directory,
-   encrypts it, creates relocatable checksums, verifies the remote objects, and
-   securely removes temporary plaintext. Retrieve it and verify it in isolation.
+7. Run `create-base-backup.sh`. It uses PostgreSQL 17 tar format with fetched WAL
+   (`pg_basebackup -Ft -X fetch`), requires and verifies `backup_manifest` and the
+   fetched WAL, encrypts the portable bundle, creates relocatable checksums,
+   verifies every remote object, and securely removes temporary plaintext.
+   Retrieve it and verify it in isolation.
 8. Create pre/post markers around a recorded recovery target, archive actual WAL,
    recover into isolated PostgreSQL with `restore_command`, and prove the pre
    marker exists while the post marker does not. Verify every shared database and
