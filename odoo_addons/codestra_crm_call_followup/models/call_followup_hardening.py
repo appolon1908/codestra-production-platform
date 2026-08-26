@@ -69,6 +69,8 @@ class CodestraCrmCallFollowupHardening(models.Model):
         agent,
         lead,
         partner,
+        record_name,
+        customer_email,
         started_at,
         ended_at,
         duration_seconds,
@@ -82,6 +84,10 @@ class CodestraCrmCallFollowupHardening(models.Model):
             "agent_id": agent.id,
             "lead_id": lead.id or None,
             "partner_id": partner.id or None,
+            # These normalized snapshots cover completed calls that do not have
+            # a CRM lead or partner and therefore rely on payload fallbacks.
+            "record_name": str(record_name or "").strip(),
+            "customer_email": str(customer_email or "").strip().lower() or None,
             "started_at": fields.Datetime.to_string(started_at) if started_at else None,
             "ended_at": fields.Datetime.to_string(ended_at),
             "duration_seconds": duration_seconds,
@@ -107,6 +113,8 @@ class CodestraCrmCallFollowupHardening(models.Model):
             agent=self.agent_id,
             lead=self.lead_id,
             partner=self.partner_id,
+            record_name=self.name,
+            customer_email=self.email_to,
             started_at=self.started_at,
             ended_at=self.ended_at,
             duration_seconds=self.duration_seconds or 0,
@@ -166,12 +174,26 @@ class CodestraCrmCallFollowupHardening(models.Model):
         source = str(payload.get("source") or "middleware").strip()
         call_id = str(payload.get("call_id") or "").strip() or False
         correlation_id = str(payload.get("correlation_id") or "").strip() or False
+        customer_name = (
+            partner.display_name
+            or lead.display_name
+            or str(payload.get("customer_name") or _("Customer")).strip()
+        )
+        record_name = _("Post-call follow-up — %s") % customer_name
+        customer_email = (
+            partner.email
+            or lead.email_from
+            or str(payload.get("customer_email") or "").strip()
+            or False
+        )
         fingerprint = self._registration_fingerprint(
             event_id=event_id,
             company=company,
             agent=agent,
             lead=lead,
             partner=partner,
+            record_name=record_name,
+            customer_email=customer_email,
             started_at=started_at,
             ended_at=ended_at,
             duration_seconds=duration_seconds,
@@ -248,6 +270,31 @@ class CodestraCrmCallFollowupHardening(models.Model):
             }
             for record in records
         ]
+
+    @api.model
+    def get_next_post_call_snooze(self):
+        """Return the next snoozed action so the browser can schedule a wake-up."""
+        if not self.env.user.has_group(
+            "codestra_crm_call_followup.group_call_followup_user"
+        ):
+            return False
+        now = fields.Datetime.now()
+        record = self.search(
+            [
+                ("agent_id", "=", self.env.user.id),
+                ("state", "=", "pending"),
+                ("popup_completed_at", "=", False),
+                ("snoozed_until", ">", now),
+            ],
+            order="snoozed_until asc, id asc",
+            limit=1,
+        )
+        if not record:
+            return False
+        return {
+            "followup_id": record.id,
+            "snoozed_until": record.snoozed_until.isoformat() + "Z",
+        }
 
     def action_cancel_followup(self):
         for record in self:
