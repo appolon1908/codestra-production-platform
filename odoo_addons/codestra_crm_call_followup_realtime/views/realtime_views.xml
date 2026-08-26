@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_call_followup_form_realtime" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.form.realtime</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//page[@string='Integration']/group" position="inside">
+                <separator string="Realtime delivery"/>
+                <field name="rt_claim_state" readonly="1"/>
+                <field name="rt_claimed_by_id" readonly="1"/>
+                <field name="rt_claimed_at" readonly="1"/>
+                <field name="rt_claim_expires_at" readonly="1"/>
+                <field name="rt_popup_opened_at" readonly="1"/>
+                <field name="rt_last_heartbeat_at" readonly="1"/>
+                <field name="rt_delivery_attempts" readonly="1"/>
+                <field name="rt_last_delivery_at" readonly="1"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_call_followup_list_realtime" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.list.realtime</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_list"/>
+        <field name="arch" type="xml">
+            <xpath expr="//list" position="attributes">
+                <attribute name="decoration-danger">rt_pending_overdue</attribute>
+            </xpath>
+            <xpath expr="//list/field[@name='state']" position="after">
+                <field name="rt_pending_overdue" column_invisible="True"/>
+                <field name="rt_claim_state" optional="show" widget="badge"
+                       decoration-info="rt_claim_state == 'claimed'"
+                       decoration-warning="rt_claim_state == 'expired'"
+                       decoration-success="rt_claim_state == 'closed'"/>
+                <field name="rt_claimed_by_id" optional="hide"/>
+                <field name="rt_claim_expires_at" optional="hide"/>
+                <field name="rt_delivery_attempts" optional="hide"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_call_followup_search_realtime" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.search.realtime</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_search"/>
+        <field name="arch" type="xml">
+            <xpath expr="//filter[@name='pending']" position="after">
+                <filter name="delivery_claimed" string="Claimed in Browser"
+                        domain="[('state', '=', 'pending'), ('rt_claim_token', '!=', False), ('rt_claim_expires_at', '&gt;', context_today())]"/>
+                <filter name="delivery_expired" string="Expired Claim"
+                        domain="[('state', '=', 'pending'), ('rt_claim_token', '!=', False), ('rt_claim_expires_at', '&lt;=', context_today())]"/>
+            </xpath>
+            <xpath expr="//group" position="inside">
+                <filter name="group_delivery" string="Popup Delivery" context="{'group_by': 'rt_claim_state'}"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="action_call_followup_realtime_queue" model="ir.actions.act_window">
+        <field name="name">Post-call Delivery Queue</field>
+        <field name="res_model">codestra.crm.call.followup</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('state', '=', 'pending'), ('popup_completed_at', '=', False)]</field>
+        <field name="search_view_id" ref="codestra_crm_call_followup.view_codestra_call_followup_search"/>
+        <field name="context">{'search_default_group_agent': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No post-call actions are waiting for delivery.</p>
+            <p>Supervisors can review pending, claimed, expired, and repeatedly delivered actions without taking ownership away from the assigned agent.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_call_followup_realtime_queue"
+              name="Post-call Delivery Queue"
+              parent="crm.crm_menu_sales"
+              action="action_call_followup_realtime_queue"
+              sequence="16"
+              groups="codestra_crm_call_followup.group_call_followup_manager"/>
+</odoo>
