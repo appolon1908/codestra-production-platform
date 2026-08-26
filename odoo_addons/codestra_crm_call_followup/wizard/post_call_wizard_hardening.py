@@ -114,7 +114,12 @@ class CodestraCrmPostCallWizardHardening(models.TransientModel):
 
     def _calendar_event_values(self):
         values = super()._calendar_event_values()
-        values["codestra_schedule_kind"] = self.schedule_kind
+        values.update(
+            {
+                "active": True,
+                "codestra_schedule_kind": self.schedule_kind,
+            }
+        )
         return values
 
     def action_complete(self):
