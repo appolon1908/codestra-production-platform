@@ -11,17 +11,55 @@
                 <field name="partner_id"/>
                 <field name="lead_id"/>
                 <field name="agent_id"/>
-                <filter name="my_followups" string="My Follow-ups" domain="[('agent_id', '=', uid)]"/>
-                <filter name="pending" string="Needs Follow-up" domain="[('state', '=', 'pending')]"/>
-                <filter name="scheduled" string="Scheduled" domain="[('schedule_kind', '!=', 'none'), ('callback_at', '!=', False)]"/>
-                <filter name="completed" string="Completed" domain="[('state', '=', 'completed')]"/>
+                <field name="email_to"/>
+
+                <filter name="my_followups"
+                        string="My Follow-ups"
+                        domain="[('agent_id', '=', uid)]"/>
+                <filter name="pending"
+                        string="Needs Follow-up"
+                        domain="[('state', '=', 'pending')]"/>
+                <filter name="urgent"
+                        string="Urgent"
+                        domain="[('priority', '=', 'urgent')]"/>
+                <filter name="snoozed"
+                        string="Snoozed"
+                        domain="[('state', '=', 'pending'), ('snoozed_until', '!=', False)]"/>
+                <filter name="scheduled"
+                        string="Scheduled"
+                        domain="[('schedule_kind', '!=', 'none'), ('callback_at', '!=', False)]"/>
+                <filter name="compliance_review"
+                        string="Compliance Review"
+                        domain="[('compliance_review_required', '=', True)]"/>
+                <filter name="completed"
+                        string="Completed"
+                        domain="[('state', '=', 'completed')]"/>
                 <separator/>
-                <filter name="today" string="Calls Today" domain="[('ended_at', '&gt;=', 'today'), ('ended_at', '&lt;', 'today +1d')]"/>
+                <filter name="today"
+                        string="Calls Today"
+                        domain="[('ended_at', '&gt;=', 'today'), ('ended_at', '&lt;', 'today +1d')]"/>
                 <group>
-                    <filter name="group_agent" string="Agent" context="{'group_by': 'agent_id'}"/>
-                    <filter name="group_outcome" string="Outcome" context="{'group_by': 'disposition'}"/>
-                    <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>
-                    <filter name="group_call_day" string="Call Date" context="{'group_by': 'ended_at:day'}"/>
+                    <filter name="group_agent"
+                            string="Agent"
+                            context="{'group_by': 'agent_id'}"/>
+                    <filter name="group_priority"
+                            string="Priority"
+                            context="{'group_by': 'priority'}"/>
+                    <filter name="group_outcome"
+                            string="Outcome"
+                            context="{'group_by': 'disposition'}"/>
+                    <filter name="group_sentiment"
+                            string="Sentiment"
+                            context="{'group_by': 'customer_sentiment'}"/>
+                    <filter name="group_channel"
+                            string="Contact Method"
+                            context="{'group_by': 'contact_channel'}"/>
+                    <filter name="group_state"
+                            string="Status"
+                            context="{'group_by': 'state'}"/>
+                    <filter name="group_call_day"
+                            string="Call Date"
+                            context="{'group_by': 'ended_at:day'}"/>
                 </group>
             </search>
         </field>
@@ -31,23 +69,47 @@
         <field name="name">codestra.crm.call.followup.list</field>
         <field name="model">codestra.crm.call.followup</field>
         <field name="arch" type="xml">
-            <list string="Call Follow-ups" create="0" delete="0" default_order="ended_at desc"
-                  decoration-warning="state == 'pending'"
-                  decoration-success="state == 'completed'"
+            <list string="Call Follow-ups"
+                  create="0"
+                  delete="0"
+                  default_order="priority_rank desc, ended_at desc"
+                  decoration-danger="compliance_review_required or priority == 'urgent'"
+                  decoration-warning="state == 'pending' and priority != 'urgent'"
+                  decoration-success="state == 'completed' and not compliance_review_required"
                   decoration-muted="state == 'cancelled'">
+                <field name="priority_rank" column_invisible="True"/>
+                <field name="calendar_event_id" column_invisible="True"/>
                 <field name="ended_at"/>
+                <field name="priority" widget="badge" optional="show"
+                       decoration-info="priority == 'normal'"
+                       decoration-warning="priority == 'high'"
+                       decoration-danger="priority == 'urgent'"/>
                 <field name="partner_id" optional="show"/>
                 <field name="lead_id" optional="show"/>
                 <field name="agent_id" optional="show"/>
+                <field name="call_direction" optional="hide"/>
                 <field name="duration_seconds" string="Call Seconds" optional="hide"/>
                 <field name="disposition" optional="show"/>
+                <field name="customer_sentiment" optional="show"/>
                 <field name="schedule_kind" optional="show"/>
+                <field name="contact_channel" optional="hide"/>
                 <field name="callback_at" optional="show"/>
+                <field name="snoozed_until" optional="hide"/>
+                <field name="compliance_review_required" optional="hide"/>
                 <field name="state" widget="badge"
                        decoration-warning="state == 'pending'"
                        decoration-success="state == 'completed'"
                        decoration-muted="state == 'cancelled'"/>
-                <button name="action_open_post_call_wizard" type="object" string="Complete" class="btn-link" invisible="state != 'pending'"/>
+                <button name="action_open_post_call_wizard"
+                        type="object"
+                        string="Finish"
+                        class="btn-link"
+                        invisible="state != 'pending'"/>
+                <button name="action_open_calendar_event"
+                        type="object"
+                        string="Calendar"
+                        class="btn-link"
+                        invisible="not calendar_event_id"/>
             </list>
         </field>
     </record>
@@ -58,49 +120,136 @@
         <field name="arch" type="xml">
             <form string="Call Follow-up" create="0" delete="0">
                 <header>
-                    <button name="action_open_post_call_wizard" type="object" string="Complete Post-call" class="btn-primary" invisible="state != 'pending'"/>
-                    <button name="action_open_calendar_event" type="object" string="Open Calendar Event" class="btn-secondary" invisible="not calendar_event_id"/>
-                    <button name="action_cancel_followup" type="object" string="Cancel Follow-up" class="btn-secondary" invisible="state != 'pending'" confirm="Cancel this pending follow-up?"/>
-                    <field name="state" widget="statusbar" statusbar_visible="pending,completed,cancelled"/>
+                    <button name="action_open_post_call_wizard"
+                            type="object"
+                            string="Finish Post-call"
+                            class="btn-primary"
+                            invisible="state != 'pending'"/>
+                    <button name="action_snooze_10_minutes"
+                            type="object"
+                            string="Snooze 10 Minutes"
+                            icon="fa-clock-o"
+                            class="btn-secondary"
+                            invisible="state != 'pending'"/>
+                    <button name="action_open_related_record"
+                            type="object"
+                            string="Open CRM / Customer"
+                            icon="fa-external-link"
+                            class="btn-secondary"
+                            invisible="not lead_id and not partner_id"/>
+                    <button name="action_open_calendar_event"
+                            type="object"
+                            string="Open Calendar Event"
+                            class="btn-secondary"
+                            invisible="not calendar_event_id"/>
+                    <button name="action_cancel_followup"
+                            type="object"
+                            string="Cancel Follow-up"
+                            class="btn-secondary"
+                            invisible="state != 'pending'"
+                            confirm="Cancel this pending follow-up? The completed-call audit record will be retained."/>
+                    <field name="state"
+                           widget="statusbar"
+                           statusbar_visible="pending,completed,cancelled"/>
                 </header>
+
                 <sheet>
                     <div class="oe_button_box" name="button_box">
-                        <button name="action_open_calendar_event" type="object" class="oe_stat_button" icon="fa-calendar" invisible="not calendar_event_id">
+                        <button name="action_open_calendar_event"
+                                type="object"
+                                class="oe_stat_button"
+                                icon="fa-calendar"
+                                invisible="not calendar_event_id">
                             <div class="o_stat_info">
                                 <span class="o_stat_text">Calendar</span>
                                 <span class="o_stat_text">Event</span>
                             </div>
                         </button>
+                        <button name="action_open_related_record"
+                                type="object"
+                                class="oe_stat_button"
+                                icon="fa-external-link"
+                                invisible="not lead_id and not partner_id">
+                            <div class="o_stat_info">
+                                <span class="o_stat_text">CRM</span>
+                                <span class="o_stat_text">Record</span>
+                            </div>
+                        </button>
                     </div>
-                    <widget name="web_ribbon" title="Needs Follow-up" bg_color="text-bg-warning" invisible="state != 'pending'"/>
-                    <widget name="web_ribbon" title="Completed" bg_color="text-bg-success" invisible="state != 'completed'"/>
+
+                    <widget name="web_ribbon"
+                            title="Needs Follow-up"
+                            bg_color="text-bg-warning"
+                            invisible="state != 'pending'"/>
+                    <widget name="web_ribbon"
+                            title="Compliance Review"
+                            bg_color="text-bg-danger"
+                            invisible="not compliance_review_required"/>
+                    <widget name="web_ribbon"
+                            title="Completed"
+                            bg_color="text-bg-success"
+                            invisible="state != 'completed' or compliance_review_required"/>
+
                     <div class="oe_title">
                         <label for="name"/>
                         <h1><field name="name" readonly="1"/></h1>
+                        <div class="d-flex gap-3 align-items-center">
+                            <field name="priority"
+                                   widget="badge"
+                                   readonly="1"
+                                   decoration-info="priority == 'normal'"
+                                   decoration-warning="priority == 'high'"
+                                   decoration-danger="priority == 'urgent'"/>
+                            <field name="customer_sentiment" readonly="1"/>
+                        </div>
                     </div>
+
                     <group>
                         <group string="Call">
                             <field name="ended_at" readonly="1"/>
                             <field name="started_at" readonly="1"/>
                             <field name="duration_seconds" readonly="1"/>
+                            <field name="call_direction" readonly="1"/>
                             <field name="call_id" readonly="1"/>
-                            <field name="event_id" readonly="1" groups="codestra_crm_call_followup.group_call_followup_manager"/>
+                            <field name="event_id"
+                                   readonly="1"
+                                   groups="codestra_crm_call_followup.group_call_followup_manager"/>
                         </group>
                         <group string="CRM">
                             <field name="partner_id" readonly="1"/>
                             <field name="lead_id" readonly="1"/>
                             <field name="agent_id" readonly="1"/>
-                            <field name="company_id" readonly="1" groups="base.group_multi_company"/>
+                            <field name="company_id"
+                                   readonly="1"
+                                   groups="base.group_multi_company"/>
                             <field name="disposition" readonly="1"/>
+                            <field name="compliance_review_required" readonly="1"/>
                         </group>
                     </group>
-                    <group string="Scheduled Next Step" invisible="schedule_kind == 'none'">
-                        <field name="schedule_kind" readonly="1"/>
-                        <field name="callback_at" readonly="1"/>
-                        <field name="duration_minutes" readonly="1"/>
-                        <field name="calendar_event_id" readonly="1" options="{'no_create': true, 'no_open': false}"/>
-                        <field name="reminder_email_enabled" readonly="1"/>
+
+                    <group string="Scheduled Next Step"
+                           invisible="schedule_kind == 'none'">
+                        <group>
+                            <field name="schedule_kind" readonly="1"/>
+                            <field name="callback_at" readonly="1"/>
+                            <field name="duration_minutes" readonly="1"/>
+                            <field name="contact_channel" readonly="1"/>
+                            <field name="meeting_location" readonly="1"/>
+                        </group>
+                        <group>
+                            <field name="calendar_event_id"
+                                   readonly="1"
+                                   options="{'no_create': true, 'no_open': false}"/>
+                            <field name="reminder_email_enabled" readonly="1"/>
+                        </group>
                     </group>
+
+                    <group string="Workflow Timing">
+                        <field name="snoozed_until" readonly="1"/>
+                        <field name="completed_at" readonly="1"/>
+                        <field name="completed_by_id" readonly="1"/>
+                    </group>
+
                     <notebook>
                         <page string="Notes">
                             <field name="notes" readonly="1" widget="html"/>
@@ -111,16 +260,19 @@
                                 <field name="email_to" readonly="1"/>
                                 <field name="email_cc" readonly="1"/>
                                 <field name="email_subject" readonly="1"/>
+                                <field name="mail_id" readonly="1"/>
                             </group>
                             <field name="email_body" readonly="1" widget="html"/>
                         </page>
-                        <page string="Integration" groups="codestra_crm_call_followup.group_call_followup_manager">
+                        <page string="Integration"
+                              groups="codestra_crm_call_followup.group_call_followup_manager">
                             <group>
+                                <field name="payload_version" readonly="1"/>
                                 <field name="source" readonly="1"/>
                                 <field name="correlation_id" readonly="1"/>
+                                <field name="request_fingerprint" readonly="1"/>
                                 <field name="popup_requested_at" readonly="1"/>
                                 <field name="popup_completed_at" readonly="1"/>
-                                <field name="mail_id" readonly="1"/>
                             </group>
                         </page>
                     </notebook>
@@ -134,11 +286,19 @@
         <field name="name">codestra.crm.call.followup.calendar</field>
         <field name="model">codestra.crm.call.followup</field>
         <field name="arch" type="xml">
-            <calendar string="Callbacks and Appointments" date_start="callback_at" color="agent_id" mode="month" event_open_popup="true" create="0" delete="0">
+            <calendar string="Callbacks and Appointments"
+                      date_start="callback_at"
+                      color="agent_id"
+                      mode="month"
+                      event_open_popup="true"
+                      create="0"
+                      delete="0">
                 <field name="name"/>
                 <field name="partner_id"/>
                 <field name="agent_id"/>
+                <field name="priority"/>
                 <field name="schedule_kind"/>
+                <field name="contact_channel"/>
                 <field name="state"/>
             </calendar>
         </field>
@@ -151,8 +311,13 @@
         <field name="search_view_id" ref="view_codestra_call_followup_search"/>
         <field name="context">{'search_default_my_followups': 1}</field>
         <field name="help" type="html">
-            <p class="o_view_nocontent_smiling_face">Completed calls will appear here automatically.</p>
-            <p>The middleware service creates one immutable event per completed call. Agents finish the outcome, notes, email, and callback in the post-call popup.</p>
+            <p class="o_view_nocontent_smiling_face">
+                Completed calls will appear here automatically.
+            </p>
+            <p>
+                Middleware creates one immutable event per completed call.
+                Agents finish the outcome, notes, email, and callback from the post-call workflow.
+            </p>
         </field>
     </record>
 
