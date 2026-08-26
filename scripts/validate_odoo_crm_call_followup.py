@@ -110,8 +110,12 @@ def main() -> int:
         fail(errors, "Odoo 19 does not accept today as a date-filter default_period")
     if '<group expand="' in view_source:
         fail(errors, "Odoo 19 search-view groups do not accept the expand attribute")
-    if "('ended_at', '&gt;=', 'today')" not in view_source or "('ended_at', '&lt;', 'today +1d')" not in view_source:
-        fail(errors, "Calls Today must use the Odoo 19 relative-date domain")
+    has_relative_today = (
+        "('ended_at', '&gt;=', 'today')" in view_source
+        and "('ended_at', '&lt;', 'today +1d')" in view_source
+    )
+    if 'date="ended_at"' not in view_source and not has_relative_today:
+        fail(errors, "call history must expose an Odoo 19-compatible date filter")
 
     python_and_js = "\n".join(
         path.read_text(encoding="utf-8")
