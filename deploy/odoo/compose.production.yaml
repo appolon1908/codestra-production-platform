@@ -1,0 +1,57 @@
+name: codestra
+
+services:
+  odoo:
+    image: odoo@sha256:f54272f31d5f77e4146b887efb3761c98480317daf687e4b4b5e76ed8bcc08c5
+    entrypoint: [/usr/local/bin/odoo-secret-entrypoint.sh]
+    command:
+      - odoo
+      - --addons-path=/usr/lib/python3/dist-packages/odoo/addons,/mnt/integration-addons,/mnt/call-center-addons,/mnt/breero-addons
+      - --workers=4
+      - --max-cron-threads=1
+      - --gevent-port=8072
+    restart: unless-stopped
+    cpus: 2
+    mem_limit: 4g
+    healthcheck:
+      test: [CMD-SHELL, curl -fsS http://127.0.0.1:8069/web/health || exit 1]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    volumes:
+      - /opt/codestra/config/odoo:/etc/odoo:ro
+      - /opt/codestra/releases/odoo-addons/67c0b02:/mnt/breero-addons:ro
+      - /opt/codestra/releases/odoo-addons/91e22ef4e69e624142bb3865b16c43a14e8b69d6:/mnt/call-center-addons:ro
+      - /opt/codestra/releases/odoo-addons/91e22ef4e69e624142bb3865b16c43a14e8b69d6/call_center_campaign:/mnt/call-center-addons/call_center_campaign:ro
+      - /opt/codestra/odoo-addons:/mnt/extra-addons:ro
+      - /home/codestra-admin/releases/odoo-callback-1e450061b3db/codestra_appointments:/mnt/extra-addons/codestra_appointments:ro
+      - /opt/codestra/releases/odoo-addons/91e22ef4e69e624142bb3865b16c43a14e8b69d6/ci_addons:/mnt/integration-addons:ro
+      - /opt/codestra/scripts/odoo-secret-entrypoint.sh:/usr/local/bin/odoo-secret-entrypoint.sh:ro
+      - /home/codestra-admin/releases/odoo-callback-1e450061b3db/call_center_campaign:/mnt/extra-addons/call_center_campaign:ro
+      - /etc/codestra/secrets/odoo-callback/client_secret:/run/secrets/odoo_callback_client_secret:ro
+      - /etc/codestra/secrets/codestra-compose/odoo_db_password:/run/secrets/odoo_db_password:ro
+      - odoo_data:/var/lib/odoo
+    networks:
+      - backend
+      - edge
+      - identity
+      - internal-integration
+
+networks:
+  backend:
+    external: true
+    name: codestra_backend
+  edge:
+    external: true
+    name: codestra_edge
+  identity:
+    external: true
+    name: codestra-identity_identity_service
+  internal-integration:
+    external: true
+    name: codestra-internal-integration
+
+volumes:
+  odoo_data:
+    external: true
+    name: codestra_odoo_data

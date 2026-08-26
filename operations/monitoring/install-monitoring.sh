@@ -27,6 +27,16 @@ for secret in primary_receiver_url secondary_receiver_url recovery_receiver_url 
         exit 2
     }
 done
+postgres_exporter_secret=/etc/codestra/secrets/monitoring-runtime/postgres_exporter_password
+[[ -s "$postgres_exporter_secret" ]] || {
+    echo "protected PostgreSQL exporter secret is missing: $postgres_exporter_secret" >&2
+    exit 2
+}
+postgres_exporter_mode=$(stat -c '%a' "$postgres_exporter_secret")
+[[ "$postgres_exporter_mode" == "400" || "$postgres_exporter_mode" == "440" || "$postgres_exporter_mode" == "600" || "$postgres_exporter_mode" == "640" ]] || {
+    echo "unsafe PostgreSQL exporter secret mode: $postgres_exporter_secret ($postgres_exporter_mode)" >&2
+    exit 2
+}
 
 python3 "$ROOT/validate-receiver-files.py" \
     --check-network "$CONFIG" /etc/codestra/secrets/monitoring
@@ -36,7 +46,7 @@ docker run --rm \
     -v "$ROOT/prometheus.yml":/etc/prometheus/prometheus.yml:ro \
     -v "$ROOT/rules":/etc/prometheus/rules:ro \
     prom/prometheus@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893 \
-    promtool check config /etc/prometheus/prometheus.yml
+    check config /etc/prometheus/prometheus.yml
 docker run --rm \
     --entrypoint /bin/amtool \
     -v "$CONFIG":/etc/alertmanager/alertmanager.yml:ro \

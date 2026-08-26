@@ -43,6 +43,11 @@ CodestraCallSetupLatencyExcessive	operations/runbooks/alerts/call-setup-latency-
 CodestraStuckAsteriskChannel	operations/runbooks/alerts/stuck-asterisk-channel.md	13/13	monitoring-owner-registry	PASS
 CodestraChannelCleanupFailure	operations/runbooks/alerts/channel-cleanup-failure.md	13/13	monitoring-owner-registry	PASS
 CodestraPostgresqlUnavailable	operations/runbooks/alerts/postgresql-unavailable.md	13/13	monitoring-owner-registry	PASS
+MiddlewareDatabaseDown	operations/runbooks/alerts/middleware-database-down.md	13/13	monitoring-owner-registry	PASS
+MiddlewareDatabaseConnectionWarning	operations/runbooks/alerts/middleware-database-connection-warning.md	13/13	monitoring-owner-registry	PASS
+MiddlewareDatabaseConnectionCritical	operations/runbooks/alerts/middleware-database-connection-critical.md	13/13	monitoring-owner-registry	PASS
+MiddlewareDatabaseDiskLow	operations/runbooks/alerts/middleware-database-disk-low.md	13/13	monitoring-owner-registry	PASS
+MiddlewareDatabaseDeadlocks	operations/runbooks/alerts/middleware-database-deadlocks.md	13/13	monitoring-owner-registry	PASS
 CodestraMariadbUnavailable	operations/runbooks/alerts/mariadb-unavailable.md	13/13	monitoring-owner-registry	PASS
 CodestraRedisUnavailable	operations/runbooks/alerts/redis-unavailable.md	13/13	monitoring-owner-registry	PASS
 CodestraDatabaseConnectionSaturation	operations/runbooks/alerts/database-connection-saturation.md	13/13	monitoring-owner-registry	PASS
@@ -60,6 +65,10 @@ CodestraBackupFailure	operations/runbooks/alerts/backup-failure.md	13/13	monitor
 CodestraOffServerReplicationFailure	operations/runbooks/alerts/off-server-replication-failure.md	13/13	monitoring-owner-registry	PASS
 CodestraBackupChecksumFailure	operations/runbooks/alerts/backup-checksum-failure.md	13/13	monitoring-owner-registry	PASS
 CodestraBackupStale	operations/runbooks/alerts/backup-stale.md	13/13	monitoring-owner-registry	PASS
+MiddlewareDatabaseBackupStale	operations/runbooks/alerts/middleware-database-backup-stale.md	13/13	monitoring-owner-registry	PASS
+MiddlewareDatabaseBackupFailed	operations/runbooks/alerts/middleware-database-backup-failed.md	13/13	monitoring-owner-registry	PASS
+MiddlewareDatabaseRestoreOverdue	operations/runbooks/alerts/middleware-database-restore-overdue.md	13/13	monitoring-owner-registry	PASS
+MiddlewareDatabaseMigrationMismatch	operations/runbooks/alerts/middleware-database-migration-mismatch.md	13/13	monitoring-owner-registry	PASS
 CodestraRemoteBackupCapacityLow	operations/runbooks/alerts/remote-backup-capacity-low.md	13/13	monitoring-owner-registry	PASS
 CodestraBackupTimerDisabled	operations/runbooks/alerts/backup-timer-disabled.md	13/13	monitoring-owner-registry	PASS
 CodestraBackupTimerFailed	operations/runbooks/alerts/backup-timer-failed.md	13/13	monitoring-owner-registry	PASS
