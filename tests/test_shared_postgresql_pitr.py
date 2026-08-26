@@ -6,9 +6,30 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "operations" / "shared-postgresql"
+
+
+def test_activation_compose_projects_stage_helper_without_secrets() -> None:
+    activation = yaml.safe_load((PACKAGE / "compose.pitr-activation.yaml").read_text())
+    postgres = activation["services"]["postgres"]
+    command = postgres["command"]
+    volumes = postgres["volumes"]
+    assert "archive_mode=on" in command
+    assert any(value.startswith("archive_command=") for value in command)
+    assert (
+        "/usr/local/sbin/codestra-shared-postgres-stage-wal.sh:"
+        "/usr/local/sbin/codestra-shared-postgres-stage-wal.sh:ro"
+    ) in volumes
+    assert (
+        "/var/spool/codestra/postgresql-shared/wal:"
+        "/var/spool/codestra/postgresql-shared/wal"
+    ) in volumes
+    serialized = str(activation).lower()
+    assert "password" not in serialized
+    assert "private" not in serialized
 
 
 def run_validator(authority: Path):

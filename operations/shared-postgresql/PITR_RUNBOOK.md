@@ -15,6 +15,12 @@
    client fragment is non-secret and `ProtectHome=true` remains enforced.
    Validate modes, forced-command restrictions, and remote readback.
 4. Install `postgresql-pitr.conf`; capture the previous effective configuration.
+   Render `compose.pitr-activation.yaml` together with the authoritative live
+   Compose file and require semantic drift to be limited to the PostgreSQL
+   command and the stage-helper/spool mounts. The helper must be read-only in
+   the container; only the WAL spool is writable. Never activate the settings
+   without this layer because the host helper is otherwise absent in the
+   PostgreSQL mount namespace.
 5. Restart PostgreSQL once inside the approved window. Validate every database
    and application consumer before continuing.
 6. Force a WAL switch, require `archive_mode=on`, zero new archive failures,
