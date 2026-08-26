@@ -9,7 +9,6 @@ groups:
           service: redis
         annotations:
           summary: Redis exporter target is absent
-
       - alert: RedisDown
         expr: absent(redis_up{job="redis"}) or redis_up{job="redis"} != 1
         for: 1m
@@ -108,4 +107,3 @@ groups:
           service: redis
         annotations:
           summary: Redis replica topology differs from the approved standalone policy
-
