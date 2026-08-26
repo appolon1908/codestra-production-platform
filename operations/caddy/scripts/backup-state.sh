@@ -18,9 +18,16 @@ ln -sfn "caddy-state-$STAMP.tar.gpg" "$DEST/latest.tar.gpg"
 find "$DEST" -maxdepth 1 -type f -name 'caddy-state-*.tar.gpg' -mtime +14 -delete
 REMOTE_HOST=${CADDY_BACKUP_REMOTE_HOST:-codestra-vicidial}
 REMOTE_DIR=${CADDY_BACKUP_REMOTE_DIR:-/srv/codestra-backups/server-a/caddy}
-if timeout 120 ssh -o BatchMode=yes "$REMOTE_HOST" "install -d -m 0700 '$REMOTE_DIR'" &&
+if timeout 120 ssh -o BatchMode=yes "$REMOTE_HOST" "install -d -m 0700 '$REMOTE_DIR' '$REMOTE_DIR/daily' '$REMOTE_DIR/weekly' '$REMOTE_DIR/monthly'" &&
    timeout 300 scp -q "$DEST/caddy-state-$STAMP.tar.gpg" "$DEST/caddy-state-$STAMP.tar.gpg.sha256" "$DEST/caddy-state-$STAMP.manifest" "$REMOTE_HOST:$REMOTE_DIR/" &&
-   timeout 30 ssh -o BatchMode=yes "$REMOTE_HOST" "test -s '$REMOTE_DIR/caddy-state-$STAMP.tar.gpg' && chmod 0600 '$REMOTE_DIR/caddy-state-$STAMP.tar.gpg' '$REMOTE_DIR/caddy-state-$STAMP.tar.gpg.sha256' '$REMOTE_DIR/caddy-state-$STAMP.manifest'"; then
+   timeout 30 ssh -o BatchMode=yes "$REMOTE_HOST" "test -s '$REMOTE_DIR/caddy-state-$STAMP.tar.gpg' &&
+     chmod 0600 '$REMOTE_DIR/caddy-state-$STAMP.tar.gpg' '$REMOTE_DIR/caddy-state-$STAMP.tar.gpg.sha256' '$REMOTE_DIR/caddy-state-$STAMP.manifest' &&
+     cp -p '$REMOTE_DIR/caddy-state-$STAMP.tar.gpg' '$REMOTE_DIR/daily/' &&
+     find '$REMOTE_DIR/daily' -type f -name 'caddy-state-*.tar.gpg' -mtime +14 -delete &&
+     find '$REMOTE_DIR/weekly' -type f -name 'caddy-state-*.tar.gpg' -mtime +56 -delete &&
+     find '$REMOTE_DIR/monthly' -type f -name 'caddy-state-*.tar.gpg' -mtime +366 -delete"; then
+  if [ "$(date -u +%u)" = 7 ]; then ssh -o BatchMode=yes "$REMOTE_HOST" "cp -p '$REMOTE_DIR/caddy-state-$STAMP.tar.gpg' '$REMOTE_DIR/weekly/'"; fi
+  if [ "$(date -u +%d)" = 01 ]; then ssh -o BatchMode=yes "$REMOTE_HOST" "cp -p '$REMOTE_DIR/caddy-state-$STAMP.tar.gpg' '$REMOTE_DIR/monthly/'"; fi
   touch "$DEST/offhost-last-success"
   printf '%s\n' "$REMOTE_HOST:$REMOTE_DIR/caddy-state-$STAMP.tar.gpg" >"$DEST/offhost-last-destination"
   echo CADDY_STATE_BACKUP_OFFHOST=PASS
