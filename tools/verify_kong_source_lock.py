@@ -66,6 +66,13 @@ def normalized_routes(document: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: (row["service"], row["route"]))
 
 
+def plugin(document: dict[str, Any], service_name: str, plugin_name: str) -> dict[str, Any]:
+    service = next(item for item in document["services"] if item["name"] == service_name)
+    matches = [item for item in service.get("plugins", []) if item["name"] == plugin_name]
+    assert len(matches) == 1, f"{service_name} must attach exactly one {plugin_name} plugin"
+    return matches[0]
+
+
 def verify_online(lock: dict[str, Any]) -> None:
     base = (
         f"https://raw.githubusercontent.com/"
@@ -92,14 +99,34 @@ def verify_online(lock: dict[str, Any]) -> None:
             "standalone Kong public route contract differs from platform lock"
         )
 
+    oidc = plugin(kong, "codestra-control-plane", "openid-connect")
+    assert oidc["config"]["audience"] == ["codestra-control-plane"]
+    policy = plugin(kong, "codestra-control-plane", "pre-function")["config"]["access"]
+    assert len(policy) == 1
+
     scope_policy = fetch_text(f"{base}/deploy/kong/scope-policy.lua")
     security = lock["security_contracts"]
-    assert security["system_admin_required_scope"] in scope_policy
+    assert security["system_admin_required_scope"] in policy[0]
     for role in security["authenticated_role_headers"]:
         assert (
             f'set_header("X-Authenticated-Role", "{role}")'
-            in scope_policy
+            in policy[0]
         )
+
+    callback = json.loads(fetch_text(f"{base}/config/kong-callback-routes.json"))
+    assert callback["host"] == "api.codestra.co"
+    assert callback["issuer"] == "https://auth.codestra.co/realms/codestra"
+    assert callback["audience"] == "codestra-callback-api"
+    assert callback["tenant"] == "COD"
+    assert callback["service"]["host"] == "codestra-middleware-integration-api-1"
+    assert callback["service"]["port"] == 8095
+    callback_routes = {row["name"]: row for row in callback["routes"]}
+    assert callback_routes["codestra-callback-control"]["paths"] == ["/api/v1/control/callbacks"]
+    assert callback_routes["codestra-callback-control"]["methods"] == ["POST"]
+    assert callback_routes["codestra-callback-control"]["requiredScope"] == "callbacks.write"
+    assert callback_routes["codestra-callback-read"]["paths"] == ["/api/v1/callbacks"]
+    assert callback_routes["codestra-callback-read"]["methods"] == ["GET"]
+    assert callback_routes["codestra-callback-read"]["requiredScope"] == "callbacks.read"
 
 
 def main() -> None:

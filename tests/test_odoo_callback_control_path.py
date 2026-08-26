@@ -44,6 +44,14 @@ def test_kong_callback_contract_is_pinned_to_standalone_authority():
     assert "config/kong-callback-routes.json" in KONG_LOCK["required_paths"]
     assert "config/kong-campaign-automation-routes.json" in KONG_LOCK["required_paths"]
 
+
+def test_online_lock_verification_fetches_and_validates_callback_contract():
+    source = Path("tools/verify_kong_source_lock.py").read_text()
+    assert 'config/kong-callback-routes.json' in source
+    assert 'callback["audience"] == "codestra-callback-api"' in source
+    assert 'callback_routes["codestra-callback-control"]' in source
+    assert 'callback_routes["codestra-callback-read"]' in source
+
 def test_deployment_keeps_every_broad_delivery_path_disabled():
     assert 'CODESTRA_CALLBACK_SYNC_ENABLED: "true"' in DEPLOYMENT
     assert 'CODESTRA_CALLBACK_TOKEN_URL: "http://keycloak:8080/realms/codestra/protocol/openid-connect/token"' in DEPLOYMENT
