@@ -20,3 +20,13 @@ PostgreSQL, validate every consumer, and stop before middleware migration.
 
 Change authority: GitHub issue #107. All `PENDING` decisions must be replaced by
 accountable approvals before deployment.
+
+## Execution gate
+
+Run `tests/integration/shared_postgresql_pitr_execution.sh` on a host with Docker,
+GnuPG, and restic before promotion. The rehearsal uses an internal-only disposable
+network and synthetic credentials. It executes the production stage, offload,
+base-backup, and restore helpers; verifies `pg_basebackup -Ft -X fetch`; checks
+portable local/off-host hashes; proves failed publication retains WAL; and waits
+for recovery promotion before asserting that the pre-target marker exists and the
+post-target marker does not. A source-only or string-matching test is insufficient.

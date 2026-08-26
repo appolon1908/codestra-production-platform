@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=root
+Environment=HOME=/etc/codestra/secrets/shared-postgresql/ssh-home
 ExecStart=/usr/local/sbin/codestra-shared-postgres-archive-wal.sh
 NoNewPrivileges=true
 PrivateTmp=true
