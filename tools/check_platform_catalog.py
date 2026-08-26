@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -118,7 +119,16 @@ def _repository_evidence_file(root: Path, reference: str) -> bool:
         return False
     repository_root = root.resolve()
     candidate = (repository_root / path).resolve()
-    return candidate.is_relative_to(repository_root) and candidate.is_file()
+    if not candidate.is_relative_to(repository_root) or not candidate.is_file():
+        return False
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--", reference],
+        cwd=repository_root,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return tracked.returncode == 0
 
 
 def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
@@ -160,6 +170,13 @@ def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
         if missing := _missing(row, FEATURE_FIELDS):
             findings.append(Finding("critical", "feature-schema", identity, f"missing fields: {', '.join(missing)}"))
             continue
+        if not isinstance(row["deployment_candidate"], bool):
+            findings.append(Finding(
+                "critical",
+                "feature-deployment-candidate",
+                identity,
+                "deployment_candidate must be a Boolean",
+            ))
         if row["system_id"] not in system_ids:
             findings.append(Finding("critical", "feature-system", identity, f"unknown system: {row['system_id']}"))
         if row["lifecycle"] not in LIFECYCLES:
