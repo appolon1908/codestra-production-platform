@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_post_call_wizard_workspace" model="ir.ui.view">
+        <field name="name">codestra.crm.post.call.wizard.workspace</field>
+        <field name="model">codestra.crm.post.call.wizard</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_post_call_wizard_form"/>
+        <field name="priority">80</field>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='followup_id']" position="after">
+                <field name="ux_partner_id" invisible="1"/>
+                <field name="ux_lead_id" invisible="1"/>
+                <field name="ux_calendar_event_id" invisible="1"/>
+                <field name="ux_schedule_ready" invisible="1"/>
+                <field name="ux_email_ready" invisible="1"/>
+                <field name="ux_ready" invisible="1"/>
+            </xpath>
+
+            <xpath expr="//notebook" position="before">
+                <div class="o_codestra_workspace_header" role="region" aria-label="Call summary and related records">
+                    <div class="o_codestra_workspace_identity">
+                        <span class="o_codestra_workspace_eyebrow">Post-call workspace</span>
+                        <h2><field name="ux_contact_label" readonly="1" nolabel="1"/></h2>
+                        <div class="o_codestra_workspace_meta">
+                            <span>
+                                <i class="fa fa-phone me-1" aria-hidden="true"/>
+                                <field name="ux_call_duration_label" readonly="1" nolabel="1"/>
+                            </span>
+                            <span>
+                                <i class="fa fa-user me-1" aria-hidden="true"/>
+                                <field name="agent_id" readonly="1" nolabel="1"/>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="o_codestra_workspace_links" role="group" aria-label="Related record actions">
+                        <button name="action_ux_open_customer" type="object" string="Customer"
+                                class="btn btn-outline-primary" icon="fa-address-card"
+                                invisible="not ux_partner_id"/>
+                        <button name="action_ux_open_opportunity" type="object" string="Opportunity"
+                                class="btn btn-outline-primary" icon="fa-filter"
+                                invisible="not ux_lead_id"/>
+                        <button name="action_ux_open_calendar" type="object" string="Calendar"
+                                class="btn btn-outline-primary" icon="fa-calendar"
+                                invisible="not ux_calendar_event_id"/>
+                    </div>
+                </div>
+                <div class="alert alert-success o_codestra_completion_guidance"
+                     role="status" invisible="not ux_ready">
+                    <field name="ux_completion_guidance" widget="html" readonly="1" nolabel="1"/>
+                </div>
+                <div class="alert alert-warning o_codestra_completion_guidance"
+                     role="status" invisible="ux_ready">
+                    <field name="ux_completion_guidance" widget="html" readonly="1" nolabel="1"/>
+                </div>
+            </xpath>
+
+            <xpath expr="//footer/button[@name='action_complete']" position="attributes">
+                <attribute name="string">Save &amp; Complete</attribute>
+                <attribute name="class">btn-primary o_codestra_primary_cta</attribute>
+                <attribute name="icon">fa-check-circle</attribute>
+                <attribute name="data-hotkey">s</attribute>
+            </xpath>
+
+            <xpath expr="//footer/button[@name='action_complete_without_email']" position="attributes">
+                <attribute name="string">Complete Without Email</attribute>
+                <attribute name="class">btn-secondary</attribute>
+                <attribute name="icon">fa-envelope-o</attribute>
+                <attribute name="confirm">Complete this post-call action without queuing the immediate client email?</attribute>
+            </xpath>
+
+            <xpath expr="//footer/button[@special='cancel']" position="before">
+                <button name="action_ux_complete_and_open_calendar" type="object"
+                        string="Complete &amp; Open Calendar" class="btn-secondary"
+                        icon="fa-calendar-check-o" invisible="schedule_kind == 'none'"
+                        data-hotkey="o"/>
+                <button name="action_ux_complete_and_open_customer" type="object"
+                        string="Complete &amp; Open Customer" class="btn-secondary"
+                        icon="fa-address-card" invisible="not ux_partner_id"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_call_followup_form_workspace" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.form.workspace</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_form"/>
+        <field name="priority">80</field>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <field name="ux_can_complete" invisible="1"/>
+                <field name="ux_has_customer" invisible="1"/>
+                <field name="ux_has_opportunity" invisible="1"/>
+                <field name="ux_has_calendar_event" invisible="1"/>
+            </xpath>
+
+            <xpath expr="//header/button[@name='action_open_post_call_wizard']" position="attributes">
+                <attribute name="string">Complete Post-call</attribute>
+                <attribute name="class">btn-primary</attribute>
+                <attribute name="icon">fa-check-circle</attribute>
+                <attribute name="invisible">not ux_can_complete</attribute>
+            </xpath>
+
+            <xpath expr="//header/button[@name='action_open_calendar_event']" position="attributes">
+                <attribute name="string">Open Calendar</attribute>
+                <attribute name="icon">fa-calendar</attribute>
+            </xpath>
+
+            <xpath expr="//header/field[@name='state']" position="before">
+                <button name="action_ux_open_customer" type="object"
+                        string="Open Customer" class="btn-secondary"
+                        icon="fa-address-card" invisible="not ux_has_customer"/>
+                <button name="action_ux_open_opportunity" type="object"
+                        string="Open Opportunity" class="btn-secondary"
+                        icon="fa-filter" invisible="not ux_has_opportunity"/>
+            </xpath>
+
+            <xpath expr="//sheet/notebook" position="before">
+                <div class="o_codestra_followup_summary" role="region" aria-label="Post-call summary">
+                    <div>
+                        <span class="o_codestra_workspace_eyebrow">Customer</span>
+                        <strong><field name="ux_contact_label" readonly="1" nolabel="1"/></strong>
+                    </div>
+                    <div>
+                        <span class="o_codestra_workspace_eyebrow">Call duration</span>
+                        <strong><field name="ux_call_duration_label" readonly="1" nolabel="1"/></strong>
+                    </div>
+                    <div>
+                        <span class="o_codestra_workspace_eyebrow">Next step</span>
+                        <strong><field name="ux_next_step_summary" readonly="1" nolabel="1"/></strong>
+                    </div>
+                </div>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_call_followup_list_workspace" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.list.workspace</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_list"/>
+        <field name="priority">80</field>
+        <field name="arch" type="xml">
+            <xpath expr="//list/field[@name='partner_id']" position="before">
+                <field name="ux_contact_label" string="Customer" optional="show"/>
+            </xpath>
+            <xpath expr="//list/field[@name='callback_at']" position="after">
+                <field name="ux_next_step_summary" string="Next Step" optional="show"/>
+                <field name="ux_can_complete" column_invisible="True"/>
+                <button name="action_ux_primary" type="object" string="Open"
+                        icon="fa-external-link" class="btn-link"
+                        invisible="ux_can_complete"/>
+            </xpath>
+            <xpath expr="//list/button[@name='action_open_post_call_wizard']" position="attributes">
+                <attribute name="string">Complete</attribute>
+                <attribute name="icon">fa-check-circle</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_call_followup_search_workspace" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.search.workspace</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_search"/>
+        <field name="priority">80</field>
+        <field name="arch" type="xml">
+            <xpath expr="//filter[@name='pending']" position="after">
+                <filter name="ux_callback_next_step" string="Callbacks"
+                        domain="[('schedule_kind', '=', 'callback')]"/>
+                <filter name="ux_appointment_next_step" string="Appointments"
+                        domain="[('schedule_kind', '=', 'appointment')]"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_call_followup_kanban_workspace" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.kanban.workspace</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="arch" type="xml">
+            <kanban class="o_codestra_followup_kanban" default_group_by="state" create="0" quick_create="0">
+                <field name="name"/>
+                <field name="state"/>
+                <field name="agent_id"/>
+                <field name="ended_at"/>
+                <field name="disposition"/>
+                <field name="schedule_kind"/>
+                <field name="callback_at"/>
+                <field name="ux_contact_label"/>
+                <field name="ux_call_duration_label"/>
+                <field name="ux_next_step_summary"/>
+                <field name="ux_can_complete"/>
+                <field name="ux_has_customer"/>
+                <field name="ux_has_opportunity"/>
+                <field name="ux_has_calendar_event"/>
+                <templates>
+                    <t t-name="card">
+                        <main>
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <span class="o_codestra_workspace_eyebrow"><field name="state"/></span>
+                                    <h4 class="mb-1"><field name="ux_contact_label"/></h4>
+                                    <small class="text-muted">
+                                        <field name="ended_at"/> · <field name="ux_call_duration_label"/>
+                                    </small>
+                                </div>
+                                <field name="agent_id" widget="many2one_avatar_user"/>
+                            </div>
+                            <div class="o_codestra_kanban_next_step mt-3">
+                                <i class="fa fa-calendar-o me-1" aria-hidden="true"/>
+                                <field name="ux_next_step_summary"/>
+                            </div>
+                        </main>
+                        <footer>
+                            <button name="action_open_post_call_wizard" type="object"
+                                    class="btn btn-primary" string="Complete"
+                                    t-if="record.ux_can_complete.raw_value"/>
+                            <button name="action_ux_open_customer" type="object"
+                                    class="btn btn-link" string="Customer"
+                                    t-if="record.ux_has_customer.raw_value"/>
+                            <button name="action_ux_open_opportunity" type="object"
+                                    class="btn btn-link" string="Opportunity"
+                                    t-if="record.ux_has_opportunity.raw_value"/>
+                            <button name="action_ux_open_calendar" type="object"
+                                    class="btn btn-link" string="Calendar"
+                                    t-if="record.ux_has_calendar_event.raw_value"/>
+                        </footer>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="action_call_followup_workspace" model="ir.actions.act_window">
+        <field name="name">My Post-call Workspace</field>
+        <field name="res_model">codestra.crm.call.followup</field>
+        <field name="view_mode">kanban,list,calendar,form</field>
+        <field name="view_id" ref="view_call_followup_kanban_workspace"/>
+        <field name="domain">[('agent_id', '=', uid)]</field>
+        <field name="search_view_id" ref="codestra_crm_call_followup.view_codestra_call_followup_search"/>
+        <field name="context">{'search_default_pending': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No post-call actions are assigned to you.</p>
+            <p>Completed calls appear here automatically. Use Complete to record the outcome, notes, next step, reminders, and client email.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_call_followup_workspace"
+              name="My Post-call Workspace"
+              parent="crm.crm_menu_sales"
+              action="action_call_followup_workspace"
+              sequence="3"
+              groups="codestra_crm_call_followup.group_call_followup_user"/>
+</odoo>
