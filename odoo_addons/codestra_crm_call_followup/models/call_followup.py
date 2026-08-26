@@ -196,7 +196,7 @@ class CodestraCrmCallFollowup(models.Model):
                 limit=1,
             )
 
-        if not agent or agent.share:
+        if not agent or not agent.active or agent.share:
             raise ValidationError(_("A valid internal agent is required."))
         if company not in agent.company_ids:
             raise AccessError(_("The assigned agent does not belong to the event company."))
@@ -230,6 +230,15 @@ class CodestraCrmCallFollowup(models.Model):
             partner = partners.browse(partner_id).exists()
             if not partner:
                 raise ValidationError(_("The requested customer does not exist."))
+            if (
+                lead
+                and lead.partner_id
+                and partner.commercial_partner_id
+                != lead.partner_id.commercial_partner_id
+            ):
+                raise ValidationError(
+                    _("The requested customer is unrelated to the CRM lead.")
+                )
         if partner.company_id and partner.company_id != company:
             raise AccessError(_("The customer belongs to a different company."))
         return partner
