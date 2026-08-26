@@ -1,0 +1,24 @@
+[Unit]
+Description=Maintain and verify shared PostgreSQL restic repository
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/sbin/codestra-shared-postgres-maintain-restic.sh
+TimeoutStartSec=6h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+ReadOnlyPaths=/etc/codestra/secrets/shared-postgresql
+ReadWritePaths=/opt/codestra/backups/postgresql-shared /var/lib/codestra-shared-postgresql /run/lock
