@@ -143,6 +143,29 @@ class TestCodestraCrmCallFollowup(TransactionCase):
                 "codestra.crm.call.followup"
             ].register_completed_call(payload)
 
+    def test_service_rejects_archived_agent(self):
+        self.agent.active = False
+        payload = self._payload("archived-agent-event")
+        service_env = self.env(user=self.service_user)
+
+        with self.assertRaises(ValidationError):
+            service_env[
+                "codestra.crm.call.followup"
+            ].register_completed_call(payload)
+
+    def test_service_rejects_partner_unrelated_to_lead(self):
+        unrelated = self.env["res.partner"].create(
+            {"name": "Unrelated Customer", "email": "unrelated@test.invalid"}
+        )
+        payload = self._payload("unrelated-customer-event")
+        payload["partner_id"] = unrelated.id
+        service_env = self.env(user=self.service_user)
+
+        with self.assertRaises(ValidationError):
+            service_env[
+                "codestra.crm.call.followup"
+            ].register_completed_call(payload)
+
     def test_completed_call_identity_is_immutable_for_agent(self):
         registration = self._register("immutable-event")
         agent_env = self.env(user=self.agent)
@@ -293,6 +316,27 @@ class TestCodestraCrmCallFollowup(TransactionCase):
         followup.invalidate_recordset()
         self.assertTrue(followup.mail_id)
         self.assertEqual(followup.mail_id.state, "outgoing")
+
+    def test_immediate_email_rejects_partially_invalid_recipient_list(self):
+        registration = self._register("invalid-email-list-event")
+        agent_env = self.env(user=self.agent)
+        followup = agent_env["codestra.crm.call.followup"].browse(
+            registration["followup_id"]
+        )
+        wizard = agent_env["codestra.crm.post.call.wizard"].create(
+            {
+                "followup_id": followup.id,
+                "disposition": "contacted",
+                "schedule_kind": "none",
+                "send_post_call_email": True,
+                "email_to": f"{self.customer.email}, malformed-address",
+                "email_subject": "Invalid recipient regression",
+                "email_body": "<p>Must not queue.</p>",
+            }
+        )
+
+        with self.assertRaises(ValidationError):
+            wizard.action_complete()
 
     def test_replayed_wizard_does_not_duplicate_completion_side_effects(self):
         registration = self._register("replayed-wizard-event")
