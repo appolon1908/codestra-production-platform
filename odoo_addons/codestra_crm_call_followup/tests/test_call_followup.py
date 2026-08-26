@@ -56,6 +56,9 @@ class TestCodestraCrmCallFollowup(TransactionCase):
                 "group_ids": [Command.set([base_user.id, agent_group.id])],
             }
         )
+        cls.other_company = cls.env["res.company"].create(
+            {"name": "Isolated Test Company"}
+        )
         cls.customer = cls.env["res.partner"].create(
             {
                 "name": "Test Customer",
@@ -102,27 +105,6 @@ class TestCodestraCrmCallFollowup(TransactionCase):
                 "codestra.crm.call.followup"
             ].register_completed_call(self._payload("unauthorized-event"))
 
-    def test_other_agent_cannot_read_assigned_followup(self):
-        registration = self._register("assigned-agent-event")
-        other_env = self.env(user=self.other_agent)
-        self.assertFalse(
-            other_env["codestra.crm.call.followup"].search(
-                [("id", "=", registration["followup_id"])]
-            )
-        )
-
-    def test_service_cannot_register_for_unassigned_company(self):
-        other_company = self.env["res.company"].create(
-            {"name": "Synthetic Isolated Company"}
-        )
-        payload = self._payload("wrong-company-event")
-        payload["company_id"] = other_company.id
-        service_env = self.env(user=self.service_user)
-        with self.assertRaises(AccessError):
-            service_env[
-                "codestra.crm.call.followup"
-            ].register_completed_call(payload)
-
     def test_completed_call_registration_is_idempotent(self):
         first = self._register("idempotent-event")
         second = self._register("idempotent-event")
@@ -139,6 +121,37 @@ class TestCodestraCrmCallFollowup(TransactionCase):
             ),
             1,
         )
+
+    def test_other_agent_cannot_read_or_update_assigned_followup(self):
+        registration = self._register("assigned-agent-only")
+        other_env = self.env(user=self.other_agent)
+        followups = other_env["codestra.crm.call.followup"]
+
+        self.assertFalse(followups.search([("id", "=", registration["followup_id"])]))
+        with self.assertRaises(AccessError):
+            followups.browse(registration["followup_id"]).write(
+                {"disposition": "contacted"}
+            )
+
+    def test_service_cannot_register_for_unassigned_company(self):
+        payload = self._payload("cross-company-event")
+        payload["company_id"] = self.other_company.id
+        service_env = self.env(user=self.service_user)
+
+        with self.assertRaises(AccessError):
+            service_env[
+                "codestra.crm.call.followup"
+            ].register_completed_call(payload)
+
+    def test_completed_call_identity_is_immutable_for_agent(self):
+        registration = self._register("immutable-event")
+        agent_env = self.env(user=self.agent)
+        followup = agent_env["codestra.crm.call.followup"].browse(
+            registration["followup_id"]
+        )
+
+        with self.assertRaises(AccessError):
+            followup.write({"event_id": "rewritten-event"})
 
     def test_callback_creates_calendar_and_both_reminders(self):
         registration = self._register("callback-event")

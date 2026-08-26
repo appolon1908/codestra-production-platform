@@ -16,12 +16,13 @@
                 <filter name="scheduled" string="Scheduled" domain="[('schedule_kind', '!=', 'none'), ('callback_at', '!=', False)]"/>
                 <filter name="completed" string="Completed" domain="[('state', '=', 'completed')]"/>
                 <separator/>
-                <filter name="today" string="Call Date" date="ended_at"/>
-                <separator/>
-                <filter name="group_agent" string="Agent" context="{'group_by': 'agent_id'}"/>
-                <filter name="group_outcome" string="Outcome" context="{'group_by': 'disposition'}"/>
-                <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>
-                <filter name="group_call_day" string="Call Date" context="{'group_by': 'ended_at:day'}"/>
+                <filter name="today" string="Calls Today" domain="[('ended_at', '&gt;=', 'today'), ('ended_at', '&lt;', 'today +1d')]"/>
+                <group>
+                    <filter name="group_agent" string="Agent" context="{'group_by': 'agent_id'}"/>
+                    <filter name="group_outcome" string="Outcome" context="{'group_by': 'disposition'}"/>
+                    <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>
+                    <filter name="group_call_day" string="Call Date" context="{'group_by': 'ended_at:day'}"/>
+                </group>
             </search>
         </field>
     </record>
