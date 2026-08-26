@@ -154,22 +154,10 @@ def main() -> int:
         if validator not in workflow:
             errors.append(f"Docker CI does not run {validator}")
 
-    sensitive_patterns = [
-        re.compile(r"(?i)(api[_-]?key|password|webhook[_-]?secret)\s*=\s*[^<\s$]"),
-        re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-    ]
-    for path in [
-        PACKAGE / ".env.example",
-        PACKAGE / "compose.automation-secrets.yaml",
-        PACKAGE / "build.sh",
-        PACKAGE / "deploy.sh",
-    ]:
-        text = path.read_text(encoding="utf-8")
-        for pattern in sensitive_patterns:
-            if pattern.search(text):
-                errors.append(
-                    f"possible literal secret in {path.relative_to(ROOT)}"
-                )
+    # Repository-wide gitleaks remains the authoritative credential scanner.
+    # Do not embed secret detector fixtures here: those fixtures correctly look
+    # like credentials to the real scanner and make this structural validator
+    # self-trigger. This validator focuses on release structure and safety gates.
 
     if errors:
         print("ODOO_CALL_FOLLOWUP_DOCKER_RELEASE_VALIDATION=FAIL")
