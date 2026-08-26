@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import os
 import subprocess
 from io import BytesIO
 from pathlib import Path
@@ -229,7 +230,9 @@ def test_container_runtime_uses_compatibility_application_entrypoint() -> None:
     )
 
 
-def test_authoritative_compose_files_parse_and_use_application_entrypoint() -> None:
+def test_authoritative_compose_files_parse_and_use_application_entrypoint(
+    tmp_path: Path,
+) -> None:
     compose_files = (
         ROOT / "deploy/control-plane/compose.yaml",
         ROOT / "deploy/control-plane/compose.live-delivery-safety.yaml",
@@ -238,6 +241,12 @@ def test_authoritative_compose_files_parse_and_use_application_entrypoint() -> N
         parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert isinstance(parsed.get("services"), dict)
 
+    empty_env_file = tmp_path / "control-plane.env"
+    empty_env_file.write_text("", encoding="utf-8")
+    environment = {
+        **os.environ,
+        "CONTROL_PLANE_ENV_FILE": str(empty_env_file),
+    }
     result = subprocess.run(
         [
             "docker",
@@ -253,6 +262,7 @@ def test_authoritative_compose_files_parse_and_use_application_entrypoint() -> N
             "json",
         ],
         cwd=ROOT,
+        env=environment,
         text=True,
         capture_output=True,
         check=False,
