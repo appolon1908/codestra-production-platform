@@ -37,8 +37,6 @@ elseif path:find("^/api/v1/control/adapters") then
 elseif path == "/api/v1/health" then
   application_auth_only = true
 elseif path:find("^/api/v1/events/") then
-  -- The control-plane application performs the source API-key and HMAC checks.
-  -- Kong still requires an authenticated service token and tenant claim.
   application_auth_only = true
 else
   return kong.response.exit(403,{error="route_scope_undefined"})
