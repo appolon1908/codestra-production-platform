@@ -62,6 +62,47 @@ def test_accepted_risk_cannot_bypass_required_server_push_gap() -> None:
     assert gap["gap_id"] in {item.location for item in blockers}
 
 
+def test_resolved_gap_requires_structured_existing_evidence() -> None:
+    value = catalog()
+    gap = next(
+        item
+        for item in value["known_gaps"]
+        if item["required_before_server_push"]
+        and item["affected_features"]
+    )
+    feature_id = gap["affected_features"][0]
+    gap["status"] = "resolved"
+
+    for invalid_resolution in (True, "done", {"summary": "done", "evidence": []}):
+        gap["resolution"] = invalid_resolution
+        rules = {item.rule for item in validate_catalog(ROOT, value)}
+        assert "gap-resolution" in rules
+        blockers = deployment_blockers(value, {feature_id})
+        assert gap["gap_id"] in {item.location for item in blockers}
+
+    gap["resolution"] = {
+        "summary": "Synthetic resolution evidence for validation coverage.",
+        "evidence": ["docs/architecture/API_GOVERNANCE.md"],
+    }
+    assert not {
+        item.rule
+        for item in validate_catalog(ROOT, value)
+        if item.location == gap["gap_id"]
+    }
+    blockers = deployment_blockers(value, {feature_id})
+    assert gap["gap_id"] not in {item.location for item in blockers}
+
+
+def test_resolved_gap_rejects_missing_or_external_evidence() -> None:
+    value = catalog()
+    gap = next(item for item in value["known_gaps"] if item["required_before_server_push"])
+    gap["status"] = "resolved"
+    for reference in ("docs/missing-resolution-evidence.md", "external:unverified"):
+        gap["resolution"] = {"summary": "Claimed resolution.", "evidence": [reference]}
+        rules = {item.rule for item in validate_catalog(ROOT, value)}
+        assert "gap-resolution-evidence" in rules
+
+
 def test_duplicate_public_route_is_rejected() -> None:
     value = catalog()
     value["apis"].append(copy.deepcopy(value["apis"][0]))

@@ -80,6 +80,23 @@ def _missing(value: dict[str, Any], fields: set[str]) -> list[str]:
     return sorted(fields - set(value))
 
 
+def _structured_resolution(row: dict[str, Any]) -> dict[str, Any] | None:
+    resolution = row.get("resolution")
+    if not isinstance(resolution, dict):
+        return None
+    summary = resolution.get("summary")
+    evidence = resolution.get("evidence")
+    if not isinstance(summary, str) or not summary.strip():
+        return None
+    if (
+        not isinstance(evidence, list)
+        or not evidence
+        or any(not isinstance(reference, str) or not reference.strip() for reference in evidence)
+    ):
+        return None
+    return resolution
+
+
 def _unique(values: Iterable[dict[str, Any]], key: str, kind: str) -> list[Finding]:
     seen: set[str] = set()
     findings: list[Finding] = []
@@ -209,8 +226,24 @@ def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
         unknown = sorted(set(row["affected_features"]) - feature_ids)
         if unknown:
             findings.append(Finding("critical", "gap-feature", identity, f"unknown features: {', '.join(unknown)}"))
-        if row["status"] == "resolved" and not row.get("resolution"):
-            findings.append(Finding("critical", "gap-resolution", identity, "resolved gaps require resolution evidence"))
+        if row["status"] == "resolved":
+            resolution = _structured_resolution(row)
+            if resolution is None:
+                findings.append(Finding(
+                    "critical",
+                    "gap-resolution",
+                    identity,
+                    "resolved gaps require a summary and non-empty local evidence list",
+                ))
+            else:
+                for reference in resolution["evidence"]:
+                    if not _local_reference(reference) or not (root / reference).is_file():
+                        findings.append(Finding(
+                            "critical",
+                            "gap-resolution-evidence",
+                            identity,
+                            f"resolution evidence must be an existing repository file: {reference}",
+                        ))
 
     for name, reference in catalog.get("canonical_sources", {}).items():
         if _local_reference(str(reference)) and not (root / str(reference)).exists():
@@ -237,7 +270,7 @@ def deployment_blockers(catalog: dict[str, Any], requested_features: set[str]) -
         # A risk classification is not deployment authorization. Required
         # server-push gaps remain blocking until source-controlled resolution
         # evidence is present and the gap is explicitly resolved.
-        if gap.get("status") == "resolved" and gap.get("resolution"):
+        if gap.get("status") == "resolved" and _structured_resolution(gap):
             continue
         affected = set(gap.get("affected_features", []))
         if requested_features.intersection(affected):
