@@ -141,20 +141,29 @@ def implementation_route_fragments(source: str) -> dict[str, set[str]]:
 
 def route_predicate_groups(source: str) -> list[set[str]]:
     """Return path literals that must participate in the same branch predicate."""
+    def alternatives(node: ast.AST) -> list[set[str]]:
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+            return [group for value in node.values for group in alternatives(value)]
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And):
+            combined = [set()]
+            for value in node.values:
+                combined = [left | right for left in combined for right in alternatives(value)]
+            return combined
+        values = {
+            child.value
+            for child in ast.walk(node)
+            if isinstance(child, ast.Constant)
+            and isinstance(child.value, str)
+            and child.value.startswith("/")
+        }
+        return [values]
+
     tree = ast.parse(source)
     groups: list[set[str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.If):
             continue
-        values = {
-            child.value
-            for child in ast.walk(node.test)
-            if isinstance(child, ast.Constant)
-            and isinstance(child.value, str)
-            and child.value.startswith("/")
-        }
-        if values:
-            groups.append(values)
+        groups.extend(group for group in alternatives(node.test) if group)
     return groups
 
 

@@ -7,6 +7,18 @@ handlers:
   crm_mutation: [POST, PATCH]
 
 endpoints:
+  admin-system-health:
+    gateway_auth:
+      status: gap
+      remediation: Reconcile the global platform-admin contract with Kong's current tenant-claim requirement.
+  admin-system-readiness:
+    gateway_auth:
+      status: gap
+      remediation: Reconcile the global platform-admin contract with Kong's current tenant-claim requirement.
+  admin-system-databases:
+    gateway_auth:
+      status: gap
+      remediation: Reconcile the global platform-admin contract with Kong's current tenant-claim requirement.
   api-health:
     gateway_auth:
       status: gap

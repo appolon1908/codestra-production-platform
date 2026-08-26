@@ -105,6 +105,9 @@ def test_event_ingest_gateway_auth_mismatch_is_fail_closed() -> None:
         if finding.rule == "gateway-auth-coverage-gap"
     }
     assert gateway_gaps == {
+        "admin-system-databases",
+        "admin-system-health",
+        "admin-system-readiness",
         "api-health",
         "messages-api-list",
         "source-event-ingest",
@@ -125,6 +128,13 @@ def test_route_fragments_must_share_one_branch_predicate() -> None:
     )
     assert '"/retry"' in message_retry_removed  # crawler retry remains elsewhere
     assert not endpoint_route_predicate_covered(message_retry_removed, tokens)
+
+    fragments_split_across_or_arms = (
+        'if (path.startswith("/v1/messages/") and path.endswith("/cancel")) '
+        'or (path.startswith("/unrelated/") and path.endswith("/retry")):\n'
+        '    pass\n'
+    )
+    assert not endpoint_route_predicate_covered(fragments_split_across_or_arms, tokens)
 
 
 def test_implementation_tokens_are_bound_to_the_declared_http_method(tmp_path) -> None:
