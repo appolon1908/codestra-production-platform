@@ -68,6 +68,13 @@ def test_source_has_valid_pitr_and_base_backup_contracts():
     assert 'mktemp -d' in restore and 'cp -a "$secrets/gpg/."' in restore and "shred -u" in restore
 
 
+def test_offload_service_uses_protected_non_home_ssh_authority():
+    unit = (PACKAGE / "codestra-shared-postgres-wal-offload.service").read_text()
+    assert "ProtectHome=true" in unit
+    assert "Environment=HOME=/etc/codestra/secrets/shared-postgresql/ssh-home" in unit
+    assert "ReadOnlyPaths=/etc/codestra/secrets/shared-postgresql" in unit
+
+
 def test_nonroot_stage_and_portable_checksum_relocation(tmp_path):
     if os.geteuid() == 0:
         tmp_path.chmod(0o755)
