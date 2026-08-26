@@ -18,3 +18,14 @@ reports/github/SECRET_SCAN_FINDINGS.csv:generic-api-key:27
 7d2eda6f7f9cb81b1b713896bf03f585cb8c56bb:webphone_middleware/tests/test_telephony_command_client.py:generic-api-key:149
 7d2eda6f7f9cb81b1b713896bf03f585cb8c56bb:webphone_middleware/tests/test_telephony_command_client.py:generic-api-key:175
 70d28258ff9a3dd9a7eb5535e6998fca0e58e909:tests/test_campaign_email_provisioning.py:generic-api-key:64
+# Reviewed synthetic fixture identifiers used by tree scans; none are usable credentials.
+webphone_middleware/deploy/n8n/lead-automation/schema-provenance-v1.json:generic-api-key:6
+webphone_middleware/deploy/n8n/lead-automation/schemas/provenance-manifest-v1.json:generic-api-key:6
+webphone_middleware/deploy/n8n/lead-automation/callback-auth-manifest-v2.json:generic-api-key:26
+webphone_middleware/deploy/n8n/lead-automation/workflow-manifest-v1.json:generic-api-key:10
+webphone_middleware/deploy/n8n/lead-automation/lead-automation-generic-v1.json:generic-api-key:13
+webphone_middleware/tests/test_agent_realtime.py:generic-api-key:16
+webphone_middleware/tests/test_provider_adapters.py:generic-api-key:27
+webphone_middleware/tests/test_notifications.py:generic-api-key:128
+webphone_middleware/tests/test_telephony_command_client.py:generic-api-key:149
+webphone_middleware/tests/test_telephony_command_client.py:generic-api-key:175
