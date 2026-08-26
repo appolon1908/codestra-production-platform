@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_codestra_crm_post_call_wizard_form_ux" model="ir.ui.view">
+        <field name="name">codestra.crm.post.call.wizard.form.ux</field>
+        <field name="model">codestra.crm.post.call.wizard</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_crm_post_call_wizard_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[contains(@class, 'o_codestra_identity_card')]" position="after">
+                <div class="o_codestra_post_call_actions">
+                    <div class="o_codestra_post_call_actions__copy">
+                        <strong>Customer context</strong>
+                        <span class="text-muted">Review the CRM record or customer without searching in another tab.</span>
+                    </div>
+                    <div class="o_codestra_post_call_actions__buttons">
+                        <button name="action_open_crm_record"
+                                type="object"
+                                string="Open CRM"
+                                icon="fa-external-link"
+                                class="btn btn-outline-primary"
+                                invisible="not lead_id"/>
+                        <button name="action_open_customer"
+                                type="object"
+                                string="Open Customer"
+                                icon="fa-user"
+                                class="btn btn-outline-secondary"
+                                invisible="not partner_id"/>
+                    </div>
+                </div>
+                <field name="snoozed_until" invisible="1"/>
+                <field name="snooze_count" invisible="1"/>
+            </xpath>
+
+            <xpath expr="//footer" position="replace">
+                <footer class="o_codestra_post_call_footer">
+                    <div class="o_codestra_post_call_footer__primary">
+                        <button name="action_send_email_and_complete"
+                                type="object"
+                                string="Send Email &amp; Complete"
+                                class="btn-primary"
+                                invisible="not send_post_call_email"/>
+                        <button name="action_schedule_and_complete"
+                                type="object"
+                                string="Schedule &amp; Complete"
+                                class="btn-primary"
+                                invisible="send_post_call_email or schedule_kind == 'none'"/>
+                        <button name="action_complete_without_email"
+                                type="object"
+                                string="Save &amp; Complete"
+                                class="btn-primary"
+                                invisible="send_post_call_email or schedule_kind != 'none'"/>
+                        <button name="action_complete_without_email"
+                                type="object"
+                                string="Complete Without Email"
+                                class="btn-secondary"
+                                invisible="not send_post_call_email"/>
+                    </div>
+                    <div class="o_codestra_post_call_footer__snooze">
+                        <span class="text-muted">Remind me in</span>
+                        <button name="action_snooze_5" type="object" string="5 min" class="btn-outline-secondary"/>
+                        <button name="action_snooze_15" type="object" string="15 min" class="btn-outline-secondary"/>
+                        <button name="action_snooze_30" type="object" string="30 min" class="btn-outline-secondary"/>
+                        <button string="Close for Now" special="cancel" class="btn-link"/>
+                    </div>
+                </footer>
+            </xpath>
+        </field>
+    </record>
+</odoo>
