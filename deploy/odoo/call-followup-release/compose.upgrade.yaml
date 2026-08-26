@@ -1,0 +1,15 @@
+services:
+  odoo:
+    restart: "no"
+    command:
+      - odoo
+      - --database=${ODOO_DATABASE:?exact target database required}
+      - --addons-path=/usr/lib/python3/dist-packages/odoo/addons,/mnt/integration-addons,/mnt/call-center-addons,/mnt/breero-addons,/mnt/extra-addons,/opt/codestra/addons
+      - --update=codestra_crm_call_followup,codestra_crm_call_followup_api,codestra_crm_call_followup_ux,codestra_crm_call_followup_automation
+      - --stop-after-init
+      - --workers=0
+      - --max-cron-threads=0
+      - --without-demo=true
+      - --log-level=info
+    healthcheck:
+      test: ["NONE"]

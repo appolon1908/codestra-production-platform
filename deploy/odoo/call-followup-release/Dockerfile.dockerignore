@@ -1,0 +1,14 @@
+**
+!odoo_addons/
+!odoo_addons/codestra_crm_call_followup/
+!odoo_addons/codestra_crm_call_followup/**
+!odoo_addons/codestra_crm_call_followup_api/
+!odoo_addons/codestra_crm_call_followup_api/**
+!odoo_addons/codestra_crm_call_followup_ux/
+!odoo_addons/codestra_crm_call_followup_ux/**
+!odoo_addons/codestra_crm_call_followup_automation/
+!odoo_addons/codestra_crm_call_followup_automation/**
+!deploy/
+!deploy/odoo/
+!deploy/odoo/call-followup-release/
+!deploy/odoo/call-followup-release/**

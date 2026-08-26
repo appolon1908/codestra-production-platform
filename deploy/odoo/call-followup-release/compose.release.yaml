@@ -1,0 +1,21 @@
+services:
+  odoo:
+    image: ${ODOO_CALL_FOLLOWUP_IMAGE:?set an immutable repository@sha256 image reference}
+    pull_policy: always
+    command:
+      - odoo
+      - --addons-path=/usr/lib/python3/dist-packages/odoo/addons,/mnt/integration-addons,/mnt/call-center-addons,/mnt/breero-addons,/mnt/extra-addons,/opt/codestra/addons
+      - --workers=${ODOO_WORKERS:-4}
+      - --max-cron-threads=${ODOO_MAX_CRON_THREADS:-1}
+      - --gevent-port=${ODOO_GEVENT_PORT:-8072}
+    stop_grace_period: 90s
+    labels:
+      com.codestra.release.component: odoo-call-followup
+      com.codestra.release.git-sha: ${ODOO_CALL_FOLLOWUP_RELEASE_SHA:?exact approved 40-character Git SHA required}
+      com.codestra.call-followup.automation-default: disabled
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/codestra-odoo-healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
