@@ -9,18 +9,25 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "config/kong-canonical-middleware-routes.json"
 RECONCILER_PATH = ROOT / "scripts/reconcile_kong_canonical_routes.py"
+EXPORTER_PATH = ROOT / "scripts/export_kong_public_route_contracts.py"
 CONTROL_PLANE_PATH = ROOT / "deploy/kong/control-plane.yml"
 SCOPE_POLICY_PATH = ROOT / "deploy/kong/scope-policy.lua"
 
 
-def _module():
-    spec = importlib.util.spec_from_file_location(
-        "reconcile_kong_canonical_routes", RECONCILER_PATH
-    )
+def _load(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _module():
+    return _load(RECONCILER_PATH, "reconcile_kong_canonical_routes")
+
+
+def _exporter():
+    return _load(EXPORTER_PATH, "export_kong_public_route_contracts")
 
 
 def _inline_scope_policy() -> str:
@@ -82,6 +89,35 @@ def test_reconciler_is_exact_and_never_unions_legacy_hosts():
     assert "duplicate enabled route plugins" in source
     assert "securityAuthority" in source
     assert "correlation-id" in source
+    assert 'return "true" if value else "false"' in source
+
+
+def test_read_only_route_exporter_redacts_secret_values_without_exporting_credentials():
+    module = _exporter()
+    source = EXPORTER_PATH.read_text()
+    value = {
+        "client_secret": "do-not-export",
+        "nested": {"password": "do-not-export", "secret_is_base64": True},
+        "key_claim_name": "azp",
+        "allowed_payload_size": 2,
+    }
+    sanitized = module.sanitize(value)
+    assert sanitized["client_secret"] == "REDACTED"
+    assert sanitized["nested"]["password"] == "REDACTED"
+    assert sanitized["nested"]["secret_is_base64"] is True
+    assert sanitized["key_claim_name"] == "azp"
+    assert "method=\"GET\"" in source
+    assert "credentials_exported" in source
+    assert "consumers" not in source.lower()
+    assert "unsafe Kong pagination URL" in source
+
+
+def test_exporter_pagination_cannot_leave_the_selected_admin_origin():
+    module = _exporter()
+    with pytest.raises(RuntimeError, match="unsafe Kong pagination URL"):
+        module.safe_next(
+            "http://127.0.0.1:8001", "http://attacker.invalid/routes?offset=next"
+        )
 
 
 def test_inline_and_standalone_control_plane_scope_policies_are_identical():
