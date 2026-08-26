@@ -79,3 +79,27 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: Kong PostgreSQL replication lag exceeds 30 seconds
+      - alert: KongDatabaseUnexpectedWritableStandby
+        expr: codestra_kong_db_replication_expected == 1 and codestra_kong_db_standby_read_only != 1
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Kong PostgreSQL standby is unexpectedly writable
+      - alert: KongDatabaseReplicationSlotInactive
+        expr: codestra_kong_db_replication_expected == 1 and codestra_kong_db_replication_slots_active < 1
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Kong PostgreSQL replication slot is inactive
+      - alert: KongDatabaseWalReceiverDown
+        expr: codestra_kong_db_replication_expected == 1 and codestra_kong_db_wal_receiver_up != 1
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Kong PostgreSQL standby WAL receiver is down
+      - alert: KongDatabaseWALArchiveFailure
+        expr: increase(codestra_kong_db_wal_archive_failures_total[10m]) > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Kong PostgreSQL WAL archive command failed

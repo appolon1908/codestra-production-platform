@@ -46,6 +46,17 @@ migration_up_to_date=0
 if docker exec codestra-kong-kong-gateway-1 kong migrations list >/dev/null 2>&1; then
   migration_up_to_date=1
 fi
+replication_expected=0
+[[ -f /etc/codestra/kong-database/replication-expected ]] && replication_expected=1
+ha_values="$(docker exec "$db" psql -U kong -d kong -XAt -F '|' -v ON_ERROR_STOP=1 -c "
+select (not pg_is_in_recovery() and not current_setting('default_transaction_read_only')::boolean)::int,
+(select count(*) from pg_stat_replication where state='streaming'),
+(select count(*) from pg_replication_slots where active),
+(select archived_count from pg_stat_archiver),
+(select failed_count from pg_stat_archiver),
+coalesce((select extract(epoch from clock_timestamp()-last_archived_time) from pg_stat_archiver),-1);
+")"
+IFS='|' read -r primary_writable wal_senders replication_slots wal_archived wal_archive_failures wal_archive_age <<<"$ha_values"
 cat >"$temporary" <<EOF
 # HELP codestra_kong_db_up Direct PostgreSQL readback succeeded.
 # TYPE codestra_kong_db_up gauge
@@ -94,10 +105,37 @@ codestra_kong_db_restore_last_success_timestamp_seconds $restore_timestamp
 codestra_kong_db_migration_up_to_date $migration_up_to_date
 # HELP codestra_kong_db_replication_expected Whether HA replication is approved and expected.
 # TYPE codestra_kong_db_replication_expected gauge
-codestra_kong_db_replication_expected 0
+codestra_kong_db_replication_expected $replication_expected
 # HELP codestra_kong_db_replication_lag_seconds Replica replay lag, or -1 when no replica exists.
 # TYPE codestra_kong_db_replication_lag_seconds gauge
 codestra_kong_db_replication_lag_seconds -1
+# HELP codestra_kong_db_primary_writable The authoritative primary accepts writes.
+# TYPE codestra_kong_db_primary_writable gauge
+codestra_kong_db_primary_writable $primary_writable
+# HELP codestra_kong_db_wal_senders_streaming Streaming WAL sender count.
+# TYPE codestra_kong_db_wal_senders_streaming gauge
+codestra_kong_db_wal_senders_streaming $wal_senders
+# HELP codestra_kong_db_replication_slots_active Active physical replication slots.
+# TYPE codestra_kong_db_replication_slots_active gauge
+codestra_kong_db_replication_slots_active $replication_slots
+# HELP codestra_kong_db_wal_archived_total Successfully archived WAL segments.
+# TYPE codestra_kong_db_wal_archived_total counter
+codestra_kong_db_wal_archived_total $wal_archived
+# HELP codestra_kong_db_wal_archive_failures_total Failed WAL archive attempts.
+# TYPE codestra_kong_db_wal_archive_failures_total counter
+codestra_kong_db_wal_archive_failures_total $wal_archive_failures
+# HELP codestra_kong_db_wal_archive_age_seconds Age of latest archived WAL segment.
+# TYPE codestra_kong_db_wal_archive_age_seconds gauge
+codestra_kong_db_wal_archive_age_seconds $wal_archive_age
+# HELP codestra_kong_db_standby_in_recovery Standby recovery state; -1 until deployed.
+# TYPE codestra_kong_db_standby_in_recovery gauge
+codestra_kong_db_standby_in_recovery -1
+# HELP codestra_kong_db_standby_read_only Standby read-only state; -1 until deployed.
+# TYPE codestra_kong_db_standby_read_only gauge
+codestra_kong_db_standby_read_only -1
+# HELP codestra_kong_db_wal_receiver_up Standby WAL receiver state; -1 until deployed.
+# TYPE codestra_kong_db_wal_receiver_up gauge
+codestra_kong_db_wal_receiver_up -1
 EOF
 chmod 0644 "$temporary"
 mv -f "$temporary" "$output"
