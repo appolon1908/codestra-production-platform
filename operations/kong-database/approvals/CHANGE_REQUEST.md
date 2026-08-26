@@ -1,8 +1,8 @@
 # Kong PostgreSQL 17.11 Security / PITR / HA Activation
 
-Status: `PENDING_APPROVAL`
+Status: `ACCOUNTABLE_OWNER_APPROVED_PENDING_REPLACEMENT_SHA_REVIEW`
 
-Change ID: `PENDING_APPROVAL`
+Change ID: `CHG-20260826-KONG-DB-HA-01`
 
 ## Current evidence
 

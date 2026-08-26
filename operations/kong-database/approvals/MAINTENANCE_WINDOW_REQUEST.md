@@ -20,15 +20,15 @@ load/soak windows. No clock time is approved by this document.
 
 `ROLLBACK_RESERVE=60 minutes`
 
-`APPROVED_START=PENDING`
+`APPROVED_START=2026-08-28T00:00:00-04:00`
 
-`APPROVED_END=PENDING`
+`APPROVED_END=2026-08-28T04:00:00-04:00`
 
-`TIMEZONE=PENDING`
+`TIMEZONE=America/Santo_Domingo`
 
-`FAILOVER_REHEARSAL_WINDOW=PENDING`
+`FAILOVER_REHEARSAL_WINDOW=2026-08-29T00:00:00-04:00/2026-08-29T02:00:00-04:00`
 
-`LOAD_SOAK_WINDOW=PENDING`
+`LOAD_SOAK_WINDOW=2026-08-30T00:00:00-04:00/2026-08-30T04:00:00-04:00`
 
 The change owner stops before mutation if the approval validator fails. Abort
 criteria include stale backup, restore failure, topology mismatch, HBA/TLS

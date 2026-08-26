@@ -1,5 +1,8 @@
 # Telephony safety and Kong canary authority request
 
+Accountable authority: `Ralph Appolon`. Approved action:
+`codestra-vicidial-operator telephony-safety-status` only.
+
 Requested decision: authorize only the existing restricted operator's sanitized,
 read-only Asterisk safety action and, after safe results, one narrow authenticated
 Kong canary. This is not dialing approval.

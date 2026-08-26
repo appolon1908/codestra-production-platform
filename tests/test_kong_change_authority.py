@@ -154,3 +154,13 @@ def test_approval_packet_has_every_required_document():
         "approved-change.env.example",
     }
     assert expected <= {path.name for path in PACKAGE.iterdir()}
+
+
+def test_accountable_owner_decisions_are_non_secret_and_fail_closed():
+    decisions = (PACKAGE / "accountable-owner-decisions.env").read_text()
+    assert "CHG-20260826-KONG-DB-HA-01" in decisions
+    assert "KONG_DB_REPLICA_HOST=codestra-provider" in decisions
+    assert "KONG_DB_FENCING_PROVIDER=Hetzner_control_plane_API" in decisions
+    assert "PASSWORD=" not in decisions
+    assert "PRIVATE_KEY" not in decisions
+    assert "KONG_CHANGE_STATUS=APPROVED" not in decisions

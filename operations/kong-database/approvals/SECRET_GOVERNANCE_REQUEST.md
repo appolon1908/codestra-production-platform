@@ -5,11 +5,11 @@ five unique credentials: `kong_runtime`, `kong_migration_admin`, `kong_monitor`,
 `kong_backup`, and `kong_replication`.
 
 ```text
-SECRET_BACKEND=PENDING
-SECRET_OWNER=PENDING
-ROTATION_OWNER=PENDING
-ROTATION_INTERVAL=PENDING
-BREAK_GLASS_POLICY=PENDING
+SECRET_BACKEND=/etc/codestra/secrets/kong-database
+SECRET_OWNER=Ralph_Appolon
+ROTATION_OWNER=Ralph_Appolon
+ROTATION_INTERVAL=90_days
+BREAK_GLASS_POLICY=owner_plus_independent_approval_one_time_credential_full_audit_rotate_within_1_hour
 ```
 
 Required policy: one independently generated credential per role; root/service

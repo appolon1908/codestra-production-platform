@@ -8,18 +8,18 @@ with expansion path; private primary connectivity; TLS identity; monitoring and
 off-host backup egress; provider/network fencing; no public PostgreSQL listener.
 
 ```text
-REPLICA_HOST=PENDING
-PRIVATE_IP=PENDING
-PRIVATE_CIDR=PENDING
-PROVIDER=PENDING
-REGION=PENDING
-FAILURE_DOMAIN=PENDING
-CPU=PENDING
-RAM=PENDING
-STORAGE=PENDING
-NETWORK_PATH=PENDING
-TLS_IDENTITY=PENDING
-FENCING_INTERFACE=PENDING
+REPLICA_HOST=codestra-provider
+PRIVATE_IP=10.40.0.4
+PRIVATE_CIDR=10.40.0.4/32
+PROVIDER=Hetzner
+REGION=provider_inventory_readback_required
+FAILURE_DOMAIN=separate_bare_metal_host_same_provider_and_private_VLAN
+CPU=4_vCPU_reserved
+RAM=16_GiB_reserved
+STORAGE=200_GiB_persistent_SSD_reserved
+NETWORK_PATH=private_VLAN_10.40.0.0/24
+TLS_IDENTITY=kong-db-replica.internal.codestra.agency
+FENCING_INTERFACE=Hetzner_control_plane_API_matching_actual_primary_product
 PUBLIC_DB_PORTS=0
 ```
 

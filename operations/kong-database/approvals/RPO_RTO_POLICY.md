@@ -1,6 +1,7 @@
 # Kong database RPO/RTO proposal
 
-These values are proposals and are **not approved** by this document.
+These values were approved by the accountable database owner for change
+`CHG-20260826-KONG-DB-HA-01`.
 
 ```text
 PROPOSED_RPO_SECONDS=300
@@ -8,8 +9,9 @@ PROPOSED_RTO_SECONDS=900
 PROPOSED_WAL_RETENTION=7 days off-host, subject to capacity validation
 PROPOSED_BASE_BACKUP_RETENTION=2 weekly and 3 monthly physical backups
 LOGICAL_BACKUP_RETENTION=14 daily, 8 weekly, 12 monthly
-APPROVAL_OWNER=PENDING
-APPROVAL_STATUS=PENDING
+APPROVAL_OWNER=Ralph_Appolon
+APPROVAL_STATUS=APPROVED
+MONTHLY_PITR_REHEARSAL=required
 ```
 
 Evidence: daily encrypted logical backup, independent Restic copy, 14/8/12
