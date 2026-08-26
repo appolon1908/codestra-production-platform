@@ -52,6 +52,18 @@ def test_redis_alerts_fail_closed_and_cover_required_categories() -> None:
     assert "absent(redis_up{job=\"redis\"})" in alerts["RedisDown"]["expr"]
 
 
+def test_redis_recovery_policy_is_formally_classified() -> None:
+    lock = json.loads(
+        (ROOT / "config/redis-production-runtime-lock.json").read_text()
+    )
+    policy = lock["recovery_policy"]
+    assert "RECONSTRUCTIBLE_STATE" in policy["data_classification"]
+    assert policy["durable_authority"].startswith("PostgreSQL")
+    assert policy["backup"] == "FORMALLY_NOT_REQUIRED"
+    assert policy["ha"] == "FORMALLY_NOT_REQUIRED"
+    assert policy["owner"] == "Ralph Appolon"
+
+
 def test_odoo_contract_keeps_browser_private_and_api_boundaries_distinct() -> None:
     contract = json.loads(
         (ROOT / "config/odoo-production-contract.json").read_text()

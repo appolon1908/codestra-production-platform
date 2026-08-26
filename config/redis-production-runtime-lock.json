@@ -14,6 +14,20 @@
     "maxmemory": "768mb",
     "maxmemory_policy": "noeviction"
   },
+  "recovery_policy": {
+    "data_classification": [
+      "RECONSTRUCTIBLE_STATE",
+      "QUEUES",
+      "LOCKS",
+      "WEBSOCKET_STATE"
+    ],
+    "durable_authority": "PostgreSQL inbox/outbox and delivery tables",
+    "backup": "FORMALLY_NOT_REQUIRED",
+    "ha": "FORMALLY_NOT_REQUIRED",
+    "owner": "Ralph Appolon",
+    "approved_date": "2026-08-26",
+    "review_date": "2026-11-24"
+  },
   "network": {
     "redis": "codestra_backend",
     "exporter_alias": "redis-exporter",

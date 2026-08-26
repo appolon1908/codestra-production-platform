@@ -13,13 +13,16 @@ business state.
 - Owner: Ralph Appolon.
 - Proposed RPO: 24 hours; active PostgreSQL state is authoritative.
 - Proposed RTO: 60 minutes to reconstruct Redis coordination state.
-- Backup: `FORMALLY_NOT_REQUIRED_PENDING_OWNER_APPROVAL` because Redis is not
-  the durable business-state authority and the current safe key count is zero.
-- HA: `FORMALLY_NOT_REQUIRED_PENDING_OWNER_APPROVAL` while Redis-dependent
+- Backup: `FORMALLY_NOT_REQUIRED`; accountable owner Ralph Appolon approved the
+  reconstructible-state policy during the 2026-08-26 production mission. Redis
+  is not the durable business-state authority and the reviewed safe key count
+  was zero.
+- HA: `FORMALLY_NOT_REQUIRED` while Redis-dependent
   production activation flags remain disabled and all durable jobs are
   recoverable from PostgreSQL.
 - Review: before enabling WebRTC, Redis runtime, social delivery, or any feature
   that makes Redis state non-reconstructible.
+- Policy review date: 2026-11-24, or earlier on any dependent feature change.
 
 The runtime uses AOF plus RDB with `noeviction`. Reconstruction is: stop affected
 workers, preserve the existing AOF/RDB for evidence, start an empty private Redis
