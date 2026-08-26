@@ -40,6 +40,13 @@ database/filestore backup, validate the rendered Compose configuration, recreate
 only staging Odoo, run the module upgrade with `--stop-after-init`, and restore the
 normal staging container. Cron and all live-delivery flags remain disabled.
 
+The staging database currently contains `call_center_campaign 19.0.3.0.2`. Set
+`ODOO_CALL_CENTER_ADDON_RELEASE` to the independently reviewed, immutable
+`Codestra-SRL/codestra-odoo-addons` release whose manifest matches that installed
+version. The overlay mounts only `call_center_campaign` over the older staging
+checkout. Abort on a database/manifest version mismatch; never copy into or deploy
+the dirty staging checkout.
+
 Use synthetic `.invalid` identities. Validate queued recipients and retry state in
 Odoo's mail models; do not deliver test messages to real customer addresses.
 

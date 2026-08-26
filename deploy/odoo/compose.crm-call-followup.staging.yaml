@@ -9,4 +9,8 @@ services:
       - --http-interface=0.0.0.0
       - --without-demo=true
     volumes:
+      # The staging database has call_center_campaign 19.0.3.0.2 installed.
+      # Fail closed on its immutable source so installing another addon cannot
+      # accidentally revalidate CRM views against the older mutable checkout.
+      - ${ODOO_CALL_CENTER_ADDON_RELEASE:?exact reviewed call-center addon release directory required}/call_center_campaign:/mnt/call-center-addons/call_center_campaign:ro
       - ${ODOO_CRM_CALL_FOLLOWUP_ADDON_RELEASE:?exact reviewed addon release directory required}/codestra_crm_call_followup:/mnt/crm-call-followup-addons/codestra_crm_call_followup:ro
