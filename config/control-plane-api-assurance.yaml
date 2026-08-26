@@ -56,11 +56,11 @@ endpoints:
   messages-api-detail:
     tokens: ['else STORE.get_message(message_id,tenant)']
   messages-api-events:
-    tokens: ['event_request=parts[-1]=="events"']
+    tokens: ['event_request=parts[-1]=="events"', 'STORE.message_events(message_id,tenant)']
   messages-detail:
     tokens: ['else STORE.get_message(message_id,tenant)']
   messages-events:
-    tokens: ['event_request=parts[-1]=="events"']
+    tokens: ['event_request=parts[-1]=="events"', 'STORE.message_events(message_id,tenant)']
   messages-api-list:
     gateway_auth:
       status: gap
