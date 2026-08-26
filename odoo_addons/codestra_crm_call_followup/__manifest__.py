@@ -1,12 +1,12 @@
 {
     "name": "Codestra CRM Call Follow-up",
-    "version": "19.0.1.0.0",
+    "version": "19.0.2.0.0",
     "summary": "Modern post-call CRM workflow, callback calendar, and appointment reminders",
     "description": (
-        "Provides an idempotent post-call popup for agents, structured outcomes "
-        "and notes, callback and appointment scheduling, a 30-minute in-app "
-        "preparation reminder, and a 15-minute email reminder for the client "
-        "and assigned agent."
+        "Provides a versioned, idempotent post-call workflow for agents, "
+        "structured outcomes and notes, callback and appointment scheduling, "
+        "a 30-minute in-app preparation reminder, and a 15-minute email "
+        "reminder for the client and assigned agent."
     ),
     "author": "Codestra",
     "website": "https://codestra.co",
