@@ -1,12 +1,12 @@
 {
   "schema_version": "1.0",
   "package": "codestra-odoo19-call-followup",
-  "integration_source_sha": "32ef97f27459cf57c58e7b329ab8ed0ae9c0f34d",
+  "integration_source_sha": "b9b55274d726b2375f0a48ae30a2b1369c47e91c",
   "component_source_shas": {
     "core": "3bf43b689da96eb1ab2444c30133a2dc43563be4",
     "api": "985869b17ebd3211b87c48cf620bb34a011b910b",
-    "ux": "0c8568f36e0fd1c8e508145801d4abf32e0d85f0",
-    "automation": "dd468a79376ef595df13cfe9e142204a7771b5eb"
+    "ux": "3bcca91f62a8e1ca67c9e4b850a72a9f317ed431",
+    "automation": "fde96222979e43f213f49eeee3d695bfdc862ddb"
   },
   "base_image": "odoo@sha256:f54272f31d5f77e4146b887efb3761c98480317daf687e4b4b5e76ed8bcc08c5",
   "modules": [
