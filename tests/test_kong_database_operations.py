@@ -10,7 +10,7 @@ def test_backup_is_encrypted_checksummed_retained_and_off_host():
     assert "pg_dump" in value and "--format=custom" in value
     assert "gpg" in value and "--encrypt" in value
     assert "sha256sum -c" in value
-    assert "restic backup" in value
+    assert "restic_retry backup" in value
     assert "--keep-daily 14" in value
     assert "--keep-weekly 8" in value
     assert "--keep-monthly 12" in value
@@ -57,6 +57,10 @@ def test_metrics_and_alerts_cover_production_database_gates():
         "KongDatabaseMigrationMismatch",
         "KongDatabaseReplicationDisconnected",
         "KongDatabaseReplicationLagHigh",
+        "KongDatabaseUnexpectedWritableStandby",
+        "KongDatabaseReplicationSlotInactive",
+        "KongDatabaseWalReceiverDown",
+        "KongDatabaseWALArchiveFailure",
     ):
         assert f"alert: {alert}" in rules
 
@@ -78,6 +82,11 @@ def test_restore_rehearsal_is_scheduled_and_persistent():
     assert "NoNewPrivileges=true" in service
     assert "OnCalendar=monthly" in timer
     assert "Persistent=true" in timer
+    pitr_service = (PACKAGE / "codestra-kong-database-pitr-rehearsal.service").read_text()
+    pitr_timer = (PACKAGE / "codestra-kong-database-pitr-rehearsal.timer").read_text()
+    assert "codestra-kong-database-pitr-rehearsal" in pitr_service
+    assert "OnCalendar=monthly" in pitr_timer
+    assert "Persistent=true" in pitr_timer
 
 
 def test_database_runtime_authority_is_pinned_private_and_secret_free():
@@ -87,3 +96,36 @@ def test_database_runtime_authority_is_pinned_private_and_secret_free():
     assert '127.0.0.1:5432' not in value
     assert "KONG_PG_PASSWORD:?required" in value
     assert "changeme" not in value.lower()
+
+
+def test_hba_and_roles_fail_closed_without_secrets():
+    hba = (PACKAGE / "pg_hba.conf").read_text()
+    roles = (PACKAGE / "roles.sql").read_text()
+    active_hba = [line for line in hba.splitlines() if line and not line.startswith("#")]
+    assert all(line.split()[-1] != "trust" for line in active_hba)
+    assert "scram-sha-256" in hba
+    assert "0.0.0.0/0            reject" in hba
+    assert "kong_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE" in roles
+    assert "kong_replication LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE" in roles
+    assert "kong_backup LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE" in roles
+    assert " PASSWORD '" not in roles.upper()
+
+
+def test_pitr_and_wal_archive_are_off_host_and_encrypted():
+    config = (PACKAGE / "postgresql-ha.conf").read_text()
+    archive = (PACKAGE / "codestra-kong-wal-archive.sh").read_text()
+    rehearsal = (PACKAGE / "pitr-rehearsal.sh").read_text()
+    for value in ("archive_mode = 'on'", "wal_level = 'replica'", "max_wal_senders", "max_replication_slots"):
+        assert value in config
+    assert "gpg" in archive and "restic backup" in archive
+    assert "recovery_target_time" in rehearsal
+    assert "codestra_pitr_marker" in rehearsal
+    assert "KONG_SCHEMA_BOOT=PASS" in rehearsal
+
+
+def test_least_privilege_rehearsal_proves_runtime_and_migration_separation():
+    value = (PACKAGE / "least-privilege-rehearsal.sh").read_text()
+    assert "KONG_PG_USER=kong_runtime" in value
+    assert "ADMIN_READ_WRITE=PASS" in value
+    assert "MIGRATION_PRIVILEGE_ISOLATION=PASS" in value
+    assert "create table must_be_denied" in value
