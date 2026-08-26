@@ -1,0 +1,159 @@
+.o_codestra_workspace_header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1.5rem;
+    margin: 0 0 1rem;
+    padding: 1.25rem;
+    background: linear-gradient(135deg, #172033, #2b3f6b);
+    border-radius: 0.875rem;
+    color: #fff;
+
+    h2 {
+        margin: 0.15rem 0 0.4rem;
+        color: inherit;
+        font-size: 1.45rem;
+        font-weight: 700;
+    }
+
+    .o_field_widget {
+        color: inherit;
+    }
+}
+
+.o_codestra_workspace_identity {
+    min-width: 0;
+}
+
+.o_codestra_workspace_eyebrow {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: #667085;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.11em;
+    line-height: 1.3;
+    text-transform: uppercase;
+}
+
+.o_codestra_workspace_header .o_codestra_workspace_eyebrow {
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.o_codestra_workspace_meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 0.875rem;
+}
+
+.o_codestra_workspace_links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+
+    .btn {
+        color: #fff;
+        border-color: rgba(255, 255, 255, 0.45);
+        background: rgba(255, 255, 255, 0.08);
+        white-space: nowrap;
+    }
+
+    .btn:hover,
+    .btn:focus-visible {
+        color: #172033;
+        border-color: #fff;
+        background: #fff;
+    }
+}
+
+.o_codestra_completion_guidance {
+    margin-bottom: 1rem;
+    border: 0;
+    border-radius: 0.75rem;
+
+    .o_field_html {
+        min-height: auto;
+        border: 0;
+        background: transparent;
+    }
+
+    ul {
+        margin: 0.5rem 0 0;
+        padding-left: 1.25rem;
+    }
+}
+
+.o_codestra_primary_cta {
+    min-width: 10rem;
+    font-weight: 700;
+}
+
+.o_codestra_followup_summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+
+    > div {
+        min-width: 0;
+        padding: 1rem;
+        border: 1px solid #e3e8f0;
+        border-radius: 0.75rem;
+        background: #f8fafc;
+    }
+
+    strong,
+    .o_field_widget {
+        display: block;
+        overflow-wrap: anywhere;
+        color: #172033;
+    }
+}
+
+.o_codestra_followup_kanban {
+    .o_kanban_record {
+        border-radius: 0.875rem;
+    }
+
+    .o_codestra_kanban_next_step {
+        padding: 0.75rem;
+        border-radius: 0.625rem;
+        background: #f5f7fb;
+        color: #475467;
+    }
+
+    footer {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.35rem;
+        margin-top: 1rem;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .o_codestra_workspace_header {
+        flex-direction: column;
+        padding: 1rem;
+    }
+
+    .o_codestra_workspace_links {
+        width: 100%;
+        justify-content: flex-start;
+
+        .btn {
+            flex: 1 1 auto;
+        }
+    }
+
+    .o_codestra_followup_summary {
+        grid-template-columns: 1fr;
+    }
+
+    .o_codestra_primary_cta {
+        width: 100%;
+    }
+}
