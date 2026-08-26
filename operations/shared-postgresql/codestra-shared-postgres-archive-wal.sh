@@ -16,6 +16,12 @@ chmod 0700 "$spool"
 metrics_state="${CODESTRA_SHARED_POSTGRES_STATE:-/var/lib/codestra-shared-postgresql}"
 mkdir -p "$metrics_state"
 chmod 0700 "$metrics_state"
+temporary_files=()
+cleanup_temporary() {
+  ((${#temporary_files[@]} == 0)) || find "${temporary_files[@]}" -delete 2>/dev/null || true
+}
+trap cleanup_temporary EXIT
+
 disk_used="$(df -P "$stage" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
 [[ "$disk_used" =~ ^[0-9]+$ ]]
 if (( disk_used >= 90 )); then
@@ -60,6 +66,7 @@ for source_path in "$stage"/[0-9A-F]*; do
   artifact="$spool/$wal_name.gpg"
   if [[ ! -s "$artifact" ]]; then
     temporary="$(mktemp "$spool/.${wal_name}.XXXXXX")"
+    temporary_files+=("$temporary")
     gpg --homedir "$authority/gpg" --batch --yes --trust-model always \
       --recipient "$recipient" --encrypt --output "$temporary" "$source_path"
     mv "$temporary" "$artifact"
@@ -69,7 +76,7 @@ for source_path in "$stage"/[0-9A-F]*; do
 
   backup_json="$(mktemp "$spool/.${wal_name}.restic.XXXXXX")"
   index_json="$(mktemp "$spool/.${wal_name}.index.XXXXXX")"
-  trap 'find "$backup_json" "$index_json" -delete 2>/dev/null || true' RETURN
+  temporary_files+=("$backup_json" "$index_json")
   restic backup --json --tag shared-postgresql-wal "$artifact" "$artifact.sha256" >"$backup_json"
   snapshot_id="$(python3 - "$backup_json" <<'PY'
 import json
@@ -114,11 +121,11 @@ PY
   remote_hash="$(restic dump "$snapshot_id" "$remote_path" | sha256sum | awk '{print $1}')"
   [[ "$remote_hash" == "$expected_hash" ]]
   find "$backup_json" "$index_json" -delete
-  trap - RETURN
 
   captured_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   expires_at="$(date -u -d "+${retention_days} days" +%Y-%m-%dT%H:%M:%SZ)"
   marker_tmp="${marker}.partial"
+  temporary_files+=("$marker_tmp")
   cat >"$marker_tmp" <<EOF
 CHANGE_ID=$(<"$authority/current-change-id")
 EVIDENCE_TYPE=WAL_OFFHOST
