@@ -32,6 +32,16 @@ def test_activation_compose_projects_stage_helper_without_secrets() -> None:
     assert "private" not in serialized
 
 
+def test_backup_hba_is_role_specific_scram_and_reload_only() -> None:
+    script = (PACKAGE / "install-backup-hba.sh").read_text()
+    assert "host replication $role $cidr scram-sha-256" in script
+    assert "select pg_reload_conf()" in script
+    assert "pg_hba_file_rules" in script
+    assert "host replication all" not in script
+    assert "trust" not in script
+    assert "docker restart" not in script
+
+
 def run_validator(authority: Path):
     return subprocess.run(["bash", str(PACKAGE / "validate-change-authority.sh"), str(authority)], text=True, capture_output=True)
 
