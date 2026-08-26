@@ -1,0 +1,15 @@
+[Unit]
+Description=Encrypt and publish staged shared PostgreSQL WAL
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/codestra-shared-postgres-archive-wal.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/codestra/secrets/shared-postgresql
+ReadWritePaths=/var/spool/codestra/postgresql-shared /opt/codestra/backups/postgresql-shared
