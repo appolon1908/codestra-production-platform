@@ -26,7 +26,9 @@ class TestCodestraCrmCallFollowupUx(TransactionCase):
                 "group_ids": [Command.set([base_user.id, agent_group.id])],
             }
         )
-        cls.followup = cls.env["codestra.crm.call.followup"].sudo().create(
+        cls.followup = cls.env[
+            "codestra.crm.call.followup"
+        ].sudo().create(
             {
                 "name": "Post-call UX test",
                 "event_id": "ux-event-1",
@@ -39,8 +41,14 @@ class TestCodestraCrmCallFollowupUx(TransactionCase):
             }
         )
 
-    def test_agent_can_snooze_assigned_pending_followup(self):
-        self.followup.with_user(self.agent).action_snooze_15()
+    def test_form_snooze_keeps_the_persistent_record_open(self):
+        action = self.followup.with_user(
+            self.agent
+        ).action_snooze_15()
+        self.assertEqual(
+            action,
+            {"type": "ir.actions.client", "tag": "reload"},
+        )
         self.assertEqual(self.followup.snooze_count, 1)
         self.assertTrue(self.followup.snoozed_until)
         self.assertGreater(
@@ -48,10 +56,25 @@ class TestCodestraCrmCallFollowupUx(TransactionCase):
             fields.Datetime.now(),
         )
 
+    def test_wizard_snooze_closes_only_the_dialog(self):
+        wizard = self.env[
+            "codestra.crm.post.call.wizard"
+        ].with_user(self.agent).create(
+            {"followup_id": self.followup.id}
+        )
+        action = wizard.action_snooze_5()
+        self.assertEqual(
+            action,
+            {"type": "ir.actions.act_window_close"},
+        )
+        self.assertEqual(self.followup.snooze_count, 1)
+
     def test_snoozed_followup_is_not_returned_until_due(self):
         self.followup._write_from_workflow(
             {
-                "snoozed_until": fields.Datetime.now() + timedelta(minutes=30),
+                "snoozed_until": (
+                    fields.Datetime.now() + timedelta(minutes=30)
+                ),
             }
         )
         pending = self.env(user=self.agent)[
@@ -64,7 +87,9 @@ class TestCodestraCrmCallFollowupUx(TransactionCase):
 
         self.followup._write_from_workflow(
             {
-                "snoozed_until": fields.Datetime.now() - timedelta(minutes=1),
+                "snoozed_until": (
+                    fields.Datetime.now() - timedelta(minutes=1)
+                ),
             }
         )
         pending = self.env(user=self.agent)[
@@ -78,7 +103,9 @@ class TestCodestraCrmCallFollowupUx(TransactionCase):
     def test_cron_releases_due_snooze(self):
         self.followup._write_from_workflow(
             {
-                "snoozed_until": fields.Datetime.now() - timedelta(minutes=1),
+                "snoozed_until": (
+                    fields.Datetime.now() - timedelta(minutes=1)
+                ),
                 "snooze_count": 1,
             }
         )

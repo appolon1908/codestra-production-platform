@@ -58,6 +58,7 @@
                 <field name="company_id"
                        groups="base.group_multi_company"/>
                 <field name="attempt_count"/>
+                <field name="manual_retry_count" optional="hide"/>
                 <field name="next_attempt_at"/>
                 <field name="last_http_status"
                        optional="show"/>
@@ -94,7 +95,7 @@
                             type="object"
                             string="Move to Dead Letter"
                             class="btn-secondary"
-                            invisible="state in ['delivered', 'dead']"
+                            invisible="state not in ['pending', 'retry']"
                             confirm="Stop automatic retries for this event?"/>
                     <button name="action_open_followup"
                             type="object"
@@ -125,6 +126,7 @@
                             <field name="priority"/>
                             <field name="attempt_count"/>
                             <field name="max_attempts"/>
+                            <field name="manual_retry_count"/>
                             <field name="next_attempt_at"/>
                             <field name="locked_at"/>
                             <field name="lease_token"/>
