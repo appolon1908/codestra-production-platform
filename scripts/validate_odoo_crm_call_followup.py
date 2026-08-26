@@ -72,8 +72,10 @@ def main() -> int:
         staging_source = STAGING_OVERLAY.read_text(encoding="utf-8")
         if "ODOO_CRM_CALL_FOLLOWUP_STAGING_MAIL_INBOX_RELEASE:?" not in staging_source:
             fail(errors, "staging overlay does not fail closed on the installed mail inbox dependency")
-        if ":/mnt/vertical-addons/codestra_mail_inbox:ro" not in staging_source:
+        if ":/mnt/staging-mail-inbox-addons/codestra_mail_inbox:ro" not in staging_source:
             fail(errors, "staging overlay does not mount the installed mail inbox dependency read-only")
+        if "/mnt/staging-mail-inbox-addons" not in staging_source:
+            fail(errors, "staging mail inbox release root is absent from the Odoo addon path")
         if "ODOO_CALL_CENTER_ADDON_RELEASE:?" not in staging_source:
             fail(errors, "staging overlay does not fail closed on call-center source parity")
         if ":/mnt/call-center-addons/call_center_campaign:ro" not in staging_source:

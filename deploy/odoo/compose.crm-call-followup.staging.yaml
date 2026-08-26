@@ -3,7 +3,7 @@ services:
     command:
       - odoo
       - --database=odoo19_module_staging
-      - --addons-path=/usr/lib/python3/dist-packages/odoo/addons,/mnt/integration-addons,/mnt/call-center-addons,/mnt/vertical-addons,/mnt/crm-call-followup-addons
+      - --addons-path=/usr/lib/python3/dist-packages/odoo/addons,/mnt/integration-addons,/mnt/call-center-addons,/mnt/vertical-addons,/mnt/staging-mail-inbox-addons,/mnt/crm-call-followup-addons
       - --max-cron-threads=0
       - --workers=0
       - --http-interface=0.0.0.0
@@ -17,4 +17,4 @@ services:
       # The staging database already has codestra_mail_inbox installed. Keep its
       # independently reviewed release visible so registry validation cannot
       # silently proceed with a missing installed module.
-      - ${ODOO_CRM_CALL_FOLLOWUP_STAGING_MAIL_INBOX_RELEASE:?exact reviewed mail inbox release directory required}/codestra_mail_inbox:/mnt/vertical-addons/codestra_mail_inbox:ro
+      - ${ODOO_CRM_CALL_FOLLOWUP_STAGING_MAIL_INBOX_RELEASE:?exact reviewed mail inbox release directory required}/codestra_mail_inbox:/mnt/staging-mail-inbox-addons/codestra_mail_inbox:ro
