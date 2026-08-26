@@ -11,4 +11,3 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/node_exporter/textfile_collector
 NoNewPrivileges=true
-

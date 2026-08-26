@@ -41,4 +41,3 @@ printf 'codestra_websocket_db_replication_lag_bytes %s\n' "$lag_bytes" >> "$temp
 chmod 0644 "$temporary"
 mv -f "$temporary" "$output"
 trap - EXIT
-

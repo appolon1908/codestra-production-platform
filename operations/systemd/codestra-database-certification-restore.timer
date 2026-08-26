@@ -9,4 +9,3 @@ Unit=codestra-database-certification-restore.service
 
 [Install]
 WantedBy=timers.target
-

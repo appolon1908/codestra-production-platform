@@ -7,4 +7,3 @@ AccuracySec=5s
 Unit=codestra-database-runtime-metrics.service
 [Install]
 WantedBy=timers.target
-

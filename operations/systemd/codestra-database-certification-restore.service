@@ -12,4 +12,3 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/codestra/evidence/database-restore /var/lib/docker
 NoNewPrivileges=true
-
