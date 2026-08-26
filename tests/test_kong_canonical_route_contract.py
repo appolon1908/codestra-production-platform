@@ -12,6 +12,23 @@ def test_only_proven_middleware_routes_are_public():
     }
 
 
+def test_authenticated_middleware_contract_routes_are_canonical():
+    routes = {route["name"]: route for route in MANIFEST["contractRoutes"]}
+    assert {path for route in routes.values() for path in route["paths"]} == {
+        "/api/v1/callbacks",
+        "/api/v1/control/callbacks",
+        "/api/v1/automation/policy-check",
+        "/api/v1/integrations/n8n/results",
+    }
+    for route in routes.values():
+        assert route["hosts"] == ["api.codestra.co"]
+        assert route["serviceHost"] == "codestra-middleware-integration-api-1"
+        assert route["servicePort"] == 8095
+        assert set(route["requiredPlugins"]) == {
+            "jwt", "correlation-id", "rate-limiting", "request-size-limiting"
+        }
+
+
 def test_every_route_has_explicit_security_controls():
     for route in MANIFEST["routes"]:
         assert route["methods"]

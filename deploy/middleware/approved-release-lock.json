@@ -1,0 +1,9 @@
+{
+  "source": "https://github.com/Codestra-SRL/codestra-middleware",
+  "revision": "f199b6c40f4e467979e9a8b255a0e686321a182d",
+  "image": "ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b",
+  "required_database_head": "0056_klyrow_delivery_events",
+  "webphone_endpoint_adapter_url": "",
+  "webphone_features_enabled": false,
+  "deployment_state": "BLOCKED_PENDING_SHARED_POSTGRESQL_PITR_AND_0056_MIGRATION"
+}
