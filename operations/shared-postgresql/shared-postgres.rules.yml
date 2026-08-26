@@ -1,0 +1,27 @@
+groups:
+  - name: shared-postgresql-recovery
+    rules:
+      - alert: SharedPostgresWALArchiveFailure
+        expr: increase(codestra_shared_postgres_wal_archive_failures_total[10m]) > 0
+        for: 1m
+        labels: {severity: critical}
+      - alert: SharedPostgresWALArchiveStale
+        expr: time() - codestra_shared_postgres_wal_last_success_timestamp_seconds > 600
+        for: 5m
+        labels: {severity: critical}
+      - alert: SharedPostgresBaseBackupStale
+        expr: time() - codestra_shared_postgres_base_backup_last_success_timestamp_seconds > 691200
+        for: 1h
+        labels: {severity: critical}
+      - alert: SharedPostgresPITRRehearsalOverdue
+        expr: time() - codestra_shared_postgres_pitr_last_success_timestamp_seconds > 2678400
+        for: 1h
+        labels: {severity: warning}
+      - alert: SharedPostgresDiskWarning
+        expr: codestra_shared_postgres_disk_used_percent >= 80
+        for: 10m
+        labels: {severity: warning}
+      - alert: SharedPostgresDiskCritical
+        expr: codestra_shared_postgres_disk_used_percent >= 90
+        for: 5m
+        labels: {severity: critical}
