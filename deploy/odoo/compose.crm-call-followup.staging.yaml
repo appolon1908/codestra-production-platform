@@ -1,0 +1,12 @@
+services:
+  odoo:
+    command:
+      - odoo
+      - --database=odoo19_module_staging
+      - --addons-path=/usr/lib/python3/dist-packages/odoo/addons,/mnt/integration-addons,/mnt/call-center-addons,/mnt/vertical-addons,/mnt/crm-call-followup-addons
+      - --max-cron-threads=0
+      - --workers=0
+      - --http-interface=0.0.0.0
+      - --without-demo=true
+    volumes:
+      - ${ODOO_CRM_CALL_FOLLOWUP_ADDON_RELEASE:?exact reviewed addon release directory required}/codestra_crm_call_followup:/mnt/crm-call-followup-addons/codestra_crm_call_followup:ro

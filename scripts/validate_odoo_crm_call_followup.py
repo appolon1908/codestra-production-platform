@@ -38,6 +38,9 @@ REQUIRED_FILES = {
 }
 
 DISPOSABLE_TEST = ROOT / "scripts" / "test_odoo_crm_call_followup_disposable.sh"
+PRODUCTION_OVERLAY = ROOT / "deploy" / "odoo" / "compose.crm-call-followup.yaml"
+STAGING_OVERLAY = ROOT / "deploy" / "odoo" / "compose.crm-call-followup.staging.yaml"
+RELEASE_RUNBOOK = ROOT / "docs" / "runbooks" / "ODOO_CRM_CALL_FOLLOWUP_RELEASE.md"
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -53,6 +56,17 @@ def main() -> int:
 
     if not DISPOSABLE_TEST.is_file():
         fail(errors, "missing disposable Odoo 19 install/upgrade/uninstall gate")
+    for release_file in (PRODUCTION_OVERLAY, STAGING_OVERLAY, RELEASE_RUNBOOK):
+        if not release_file.is_file():
+            fail(errors, f"missing release authority: {release_file.relative_to(ROOT)}")
+
+    for overlay in (PRODUCTION_OVERLAY, STAGING_OVERLAY):
+        if overlay.is_file():
+            overlay_source = overlay.read_text(encoding="utf-8")
+            if "ODOO_CRM_CALL_FOLLOWUP_ADDON_RELEASE:?" not in overlay_source:
+                fail(errors, f"release overlay is not fail-closed: {overlay.name}")
+            if ":/mnt/crm-call-followup-addons/codestra_crm_call_followup:ro" not in overlay_source:
+                fail(errors, f"release overlay does not mount the addon read-only: {overlay.name}")
 
     if MANIFEST.is_file():
         try:
