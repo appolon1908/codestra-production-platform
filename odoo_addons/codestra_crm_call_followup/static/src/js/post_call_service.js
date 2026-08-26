@@ -28,7 +28,9 @@ const postCallService = {
                 queue.push({ ...item, followup_id: followupId });
                 added += 1;
             }
-            openNext();
+            if (added) {
+                openNext();
+            }
             return added;
         };
 
