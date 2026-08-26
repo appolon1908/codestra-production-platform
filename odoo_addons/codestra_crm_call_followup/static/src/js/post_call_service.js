@@ -1,5 +1,6 @@
 /** @odoo-module **/
 
+import { browser } from "@web/core/browser/browser";
 import { registry } from "@web/core/registry";
 import { _t } from "@web/core/l10n/translation";
 
@@ -16,6 +17,7 @@ const postCallService = {
         let dialogActive = false;
         let loadingPending = false;
         let refreshRequested = false;
+        let snoozeWakeupTimeout = null;
 
         const enqueue = (payload) => {
             let added = 0;
@@ -32,6 +34,22 @@ const postCallService = {
                 openNext();
             }
             return added;
+        };
+
+        const scheduleSnoozeWakeup = (snooze) => {
+            browser.clearTimeout(snoozeWakeupTimeout);
+            snoozeWakeupTimeout = null;
+            const followupId = Number(snooze && snooze.followup_id);
+            const deadline = Date.parse(snooze && snooze.snoozed_until);
+            if (!followupId || !Number.isFinite(deadline)) {
+                return;
+            }
+            const delay = Math.max(0, deadline - Date.now());
+            snoozeWakeupTimeout = browser.setTimeout(() => {
+                snoozeWakeupTimeout = null;
+                seenFollowups.delete(followupId);
+                void loadPending();
+            }, delay);
         };
 
         const loadPending = async () => {
@@ -56,6 +74,13 @@ const postCallService = {
                         break;
                     }
                 }
+                const nextSnooze = await orm.call(
+                    "codestra.crm.call.followup",
+                    "get_next_post_call_snooze",
+                    [],
+                    {}
+                );
+                scheduleSnoozeWakeup(nextSnooze);
             } catch {
                 // Users without the feature group receive no startup popup.
             } finally {
