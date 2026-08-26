@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "current_image": "odoo@sha256:f54272f31d5f77e4146b887efb3761c98480317daf687e4b4b5e76ed8bcc08c5",
+  "current_oci_revision": null,
+  "approved_next_image": null,
+  "approved_next_source": "https://github.com/Codestra-SRL/codestra-odoo-addons",
+  "approved_next_revision": null,
+  "public_ports": 0,
+  "database": "codestra_odoo",
+  "filestore_volume": "codestra_odoo_data"
+}

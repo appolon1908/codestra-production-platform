@@ -1,0 +1,15 @@
+services:
+  odoo:
+    environment:
+      ALLOW_CAMPAIGN_ACTIVATION: "false"
+      ALLOW_LIVE_CALLS: "false"
+      ALLOW_LIVE_EMAIL: "false"
+      ALLOW_LIVE_SMS: "false"
+      CODESTRA_CALLBACK_SYNC_ENABLED: "true"
+      EXTERNAL_DIAL_ENABLED: "false"
+      N8N_PRODUCTION_WORKFLOWS_ENABLED: "false"
+      PRODUCTION_CALLBACKS_ENABLED: "false"
+      SEND_EVENTS: "false"
+      TRANSFERS_ENABLED: "false"
+      VICIDIAL_WRITES_ENABLED: "false"
+      WEBRTC_PRODUCTION_ROUTES_ENABLED: "false"

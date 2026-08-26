@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import subprocess
 
 import yaml
 
@@ -23,9 +24,32 @@ def test_redis_exporter_is_authoritative_and_scraped() -> None:
         (ROOT / "operations/monitoring/prometheus.yml").read_text()
     )
     jobs = {job["job_name"]: job for job in prometheus["scrape_configs"]}
-    assert jobs["redis-exporter"]["static_configs"][0]["targets"] == [
+    assert jobs["redis"]["static_configs"][0]["targets"] == [
         "redis-exporter:9121"
     ]
+
+
+def test_redis_alerts_fail_closed_and_cover_required_categories() -> None:
+    rules = yaml.safe_load(
+        (ROOT / "operations/monitoring/rules/redis-production.rules.yml").read_text()
+    )
+    alerts = {rule["alert"]: rule for rule in rules["groups"][0]["rules"]}
+    assert set(alerts) == {
+        "RedisExporterMissing",
+        "RedisDown",
+        "RedisAuthenticationFailure",
+        "RedisRejectedConnections",
+        "RedisBlockedClients",
+        "RedisMemoryWarning",
+        "RedisMemoryCritical",
+        "RedisEvictions",
+        "RedisAOFFailure",
+        "RedisRDBFailure",
+        "RedisPersistenceStale",
+        "RedisUnexpectedReplicaState",
+    }
+    assert "absent(up{job=\"redis\"})" in alerts["RedisExporterMissing"]["expr"]
+    assert "absent(redis_up{job=\"redis\"})" in alerts["RedisDown"]["expr"]
 
 
 def test_odoo_contract_keeps_browser_private_and_api_boundaries_distinct() -> None:
@@ -66,3 +90,44 @@ def test_odoo_release_requires_source_and_revision_provenance() -> None:
         "org.opencontainers.image.source",
         "org.opencontainers.image.revision",
     ]
+
+
+def test_canonical_odoo_compose_has_no_public_ports_and_order_is_explicit() -> None:
+    deploy = ROOT / "deploy/odoo"
+    order = (deploy / "compose-order.txt").read_text().splitlines()
+    assert order == [
+        "compose.production.yaml",
+        "overrides/feature-policy.yaml",
+        "overrides/integration-trust.yaml",
+    ]
+    base = yaml.safe_load((deploy / order[0]).read_text())
+    service = base["services"]["odoo"]
+    assert "ports" not in service
+    assert service["restart"] == "unless-stopped"
+    assert service["healthcheck"]["test"][-1].endswith("|| exit 1")
+    assert set(service["networks"]) == {
+        "backend",
+        "edge",
+        "identity",
+        "internal-integration",
+    }
+
+
+def test_all_live_odoo_layers_are_classified() -> None:
+    inventory = json.loads(
+        (ROOT / "deploy/odoo/live-layer-inventory.json").read_text()
+    )
+    assert inventory["unknown_layers"] == 0
+    assert [layer["order"] for layer in inventory["layers"]] == list(range(1, 11))
+    assert all(layer["classification"] != "UNKNOWN" for layer in inventory["layers"])
+
+
+def test_odoo_container_classifier_has_no_unknown_runtime_entries() -> None:
+    result = subprocess.run(
+        ["python3", str(ROOT / "scripts/classify_odoo_containers.py")],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "ODOO_UNKNOWN_HISTORICAL_CONTAINERS=0" in result.stdout
+    assert "ODOO_CLEANUP_APPROVED_COUNT=0" in result.stdout
