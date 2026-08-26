@@ -86,6 +86,23 @@ jobs:
           print(f"minimum test gate satisfied: passed={passed}, subtests={subtests}")
           PY
 
+      - name: Run shared PostgreSQL executable recovery rehearsals when changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only "${BASE_SHA}..HEAD")"
+          if grep -Eq \
+            '^(operations/shared-postgresql/|tests/test_shared_postgresql_pitr.py$|tests/integration/shared_postgresql_)' \
+            <<<"${changed}"
+          then
+            sudo apt-get install -y --no-install-recommends restic
+            bash tests/integration/shared_postgresql_base_backup_helper.sh
+            bash tests/integration/shared_postgresql_pitr_execution.sh
+          else
+            echo "Shared PostgreSQL recovery package unchanged; executable rehearsals skipped."
+          fi
+
       - name: Compile all tracked Python involved in the suite
         run: |
           python - <<'PY'
