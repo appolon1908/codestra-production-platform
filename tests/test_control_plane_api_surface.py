@@ -3,11 +3,17 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from tools.check_control_plane_api_surface import coverage_gaps, load_yaml, validate
+from tools.check_control_plane_api_surface import (
+    REQUIRED_FIELDS,
+    coverage_gaps,
+    load_yaml,
+    validate,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "config/control-plane-api-surface.yaml"
+OPTIONAL_FIELDS = {"remediation", "idempotency_exemption"}
 
 
 def manifest():
@@ -16,6 +22,15 @@ def manifest():
 
 def test_control_plane_api_inventory_matches_current_sources() -> None:
     assert validate(ROOT, manifest()) == []
+
+
+def test_endpoint_rows_contain_only_governed_fields() -> None:
+    unexpected = {
+        row["endpoint_id"]: sorted(set(row) - REQUIRED_FIELDS - OPTIONAL_FIELDS)
+        for row in manifest()["endpoints"]
+        if set(row) - REQUIRED_FIELDS - OPTIONAL_FIELDS
+    }
+    assert unexpected == {}
 
 
 def test_missing_contract_layers_are_explicit_and_owned() -> None:
