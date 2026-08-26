@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from email.utils import getaddresses
 
 from markupsafe import Markup
 
@@ -131,9 +132,13 @@ class CodestraCrmPostCallWizard(models.TransientModel):
             if required:
                 raise ValidationError(_("%s is required.") % label)
             return
-        if not email_split(value):
+        parsed = getaddresses([value.replace(";", ",")])
+        if not parsed or any(
+            not address or email_split(address) != [address]
+            for _name, address in parsed
+        ):
             raise ValidationError(
-                _("%s does not contain a valid email address.") % label
+                _("%s contains an invalid email address.") % label
             )
 
     def _validate_completion(self):
