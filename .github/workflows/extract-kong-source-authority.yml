@@ -36,7 +36,7 @@ jobs:
           value = path.read_text(encoding="utf-8")
           start = value.index("def patch_architecture_validator() -> None:")
           end = value.index("\n\ndef patch_workflows() -> None:", start)
-          replacement = '''def patch_architecture_validator() -> None:
+          replacement = r'''def patch_architecture_validator() -> None:
               path = ROOT / "tools/check_integration_architecture.py"
               value = path.read_text(encoding="utf-8")
               block_start = value.index(
