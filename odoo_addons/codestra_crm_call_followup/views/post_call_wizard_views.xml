@@ -76,7 +76,9 @@
                 <footer>
                     <button name="action_complete" type="object" string="Save &amp; Complete" class="btn-primary"/>
                     <button name="action_complete_without_email" type="object" string="Complete Without Email" class="btn-secondary" invisible="not send_post_call_email"/>
-                    <button string="Close for Now" special="cancel" class="btn-link"/>
+                    <button name="action_save_draft" type="object" string="Save Draft" class="btn-secondary"/>
+                    <button name="action_snooze_10_minutes" type="object" string="Snooze 10 Minutes" class="btn-secondary"/>
+                    <button string="Discard Unsaved Changes" special="cancel" class="btn-link"/>
                 </footer>
             </form>
         </field>

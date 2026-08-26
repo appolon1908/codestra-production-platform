@@ -11,6 +11,11 @@ class CalendarEvent(models.Model):
         copy=False,
         ondelete="set null",
     )
+    codestra_schedule_kind = fields.Selection(
+        [("callback", "Callback"), ("appointment", "Appointment")],
+        string="Call Follow-up Schedule Type",
+        copy=False,
+    )
 
     _codestra_followup_unique = models.Constraint(
         "UNIQUE(codestra_call_followup_id)",
@@ -22,24 +27,29 @@ class CalendarEvent(models.Model):
         if self.env.context.get("skip_codestra_followup_sync"):
             return result
 
-        if {"start", "stop", "active"}.intersection(values):
+        if {"start", "stop", "active", "codestra_schedule_kind"}.intersection(values):
             for event in self.filtered("codestra_call_followup_id"):
                 followup_values = {}
-                if "start" in values:
-                    followup_values["callback_at"] = event.start
-                if {"start", "stop"}.intersection(values) and event.start and event.stop:
-                    duration = int(
-                        max(1, round((event.stop - event.start).total_seconds() / 60))
-                    )
-                    followup_values["duration_minutes"] = duration
                 if "active" in values and not event.active:
+                    # Preserve the link to the archived event. This retains audit
+                    # history and allows the same event to be safely reactivated.
                     followup_values.update(
                         {
                             "schedule_kind": "none",
                             "callback_at": False,
-                            "calendar_event_id": False,
                         }
                     )
+                elif event.active:
+                    if event.start:
+                        followup_values["callback_at"] = event.start
+                    if event.start and event.stop:
+                        followup_values["duration_minutes"] = int(
+                            max(1, round((event.stop - event.start).total_seconds() / 60))
+                        )
+                    if event.codestra_schedule_kind:
+                        followup_values["schedule_kind"] = event.codestra_schedule_kind
+                    followup_values["calendar_event_id"] = event.id
+
                 if followup_values:
                     event.codestra_call_followup_id._write_from_workflow(
                         followup_values
