@@ -314,9 +314,27 @@ class CodestraCrmPostCallWizard(models.TransientModel):
             subtype_xmlid="mail.mt_note",
         )
 
+    def _claim_pending_followup(self):
+        """Serialize completion and reject stale/replayed wizard submissions."""
+        self.ensure_one()
+        followup = self.followup_id.exists()
+        if not followup:
+            return False
+        # PostgreSQL rechecks the pending predicate after a concurrent row lock is
+        # released. The losing submission therefore observes no row and performs
+        # none of the calendar, mail, or chatter side effects below.
+        self.env.cr.execute(
+            f"SELECT id FROM {followup._table} "
+            "WHERE id = %s AND state = 'pending' FOR UPDATE",
+            [followup.id],
+        )
+        return bool(self.env.cr.fetchone())
+
     def action_complete(self):
         self.ensure_one()
         self._validate_completion()
+        if not self._claim_pending_followup():
+            return {"type": "ir.actions.act_window_close"}
         event = self._schedule_or_remove_calendar_event()
         mail = self._queue_post_call_email()
 

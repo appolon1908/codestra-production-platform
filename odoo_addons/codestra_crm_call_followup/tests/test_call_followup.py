@@ -294,6 +294,40 @@ class TestCodestraCrmCallFollowup(TransactionCase):
         self.assertTrue(followup.mail_id)
         self.assertEqual(followup.mail_id.state, "outgoing")
 
+    def test_replayed_wizard_does_not_duplicate_completion_side_effects(self):
+        registration = self._register("replayed-wizard-event")
+        agent_env = self.env(user=self.agent)
+        followup = agent_env["codestra.crm.call.followup"].browse(
+            registration["followup_id"]
+        )
+        values = {
+            "followup_id": followup.id,
+            "disposition": "contacted",
+            "schedule_kind": "none",
+            "send_post_call_email": True,
+            "email_to": self.customer.email,
+            "email_cc": self.agent.email,
+            "email_subject": "Synthetic replay-safe follow-up",
+            "email_body": "<p>Replay safety test.</p>",
+        }
+        first = agent_env["codestra.crm.post.call.wizard"].create(values)
+        stale = agent_env["codestra.crm.post.call.wizard"].create(values)
+
+        first.action_complete()
+        followup.invalidate_recordset()
+        first_mail = followup.mail_id
+        first_messages = self.lead.message_ids.filtered(
+            lambda item: "Post-call follow-up completed" in (item.body or "")
+        )
+
+        stale.action_complete()
+        followup.invalidate_recordset()
+        replay_messages = self.lead.message_ids.filtered(
+            lambda item: "Post-call follow-up completed" in (item.body or "")
+        )
+        self.assertEqual(followup.mail_id, first_mail)
+        self.assertEqual(len(replay_messages), len(first_messages))
+
     def test_agent_cannot_bypass_post_call_workflow_with_direct_write(self):
         registration = self._register("direct-write-event")
         followup = self.env(user=self.agent)[

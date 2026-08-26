@@ -160,6 +160,16 @@ def main() -> int:
         if required_snippet not in model_source:
             fail(errors, f"completed-call model missing invariant: {required_snippet}")
 
+    wizard_source = (MODULE / "wizard" / "post_call_wizard.py").read_text(
+        encoding="utf-8"
+    ) if (MODULE / "wizard" / "post_call_wizard.py").is_file() else ""
+    for required_snippet in (
+        "_claim_pending_followup",
+        "state = 'pending' FOR UPDATE",
+    ):
+        if required_snippet not in wizard_source:
+            fail(errors, f"post-call completion missing replay invariant: {required_snippet}")
+
     alarm_source = (MODULE / "data" / "calendar_alarm_data.xml").read_text(
         encoding="utf-8"
     ) if (MODULE / "data" / "calendar_alarm_data.xml").is_file() else ""
