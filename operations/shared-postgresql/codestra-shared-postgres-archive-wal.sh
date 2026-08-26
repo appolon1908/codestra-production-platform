@@ -32,6 +32,11 @@ export RESTIC_REPOSITORY
 if [[ -f "$authority/object-access-key-id" ]]; then AWS_ACCESS_KEY_ID="$(<"$authority/object-access-key-id")"; export AWS_ACCESS_KEY_ID; fi
 if [[ -f "$authority/object-secret-access-key" ]]; then AWS_SECRET_ACCESS_KEY="$(<"$authority/object-secret-access-key")"; export AWS_SECRET_ACCESS_KEY; fi
 if [[ -f "$authority/object-region" ]]; then AWS_DEFAULT_REGION="$(<"$authority/object-region")"; export AWS_DEFAULT_REGION; fi
+restic_lock="${CODESTRA_SHARED_POSTGRES_RESTIC_LOCK:-/run/lock/codestra-shared-postgresql-restic.lock}"
+install -d -m 0755 "$(dirname "$restic_lock")"
+exec 9>"$restic_lock"
+flock -w 300 9
+
 shopt -s nullglob
 for source_path in "$stage"/[0-9A-F]*; do
   [[ -f "$source_path" && ! -L "$source_path" ]]
