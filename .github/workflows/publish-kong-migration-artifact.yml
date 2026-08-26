@@ -1,0 +1,44 @@
+name: Publish verified Kong migration artifact
+
+on:
+  push:
+    branches:
+      - migration/export-kong-authority-20260826
+    paths:
+      - .github/workflows/publish-kong-migration-artifact.yml
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Reconstruct and verify source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          directory=migration/kong-export
+          cat "$directory"/KONG_SOURCE_BUNDLE.part-* \
+            | base64 --decode > KONG_SOURCE_BUNDLE.tar.gz
+          sed -E 's#^([0-9a-f]{64})[[:space:]]+.*#\1  KONG_SOURCE_BUNDLE.tar.gz#' \
+            "$directory/KONG_SOURCE_BUNDLE.sha256" > KONG_SOURCE_BUNDLE.sha256
+          sha256sum -c KONG_SOURCE_BUNDLE.sha256
+          mkdir verify
+          tar -xzf KONG_SOURCE_BUNDLE.tar.gz -C verify
+          python3 verify/tools/verify_migration_manifest.py
+          test -f verify/deploy/kong/control-plane.yml
+          test -f verify/operations/kong-database/README.md
+          test -f verify/tests/test_kong_route_authority_hardening.py
+      - name: Upload exact verified bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: kong-source-authority-bundle
+          path: |
+            KONG_SOURCE_BUNDLE.tar.gz
+            KONG_SOURCE_BUNDLE.sha256
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
