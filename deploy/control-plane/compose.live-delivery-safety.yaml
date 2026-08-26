@@ -8,7 +8,7 @@ x-live-delivery-safety: &live-delivery-safety
 services:
   api:
     <<: *live-delivery-safety
-    command: ["python", "-m", "control_plane_service.server"]
+    command: ["python", "-m", "control_plane_service.application"]
   worker:
     <<: *live-delivery-safety
     command: ["python", "-m", "control_plane_service.worker"]

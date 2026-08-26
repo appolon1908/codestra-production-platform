@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
+import json
+import subprocess
 from io import BytesIO
 from pathlib import Path
 
 import pytest
+import yaml
 
 from control_plane_service.api.auth import resolve_operator
 from control_plane_service.api.http import (
@@ -148,9 +152,9 @@ def test_trusted_gateway_operator_requires_digest_role_peer_and_tenant() -> None
 
 
 def test_bearer_fallback_is_role_bounded_and_invalid_proxy_config_is_not_trusted() -> None:
-    fallback = lambda token: (
-        ("legacy-operator", "operations", None) if token == "good" else None
-    )
+    def fallback(token: str) -> tuple[str, str, None] | None:
+        return ("legacy-operator", "operations", None) if token == "good" else None
+
     resolved = resolve_operator(
         {"Authorization": "Bearer good"},
         "127.0.0.1",
@@ -190,6 +194,29 @@ def test_application_handler_inherits_every_business_route_without_reimplementat
     assert ApplicationHandler.do_OPTIONS is not LegacyHandler.do_OPTIONS
 
 
+def test_application_handler_preserves_every_route_family_and_http_method() -> None:
+    for method in ("do_GET", "do_POST", "do_PUT", "do_PATCH"):
+        assert getattr(ApplicationHandler, method) is getattr(LegacyHandler, method)
+    assert callable(ApplicationHandler.do_OPTIONS)
+
+    inherited_route_source = "\n".join(
+        inspect.getsource(getattr(ApplicationHandler, method))
+        for method in ("do_GET", "do_POST", "do_PUT", "do_PATCH")
+    )
+    for route_authority in (
+        "/v1/crm/",
+        "/v1/forms/",
+        "/v1/messages",
+        "/preferences",
+        "/v1/crawler/jobs",
+        "/api/v1/events/",
+        "/api/v1/control/campaigns",
+        "/api/v1/reconciliation/run",
+        "/api/v1/ops/",
+    ):
+        assert route_authority in inherited_route_source
+
+
 def test_container_runtime_uses_compatibility_application_entrypoint() -> None:
     dockerfile = (ROOT / "deploy/control-plane/Dockerfile").read_text(encoding="utf-8")
     assert (
@@ -199,6 +226,64 @@ def test_container_runtime_uses_compatibility_application_entrypoint() -> None:
     assert (
         'CMD ["/opt/venv/bin/python", "-m", "control_plane_service.server"]'
         not in dockerfile
+    )
+
+
+def test_authoritative_compose_files_parse_and_use_application_entrypoint() -> None:
+    compose_files = (
+        ROOT / "deploy/control-plane/compose.yaml",
+        ROOT / "deploy/control-plane/compose.live-delivery-safety.yaml",
+    )
+    for path in compose_files:
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert isinstance(parsed.get("services"), dict)
+
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            "codestra-integration-control-plane",
+            "--file",
+            str(compose_files[0]),
+            "--file",
+            str(compose_files[1]),
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    effective = json.loads(result.stdout)
+    assert effective["services"]["api"]["command"] == [
+        "python",
+        "-m",
+        "control_plane_service.application",
+    ]
+
+
+def test_production_operator_cannot_inject_legacy_server_entrypoint() -> None:
+    operator = (
+        ROOT / "operations/production-operator/codestra-production-operator"
+    ).read_text(encoding="utf-8")
+    assert "deploy/control-plane/compose.yaml" in operator
+    assert "deploy/control-plane/compose.live-delivery-safety.yaml" in operator
+    assert "control_plane_service.server" not in operator
+
+    production_authorities = (
+        ROOT / "deploy/control-plane/Dockerfile",
+        ROOT / "deploy/control-plane/compose.yaml",
+        ROOT / "deploy/control-plane/compose.live-delivery-safety.yaml",
+        ROOT / "operations/production-operator/codestra-production-operator",
+    )
+    legacy_launch = "control_plane_service.server"
+    assert all(
+        legacy_launch not in path.read_text(encoding="utf-8")
+        for path in production_authorities
     )
 
 
