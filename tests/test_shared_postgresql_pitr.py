@@ -93,6 +93,20 @@ def test_nonroot_stage_and_portable_checksum_relocation(tmp_path):
     assert subprocess.run(["sha256sum", "-c", "wal.gpg.sha256"], cwd=second).returncode == 0
 
 
+def test_nonroot_stage_accepts_timeline_history(tmp_path):
+    if os.geteuid() == 0:
+        tmp_path.chmod(0o755); tmp_path.parent.chmod(0o755); tmp_path.parent.parent.chmod(0o755)
+    stage = tmp_path / "stage"; stage.mkdir(mode=0o700)
+    source = tmp_path / "source"; source.write_text("timeline history"); source.chmod(0o644)
+    script = tmp_path / "stage.sh"; shutil.copy2(PACKAGE / "codestra-shared-postgres-stage-wal.sh", script); script.chmod(0o755)
+    command = ["bash", str(script), str(source), "00000002.history"]
+    if os.geteuid() == 0:
+        shutil.chown(stage, user="nobody", group="nogroup")
+        command = ["setpriv", "--reuid=nobody", "--regid=nogroup", "--clear-groups", *command]
+    result = subprocess.run(command, env={**os.environ, "CODESTRA_SHARED_WAL_STAGE": str(stage)})
+    assert result.returncode == 0 and (stage / "00000002.history").read_text() == "timeline history"
+
+
 @pytest.mark.parametrize("mutation,gate", [
     ({"empty": True}, "FILE_SECURITY"), ({"status": "FAIL"}, "STATUS"),
     ({"change": "WRONG"}, "CHANGE_ID"), ({"age": 7200}, "STALE"), ({"mismatch": True}, "CHECKSUM"),
@@ -143,7 +157,20 @@ def test_wal_worker_has_verified_bounded_retention_and_metrics():
     rules = (PACKAGE / "shared-postgres.rules.yml").read_text()
     assert "restic dump" in worker and "OFFHOST_STATUS=PASS" not in worker
     assert "STATUS=PASS" in worker and "wal-retention-days" in worker and "-mtime" in worker
+    assert "recorded_artifact" in worker and "continue" in worker
+    assert "wal_spool_disk_critical" in worker and "critical WAL spool filesystem usage" in worker
+    assert "exit 1" not in worker
     assert "SharedPostgresWALSpoolCleanupFailure" in rules
+
+
+def test_metrics_use_actual_offhost_success_and_support_timeline_history():
+    metrics = (PACKAGE / "shared-postgres-metrics.sh").read_text()
+    rules = (PACKAGE / "shared-postgres.rules.yml").read_text()
+    restore = (PACKAGE / "codestra-shared-postgres-restore-wal.sh").read_text()
+    assert "LAST_OFFHOST_SUCCESS" in metrics
+    assert "codestra_shared_postgres_wal_offhost_last_success_timestamp_seconds" in metrics
+    assert "codestra_shared_postgres_wal_offhost_last_success_timestamp_seconds" in rules
+    assert ".history" in restore
 
 
 def test_spool_cleanup_removes_only_verified_expired_wal(tmp_path):

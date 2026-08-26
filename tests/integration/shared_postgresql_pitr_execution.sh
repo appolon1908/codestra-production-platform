@@ -158,7 +158,10 @@ for _ in $(seq 1 90); do
   }
   sleep 1
 done
-docker exec "$recovery" pg_isready -U postgres >/dev/null
+if ! docker exec "$recovery" pg_isready -U postgres >/dev/null; then
+  docker logs "$recovery" >&2
+  exit 1
+fi
 for _ in $(seq 1 90); do
   recovery_state="$(docker exec -u postgres "$recovery" psql -U postgres -d postgres -Atqc 'select pg_is_in_recovery()' 2>/dev/null || true)"
   [[ "$recovery_state" == f ]] && break

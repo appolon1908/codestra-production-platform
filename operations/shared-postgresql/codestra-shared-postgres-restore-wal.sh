@@ -4,7 +4,7 @@ umask 077
 
 wal_name="${1:?WAL name required}"
 destination="${2:?restore destination required}"
-[[ "$wal_name" =~ ^[0-9A-F]{24}(\.[0-9A-F]{8}\.backup)?$ ]]
+[[ "$wal_name" =~ ^([0-9A-F]{24}(\.[0-9A-F]{8}\.backup)?|[0-9A-F]{8}\.history)$ ]]
 [[ "$destination" != *..* ]]
 archive="${CODESTRA_SHARED_RECOVERY_ARCHIVE:-/recovery-archive}"
 secrets="${CODESTRA_SHARED_RECOVERY_SECRETS:-/run/recovery-secrets}"
@@ -17,7 +17,6 @@ temporary="${destination}.partial"
 runtime_home="$(mktemp -d "${TMPDIR:-/tmp}/codestra-recovery-gpg.XXXXXX")"
 cleanup() {
   find "$temporary" -delete 2>/dev/null || true
-  gpgconf --homedir "$runtime_home" --kill gpg-agent >/dev/null 2>&1 || true
   find "$runtime_home" -xdev -type f -exec shred -u -- {} + 2>/dev/null || true
   find "$runtime_home" -depth -type d -empty -delete 2>/dev/null || true
 }
