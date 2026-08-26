@@ -77,12 +77,55 @@ restic_lock="${CODESTRA_SHARED_POSTGRES_RESTIC_LOCK:-/run/lock/codestra-shared-p
 install -d -m 0755 "$(dirname "$restic_lock")"
 exec 9>"$restic_lock"
 flock -w 300 9
-restic backup --quiet --json --tag shared-postgresql-base "$destination" >/dev/null
-snapshot_id="$(restic snapshots --json --tag shared-postgresql-base --path "$destination/base.tar.gpg" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v[-1]["id"] if v else "")')"
+
+backup_json="$work/restic-backup.jsonl"
+restic backup --json --tag shared-postgresql-base "$destination" >"$backup_json"
+snapshot_id="$(python3 - "$backup_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+summary = None
+for raw in Path(sys.argv[1]).read_text().splitlines():
+    if not raw.strip():
+        continue
+    value = json.loads(raw)
+    if value.get("message_type") == "summary" and value.get("snapshot_id"):
+        summary = value
+if summary is None:
+    raise SystemExit("restic backup produced no summary snapshot ID")
+print(summary["snapshot_id"])
+PY
+)"
 [[ "$snapshot_id" =~ ^[0-9a-f]{64}$ ]]
+
+# Do not assume how a restic version represents an absolute source path. Read the
+# exact snapshot index, require one matching basename, and dump that indexed path.
+restic_index="$work/restic-index.jsonl"
+restic ls --json "$snapshot_id" >"$restic_index"
 for name in base.tar.gpg backup_manifest metadata.env SHA256SUMS; do
+  remote_path="$(python3 - "$restic_index" "$name" <<'PY'
+import json
+import sys
+from pathlib import PurePosixPath, Path
+
+matches = []
+for raw in Path(sys.argv[1]).read_text().splitlines():
+    if not raw.strip():
+        continue
+    value = json.loads(raw)
+    if value.get("struct_type") != "node" or value.get("type") != "file":
+        continue
+    path = value.get("path", "")
+    if PurePosixPath(path).name == sys.argv[2]:
+        matches.append(path)
+if len(matches) != 1:
+    raise SystemExit(f"expected exactly one restic path for {sys.argv[2]}: {matches}")
+print(matches[0])
+PY
+)"
   expected="$(sha256sum "$destination/$name" | awk '{print $1}')"
-  actual="$(restic dump "$snapshot_id" "$destination/$name" | sha256sum | awk '{print $1}')"
+  actual="$(restic dump "$snapshot_id" "$remote_path" | sha256sum | awk '{print $1}')"
   [[ "$actual" == "$expected" ]]
 done
 restic forget --quiet --tag shared-postgresql-base --keep-weekly 8 --keep-monthly 12
