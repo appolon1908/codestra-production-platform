@@ -19,18 +19,38 @@ trap cleanup EXIT
 mkdir -p "$destination" "$work/data"
 chmod 0700 "$destination" "$work" "$work/data"
 
+safe_root_secret() {
+  local path="$1" mode owner
+  [[ -f "$path" && ! -L "$path" && -s "$path" ]] || return 1
+  mode="$(stat -c '%a' "$path")"; owner="$(stat -c '%u' "$path")"
+  [[ "$owner" == 0 && $((8#$mode & 077)) -eq 0 ]]
+}
+
 image="$(<"$authority/postgres-image")"; network="$(<"$authority/postgres-network")"
 host="$(<"$authority/postgres-host")"; port="$(<"$authority/postgres-port")"
 role="$(<"$authority/backup-role")"; passfile="$authority/backup-passfile"
 recipient="$(<"$authority/archive-recipient")"
-[[ "$image" == *@sha256:* && "$port" =~ ^[0-9]+$ && -f "$passfile" && ! -L "$passfile" ]]
+[[ "$image" == *@sha256:* && "$port" =~ ^[0-9]+$ ]]
+safe_root_secret "$passfile"
 postgres_uid="$(docker run --rm --network none --entrypoint id "$image" -u postgres)"
 postgres_gid="$(docker run --rm --network none --entrypoint id "$image" -g postgres)"
+[[ "$postgres_uid" =~ ^[0-9]+$ && "$postgres_gid" =~ ^[0-9]+$ ]]
 chown "$postgres_uid:$postgres_gid" "$work/data"
+runtime_passfile="$work/pgpass"
+install -m 0600 -o "$postgres_uid" -g "$postgres_gid" "$passfile" "$runtime_passfile"
+
+# Prove the exact non-root container identity can read the runtime credential copy
+# before starting a potentially expensive base backup. The root-owned authority
+# file itself is never mounted into the PostgreSQL utility container.
+docker run --rm --network none --read-only --user "$postgres_uid:$postgres_gid" \
+  --cap-drop ALL --security-opt no-new-privileges:true \
+  -e PGPASSFILE=/run/secrets/pgpass -v "$runtime_passfile:/run/secrets/pgpass:ro" \
+  --entrypoint sh "$image" -ec 'test -r "$PGPASSFILE"; test "$(stat -c %a "$PGPASSFILE")" = 600'
+
 docker run --rm --network "$network" --read-only --user "$postgres_uid:$postgres_gid" \
   --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 128 \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m -e PGPASSFILE=/run/secrets/pgpass \
-  -v "$passfile:/run/secrets/pgpass:ro" -v "$work/data:/backup" \
+  -v "$runtime_passfile:/run/secrets/pgpass:ro" -v "$work/data:/backup" \
   --entrypoint pg_basebackup "$image" -h "$host" -p "$port" -U "$role" \
   -D /backup -Fp -X stream -c fast -l "codestra-shared-$stamp" --manifest-checksums=SHA256
 test -s "$work/data/backup_manifest"
@@ -53,6 +73,10 @@ export RESTIC_CACHE_DIR="$root/.restic-cache"
 if [[ -f "$authority/object-access-key-id" ]]; then AWS_ACCESS_KEY_ID="$(<"$authority/object-access-key-id")"; export AWS_ACCESS_KEY_ID; fi
 if [[ -f "$authority/object-secret-access-key" ]]; then AWS_SECRET_ACCESS_KEY="$(<"$authority/object-secret-access-key")"; export AWS_SECRET_ACCESS_KEY; fi
 if [[ -f "$authority/object-region" ]]; then AWS_DEFAULT_REGION="$(<"$authority/object-region")"; export AWS_DEFAULT_REGION; fi
+restic_lock="${CODESTRA_SHARED_POSTGRES_RESTIC_LOCK:-/run/lock/codestra-shared-postgresql-restic.lock}"
+install -d -m 0755 "$(dirname "$restic_lock")"
+exec 9>"$restic_lock"
+flock -w 300 9
 restic backup --quiet --json --tag shared-postgresql-base "$destination" >/dev/null
 snapshot_id="$(restic snapshots --json --tag shared-postgresql-base --path "$destination/base.tar.gpg" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v[-1]["id"] if v else "")')"
 [[ "$snapshot_id" =~ ^[0-9a-f]{64}$ ]]
