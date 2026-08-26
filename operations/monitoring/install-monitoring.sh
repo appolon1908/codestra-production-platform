@@ -27,6 +27,16 @@ for secret in primary_receiver_url secondary_receiver_url recovery_receiver_url 
         exit 2
     }
 done
+postgres_exporter_secret=/etc/codestra/secrets/monitoring/postgres_exporter_password
+[[ -s "$postgres_exporter_secret" ]] || {
+    echo "protected PostgreSQL exporter secret is missing: $postgres_exporter_secret" >&2
+    exit 2
+}
+postgres_exporter_mode=$(stat -c '%a' "$postgres_exporter_secret")
+[[ "$postgres_exporter_mode" == "400" || "$postgres_exporter_mode" == "440" || "$postgres_exporter_mode" == "600" || "$postgres_exporter_mode" == "640" ]] || {
+    echo "unsafe PostgreSQL exporter secret mode: $postgres_exporter_secret ($postgres_exporter_mode)" >&2
+    exit 2
+}
 
 python3 "$ROOT/validate-receiver-files.py" \
     --check-network "$CONFIG" /etc/codestra/secrets/monitoring

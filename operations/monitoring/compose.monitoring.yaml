@@ -50,12 +50,29 @@ services:
       - --path.rootfs=/host
       - --collector.systemd
       - --collector.processes
+      - --collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector
     volumes:
       - /:/host:ro,rslave
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
     pid: host
     networks: [monitoring]
     read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: docker.io/prometheuscommunity/postgres-exporter@sha256:9fca39a4307092387b7de884bed4b62205cb88a6a5fdb423b9a70ea80b34efb3
+    environment:
+      DATA_SOURCE_URI: codestra-postgres-1:5432/postgres?sslmode=disable
+      DATA_SOURCE_USER: codestra_monitoring
+      DATA_SOURCE_PASS_FILE: /run/secrets/postgres_monitoring_password
+    secrets:
+      - source: postgres_monitoring_credential
+        target: postgres_monitoring_password
+    networks: [monitoring, backend]
+    read_only: true
+    tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     restart: unless-stopped
@@ -91,7 +108,14 @@ services:
 networks:
   monitoring:
     internal: false
+  backend:
+    external: true
+    name: codestra_backend
 
 volumes:
   prometheus_data: {}
   alertmanager_data: {}
+
+secrets:
+  postgres_monitoring_credential:
+    file: /etc/codestra/secrets/monitoring/postgres_exporter_password
