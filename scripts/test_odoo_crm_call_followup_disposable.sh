@@ -75,7 +75,7 @@ odoo -u codestra_crm_call_followup
 module_state=$(docker exec "$postgres_container" psql \
     -U "$database_user" -d "$database" -Atqc \
     "SELECT state || ':' || latest_version FROM ir_module_module WHERE name='codestra_crm_call_followup'")
-[[ "$module_state" == 'installed:19.0.1.0.0' ]]
+[[ "$module_state" == 'installed:19.0.1.1.0' ]]
 echo "DISPOSABLE_UPGRADE_TEST=PASS state=$module_state"
 
 printf '%s\n' \
