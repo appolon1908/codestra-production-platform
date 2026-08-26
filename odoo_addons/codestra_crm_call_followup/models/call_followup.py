@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from psycopg2 import IntegrityError
+import hmac
+from datetime import timedelta
 
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, ValidationError
 
 
+API_VERSION = "1.0"
 POST_CALL_BUS_CHANNEL = "codestra_crm_call_followup.post_call"
+MAX_SNOOZE_MINUTES = 24 * 60
 
 DISPOSITION_SELECTION = [
     ("contacted", "Contacted"),
@@ -20,12 +23,27 @@ DISPOSITION_SELECTION = [
     ("not_interested", "Not Interested"),
     ("other", "Other"),
 ]
-
 SCHEDULE_KIND_SELECTION = [
     ("none", "No Schedule"),
     ("callback", "Callback"),
     ("appointment", "Appointment"),
 ]
+PRIORITY_SELECTION = [
+    ("normal", "Normal"),
+    ("high", "High"),
+    ("urgent", "Urgent"),
+]
+SENTIMENT_SELECTION = [
+    ("positive", "Positive"),
+    ("neutral", "Neutral"),
+    ("negative", "Negative"),
+]
+CONTACT_CHANNEL_SELECTION = [
+    ("phone", "Phone"),
+    ("video", "Video"),
+    ("in_person", "In Person"),
+]
+COMPLIANCE_REVIEW_DISPOSITIONS = {"do_not_call", "wrong_number"}
 
 
 class CodestraCrmCallFollowup(models.Model):
@@ -38,7 +56,25 @@ class CodestraCrmCallFollowup(models.Model):
     event_id = fields.Char(required=True, readonly=True, index=True, copy=False)
     correlation_id = fields.Char(readonly=True, index=True, copy=False)
     call_id = fields.Char(readonly=True, index=True, copy=False)
-    source = fields.Char(required=True, readonly=True, default="middleware", copy=False)
+    source = fields.Char(
+        required=True, readonly=True, default="middleware", copy=False
+    )
+    payload_version = fields.Char(
+        required=True,
+        readonly=True,
+        default=API_VERSION,
+        index=True,
+        copy=False,
+    )
+    request_fingerprint = fields.Char(readonly=True, index=True, copy=False)
+    call_direction = fields.Selection(
+        [("inbound", "Inbound"), ("outbound", "Outbound"), ("unknown", "Unknown")],
+        required=True,
+        default="unknown",
+        readonly=True,
+        index=True,
+        copy=False,
+    )
 
     company_id = fields.Many2one(
         "res.company",
@@ -88,11 +124,25 @@ class CodestraCrmCallFollowup(models.Model):
         tracking=True,
     )
     disposition = fields.Selection(
-        DISPOSITION_SELECTION,
+        DISPOSITION_SELECTION, tracking=True, index=True
+    )
+    notes = fields.Html(sanitize=True, tracking=True)
+    priority = fields.Selection(
+        PRIORITY_SELECTION,
+        required=True,
+        default="normal",
         tracking=True,
         index=True,
     )
-    notes = fields.Html(sanitize=True, tracking=True)
+    priority_rank = fields.Integer(
+        compute="_compute_priority_rank", store=True, index=True
+    )
+    customer_sentiment = fields.Selection(
+        SENTIMENT_SELECTION, tracking=True, index=True
+    )
+    compliance_review_required = fields.Boolean(
+        readonly=True, tracking=True, index=True, copy=False
+    )
 
     schedule_kind = fields.Selection(
         SCHEDULE_KIND_SELECTION,
@@ -102,6 +152,13 @@ class CodestraCrmCallFollowup(models.Model):
     )
     callback_at = fields.Datetime(index=True, tracking=True)
     duration_minutes = fields.Integer(default=30, tracking=True)
+    contact_channel = fields.Selection(
+        CONTACT_CHANNEL_SELECTION,
+        required=True,
+        default="phone",
+        tracking=True,
+    )
+    meeting_location = fields.Char(tracking=True)
     calendar_event_id = fields.Many2one(
         "calendar.event",
         readonly=True,
@@ -117,14 +174,16 @@ class CodestraCrmCallFollowup(models.Model):
     email_subject = fields.Char()
     email_body = fields.Html(sanitize=True)
     mail_id = fields.Many2one(
-        "mail.mail",
-        readonly=True,
-        copy=False,
-        ondelete="set null",
+        "mail.mail", readonly=True, copy=False, ondelete="set null"
     )
 
     popup_requested_at = fields.Datetime(readonly=True, copy=False)
     popup_completed_at = fields.Datetime(readonly=True, copy=False)
+    snoozed_until = fields.Datetime(readonly=True, index=True, copy=False)
+    completed_at = fields.Datetime(readonly=True, index=True, copy=False)
+    completed_by_id = fields.Many2one(
+        "res.users", readonly=True, ondelete="set null", copy=False
+    )
 
     _event_unique = models.Constraint(
         "UNIQUE(company_id, event_id)",
@@ -139,202 +198,89 @@ class CodestraCrmCallFollowup(models.Model):
         "Callback or appointment duration must be greater than zero.",
     )
 
+    @api.depends("priority")
+    def _compute_priority_rank(self):
+        ranks = {"normal": 0, "high": 1, "urgent": 2}
+        for record in self:
+            record.priority_rank = ranks.get(record.priority, 0)
+
     @api.constrains("schedule_kind", "callback_at")
     def _check_schedule_datetime(self):
         for record in self:
             if record.schedule_kind != "none" and not record.callback_at:
-                raise ValidationError(_("A callback or appointment requires a date and time."))
+                raise ValidationError(
+                    _("A callback or appointment requires a date and time.")
+                )
 
-    @api.model
-    def _require_service_user(self):
-        if not self.env.user.has_group(
-            "codestra_crm_call_followup.group_call_followup_service"
-        ):
-            raise AccessError(
-                _("Only the authenticated call integration service may register completed calls.")
-            )
-
-    @api.model
-    def _parse_datetime(self, value, field_label, required=False):
-        if not value:
-            if required:
-                raise ValidationError(_("%s is required.") % field_label)
-            return False
-        try:
-            return fields.Datetime.to_datetime(value)
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(_("%s is not a valid date and time.") % field_label) from exc
-
-    @api.model
-    def _resolve_company(self, payload):
-        company_id = payload.get("company_id") or self.env.company.id
-        try:
-            company_id = int(company_id)
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(_("company_id must be an integer.")) from exc
-
-        if company_id not in self.env.user.company_ids.ids:
-            raise AccessError(_("The integration service is not assigned to this company."))
-        company = self.env["res.company"].sudo().browse(company_id).exists()
-        if not company:
-            raise ValidationError(_("The requested company does not exist."))
-        return company
-
-    @api.model
-    def _resolve_agent(self, payload, company):
-        users = self.env["res.users"].sudo().with_context(active_test=True)
-        agent = users.browse()
-        if payload.get("agent_user_id"):
-            try:
-                agent_id = int(payload["agent_user_id"])
-            except (TypeError, ValueError) as exc:
-                raise ValidationError(_("agent_user_id must be an integer.")) from exc
-            agent = users.browse(agent_id).exists()
-        elif payload.get("agent_login"):
-            agent = users.search(
-                [("login", "=", str(payload["agent_login"]).strip())],
-                limit=1,
-            )
-
-        if not agent or agent.share:
-            raise ValidationError(_("A valid internal agent is required."))
-        if company not in agent.company_ids:
-            raise AccessError(_("The assigned agent does not belong to the event company."))
-        return agent
-
-    @api.model
-    def _resolve_lead(self, payload, company):
-        leads = self.env["crm.lead"].sudo()
-        if not payload.get("lead_id"):
-            return leads.browse()
-        try:
-            lead_id = int(payload["lead_id"])
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(_("lead_id must be an integer.")) from exc
-        lead = leads.browse(lead_id).exists()
-        if not lead:
-            raise ValidationError(_("The requested CRM lead does not exist."))
-        if lead.company_id and lead.company_id != company:
-            raise AccessError(_("The CRM lead belongs to a different company."))
-        return lead
-
-    @api.model
-    def _resolve_partner(self, payload, lead, company):
-        partners = self.env["res.partner"].sudo()
-        partner = lead.partner_id if lead else partners.browse()
-        if payload.get("partner_id"):
-            try:
-                partner_id = int(payload["partner_id"])
-            except (TypeError, ValueError) as exc:
-                raise ValidationError(_("partner_id must be an integer.")) from exc
-            partner = partners.browse(partner_id).exists()
-            if not partner:
-                raise ValidationError(_("The requested customer does not exist."))
-        if partner.company_id and partner.company_id != company:
-            raise AccessError(_("The customer belongs to a different company."))
-        return partner
+    @api.ondelete(at_uninstall=False)
+    def _prevent_audit_deletion(self):
+        raise AccessError(
+            _("Completed-call follow-up records are an immutable audit trail.")
+        )
 
     @api.model
     def register_completed_call(self, payload):
-        """Create one pending post-call action from an authenticated RPC event.
+        """Compatibility RPC delegate for the versioned API model."""
+        return self.env[
+            "codestra.crm.call.followup.api"
+        ].register_completed_call(payload)
 
-        The caller must be a dedicated Odoo API-key user in the technical service
-        group. ``event_id`` is company-scoped and idempotent. A concurrent duplicate
-        returns the first record instead of producing a second popup or calendar item.
-        """
-        self._require_service_user()
-        if not isinstance(payload, dict):
-            raise ValidationError(_("The completed-call payload must be an object."))
+    @api.model
+    def get_api_contract(self):
+        return self.env["codestra.crm.call.followup.api"].get_contract()
 
-        event_id = str(payload.get("event_id") or "").strip()
-        if not event_id:
-            raise ValidationError(_("event_id is required."))
-        if len(event_id) > 255:
-            raise ValidationError(_("event_id cannot exceed 255 characters."))
+    @api.model
+    def get_api_health(self):
+        return self.env["codestra.crm.call.followup.api"].health()
 
-        company = self._resolve_company(payload)
-        agent = self._resolve_agent(payload, company)
-        lead = self._resolve_lead(payload, company)
-        partner = self._resolve_partner(payload, lead, company)
-        ended_at = self._parse_datetime(
-            payload.get("ended_at") or fields.Datetime.now(),
-            _("Call end time"),
-            required=True,
-        )
-        started_at = self._parse_datetime(payload.get("started_at"), _("Call start time"))
-
-        try:
-            duration_seconds = int(payload.get("duration_seconds") or 0)
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(_("duration_seconds must be an integer.")) from exc
-        if duration_seconds < 0:
-            raise ValidationError(_("duration_seconds cannot be negative."))
-
-        followup_model = self.sudo().with_company(company)
-        domain = [("company_id", "=", company.id), ("event_id", "=", event_id)]
-        existing = followup_model.search(domain, limit=1)
-        if existing:
-            return existing._registration_response(replayed=True)
-
-        customer_name = (
-            partner.display_name
-            or lead.display_name
-            or str(payload.get("customer_name") or _("Customer"))
-        )
-        email_to = (
-            partner.email
-            or lead.email_from
-            or str(payload.get("customer_email") or "").strip()
-            or False
-        )
-        values = {
-            "name": _("Post-call follow-up — %s") % customer_name,
-            "event_id": event_id,
-            "correlation_id": str(payload.get("correlation_id") or "").strip() or False,
-            "call_id": str(payload.get("call_id") or "").strip() or False,
-            "source": str(payload.get("source") or "middleware").strip(),
-            "company_id": company.id,
-            "agent_id": agent.id,
-            "lead_id": lead.id or False,
-            "partner_id": partner.id or False,
-            "started_at": started_at,
-            "ended_at": ended_at,
-            "duration_seconds": duration_seconds,
-            "email_to": email_to,
-            "email_cc": agent.email or False,
-            "popup_requested_at": fields.Datetime.now(),
-        }
-
-        created = False
-        try:
-            with self.env.cr.savepoint():
-                followup = followup_model.create(values)
-                created = True
-        except IntegrityError:
-            followup = followup_model.search(domain, limit=1)
-            if not followup:
-                raise
-
-        if created:
-            self.env["bus.bus"].sudo()._sendone(
-                agent.partner_id,
-                POST_CALL_BUS_CHANNEL,
-                {
-                    "followup_id": followup.id,
-                    "event_id": event_id,
-                    "title": _("Call completed"),
-                    "message": _("Complete the outcome, notes, callback, and email."),
-                },
+    @api.model_create_multi
+    def create(self, values_list):
+        if not self.env.context.get("codestra_call_ingest"):
+            raise AccessError(
+                _(
+                    "Completed-call records may be created only by "
+                    "the ingestion workflow."
+                )
             )
-        return followup._registration_response(replayed=not created)
+        return super().create(values_list)
+
+    def _registration_response_for_replay(
+        self, request_fingerprint, correlation_id=False
+    ):
+        self.ensure_one()
+        if self.request_fingerprint and not hmac.compare_digest(
+            self.request_fingerprint, request_fingerprint
+        ):
+            raise ValidationError(
+                _(
+                    "IDEMPOTENCY_CONFLICT: event_id %(event)s was already "
+                    "accepted with different immutable call data."
+                )
+                % {"event": self.event_id}
+            )
+        updates = {}
+        if not self.request_fingerprint:
+            updates["request_fingerprint"] = request_fingerprint
+        if correlation_id and not self.correlation_id:
+            updates["correlation_id"] = correlation_id
+        if updates:
+            self._write_from_workflow(updates)
+        return self._registration_response(replayed=True)
 
     def _registration_response(self, replayed=False):
         self.ensure_one()
         return {
+            "api_version": API_VERSION,
+            "status": "accepted",
+            "created": not bool(replayed),
+            "replayed": bool(replayed),
             "followup_id": self.id,
             "event_id": self.event_id,
+            "correlation_id": self.correlation_id or False,
             "state": self.state,
-            "replayed": bool(replayed),
+            "next_action": (
+                "post_call_popup" if self.state == "pending" else "none"
+            ),
         }
 
     @api.model
@@ -347,24 +293,43 @@ class CodestraCrmCallFollowup(models.Model):
             limit = max(1, min(int(limit), 20))
         except (TypeError, ValueError):
             limit = 5
+
+        now = fields.Datetime.now()
         records = self.search(
             [
                 ("agent_id", "=", self.env.user.id),
                 ("state", "=", "pending"),
                 ("popup_completed_at", "=", False),
+                "|",
+                ("snoozed_until", "=", False),
+                ("snoozed_until", "<=", now),
             ],
-            order="ended_at asc, id asc",
+            order="priority_rank desc, ended_at asc, id asc",
             limit=limit,
         )
         return [
             {
+                "api_version": API_VERSION,
                 "followup_id": record.id,
                 "event_id": record.event_id,
                 "title": _("Complete post-call follow-up"),
                 "message": record.name,
+                "priority": record.priority,
+                "ended_at": fields.Datetime.to_string(record.ended_at),
             }
             for record in records
         ]
+
+    def _lock_for_completion(self):
+        self.ensure_one()
+        self.env.cr.execute(
+            "SELECT id FROM codestra_crm_call_followup "
+            "WHERE id = %s FOR UPDATE",
+            [self.id],
+        )
+        locked = self.browse(self.id)
+        locked.invalidate_recordset()
+        return locked
 
     def action_open_post_call_wizard(self):
         self.ensure_one()
@@ -375,13 +340,18 @@ class CodestraCrmCallFollowup(models.Model):
             "view_mode": "form",
             "views": [(False, "form")],
             "target": "new",
-            "context": {"default_followup_id": self.id, "dialog_size": "large"},
+            "context": {
+                "default_followup_id": self.id,
+                "dialog_size": "large",
+            },
         }
 
     def action_open_calendar_event(self):
         self.ensure_one()
         if not self.calendar_event_id:
-            raise ValidationError(_("No callback or appointment has been scheduled."))
+            raise ValidationError(
+                _("No callback or appointment has been scheduled.")
+            )
         return {
             "type": "ir.actions.act_window",
             "name": self.calendar_event_id.display_name,
@@ -392,19 +362,75 @@ class CodestraCrmCallFollowup(models.Model):
             "target": "current",
         }
 
+    def action_open_related_record(self):
+        self.ensure_one()
+        if self.lead_id:
+            model, record = "crm.lead", self.lead_id
+        elif self.partner_id:
+            model, record = "res.partner", self.partner_id
+        else:
+            raise ValidationError(
+                _("No CRM lead or customer is linked to this call.")
+            )
+        return {
+            "type": "ir.actions.act_window",
+            "name": record.display_name,
+            "res_model": model,
+            "res_id": record.id,
+            "view_mode": "form",
+            "views": [(False, "form")],
+            "target": "current",
+        }
+
+    def action_snooze(self, minutes=10):
+        try:
+            minutes = int(minutes)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                _("Snooze duration must be an integer.")
+            ) from exc
+        if not 5 <= minutes <= MAX_SNOOZE_MINUTES:
+            raise ValidationError(
+                _("Snooze duration must be between 5 minutes and 24 hours.")
+            )
+
+        for record in self:
+            locked = record._lock_for_completion()
+            if locked.state != "pending":
+                raise ValidationError(
+                    _("Only pending call follow-ups can be snoozed.")
+                )
+            locked._write_from_workflow(
+                {
+                    "snoozed_until": (
+                        fields.Datetime.now()
+                        + timedelta(minutes=minutes)
+                    )
+                }
+            )
+        return True
+
+    def action_snooze_10_minutes(self):
+        return self.action_snooze(minutes=10)
+
     def action_cancel_followup(self):
-        if any(record.state != "pending" for record in self):
-            raise ValidationError(_("Only pending call follow-ups can be cancelled."))
-        self._write_from_workflow(
-            {
-                "state": "cancelled",
-                "popup_completed_at": fields.Datetime.now(),
-            }
-        )
+        for record in self:
+            locked = record._lock_for_completion()
+            if locked.state != "pending":
+                raise ValidationError(
+                    _("Only pending call follow-ups can be cancelled.")
+                )
+            locked._write_from_workflow(
+                {
+                    "state": "cancelled",
+                    "snoozed_until": False,
+                    "popup_completed_at": fields.Datetime.now(),
+                }
+            )
         return True
 
     def _write_from_workflow(self, values):
-        """Apply state changes from trusted server-side workflow methods only."""
+        """Apply state changes from trusted server-side workflow methods."""
         return super().write(values)
 
     def write(self, values):
@@ -418,15 +444,23 @@ class CodestraCrmCallFollowup(models.Model):
             "ended_at",
             "duration_seconds",
             "source",
+            "payload_version",
+            "request_fingerprint",
+            "call_direction",
             "call_id",
             "correlation_id",
         }
         if immutable.intersection(values):
-            raise AccessError(_("Completed-call identity fields are immutable."))
+            raise AccessError(
+                _("Completed-call identity fields are immutable.")
+            )
         if not self.env.user.has_group(
             "codestra_crm_call_followup.group_call_followup_manager"
         ):
             raise AccessError(
-                _("Call follow-ups must be changed through the post-call workflow.")
+                _(
+                    "Call follow-ups must be changed through "
+                    "the post-call workflow."
+                )
             )
         return super().write(values)
