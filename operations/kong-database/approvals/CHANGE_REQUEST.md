@@ -1,6 +1,7 @@
 # Kong PostgreSQL 17.11 Security / PITR / HA Activation
 
-Status: `PENDING_APPROVAL`  
+Status: `PENDING_APPROVAL`
+
 Change ID: `PENDING_APPROVAL`
 
 ## Current evidence

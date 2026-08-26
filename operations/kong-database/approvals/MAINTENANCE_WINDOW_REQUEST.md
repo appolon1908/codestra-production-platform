@@ -14,14 +14,20 @@ load/soak windows. No clock time is approved by this document.
 | Stable authority and monitoring validation | 20 min |
 | Rollback reserve | 60 min |
 
-`MINIMUM_REQUIRED_WINDOW=180 minutes`  
-`RECOMMENDED_WINDOW=240 minutes`  
+`MINIMUM_REQUIRED_WINDOW=180 minutes`
+
+`RECOMMENDED_WINDOW=240 minutes`
+
 `ROLLBACK_RESERVE=60 minutes`
 
-`APPROVED_START=PENDING`  
-`APPROVED_END=PENDING`  
-`TIMEZONE=PENDING`  
-`FAILOVER_REHEARSAL_WINDOW=PENDING`  
+`APPROVED_START=PENDING`
+
+`APPROVED_END=PENDING`
+
+`TIMEZONE=PENDING`
+
+`FAILOVER_REHEARSAL_WINDOW=PENDING`
+
 `LOAD_SOAK_WINDOW=PENDING`
 
 The change owner stops before mutation if the approval validator fails. Abort
