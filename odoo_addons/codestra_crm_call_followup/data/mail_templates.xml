@@ -17,21 +17,32 @@
                             <div style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.75;">
                                 <t t-out="object.company_id.name"/>
                             </div>
-                            <div style="font-size:24px;font-weight:700;margin-top:6px;">Thank you for your time</div>
+                            <div style="font-size:24px;font-weight:700;margin-top:6px;">
+                                Thank you for your time
+                            </div>
                         </div>
                         <div style="padding:28px;line-height:1.6;">
                             <p style="margin:0 0 16px;">
                                 Hello <t t-out="object.partner_id.name or object.lead_id.contact_name or 'there'"/>,
                             </p>
                             <p style="margin:0 0 16px;">
-                                Thank you for speaking with <t t-out="object.agent_id.name"/>. This message confirms that we have recorded your request and the agreed next step.
+                                Thank you for speaking with <t t-out="object.agent_id.name"/>.
+                                This message confirms that we have recorded your request and the agreed next step.
                             </p>
                             <p style="margin:0 0 16px;">
                                 Reply directly to this email if anything needs to be corrected before the follow-up.
                             </p>
+                            <div t-if="object.agent_id.email" style="margin:24px 0;text-align:center;">
+                                <a t-attf-href="mailto:{{ object.agent_id.email }}"
+                                   style="display:inline-block;padding:11px 18px;background:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+                                    Reply to your agent
+                                </a>
+                            </div>
                             <div style="margin-top:24px;padding-top:18px;border-top:1px solid #e3e8f0;color:#5c667a;font-size:13px;">
                                 <strong><t t-out="object.agent_id.name"/></strong><br/>
-                                <t t-if="object.agent_id.email"><t t-out="object.agent_id.email"/></t>
+                                <t t-if="object.agent_id.email">
+                                    <t t-out="object.agent_id.email"/>
+                                </t>
                             </div>
                         </div>
                     </div>
@@ -51,23 +62,41 @@
                 <div style="margin:0;padding:28px;background:#f6f8fb;font-family:Arial,sans-serif;color:#172033;">
                     <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e3e8f0;border-radius:16px;overflow:hidden;">
                         <div style="padding:24px 28px;background:#172033;color:#ffffff;">
-                            <div style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.75;">15-minute reminder</div>
+                            <div style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.75;">
+                                15-minute reminder
+                            </div>
                             <div style="font-size:24px;font-weight:700;margin-top:6px;">
                                 <t t-out="object.event_id.name"/>
                             </div>
                         </div>
                         <div style="padding:28px;line-height:1.6;">
-                            <p style="margin:0 0 16px;">Hello <t t-out="object.partner_id.name or 'there'"/>,</p>
                             <p style="margin:0 0 16px;">
-                                Your callback or appointment begins in 15 minutes. Please review any relevant information and be ready at the scheduled time.
+                                Hello <t t-out="object.partner_id.name or 'there'"/>,
+                            </p>
+                            <p style="margin:0 0 16px;">
+                                Your callback or appointment begins in 15 minutes.
+                                Please review the relevant information and be ready at the scheduled time.
                             </p>
                             <div style="padding:16px 18px;background:#f6f8fb;border-radius:10px;margin:22px 0;">
                                 <strong>Starts:</strong>
                                 <t t-out="format_datetime(object.event_id.start, tz=object.partner_id.tz or object.event_id.user_id.tz)"/>
+                                <t t-if="object.event_id.location">
+                                    <br/>
+                                    <strong>Location or link:</strong>
+                                    <t t-out="object.event_id.location"/>
+                                </t>
+                            </div>
+                            <div style="margin:24px 0;text-align:center;">
+                                <a t-attf-href="/calendar/meeting/view?token={{ object.access_token }}&amp;id={{ object.event_id.id }}"
+                                   style="display:inline-block;padding:11px 18px;background:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+                                    View appointment
+                                </a>
                             </div>
                             <p style="margin:0;color:#5c667a;font-size:13px;">
                                 Organizer: <t t-out="object.event_id.user_id.name"/>
-                                <t t-if="object.event_id.user_id.email"> · <t t-out="object.event_id.user_id.email"/></t>
+                                <t t-if="object.event_id.user_id.email">
+                                    · <t t-out="object.event_id.user_id.email"/>
+                                </t>
                             </p>
                         </div>
                     </div>
