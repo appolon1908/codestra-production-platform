@@ -12,21 +12,55 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 
 SENSITIVE_KEYS = {
+    "api_key",
+    "apikey",
+    "authorization",
     "client_secret",
+    "cookie",
     "password",
     "private_key",
+    "proxy_authorization",
     "rsa_private_key",
     "secret",
+    "set_cookie",
     "shared_secret",
     "token",
+    "x_api_key",
+    "x_auth_token",
 }
-SENSITIVE_SUFFIXES = ("_password", "_private_key", "_secret", "_token")
+SENSITIVE_SUFFIXES = (
+    "_api_key",
+    "_authorization",
+    "_cookie",
+    "_password",
+    "_private_key",
+    "_secret",
+    "_token",
+)
+SENSITIVE_HEADER_NAMES = {
+    "api-key",
+    "apikey",
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+    "set-cookie",
+    "x-api-key",
+    "x-auth-token",
+}
+SENSITIVE_ASSIGNMENT = re.compile(
+    r"(?i)(?:^|[\s,;])(?:api[-_ ]?key|authorization|client_secret|cookie|"
+    r"password|private_key|proxy-authorization|secret|set-cookie|shared_secret|"
+    r"token|x-api-key|x-auth-token)\s*[:=]"
+)
+BEARER_VALUE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
+PRIVATE_KEY_MARKER = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")
 
 
 def request(base: str, path: str) -> dict:
@@ -61,19 +95,47 @@ def all_rows(base: str, path: str) -> list[dict]:
 
 
 def sensitive_key(key: str) -> bool:
-    normalized = key.lower()
+    normalized = key.lower().replace("-", "_")
     if normalized in {"secret_is_base64", "key_claim_name"}:
         return False
     return normalized in SENSITIVE_KEYS or normalized.endswith(SENSITIVE_SUFFIXES)
 
 
+def redacted(value) -> dict[str, object]:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return {"redacted": True, "sha256": hashlib.sha256(payload).hexdigest()}
+
+
+def sensitive_scalar(value: object, key: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    stripped = value.strip()
+    if PRIVATE_KEY_MARKER.search(stripped) or BEARER_VALUE.search(stripped):
+        return True
+    if SENSITIVE_ASSIGNMENT.search(stripped):
+        return True
+    if ":" in stripped:
+        header_name = stripped.split(":", 1)[0].strip().lower()
+        if header_name in SENSITIVE_HEADER_NAMES:
+            return True
+    normalized_key = key.lower().replace("-", "_")
+    if normalized_key in {"headers", "header", "add_headers", "replace_headers", "append_headers"}:
+        header_name = stripped.split(":", 1)[0].strip().lower()
+        if header_name in SENSITIVE_HEADER_NAMES:
+            return True
+    parsed = urlsplit(stripped)
+    return bool(parsed.scheme and (parsed.username or parsed.password))
+
+
 def sanitize(value, key: str = ""):
     if sensitive_key(key):
-        return "REDACTED"
+        return redacted(value)
     if isinstance(value, dict):
         return {name: sanitize(item, name) for name, item in sorted(value.items())}
     if isinstance(value, list):
         return [sanitize(item, key) for item in value]
+    if sensitive_scalar(value, key):
+        return redacted(value)
     return value
 
 
@@ -124,7 +186,7 @@ def route_record(
         "strip_path": route.get("strip_path"),
         "preserve_host": route.get("preserve_host"),
         "https_redirect_status_code": route.get("https_redirect_status_code"),
-        "headers": route.get("headers") or {},
+        "headers": sanitize(route.get("headers") or {}, "headers"),
         "snis": sorted(route.get("snis") or []),
         "sources": route.get("sources") or [],
         "destinations": route.get("destinations") or [],
