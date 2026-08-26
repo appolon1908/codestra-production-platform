@@ -1,0 +1,2 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_codestra_crm_call_followup_report_manager,Call follow-up report manager,model_codestra_crm_call_followup_report,codestra_crm_call_followup.group_call_followup_manager,1,0,0,0
