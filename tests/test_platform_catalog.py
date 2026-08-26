@@ -133,6 +133,13 @@ def test_deployment_candidate_must_be_boolean() -> None:
     assert "feature-deployment-candidate" in rules
 
 
+def test_required_server_push_flag_must_be_boolean() -> None:
+    value = catalog()
+    value["known_gaps"][0]["required_before_server_push"] = 0
+    rules = {item.rule for item in validate_catalog(ROOT, value)}
+    assert "gap-server-push-flag" in rules
+
+
 def test_duplicate_public_route_is_rejected() -> None:
     value = catalog()
     value["apis"].append(copy.deepcopy(value["apis"][0]))
