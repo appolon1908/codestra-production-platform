@@ -37,6 +37,10 @@ def test_backup_hba_is_role_specific_scram_and_reload_only() -> None:
     assert "host replication $role $cidr scram-sha-256" in script
     assert "select pg_reload_conf()" in script
     assert "pg_hba_file_rules" in script
+    assert "requested.is_private" in script
+    assert "requested not in attached" in script
+    assert "trap rollback EXIT" in script
+    assert 'equivalent=$(psql' in script
     assert "host replication all" not in script
     assert "trust" not in script
     assert "docker restart" not in script
