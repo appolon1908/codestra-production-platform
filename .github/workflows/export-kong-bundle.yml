@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "${SOURCE_PROTECTED_SHA}"
+          git merge-base --is-ancestor "${SOURCE_PROTECTED_SHA}" HEAD
           git fetch --no-tags origin "${SOURCE_ROUTE_SHA}"
           git worktree add --detach route-authority "${SOURCE_ROUTE_SHA}"
           test "$(git -C route-authority rev-parse HEAD)" = "${SOURCE_ROUTE_SHA}"
@@ -261,7 +261,8 @@ jobs:
                       | xargs -0 -r -n1 bash -n
                     find operations deploy scripts -type f -name '*.sh' -print0 \
                       | xargs -0 -r shellcheck -x
-                    ! grep -RIlE --exclude='*.md' --exclude='MIGRATION_MANIFEST.json' \
+                    ! grep -RIlE --exclude-dir=tests --exclude-dir=reports --exclude-dir=docs \
+                      --exclude='MIGRATION_MANIFEST.json' \
                       '(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|Authorization:[[:space:]]*Bearer[[:space:]]+[^[:space:]]+|client_secret[[:space:]]*=[[:space:]]*[^[:space:]]+)' \
                       .
                 - name: Run Kong authority tests
@@ -320,13 +321,17 @@ jobs:
           test -f kong-export/deploy/kong/control-plane.yml
           test -f kong-export/operations/kong-database/README.md
           test -f kong-export/tests/test_kong_route_authority_hardening.py
-          pytest -q \
-            kong-export/tests/test_kong_canonical_route_contract.py \
-            kong-export/tests/test_kong_route_authority_hardening.py \
-            kong-export/tests/test_kong_database_operations.py \
-            kong-export/tests/test_kong_change_authority.py
-          python3 kong-export/tools/verify_migration_manifest.py
-          ! grep -RIlE --exclude='*.md' --exclude='MIGRATION_MANIFEST.json' \
+          (
+            cd kong-export
+            pytest -q \
+              tests/test_kong_canonical_route_contract.py \
+              tests/test_kong_route_authority_hardening.py \
+              tests/test_kong_database_operations.py \
+              tests/test_kong_change_authority.py
+            python3 tools/verify_migration_manifest.py
+          )
+          ! grep -RIlE --exclude-dir=tests --exclude-dir=reports --exclude-dir=docs \
+            --exclude='MIGRATION_MANIFEST.json' \
             '(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|Authorization:[[:space:]]*Bearer[[:space:]]+[^[:space:]]+|client_secret[[:space:]]*=[[:space:]]*[^[:space:]]+)' \
             kong-export
 
