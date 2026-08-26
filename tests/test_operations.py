@@ -158,6 +158,13 @@ class BackupOperationsTests(unittest.TestCase):
 
 
 class MonitoringGovernanceTests(unittest.TestCase):
+    def test_platform_ci_publishes_required_legacy_status(self) -> None:
+        workflow = (ROOT / ".github/workflows/platform-source-gate.yml").read_text()
+        self.assertIn("statuses: write", workflow)
+        self.assertIn('statuses/${GITHUB_SHA}', workflow)
+        self.assertIn("-f context=validate", workflow)
+        self.assertIn("if: always()", workflow)
+
     def test_middleware_database_exporters_are_wired(self) -> None:
         compose = yaml.safe_load((MONITORING / "compose.monitoring.yaml").read_text())
         services = compose["services"]
