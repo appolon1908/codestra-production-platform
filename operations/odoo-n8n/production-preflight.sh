@@ -58,11 +58,20 @@ done
 
 for identity in odoo_app:codestra_odoo n8n_app:codestra_n8n; do
     role=${identity%%:*}; database=${identity#*:}
-    role_state=$(pg -d postgres -c "select rolcanlogin::text||'|'||rolsuper::text from pg_roles where rolname='$role'")
-    object_count=$(pg -d "$database" -c \
-        "set role $role; select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where c.relkind in ('r','p','v','m') and n.nspname not in ('pg_catalog','information_schema') and n.nspname !~ '^pg_toast'")
-    object_count=${object_count##*$'\n'}
-    if [[ $role_state == 'true|false' && $object_count =~ ^[1-9][0-9]*$ ]]; then
+    other_database=codestra_odoo
+    [[ $database == codestra_odoo ]] && other_database=codestra_n8n
+    role_state=$(pg -d postgres -c \
+        "select rolcanlogin::text||'|'||rolsuper::text||'|'||rolcreatedb::text||'|'||rolcreaterole::text||'|'||rolreplication::text||'|'||rolbypassrls::text from pg_roles where rolname='$role'")
+    own_connect=$(pg -d postgres -c "select has_database_privilege('$role','$database','CONNECT')")
+    cross_connect=$(pg -d postgres -c "select has_database_privilege('$role','$other_database','CONNECT')")
+    inherited_roles=$(pg -d postgres -c \
+        "select count(*) from pg_auth_members m join pg_roles r on r.oid=m.member where r.rolname='$role'")
+    read -r missing_table_privileges table_count < <(pg -d "$database" -F ' ' -c \
+        "select count(*) filter(where not has_table_privilege('$role',format('%I.%I',n.nspname,c.relname),'SELECT,INSERT,UPDATE,DELETE')),count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where c.relkind in ('r','p') and n.nspname='public'")
+    if [[ $role_state == 'true|false|false|false|false|false' &&
+          $own_connect == t && $cross_connect == f &&
+          $inherited_roles -eq 0 && $table_count =~ ^[1-9][0-9]*$ &&
+          $missing_table_privileges -eq 0 ]]; then
         emit_pass "$role least-privilege connectivity to $database"
     else
         emit_fail "$role database connectivity or privilege contract"
