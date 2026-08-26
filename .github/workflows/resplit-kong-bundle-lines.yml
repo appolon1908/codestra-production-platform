@@ -1,0 +1,54 @@
+name: Line-wrap Kong migration bundle for transfer
+
+on:
+  push:
+    branches:
+      - migration/export-kong-authority-20260826
+    paths:
+      - .github/workflows/resplit-kong-bundle-lines.yml
+
+permissions:
+  contents: write
+
+jobs:
+  split:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Verify and line-split base64 bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          directory=migration/kong-export
+          temporary=$(mktemp -d)
+          trap 'rm -rf "$temporary"' EXIT
+          cat "$directory"/KONG_SOURCE_BUNDLE.part-* > "$temporary/bundle.single-line.b64"
+          base64 --decode "$temporary/bundle.single-line.b64" > "$temporary/KONG_SOURCE_BUNDLE.tar.gz"
+          (
+            cd "$temporary"
+            sed -E 's#^([0-9a-f]{64})[[:space:]]+.*#\1  KONG_SOURCE_BUNDLE.tar.gz#' \
+              "$GITHUB_WORKSPACE/$directory/KONG_SOURCE_BUNDLE.sha256" \
+              > KONG_SOURCE_BUNDLE.sha256
+            sha256sum -c KONG_SOURCE_BUNDLE.sha256
+          )
+          fold -w 76 "$temporary/bundle.single-line.b64" > "$temporary/bundle.lines.b64"
+          rm -f "$directory"/KONG_SOURCE_BUNDLE.part-*
+          split -l 100 -d -a 3 "$temporary/bundle.lines.b64" \
+            "$directory/KONG_SOURCE_BUNDLE.part-"
+          cat "$directory"/KONG_SOURCE_BUNDLE.part-* \
+            | base64 --decode > "$temporary/reconstructed.tar.gz"
+          cmp "$temporary/KONG_SOURCE_BUNDLE.tar.gz" "$temporary/reconstructed.tar.gz"
+          test "$(find "$directory" -maxdepth 1 -type f -name 'KONG_SOURCE_BUNDLE.part-*' | wc -l)" -ge 10
+      - name: Commit line-safe transfer parts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add migration/kong-export/KONG_SOURCE_BUNDLE.part-*
+          git diff --cached --check
+          git commit -m 'build: line-wrap Kong migration bundle for transfer'
+          git push origin HEAD:migration/export-kong-authority-20260826
