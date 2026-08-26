@@ -21,6 +21,8 @@ EVENT_VERSION = "1.0"
 DEFAULT_BATCH_SIZE = 10
 MAX_BATCH_SIZE = 50
 MAX_RESPONSE_BYTES = 65_536
+MANUAL_RETRY_ATTEMPTS = 3
+LEASE_TIMEOUT_MINUTES = 5
 
 EVENT_TYPE_SELECTION = [
     ("post_call.completed", "Post-call Completed"),
@@ -30,6 +32,21 @@ EVENT_TYPE_SELECTION = [
     ("calendar.rescheduled", "Calendar Rescheduled"),
     ("calendar.cancelled", "Calendar Cancelled"),
 ]
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects so credentials cannot be forwarded to another host."""
+
+    def redirect_request(
+        self,
+        request,
+        file_pointer,
+        code,
+        message,
+        headers,
+        new_url,
+    ):
+        return None
 
 
 class CodestraCrmCallFollowupOutbox(models.Model):
@@ -86,6 +103,7 @@ class CodestraCrmCallFollowupOutbox(models.Model):
     priority = fields.Integer(default=10, readonly=True, index=True)
     attempt_count = fields.Integer(default=0, readonly=True)
     max_attempts = fields.Integer(default=8, readonly=True)
+    manual_retry_count = fields.Integer(default=0, readonly=True)
     next_attempt_at = fields.Datetime(
         required=True,
         default=fields.Datetime.now,
@@ -109,6 +127,10 @@ class CodestraCrmCallFollowupOutbox(models.Model):
     _attempt_count_non_negative = models.Constraint(
         "CHECK(attempt_count >= 0)",
         "Automation attempt counts cannot be negative.",
+    )
+    _manual_retry_count_non_negative = models.Constraint(
+        "CHECK(manual_retry_count >= 0)",
+        "Automation manual retry counts cannot be negative.",
     )
     _max_attempts_positive = models.Constraint(
         "CHECK(max_attempts > 0)",
@@ -134,6 +156,28 @@ class CodestraCrmCallFollowupOutbox(models.Model):
     def _write_delivery(self, values):
         return super().write(values)
 
+    def _write_if_claimed(self, values):
+        """Update a claimed row only while this worker still owns its lease."""
+        self.ensure_one()
+        expected_token = self.lease_token
+        if not expected_token:
+            return False
+        self.env.cr.execute(
+            f"""
+                SELECT state, lease_token
+                  FROM {self._table}
+                 WHERE id = %s
+                 FOR UPDATE
+            """,
+            [self.id],
+        )
+        row = self.env.cr.fetchone()
+        if not row or row[0] != "processing" or row[1] != expected_token:
+            self.invalidate_recordset(["state", "lease_token", "locked_at"])
+            return False
+        self._write_delivery(values)
+        return True
+
     @api.model
     def _canonical_payload(self, payload):
         return json.dumps(
@@ -142,6 +186,12 @@ class CodestraCrmCallFollowupOutbox(models.Model):
             separators=(",", ":"),
             sort_keys=True,
         )
+
+    @api.model
+    def _payload_sha256(self, payload):
+        return hashlib.sha256(
+            self._canonical_payload(payload).encode("utf-8")
+        ).hexdigest()
 
     @api.model
     def _enqueue(
@@ -158,10 +208,7 @@ class CodestraCrmCallFollowupOutbox(models.Model):
             raise ValidationError(_("Unsupported automation event type."))
         followup.ensure_one()
         occurred_at = occurred_at or fields.Datetime.now()
-        payload_text = self._canonical_payload(payload)
-        payload_sha256 = hashlib.sha256(
-            payload_text.encode("utf-8")
-        ).hexdigest()
+        payload_sha256 = self._payload_sha256(payload)
         values = {
             "event_id": str(uuid.uuid4()),
             "event_type": event_type,
@@ -299,15 +346,13 @@ class CodestraCrmCallFollowupOutbox(models.Model):
                 "calendar_active": event.active,
             }
         )
-        mutation = fields.Datetime.to_string(
-            event.write_date or fields.Datetime.now()
-        )
+        mutation_sha256 = self._payload_sha256(payload)
         return self._enqueue(
             event_type=event_type,
             followup=followup,
             payload=payload,
             idempotency_key=(
-                f"calendar:{event.id}:{mutation}:{event_type}:v1"
+                f"calendar:{event.id}:{event_type}:v1:{mutation_sha256}"
             ),
             calendar_event=event,
         )
@@ -329,7 +374,7 @@ class CodestraCrmCallFollowupOutbox(models.Model):
         ).strip().lower() in {"1", "true", "yes", "on"}
 
     @api.model
-    def _read_secret_file(self, parameter_key):
+    def _read_secret_file(self, parameter_key, minimum_length=16):
         path_value = str(
             self._parameter(parameter_key, "") or ""
         ).strip()
@@ -338,6 +383,10 @@ class CodestraCrmCallFollowupOutbox(models.Model):
                 _("A required automation secret file is not configured.")
             )
         path = Path(path_value)
+        if not path.is_file():
+            raise ValidationError(
+                _("A required automation secret file is not a regular file.")
+            )
         try:
             data = path.read_text(encoding="utf-8")
         except OSError as exc:
@@ -345,7 +394,7 @@ class CodestraCrmCallFollowupOutbox(models.Model):
                 _("A required automation secret file cannot be read.")
             ) from exc
         secret = data.strip()
-        if not 8 <= len(secret) <= 4096:
+        if not minimum_length <= len(secret) <= 4096:
             raise ValidationError(
                 _("A required automation secret has an invalid length.")
             )
@@ -366,30 +415,52 @@ class CodestraCrmCallFollowupOutbox(models.Model):
             or ""
         ).strip()
         parsed = urllib.parse.urlparse(target_url)
+        hostname = (parsed.hostname or "").rstrip(".").lower()
         allow_loopback = str(
             self._parameter(
                 "codestra.call_followup_automation.allow_insecure_loopback",
                 "False",
             )
         ).strip().lower() in {"1", "true", "yes", "on"}
-        loopback = parsed.hostname in {
-            "127.0.0.1",
-            "::1",
-            "localhost",
-        }
-        if parsed.scheme != "https" and not (
-            allow_loopback and loopback and parsed.scheme == "http"
-        ):
-            raise ValidationError(
-                _(
-                    "The automation target must use HTTPS, except "
-                    "approved loopback tests."
+        allowed_hosts = {
+            host.strip().rstrip(".").lower()
+            for host in str(
+                self._parameter(
+                    "codestra.call_followup_automation.allowed_hosts", ""
                 )
-            )
-        if not parsed.netloc or not tenant_id:
+                or ""
+            ).split(",")
+            if host.strip()
+        }
+        loopback = hostname in {"127.0.0.1", "::1", "localhost"}
+
+        if not parsed.netloc or not hostname or not tenant_id:
             raise ValidationError(
                 _("The automation target and tenant are required.")
             )
+        if parsed.username or parsed.password or parsed.fragment:
+            raise ValidationError(
+                _("The automation target URL cannot contain credentials or a fragment.")
+            )
+        if "*" in allowed_hosts:
+            raise ValidationError(
+                _("Wildcard automation hosts are not allowed.")
+            )
+        if loopback:
+            if not allow_loopback or parsed.scheme not in {"http", "https"}:
+                raise ValidationError(
+                    _("Loopback automation targets require the explicit test-only flag.")
+                )
+        else:
+            if parsed.scheme != "https":
+                raise ValidationError(
+                    _("The automation target must use HTTPS.")
+                )
+            if hostname not in allowed_hosts:
+                raise ValidationError(
+                    _("The automation target host is not on the approved allowlist.")
+                )
+
         try:
             timeout = float(
                 self._parameter(
@@ -404,13 +475,16 @@ class CodestraCrmCallFollowupOutbox(models.Model):
         timeout = max(1.0, min(timeout, 30.0))
         return {
             "target_url": target_url,
+            "target_host": hostname,
             "tenant_id": tenant_id,
             "timeout": timeout,
             "api_key": self._read_secret_file(
-                "codestra.call_followup_automation.api_key_file"
+                "codestra.call_followup_automation.api_key_file",
+                minimum_length=16,
             ),
             "webhook_secret": self._read_secret_file(
-                "codestra.call_followup_automation.webhook_secret_file"
+                "codestra.call_followup_automation.webhook_secret_file",
+                minimum_length=32,
             ),
         }
 
@@ -463,9 +537,11 @@ class CodestraCrmCallFollowupOutbox(models.Model):
             data=raw,
             headers={
                 "Accept": "application/json",
+                "Cache-Control": "no-store",
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {config['api_key']}",
                 "Idempotency-Key": self.idempotency_key,
+                "User-Agent": "codestra-odoo-call-followup/1.0",
                 "X-Event-Id": self.event_id,
                 "X-Correlation-Id": (
                     self.correlation_id or self.event_id
@@ -476,9 +552,8 @@ class CodestraCrmCallFollowupOutbox(models.Model):
             },
             method="POST",
         )
-        with urllib.request.urlopen(
-            request, timeout=config["timeout"]
-        ) as response:
+        opener = urllib.request.build_opener(_NoRedirectHandler())
+        with opener.open(request, timeout=config["timeout"]) as response:
             body = response.read(MAX_RESPONSE_BYTES + 1)
             if len(body) > MAX_RESPONSE_BYTES:
                 raise ValidationError(
@@ -496,7 +571,7 @@ class CodestraCrmCallFollowupOutbox(models.Model):
 
     def _record_success(self, result):
         self.ensure_one()
-        self._write_delivery(
+        return self._write_if_claimed(
             {
                 "state": "delivered",
                 "attempt_count": self.attempt_count + 1,
@@ -535,29 +610,33 @@ class CodestraCrmCallFollowupOutbox(models.Model):
                     seconds=self._retry_delay_seconds(attempt)
                 )
             )
-        self._write_delivery(values)
+        return self._write_if_claimed(values)
 
     @api.model
     def _claim_due(self, batch_size):
         now = fields.Datetime.now()
-        stale_before = now - timedelta(minutes=5)
+        stale_before = now - timedelta(minutes=LEASE_TIMEOUT_MINUTES)
         self.env.cr.execute(
             f"""
                 SELECT id
                   FROM {self._table}
-                 WHERE state IN ('pending', 'retry')
-                   AND next_attempt_at <= %s
-                   AND (locked_at IS NULL OR locked_at < %s)
+                 WHERE (
+                       state IN ('pending', 'retry')
+                       AND next_attempt_at <= %s
+                       AND (locked_at IS NULL OR locked_at < %s)
+                 ) OR (
+                       state = 'processing'
+                       AND locked_at < %s
+                 )
                  ORDER BY priority DESC, next_attempt_at ASC, id ASC
                  FOR UPDATE SKIP LOCKED
                  LIMIT %s
             """,
-            [now, stale_before, batch_size],
+            [now, stale_before, stale_before, batch_size],
         )
-        ids = [row[0] for row in self.env.cr.fetchall()]
-        records = self.browse(ids)
-        if records:
-            records._write_delivery(
+        records = self.browse([row[0] for row in self.env.cr.fetchall()])
+        for record in records:
+            record._write_delivery(
                 {
                     "state": "processing",
                     "locked_at": now,
@@ -571,9 +650,7 @@ class CodestraCrmCallFollowupOutbox(models.Model):
         if not self._enabled():
             return 0
         try:
-            batch_size = max(
-                1, min(int(batch_size), MAX_BATCH_SIZE)
-            )
+            batch_size = max(1, min(int(batch_size), MAX_BATCH_SIZE))
         except (TypeError, ValueError):
             batch_size = DEFAULT_BATCH_SIZE
         config = self._delivery_config()
@@ -584,25 +661,27 @@ class CodestraCrmCallFollowupOutbox(models.Model):
                 record._record_success(result)
             except urllib.error.HTTPError as exc:
                 status = int(exc.code)
+                permanent = (
+                    300 <= status < 400
+                    or (
+                        400 <= status < 500
+                        and status not in {408, 429}
+                    )
+                )
                 record._record_failure(
                     status=status,
                     error_code=f"http_{status}",
-                    permanent=(
-                        400 <= status < 500
-                        and status not in {408, 429}
-                    ),
+                    permanent=permanent,
                 )
             except (
                 urllib.error.URLError,
                 TimeoutError,
                 OSError,
             ):
-                record._record_failure(
-                    error_code="transport_error"
-                )
+                record._record_failure(error_code="transport_error")
             except ValidationError:
                 record._record_failure(
-                    error_code="configuration_or_response_error",
+                    error_code="response_validation_error",
                     permanent=True,
                 )
             except Exception:
@@ -616,28 +695,27 @@ class CodestraCrmCallFollowupOutbox(models.Model):
             "codestra_crm_call_followup.group_call_followup_manager"
         ):
             raise AccessError(
-                _(
-                    "Only a call-follow-up manager may retry "
-                    "automation."
-                )
+                _("Only a call-follow-up manager may retry automation.")
             )
         for record in self:
             if record.state not in {"retry", "dead"}:
                 raise ValidationError(
-                    _(
-                        "Only retry or dead-letter events can "
-                        "be retried."
-                    )
+                    _("Only retry or dead-letter events can be retried.")
                 )
-        self._write_delivery(
-            {
-                "state": "pending",
-                "next_attempt_at": fields.Datetime.now(),
-                "locked_at": False,
-                "lease_token": False,
-                "last_error": False,
-            }
-        )
+            record._write_delivery(
+                {
+                    "state": "pending",
+                    "max_attempts": max(
+                        record.max_attempts,
+                        record.attempt_count + MANUAL_RETRY_ATTEMPTS,
+                    ),
+                    "manual_retry_count": record.manual_retry_count + 1,
+                    "next_attempt_at": fields.Datetime.now(),
+                    "locked_at": False,
+                    "lease_token": False,
+                    "last_error": False,
+                }
+            )
         return True
 
     def action_mark_dead(self):
@@ -645,11 +723,13 @@ class CodestraCrmCallFollowupOutbox(models.Model):
             "codestra_crm_call_followup.group_call_followup_manager"
         ):
             raise AccessError(
-                _(
-                    "Only a call-follow-up manager may "
-                    "dead-letter automation."
-                )
+                _("Only a call-follow-up manager may dead-letter automation.")
             )
+        for record in self:
+            if record.state not in {"pending", "retry"}:
+                raise ValidationError(
+                    _("Only pending or retry events can be manually dead-lettered.")
+                )
         self._write_delivery(
             {
                 "state": "dead",
@@ -678,10 +758,7 @@ class CodestraCrmCallFollowupOutbox(models.Model):
             "codestra_crm_call_followup.group_call_followup_manager"
         ):
             raise AccessError(
-                _(
-                    "Only a call-follow-up manager may view "
-                    "automation status."
-                )
+                _("Only a call-follow-up manager may view automation status.")
             )
         return {
             "enabled": self._enabled(),

@@ -78,10 +78,16 @@ def main() -> int:
     ).read_text(encoding="utf-8")
     for token in [
         "FOR UPDATE SKIP LOCKED",
+        "state = 'processing'",
+        "_write_if_claimed",
+        "_NoRedirectHandler",
+        "allowed_hosts",
         "codestra.call_followup_automation.enabled",
         "webhook_secret_file",
         "Idempotency-Key",
         "X-Signature",
+        "manual_retry_count",
+        "MANUAL_RETRY_ATTEMPTS",
         "max_attempts",
         '"dead" if permanent or exhausted else "retry"',
     ]:
@@ -93,6 +99,7 @@ def main() -> int:
         '"email_body":',
         '"notes":',
         "force_send=True",
+        "urllib.request.urlopen(",
     ]:
         if forbidden in source:
             errors.append(
