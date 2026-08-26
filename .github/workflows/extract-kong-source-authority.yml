@@ -6,6 +6,7 @@ on:
       - refactor/extract-kong-source-authority-20260826
     paths:
       - .github/workflows/extract-kong-source-authority.yml
+      - tools/apply_kong_repository_extraction.py
 
 permissions:
   contents: write
@@ -23,6 +24,52 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+
+      - name: Repair one-time extraction helper against current source formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("tools/apply_kong_repository_extraction.py")
+          value = path.read_text(encoding="utf-8")
+          start = value.index("def patch_architecture_validator() -> None:")
+          end = value.index("\n\ndef patch_workflows() -> None:", start)
+          replacement = '''def patch_architecture_validator() -> None:
+              path = ROOT / "tools/check_integration_architecture.py"
+              value = path.read_text(encoding="utf-8")
+              block_start = value.index(
+                  '    kong_path = root / "deploy/kong/control-plane.yml"'
+              )
+              block_end = value.index("\n\n    for compose_path in", block_start)
+              new = (
+                  '    kong_lock_path = root / "config/kong-source.lock.json"\n'
+                  '    if kong_lock_path.exists():\n'
+                  '        kong_lock = json.loads(\n'
+                  '            kong_lock_path.read_text(encoding="utf-8")\n'
+                  '        )\n'
+                  '        for route in kong_lock.get("public_routes", []):\n'
+                  '            for route_path in route.get("paths", []):\n'
+                  '                for method in route.get("methods", ["ANY"]):\n'
+                  '                    discovered.add(\n'
+                  '                        (\n'
+                  '                            str(method).upper(),\n'
+                  '                            str(route_path),\n'
+                  '                            str(kong_lock_path.relative_to(root)),\n'
+                  '                        )\n'
+                  '                    )'
+              )
+              path.write_text(
+                  value[:block_start] + new + value[block_end:], encoding="utf-8"
+              )
+          '''
+          replacement = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in replacement.splitlines()
+          )
+          path.write_text(value[:start] + replacement + value[end:], encoding="utf-8")
+          PY
 
       - name: Apply repository ownership boundary
         run: python3 tools/apply_kong_repository_extraction.py
