@@ -158,6 +158,12 @@ class BackupOperationsTests(unittest.TestCase):
 
 
 class MonitoringGovernanceTests(unittest.TestCase):
+    def test_monitoring_installer_does_not_repeat_promtool_argv_zero(self) -> None:
+        source = (MONITORING / "install-monitoring.sh").read_text()
+        self.assertIn("--entrypoint /bin/promtool", source)
+        self.assertIn("check config /etc/prometheus/prometheus.yml", source)
+        self.assertNotIn("promtool check config", source)
+
     def test_platform_ci_publishes_required_legacy_status(self) -> None:
         workflow = (ROOT / ".github/workflows/platform-source-gate.yml").read_text()
         self.assertIn("statuses: write", workflow)
@@ -200,6 +206,9 @@ class MonitoringGovernanceTests(unittest.TestCase):
         source = (MONITORING / "exporters" / "recovery_metrics.sh").read_text()
         self.assertIn("OFFSERVER_COPY=PASS", source)
         self.assertIn("codestra_middleware_backup_last_success_timestamp_seconds", source)
+        self.assertIn("codestra_systemd_timer_failed", source)
+        self.assertIn("codestra_backup_replication_failures_total", source)
+        self.assertIn("systemctl is-failed --quiet codestra-scraper-middleware-backup.service", source)
         self.assertIn("codestra_middleware_database_migration_match", source)
         self.assertIn("codestra-middleware-integration-api-1 alembic heads", source)
         self.assertIn("codestra-middleware-integration-api-1 alembic current", source)
