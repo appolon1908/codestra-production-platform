@@ -11,11 +11,27 @@
                         class="oe_stat_button"
                         icon="fa-phone"
                         groups="codestra_crm_call_followup.group_call_followup_user">
-                    <field name="codestra_call_followup_count" widget="statinfo" string="Call Follow-ups"/>
+                    <field name="codestra_call_followup_count"
+                           widget="statinfo"
+                           string="Call History"/>
+                </button>
+                <button name="action_view_codestra_pending_call_followups"
+                        type="object"
+                        class="oe_stat_button"
+                        icon="fa-exclamation-circle"
+                        invisible="codestra_pending_call_followup_count == 0"
+                        groups="codestra_crm_call_followup.group_call_followup_user">
+                    <field name="codestra_pending_call_followup_count"
+                           widget="statinfo"
+                           string="Pending Calls"/>
                 </button>
             </xpath>
+
             <xpath expr="//field[@name='date_deadline']" position="after">
                 <field name="codestra_next_callback_at"
+                       readonly="1"
+                       groups="codestra_crm_call_followup.group_call_followup_user"/>
+                <field name="codestra_last_call_at"
                        readonly="1"
                        groups="codestra_crm_call_followup.group_call_followup_user"/>
             </xpath>
