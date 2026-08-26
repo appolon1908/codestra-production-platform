@@ -100,8 +100,10 @@ case "${approved[SHARED_HA_DECISION]}" in
       SHARED_MEASURED_RESTORE_RTO_SECONDS; do
       require_value "$key"
     done
-    [[ "${approved[SHARED_MEASURED_RESTORE_RTO_SECONDS]}" =~ ^[1-9][0-9]*$ ]] || block HA_MEASURED_RTO
-    (( approved[SHARED_MEASURED_RESTORE_RTO_SECONDS] <= approved[SHARED_RTO_SECONDS] )) || block HA_RTO_CONTRADICTION
+    measured_rto="${approved[SHARED_MEASURED_RESTORE_RTO_SECONDS]}"
+    approved_rto="${approved[SHARED_RTO_SECONDS]}"
+    [[ "$measured_rto" =~ ^[1-9][0-9]*$ ]] || block HA_MEASURED_RTO
+    (( measured_rto <= approved_rto )) || block HA_RTO_CONTRADICTION
     review_epoch="$(date -d "${approved[SHARED_HA_REVIEW_DATE]}" +%s 2>/dev/null || true)"
     [[ "$review_epoch" =~ ^[0-9]+$ ]] || block HA_REVIEW_DATE_FORMAT
     (( review_epoch > now )) || block HA_REVIEW_DATE_EXPIRED
