@@ -61,11 +61,24 @@ export RESTIC_CACHE_DIR="$backup_root/.restic-cache"
 export AWS_ACCESS_KEY_ID="$(cat /etc/codestra/backup/b2-access-key-id)"
 export AWS_SECRET_ACCESS_KEY="$(cat /etc/codestra/backup/b2-secret-access-key)"
 export AWS_DEFAULT_REGION="$(cat /etc/codestra/backup/b2-region)"
-restic backup --quiet --tag kong-database "$final_dir"
-restic forget --quiet --tag kong-database \
+restic_retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    if restic "$@"; then
+      return 0
+    fi
+    sleep "$((attempt * 5))"
+  done
+  return 1
+}
+echo 'BACKUP_PHASE=OFFHOST_UPLOAD'
+restic_retry backup --quiet --tag kong-database "$final_dir"
+echo 'BACKUP_PHASE=RETENTION'
+restic_retry forget --quiet --tag kong-database \
   --keep-daily 14 --keep-weekly 8 --keep-monthly 12
-restic snapshots --json --latest 1 --tag kong-database \
-  | jq -e 'length == 1' >/dev/null
+echo 'BACKUP_PHASE=OFFHOST_VERIFY'
+restic_retry snapshots --json --latest 1 --tag kong-database \
+  | jq -e 'length >= 1' >/dev/null
 unset RESTIC_REPOSITORY RESTIC_PASSWORD_FILE RESTIC_CACHE_DIR AWS_ACCESS_KEY_ID \
   AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION
 
