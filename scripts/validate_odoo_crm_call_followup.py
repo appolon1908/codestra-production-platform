@@ -74,6 +74,10 @@ def main() -> int:
             fail(errors, "staging overlay does not fail closed on the installed mail inbox dependency")
         if ":/mnt/vertical-addons/codestra_mail_inbox:ro" not in staging_source:
             fail(errors, "staging overlay does not mount the installed mail inbox dependency read-only")
+        if "ODOO_CALL_CENTER_ADDON_RELEASE:?" not in staging_source:
+            fail(errors, "staging overlay does not fail closed on call-center source parity")
+        if ":/mnt/call-center-addons/call_center_campaign:ro" not in staging_source:
+            fail(errors, "staging overlay does not pin call_center_campaign read-only")
 
     if MANIFEST.is_file():
         try:
