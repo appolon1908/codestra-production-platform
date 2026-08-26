@@ -139,6 +139,39 @@ def implementation_route_fragments(source: str) -> dict[str, set[str]]:
     return fragments
 
 
+def route_predicate_groups(source: str) -> list[set[str]]:
+    """Return path literals that must participate in the same branch predicate."""
+    tree = ast.parse(source)
+    groups: list[set[str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        values = {
+            child.value
+            for child in ast.walk(node.test)
+            if isinstance(child, ast.Constant)
+            and isinstance(child.value, str)
+            and child.value.startswith("/")
+        }
+        if values:
+            groups.append(values)
+    return groups
+
+
+def endpoint_route_predicate_covered(
+    handler_source: str,
+    implementation_tokens: list[str],
+) -> bool:
+    fragments = {
+        _token_fragment(token)
+        for token in implementation_tokens
+        if _token_fragment(token).startswith("/")
+    }
+    if len(fragments) < 2:
+        return True
+    return any(fragments.issubset(group) for group in route_predicate_groups(handler_source))
+
+
 def openapi_operations(spec: dict[str, Any]) -> set[tuple[str, str]]:
     operations: set[tuple[str, str]] = set()
     for path, value in spec.get("paths", {}).items():
@@ -439,6 +472,15 @@ def validate(
                             f"missing from {handler}: {token}",
                         )
                     )
+            if not endpoint_route_predicate_covered(handler_text, implementation_tokens):
+                findings.append(
+                    Finding(
+                        "critical",
+                        "implementation-route-predicate",
+                        identity,
+                        f"path fragments are not bound in one {handler} branch predicate",
+                    )
+                )
 
         idempotency_evidence = evidence.get("idempotency", {})
         if idempotency_evidence and not isinstance(idempotency_evidence, dict):

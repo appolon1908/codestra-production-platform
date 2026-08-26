@@ -7,6 +7,10 @@ handlers:
   crm_mutation: [POST, PATCH]
 
 endpoints:
+  api-health:
+    gateway_auth:
+      status: gap
+      remediation: Add a plugin-exempt public-health route or explicitly require and document OIDC plus tenant authentication for this endpoint.
   crm-account:
     handler: crm_get
   crm-lead-read:
@@ -45,6 +49,10 @@ endpoints:
     tokens: ['else STORE.get_message(message_id,tenant)']
   messages-events:
     tokens: ['event_request=parts[-1]=="events"']
+  messages-api-list:
+    gateway_auth:
+      status: gap
+      remediation: Enforce communications.message.read on the exact /api/v1/messages path in Kong before claiming authorization coverage.
 
   crawler-create:
     idempotency:
