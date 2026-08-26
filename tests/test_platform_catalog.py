@@ -113,14 +113,17 @@ def test_resolved_gap_evidence_must_be_git_tracked() -> None:
     value = catalog()
     gap = next(item for item in value["known_gaps"] if item["required_before_server_push"])
     gap["status"] = "resolved"
-    ignored = ROOT / ".git"
-    assert ignored.is_file()  # linked-worktree metadata is never catalog evidence
-    gap["resolution"] = {
-        "summary": "Claimed resolution from ignored runtime metadata.",
-        "evidence": [str(ignored.relative_to(ROOT))],
-    }
-    rules = {item.rule for item in validate_catalog(ROOT, value)}
-    assert "gap-resolution-evidence" in rules
+    untracked = ROOT / ".catalog-untracked-evidence-test"
+    untracked.write_text("runtime-only evidence\n", encoding="utf-8")
+    try:
+        gap["resolution"] = {
+            "summary": "Claimed resolution from untracked runtime metadata.",
+            "evidence": [str(untracked.relative_to(ROOT))],
+        }
+        rules = {item.rule for item in validate_catalog(ROOT, value)}
+        assert "gap-resolution-evidence" in rules
+    finally:
+        untracked.unlink()
 
 
 def test_deployment_candidate_must_be_boolean() -> None:
