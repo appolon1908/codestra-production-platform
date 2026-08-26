@@ -2,6 +2,11 @@
 set -euo pipefail
 umask 077
 
+if ((EUID != 0)); then
+  exec sudo --preserve-env=PATH,POSTGRES_17_IMAGE,SHARED_BASE_TEST_SUBNET \
+    bash "$0" "$@"
+fi
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 helper="$root/operations/shared-postgresql/create-base-backup.sh"
 image="${POSTGRES_17_IMAGE:-postgres:17.6}"
