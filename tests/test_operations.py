@@ -158,6 +158,36 @@ class BackupOperationsTests(unittest.TestCase):
 
 
 class MonitoringGovernanceTests(unittest.TestCase):
+    def test_middleware_database_exporters_are_wired(self) -> None:
+        compose = yaml.safe_load((MONITORING / "compose.monitoring.yaml").read_text())
+        services = compose["services"]
+        postgres = services["postgres-exporter"]
+        self.assertIn("backend", postgres["networks"])
+        self.assertEqual(
+            postgres["environment"]["DATA_SOURCE_URI"],
+            "codestra-postgres-1:5432/postgres?sslmode=disable",
+        )
+        self.assertEqual(postgres["environment"]["DATA_SOURCE_USER"], "codestra_monitoring")
+        self.assertEqual(
+            postgres["secrets"],
+            [{"source": "postgres_monitoring_credential", "target": "postgres_monitoring_password"}],
+        )
+        node = services["node-exporter"]
+        self.assertIn(
+            "--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector",
+            node["command"],
+        )
+        self.assertEqual(
+            compose["secrets"]["postgres_monitoring_credential"]["file"],
+            "/etc/codestra/secrets/monitoring-runtime/postgres_exporter_password",
+        )
+        prometheus = yaml.safe_load((MONITORING / "prometheus.yml").read_text())
+        jobs = {job["job_name"]: job for job in prometheus["scrape_configs"]}
+        self.assertEqual(
+            jobs["postgres-exporter"]["static_configs"][0]["targets"],
+            ["postgres-exporter:9187"],
+        )
+
     def test_middleware_database_recovery_metrics_are_fail_closed(self) -> None:
         source = (MONITORING / "exporters" / "recovery_metrics.sh").read_text()
         self.assertIn("OFFSERVER_COPY=PASS", source)

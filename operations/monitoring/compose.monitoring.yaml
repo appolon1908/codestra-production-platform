@@ -118,4 +118,4 @@ volumes:
 
 secrets:
   postgres_monitoring_credential:
-    file: /etc/codestra/secrets/monitoring/postgres_exporter_password
+    file: /etc/codestra/secrets/monitoring-runtime/postgres_exporter_password
