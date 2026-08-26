@@ -10,3 +10,7 @@ services:
       - --without-demo=true
     volumes:
       - ${ODOO_CRM_CALL_FOLLOWUP_ADDON_RELEASE:?exact reviewed addon release directory required}/codestra_crm_call_followup:/mnt/crm-call-followup-addons/codestra_crm_call_followup:ro
+      # The staging database already has codestra_mail_inbox installed. Keep its
+      # independently reviewed release visible so registry validation cannot
+      # silently proceed with a missing installed module.
+      - ${ODOO_CRM_CALL_FOLLOWUP_STAGING_MAIL_INBOX_RELEASE:?exact reviewed mail inbox release directory required}/codestra_mail_inbox:/mnt/vertical-addons/codestra_mail_inbox:ro

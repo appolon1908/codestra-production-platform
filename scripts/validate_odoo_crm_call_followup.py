@@ -68,6 +68,13 @@ def main() -> int:
             if ":/mnt/crm-call-followup-addons/codestra_crm_call_followup:ro" not in overlay_source:
                 fail(errors, f"release overlay does not mount the addon read-only: {overlay.name}")
 
+    if STAGING_OVERLAY.is_file():
+        staging_source = STAGING_OVERLAY.read_text(encoding="utf-8")
+        if "ODOO_CRM_CALL_FOLLOWUP_STAGING_MAIL_INBOX_RELEASE:?" not in staging_source:
+            fail(errors, "staging overlay does not fail closed on the installed mail inbox dependency")
+        if ":/mnt/vertical-addons/codestra_mail_inbox:ro" not in staging_source:
+            fail(errors, "staging overlay does not mount the installed mail inbox dependency read-only")
+
     if MANIFEST.is_file():
         try:
             manifest = ast.literal_eval(MANIFEST.read_text(encoding="utf-8"))

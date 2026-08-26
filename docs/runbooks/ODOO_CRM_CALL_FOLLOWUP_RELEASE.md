@@ -40,6 +40,12 @@ database/filestore backup, validate the rendered Compose configuration, recreate
 only staging Odoo, run the module upgrade with `--stop-after-init`, and restore the
 normal staging container. Cron and all live-delivery flags remain disabled.
 
+The staging database already contains `codestra_mail_inbox`. Set
+`ODOO_CRM_CALL_FOLLOWUP_STAGING_MAIL_INBOX_RELEASE` to its exact reviewed release
+directory. The overlay mounts that dependency read-only and fails closed when the
+release authority is missing; do not accept registry warnings for an installed but
+unavailable module.
+
 Use synthetic `.invalid` identities. Validate queued recipients and retry state in
 Odoo's mail models; do not deliver test messages to real customer addresses.
 
