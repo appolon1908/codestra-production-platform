@@ -7,6 +7,7 @@ from pathlib import Path
 from tools.check_control_plane_api_surface import (
     REQUIRED_FIELDS,
     coverage_gaps,
+    endpoint_route_predicate_covered,
     implementation_handler_sources,
     load_yaml,
     validate,
@@ -103,7 +104,27 @@ def test_event_ingest_gateway_auth_mismatch_is_fail_closed() -> None:
         for finding in coverage_gaps(manifest(), assurance())
         if finding.rule == "gateway-auth-coverage-gap"
     }
-    assert gateway_gaps == {"source-event-ingest"}
+    assert gateway_gaps == {
+        "api-health",
+        "messages-api-list",
+        "source-event-ingest",
+    }
+
+
+def test_route_fragments_must_share_one_branch_predicate() -> None:
+    source = (ROOT / "control_plane_service/server.py").read_text(encoding="utf-8")
+    handler = implementation_handler_sources(source)["do_POST"]
+    tokens = ['"/v1/messages/"', '"/retry"']
+    assert endpoint_route_predicate_covered(handler, tokens)
+
+    message_retry_removed = handler.replace(
+        'parsed.path.startswith("/v1/messages/") and '
+        'parsed.path.endswith(("/cancel","/retry"))',
+        'parsed.path.startswith("/v1/messages/") and '
+        'parsed.path.endswith(("/cancel",))',
+    )
+    assert '"/retry"' in message_retry_removed  # crawler retry remains elsewhere
+    assert not endpoint_route_predicate_covered(message_retry_removed, tokens)
 
 
 def test_implementation_tokens_are_bound_to_the_declared_http_method(tmp_path) -> None:
