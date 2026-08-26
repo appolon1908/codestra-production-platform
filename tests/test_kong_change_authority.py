@@ -152,6 +152,7 @@ def test_approval_packet_has_every_required_document():
         "TELEPHONY_CANARY_REQUEST.md",
         "CUTOVER_GO_NO_GO.md",
         "approved-change.env.example",
+        "LIVE_PRECHECK_20260825.md",
     }
     assert expected <= {path.name for path in PACKAGE.iterdir()}
 

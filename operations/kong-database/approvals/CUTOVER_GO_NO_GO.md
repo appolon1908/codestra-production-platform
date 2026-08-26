@@ -1,5 +1,8 @@
 # Kong database cutover GO/NO-GO contract
 
+Latest sanitized live precheck:
+`LIVE_PRECHECK_20260825.md` (`KONG_DB_CUTOVER_GO=NO`).
+
 The read-only validator is the mandatory entry gate. It authorizes no mutation.
 
 GO requires: assigned approved change ID; every accountable owner; current
