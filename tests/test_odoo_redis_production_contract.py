@@ -140,3 +140,15 @@ def test_odoo_contract_is_enforced_by_deployment_preflight() -> None:
     assert "org.opencontainers.image.revision" in validator
     assert "ODOO_PUBLIC_PORT_EXPOSURE" in validator
     assert "scripts/test_odoo_private_allowlist.sh" in validator
+
+
+def test_odoo_next_release_lock_is_immutable_and_verified() -> None:
+    lock = json.loads((ROOT / "deploy/odoo/runtime-lock.json").read_text())
+    assert lock["approved_next_image"].startswith(
+        "ghcr.io/codestra-srl/codestra-odoo@sha256:"
+    )
+    assert len(lock["approved_next_revision"]) == 40
+    assert lock["approved_next_sbom"] == "PASS"
+    assert lock["approved_next_provenance"] == "PASS"
+    assert lock["approved_next_signature"] == "PASS"
+    assert lock["deployment_state"].startswith("BLOCKED_PENDING_")
