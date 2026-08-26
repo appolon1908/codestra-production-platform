@@ -151,4 +151,24 @@ if [[ "$parse_ok" -eq 1 && "$gate_change" == PASS && "$gate_owners" == PASS \
   exit 0
 fi
 echo 'KONG_DB_CUTOVER_GO=NO'
+for gate in CHANGE_RECORD OWNERSHIP MAINTENANCE_WINDOW REPLICA_INFRASTRUCTURE \
+  STABLE_AUTHORITY FENCING SECRET_GOVERNANCE RPO_RTO_POLICY CANARY_AUTHORITY \
+  RECOVERY_EVIDENCE; do
+  case "$gate" in
+    CHANGE_RECORD) value="$gate_change" ;;
+    OWNERSHIP) value="$gate_owners" ;;
+    MAINTENANCE_WINDOW) value="$gate_window" ;;
+    REPLICA_INFRASTRUCTURE) value="$gate_replica" ;;
+    STABLE_AUTHORITY) value="$gate_dns" ;;
+    FENCING) value="$gate_fencing" ;;
+    SECRET_GOVERNANCE) value="$gate_secrets" ;;
+    RPO_RTO_POLICY) value="$gate_rpo" ;;
+    CANARY_AUTHORITY) value="$gate_canary" ;;
+    RECOVERY_EVIDENCE) value="$gate_evidence" ;;
+  esac
+  if [[ "$value" != PASS ]]; then
+    printf 'BLOCKED_BY=%s\n' "$gate"
+    break
+  fi
+done
 exit 1

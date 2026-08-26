@@ -108,6 +108,7 @@ def test_missing_authority_fails_closed(tmp_path, missing):
     result = execute(tmp_path, values)
     assert result.returncode != 0
     assert "KONG_DB_CUTOVER_GO=NO" in result.stdout
+    assert result.stdout.count("BLOCKED_BY=") == 1
 
 
 def test_placeholder_fails_closed(tmp_path):
@@ -135,6 +136,7 @@ def test_fully_synthetic_approved_fixture_passes_without_mutation(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "KONG_DB_CUTOVER_GO=YES" in result.stdout
     assert result.stdout.count("=PASS") == 10
+    assert "BLOCKED_BY=" not in result.stdout
 
 
 def test_template_is_no_go_and_validator_contains_no_mutation_commands(tmp_path):
