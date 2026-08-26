@@ -158,6 +158,14 @@ class BackupOperationsTests(unittest.TestCase):
 
 
 class MonitoringGovernanceTests(unittest.TestCase):
+    def test_middleware_database_recovery_metrics_are_fail_closed(self) -> None:
+        source = (MONITORING / "exporters" / "recovery_metrics.sh").read_text()
+        self.assertIn("OFFSERVER_COPY=PASS", source)
+        self.assertIn("codestra_middleware_backup_last_success_timestamp_seconds", source)
+        self.assertIn("codestra_middleware_database_migration_match", source)
+        self.assertIn("codestra-middleware-integration-api-1 alembic heads", source)
+        self.assertIn("codestra-middleware-integration-api-1 alembic current", source)
+
     def test_receiver_validator_rejects_empty_invalid_and_placeholder_urls(self) -> None:
         config = MONITORING / "alertmanager.example.yml"
         names = ("primary_receiver_url", "secondary_receiver_url", "recovery_receiver_url", "rejected_route_url")
