@@ -50,6 +50,11 @@ No threshold in this file is claimed to be production-proven. Every rule carries
 | `CodestraStuckAsteriskChannel` | `channel age > 1h` | `5m` | candidate; tune after deployment |
 | `CodestraChannelCleanupFailure` | `any failure / 10m` | `5m` | candidate; tune after deployment |
 | `CodestraPostgresqlUnavailable` | `database_up = 0` | `2m` | candidate; tune after deployment |
+| `MiddlewareDatabaseDown` | `exporter down or scrape error` | `2m` | candidate; tune after deployment |
+| `MiddlewareDatabaseConnectionWarning` | `connections > 70% / 10m` | `10m` | candidate; tune after deployment |
+| `MiddlewareDatabaseConnectionCritical` | `connections > 85% / 5m` | `5m` | candidate; tune after deployment |
+| `MiddlewareDatabaseDiskLow` | `root filesystem used > 85% / 15m` | `15m` | candidate; tune after deployment |
+| `MiddlewareDatabaseDeadlocks` | `any deadlock / 10m` | `2m` | candidate; tune after deployment |
 | `CodestraMariadbUnavailable` | `database_up = 0` | `2m` | candidate; tune after deployment |
 | `CodestraRedisUnavailable` | `service_up = 0` | `2m` | candidate; tune after deployment |
 | `CodestraDatabaseConnectionSaturation` | `connections > 90% / 10m` | `10m` | candidate; tune after deployment |
@@ -67,6 +72,10 @@ No threshold in this file is claimed to be production-proven. Every rule carries
 | `CodestraOffServerReplicationFailure` | `any failure / 1h` | `1m` | candidate; tune after deployment |
 | `CodestraBackupChecksumFailure` | `any failure / 1h` | `1m` | candidate; tune after deployment |
 | `CodestraBackupStale` | `age > 26h / 15m` | `15m` | candidate; tune after deployment |
+| `MiddlewareDatabaseBackupStale` | `age > 24h / 15m` | `15m` | candidate; tune after deployment |
+| `MiddlewareDatabaseBackupFailed` | `timer or replication failure` | `1m` | candidate; tune after deployment |
+| `MiddlewareDatabaseRestoreOverdue` | `restore rehearsal age > 30d` | `1h` | candidate; tune after deployment |
+| `MiddlewareDatabaseMigrationMismatch` | `migration match = 0` | `5m` | candidate; tune after deployment |
 | `CodestraRemoteBackupCapacityLow` | `free < 10GiB / 30m` | `30m` | candidate; tune after deployment |
 | `CodestraBackupTimerDisabled` | `timer enabled = 0` | `5m` | candidate; tune after deployment |
 | `CodestraBackupTimerFailed` | `timer failed > 0` | `2m` | candidate; tune after deployment |
