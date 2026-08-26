@@ -74,6 +74,67 @@ jobs:
       - name: Apply repository ownership boundary
         run: python3 tools/apply_kong_repository_extraction.py
 
+      - name: Finalize platform consumer contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          # This test exercises Kong-owned implementation and belongs only in the
+          # standalone Kong repository after the source boundary is applied.
+          Path("tests/test_kong_campaign_automation.py").unlink(missing_ok=True)
+
+          # Keep the platform-owned Odoo identity and disabled-delivery tests, but
+          # replace direct imports of moved Kong files with the immutable repo lock.
+          callback = Path("tests/test_odoo_callback_control_path.py")
+          value = callback.read_text(encoding="utf-8")
+          value = value.replace(
+              'KONG = json.loads(Path("config/kong-callback-routes.json").read_text())\n'
+              'RECONCILER = Path("scripts/reconcile_kong_callback_routes.py").read_text()\n',
+              'KONG_LOCK = json.loads(Path("config/kong-source.lock.json").read_text())\n',
+          )
+          start = value.index("def test_kong_exposes_only_required_callback_surfaces():")
+          end = value.index(
+              "\n\ndef test_deployment_keeps_every_broad_delivery_path_disabled():",
+              start,
+          )
+          replacement = '''def test_kong_callback_contract_is_pinned_to_standalone_authority():
+              assert KONG_LOCK["repository"] == "appolon1908-hue/Kong"
+              assert KONG_LOCK["commit"] == "007055bbd05b9cd1c7cc33d3810ec17a3ec9fbba"
+              assert KONG_LOCK["production_state_changed"] is False
+              assert "config/kong-callback-routes.json" in KONG_LOCK["required_paths"]
+              assert "config/kong-campaign-automation-routes.json" in KONG_LOCK["required_paths"]
+          '''
+          replacement = "\n".join(
+              line[14:] if line.startswith("              ") else line
+              for line in replacement.splitlines()
+          )
+          callback.write_text(
+              value[:start] + replacement + value[end:], encoding="utf-8"
+          )
+
+          lock_path = Path("config/kong-source.lock.json")
+          lock = json.loads(lock_path.read_text(encoding="utf-8"))
+          required = set(lock["required_paths"])
+          required.update(
+              {
+                  "config/kong-callback-routes.json",
+                  "config/kong-campaign-automation-routes.json",
+              }
+          )
+          lock["required_paths"] = sorted(required)
+          lock_path.write_text(
+              json.dumps(lock, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+
+          # The extraction workflow is one-time migration scaffolding. Do not
+          # retain a self-mutating workflow in the protected platform source.
+          Path(".github/workflows/extract-kong-source-authority.yml").unlink()
+          PY
+
       - name: Install platform test dependencies
         run: |
           sudo apt-get update
