@@ -1,9 +1,11 @@
+local scheme = kong.request.get_forwarded_scheme()
+if scheme ~= "https" then return kong.response.exit(426,{error="https_required"}) end
 local path = kong.request.get_path()
 local method = kong.request.get_method()
-local claims = kong.ctx.shared.authenticated_jwt_token and kong.ctx.shared.authenticated_jwt_token.claims or {}
+local token = kong.ctx.shared.authenticated_jwt_token
+local claims = token and token.claims or {}
 local scopes = {}
 for value in string.gmatch(claims.scope or "", "%S+") do scopes[value] = true end
-
 local required
 local application_auth_only = false
 if path == "/v1/admin/system" or path:find("^/v1/admin/system/") then
@@ -41,14 +43,12 @@ elseif path:find("^/api/v1/events/") then
 else
   return kong.response.exit(403,{error="route_scope_undefined"})
 end
-
 if required and not scopes[required] then
   return kong.response.exit(403,{error="insufficient_scope",required_scope=required})
 end
 if not required and not application_auth_only then
   return kong.response.exit(403,{error="route_scope_undefined"})
 end
-
 local tenant = kong.request.get_header("X-Tenant-ID")
 if not claims.tenant or claims.tenant == "" then
   return kong.response.exit(403,{error="tenant_claim_required"})
@@ -56,7 +56,6 @@ end
 if tenant and tenant ~= claims.tenant then
   return kong.response.exit(403,{error="cross_tenant_denied"})
 end
-
 kong.service.request.set_header("X-Authenticated-Client", claims.azp or "unknown")
 kong.service.request.set_header("X-Authenticated-Tenant", claims.tenant)
 if required == "platform.admin" then
