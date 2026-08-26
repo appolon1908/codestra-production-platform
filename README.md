@@ -1,41 +1,86 @@
-# Application Server A Package
+# Codestra Production Platform
 
-## Middleware/n8n integration control plane
+This repository is the **source authority for the Codestra application platform**. It contains reviewed contracts, deployment definitions, security policy, recovery tooling, monitoring, and the integration control plane used by Odoo, middleware, n8n, Keycloak, Kong, Redis, PostgreSQL, VICIdial, Klyrow, Telnexa, and Kyqra.
 
-The additive P0 control plane is in `control_plane_service/` with its Docker deployment under `deploy/control-plane/`. It provides the unified event contract, independent service authentication, HMAC/replay defense, tenant-scoped idempotency, consent enforcement, durable queue/DLQ state, correlation history, RBAC operations APIs, audit records, and Prometheus metrics. It preserves the existing production ingress at `10.40.0.1:8095` and deploys loopback-only at `127.0.0.1:8096` with outbound Odoo/n8n delivery disabled until approved credentials and workflows pass synthetic acceptance.
+A merged source change is **not** proof that the corresponding production runtime is active. Production deployment requires an immutable image or package built from the protected merged SHA, a current change record, recovery evidence, an approved maintenance window, canary/rollback evidence, and live-versus-Git reconciliation.
 
-The communications API adds `POST /v1/messages/sms`, `POST /v1/messages/email`, tenant-scoped message/timeline queries, preference APIs, cancel/retry controls, Telnexa simulator dispatch, and Klyrow test dispatch. Production delivery has two independent fail-closed gates: `CONTROL_PLANE_OUTBOUND_ENABLED` and `CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED`; the committed Compose contract keeps outbound disabled and the provider modes non-production.
-
-See `ARCHITECTURE.md`, `DEPLOYMENT.md`, `SECURITY.md`, `DISASTER_RECOVERY.md`, and `docs/` for contracts and operations.
-
-Server: `65.109.65.169`
-
-Target directory:
+## Production request path
 
 ```text
-/root/codestra-production-completion
+Public client
+  -> host Caddy (public TLS edge)
+  -> Docker upstream-gateway
+  -> private Kong
+  -> private middleware/control-plane service
+  -> private PostgreSQL, Redis, NATS, Odoo, n8n, or approved provider adapter
 ```
 
-This package installs the application-side Codex directive for Odoo 19, middleware, automatic campaign design/provisioning, n8n, Redis, Keycloak, reverse proxy, monitoring, GitHub CI, and deployment.
+Business APIs must not bypass Kong. Explicit exceptions are limited to reviewed browser applications, public health contracts, and private mTLS receivers. Kong Admin, PostgreSQL, Redis, NATS, middleware application ports, and internal provider listeners must remain private.
 
-## Upload from Windows PowerShell
+## Repository map
 
-Download these two files into the same Windows Downloads folder:
+| Path | Responsibility |
+| --- | --- |
+| `control_plane_service/` | Authenticated integration control plane and durable coordination APIs |
+| `campaign_provisioning/` | Campaign and provisioning domain logic |
+| `eventing/` | Event contracts and durable event handling |
+| `integrations/` | Restricted adapters and integration-specific source |
+| `deploy/` | Source-controlled Compose, Kong, and service deployment definitions |
+| `operations/` | Caddy, monitoring, recovery, database, systemd, and operational controls |
+| `config/` | Canonical policy, service, feature, connector, and API registries |
+| `schemas/` | Versioned machine-readable data contracts |
+| `n8n/` | Governed workflow source; production activation remains separate |
+| `odoo_addons/` | Platform-owned Odoo integration addons and validation fixtures |
+| `tools/` | Fail-closed source and architecture validators |
+| `tests/` | Clean-checkout source, security, contract, and recovery tests |
+| `docs/` | Canonical architecture, API, deployment, and runbook documentation |
+| `reports/`, `artifacts/`, dated root reports | Historical evidence, not current runtime authority |
 
-- `codestra_app_server_A_65.109.65.169.zip`
-- `upload_app_server_A_65.109.65.169.ps1`
+## Canonical catalogs
 
-Run PowerShell:
+- System boundaries and allowed connections: `config/integration-policy.yaml`
+- Connectors, endpoints, webhooks, and protocols: `config/integration-registries.yaml`
+- Platform features, critical API surface, and known gaps: `config/platform-catalog.yaml`
+- Platform structure validator: `tools/check_platform_catalog.py`
+- Integration constitution validator: `tools/check_integration_architecture.py`
+- Human-readable architecture: `ARCHITECTURE.md`
+- Documentation index: `docs/README.md`
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-& "$env:USERPROFILE\Downloads\upload_app_server_A_65.109.65.169.ps1"
+## Change boundaries
+
+Keep these concerns in separate pull requests unless a reviewed migration requires them to move together:
+
+1. API and schema contracts.
+2. Application/domain implementation.
+3. Database migrations and recovery authority.
+4. Gateway/Caddy routing.
+5. Runtime Compose and immutable image references.
+6. Production activation and capability flags.
+
+Do not combine Kong database HA, shared PostgreSQL PITR, middleware deployment, Odoo module activation, telephony activation, and provider delivery in one release.
+
+## Local validation
+
+```bash
+python -m pytest -q
+python tools/check_integration_architecture.py
+python tools/check_platform_catalog.py
+python -m compileall -q control_plane_service campaign_provisioning eventing integrations tools
 ```
 
-## Start Codex after installation
+Run the deployment-specific catalog gate for the features included in a release:
 
-```powershell
-ssh -t root@65.109.65.169 "cd /root/codestra-production-completion && ./start-codex-app-server.sh"
+```bash
+python tools/check_platform_catalog.py \
+  --deployment-check \
+  --feature middleware-callback-api \
+  --feature middleware-campaign-automation
 ```
 
-Do not place passwords or production secrets in Git-tracked files.
+The deployment check is expected to fail while a required source or runtime gap is unresolved.
+
+## Production rule
+
+Never deploy from a dirty checkout, an unreviewed feature branch, a mutable tag, or a generated container name treated as permanent service authority. Deploy only the approved immutable artifact from the protected merged SHA, recreate only the affected services, preserve the host-Caddy -> upstream-gateway -> Kong architecture, and keep all dangerous capabilities disabled until separately certified.
+
+Do not commit credentials, private keys, live certificates, database data, backups, recordings, runtime logs, or customer data.
