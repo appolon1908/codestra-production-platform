@@ -64,6 +64,108 @@ def test_contract_routes_bind_exact_dedicated_security_authority():
         assert {"pre-function", "post-function"} & set(route["requiredPlugins"])
 
 
+def test_callback_contract_rejects_security_plugin_config_drift():
+    module = _module()
+    canonical = json.loads(MANIFEST_PATH.read_text())
+    expected = next(
+        row for row in canonical["contractRoutes"] if row["name"] == "codestra-callback-control"
+    )
+    authority_path, spec, route = module.security_authority(ROOT, expected)
+    callback = module.security_module(ROOT, "reconcile_kong_callback_routes")
+    plugins = {
+        "jwt": {
+            "enabled": True,
+            "config": {
+                "header_names": ["authorization"],
+                "uri_param_names": [],
+                "cookie_names": [],
+                "claims_to_verify": ["exp"],
+                "key_claim_name": "azp",
+                "run_on_preflight": False,
+                "secret_is_base64": False,
+                "anonymous": None,
+            },
+        },
+        "pre-function": {
+            "enabled": True,
+            "config": {"access": [callback.claim_guard(spec, route["requiredScope"])]},
+        },
+        "request-size-limiting": {
+            "enabled": True,
+            "config": {"allowed_payload_size": route["maxBodyMb"]},
+        },
+        "rate-limiting": {
+            "enabled": True,
+            "config": {
+                "minute": route["ratePerMinute"],
+                "policy": "local",
+                "limit_by": "ip",
+            },
+        },
+        "correlation-id": {
+            "enabled": True,
+            "config": {
+                "header_name": "X-Correlation-ID",
+                "generator": "uuid",
+                "echo_downstream": True,
+            },
+        },
+    }
+    module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+    plugins["jwt"]["config"]["key_claim_name"] = "sub"
+    with pytest.raises(RuntimeError, match="jwt_key_claim"):
+        module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+
+
+def test_campaign_contract_rejects_scope_guard_drift():
+    module = _module()
+    canonical = json.loads(MANIFEST_PATH.read_text())
+    expected = next(
+        row for row in canonical["contractRoutes"] if row["name"] == "codestra-campaign-policy-check"
+    )
+    authority_path, spec, route = module.security_authority(ROOT, expected)
+    campaign = module.security_module(ROOT, "reconcile_kong_campaign_automation")
+    plugins = {
+        "jwt": {
+            "enabled": True,
+            "config": {
+                "key_claim_name": "azp",
+                "claims_to_verify": ["exp"],
+                "header_names": ["authorization"],
+                "run_on_preflight": True,
+            },
+        },
+        "post-function": {
+            "enabled": True,
+            "config": {"access": [campaign.claim_guard(spec, route["scope"])]},
+        },
+        "request-size-limiting": {
+            "enabled": True,
+            "config": {"allowed_payload_size": route["max_body_mb"]},
+        },
+        "rate-limiting": {
+            "enabled": True,
+            "config": {
+                "minute": route["rate_per_minute"],
+                "policy": "local",
+                "limit_by": "consumer",
+            },
+        },
+        "correlation-id": {
+            "enabled": True,
+            "config": {
+                "header_name": "X-Correlation-ID",
+                "generator": "uuid",
+                "echo_downstream": True,
+            },
+        },
+    }
+    module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+    plugins["post-function"]["config"]["access"] = ["return true"]
+    with pytest.raises(RuntimeError, match="claim_guard"):
+        module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+
+
 def test_reconciler_pagination_cannot_leave_the_selected_admin_origin():
     module = _module()
     assert module.safe_next("http://127.0.0.1:8001", "/routes?offset=next") == (
@@ -88,6 +190,7 @@ def test_reconciler_is_exact_and_never_unions_legacy_hosts():
     assert "LEGACY_PUBLIC_ROUTE_NAMES" in source
     assert "duplicate enabled route plugins" in source
     assert "securityAuthority" in source
+    assert "verify_security_plugins" in source
     assert "correlation-id" in source
     assert 'return "true" if value else "false"' in source
 
@@ -100,12 +203,24 @@ def test_read_only_route_exporter_redacts_secret_values_without_exporting_creden
         "nested": {"password": "do-not-export", "secret_is_base64": True},
         "key_claim_name": "azp",
         "allowed_payload_size": 2,
+        "headers": [
+            "Authorization: Bearer do-not-export-token",
+            "X-API-Key: do-not-export-key",
+            "X-Safe-Header: safe-value",
+        ],
+        "upstream_url": "https://user:do-not-export@example.invalid/path",
     }
     sanitized = module.sanitize(value)
-    assert sanitized["client_secret"] == "REDACTED"
-    assert sanitized["nested"]["password"] == "REDACTED"
+    assert sanitized["client_secret"]["redacted"] is True
+    assert sanitized["nested"]["password"]["redacted"] is True
     assert sanitized["nested"]["secret_is_base64"] is True
     assert sanitized["key_claim_name"] == "azp"
+    assert sanitized["headers"][0]["redacted"] is True
+    assert sanitized["headers"][1]["redacted"] is True
+    assert sanitized["headers"][2] == "X-Safe-Header: safe-value"
+    assert sanitized["upstream_url"]["redacted"] is True
+    rendered = json.dumps(sanitized)
+    assert "do-not-export" not in rendered
     assert "method=\"GET\"" in source
     assert "credentials_exported" in source
     assert "consumers" not in source.lower()
