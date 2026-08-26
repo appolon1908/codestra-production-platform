@@ -131,3 +131,12 @@ def test_odoo_container_classifier_has_no_unknown_runtime_entries() -> None:
     )
     assert "ODOO_UNKNOWN_HISTORICAL_CONTAINERS=0" in result.stdout
     assert "ODOO_CLEANUP_APPROVED_COUNT=0" in result.stdout
+
+
+def test_odoo_contract_is_enforced_by_deployment_preflight() -> None:
+    validator = (ROOT / "scripts/validate_odoo_production_contract.py").read_text()
+    assert '"@sha256:" not in args.image' in validator
+    assert "org.opencontainers.image.source" in validator
+    assert "org.opencontainers.image.revision" in validator
+    assert "ODOO_PUBLIC_PORT_EXPOSURE" in validator
+    assert "scripts/test_odoo_private_allowlist.sh" in validator
