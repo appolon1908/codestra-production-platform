@@ -281,7 +281,7 @@ known_gaps:
     owner: platform-security
     required_before_server_push: true
     affected_features: [public-api-edge, middleware-callback-api, middleware-campaign-automation]
-    remediation: Finish PR 117 and retain one exact route registry referencing dedicated security profiles.
+    remediation: Finish PR 130 and retain one exact route registry referencing dedicated security profiles.
   - gap_id: control-plane-openapi-coverage
     severity: high
     status: open
