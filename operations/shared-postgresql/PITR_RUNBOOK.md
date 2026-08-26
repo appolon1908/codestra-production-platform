@@ -8,7 +8,12 @@
    Provision the stage as `root:postgres` `0770`. PostgreSQL receives only stage
    access; the root offload service alone receives the encryption public key and
    dedicated off-host credential. PostgreSQL receives no private decryption key,
-   off-host credential, or unrelated secret. Validate modes and remote readback.
+   off-host credential, or unrelated secret. For an SFTP restic authority, place
+   the restricted SSH configuration and key below the protected
+   `shared-postgresql/ssh-home` directory and install
+   `codestra-shared-backup.ssh.conf` under `/etc/ssh/ssh_config.d`; the system
+   client fragment is non-secret and `ProtectHome=true` remains enforced.
+   Validate modes, forced-command restrictions, and remote readback.
 4. Install `postgresql-pitr.conf`; capture the previous effective configuration.
 5. Restart PostgreSQL once inside the approved window. Validate every database
    and application consumer before continuing.
