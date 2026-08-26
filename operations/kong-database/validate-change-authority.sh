@@ -101,7 +101,21 @@ if all_values KONG_DB_RPO_SECONDS KONG_DB_RTO_SECONDS KONG_DB_WAL_RETENTION_DAYS
   && [[ "${cfg[KONG_DB_RTO_SECONDS]}" =~ ^[1-9][0-9]*$ ]] \
   && [[ "${cfg[KONG_DB_WAL_RETENTION_DAYS]}" =~ ^[1-9][0-9]*$ ]]; then gate_rpo=PASS; fi
 
-evidence_file() { valid_value "$1" && [[ -s "${cfg[$1]}" && ! -L "${cfg[$1]}" ]]; }
+evidence_file() {
+  valid_value "$1" || return 1
+  local key="$1" path="${cfg[$1]}" expected
+  [[ -s "$path" && ! -L "$path" ]] || return 1
+  case "$key" in
+    KONG_BACKUP_EVIDENCE) expected=BACKUP ;;
+    KONG_OFFHOST_BACKUP_EVIDENCE) expected=OFFHOST ;;
+    KONG_RESTORE_EVIDENCE) expected=RESTORE ;;
+    KONG_PITR_REHEARSAL_EVIDENCE) expected=PITR ;;
+    KONG_ROLLBACK_EVIDENCE) expected=ROLLBACK ;;
+    KONG_TELEPHONY_EVIDENCE) expected=TELEPHONY ;;
+    *) return 1 ;;
+  esac
+  grep -Fxq "${expected}=PASS" "$path"
+}
 fresh_evidence() {
   evidence_file "$1" || return 1
   local modified now

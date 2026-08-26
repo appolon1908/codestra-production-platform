@@ -73,6 +73,15 @@ def test_units_are_root_controlled_and_persistent():
     assert "ProtectSystem=strict" in service
     assert "Persistent=true" in timer
     assert "OnCalendar=" in timer
+    expected = {
+        "codestra-kong-database-backup.service": "kong-database-backup.sh",
+        "codestra-kong-database-metrics.service": "kong-database-metrics.sh",
+        "codestra-kong-database-restore.service": "kong-database-restore-rehearsal.sh",
+        "codestra-kong-database-pitr-rehearsal.service": "pitr-rehearsal.sh",
+    }
+    for unit, script in expected.items():
+        assert f"ExecStart=/usr/local/sbin/{script}" in (PACKAGE / unit).read_text()
+        assert (PACKAGE / script).is_file()
 
 
 def test_restore_rehearsal_is_scheduled_and_persistent():
@@ -84,7 +93,7 @@ def test_restore_rehearsal_is_scheduled_and_persistent():
     assert "Persistent=true" in timer
     pitr_service = (PACKAGE / "codestra-kong-database-pitr-rehearsal.service").read_text()
     pitr_timer = (PACKAGE / "codestra-kong-database-pitr-rehearsal.timer").read_text()
-    assert "codestra-kong-database-pitr-rehearsal" in pitr_service
+    assert "pitr-rehearsal.sh" in pitr_service
     assert "OnCalendar=monthly" in pitr_timer
     assert "Persistent=true" in pitr_timer
 
@@ -101,6 +110,9 @@ def test_hba_and_roles_fail_closed_without_secrets():
     assert "kong_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE" in roles
     assert "kong_replication LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE" in roles
     assert "kong_backup LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE" in roles
+    assert "kong_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE" in roles
+    assert "REASSIGN OWNED BY kong TO kong_owner" in roles
+    assert "GRANT kong_owner TO kong_migration_admin" in roles
     assert " PASSWORD '" not in roles.upper()
 
 
@@ -122,3 +134,17 @@ def test_least_privilege_rehearsal_proves_runtime_and_migration_separation():
     assert "ADMIN_READ_WRITE=PASS" in value
     assert "MIGRATION_PRIVILEGE_ISOLATION=PASS" in value
     assert "create table must_be_denied" in value
+
+
+def test_replication_metrics_are_live_when_expected():
+    value = (PACKAGE / "kong-database-metrics.sh").read_text()
+    assert "pg_stat_wal_receiver" in value
+    assert "pg_last_xact_replay_timestamp" in value
+    assert "replica-monitor.env" in value
+    for metric in (
+        "codestra_kong_db_replication_lag_seconds $replication_lag",
+        "codestra_kong_db_standby_in_recovery $standby_in_recovery",
+        "codestra_kong_db_standby_read_only $standby_read_only",
+        "codestra_kong_db_wal_receiver_up $wal_receiver_up",
+    ):
+        assert metric in value

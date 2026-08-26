@@ -16,7 +16,7 @@ def approved_values(tmp_path: Path) -> dict[str, str]:
     evidence = {}
     for name in ("backup", "offhost", "restore", "pitr", "rollback", "telephony"):
         path = tmp_path / f"{name}.evidence"
-        path.write_text(f"{name}=PASS\n")
+        path.write_text(f"{name.upper()}=PASS\n")
         evidence[name] = str(path)
     return {
         "KONG_CHANGE_ID": "CHG-SYNTHETIC-001",
@@ -117,6 +117,17 @@ def test_placeholder_fails_closed(tmp_path):
     assert result.returncode != 0
     assert "CHANGE_RECORD=FAIL" in result.stdout
     assert "KONG_DB_CUTOVER_GO=NO" in result.stdout
+
+
+def test_failed_or_unstructured_evidence_fails_closed(tmp_path):
+    for content in ("RESTORE_TEST=FAIL\n", "arbitrary text\n"):
+        values = approved_values(tmp_path)
+        evidence = tmp_path / "restore.evidence"
+        evidence.write_text(content)
+        result = execute(tmp_path, values)
+        assert result.returncode != 0
+        assert "RECOVERY_EVIDENCE=FAIL" in result.stdout
+        assert "KONG_DB_CUTOVER_GO=NO" in result.stdout
 
 
 def test_fully_synthetic_approved_fixture_passes_without_mutation(tmp_path):

@@ -48,6 +48,32 @@ if docker exec codestra-kong-kong-gateway-1 kong migrations list >/dev/null 2>&1
 fi
 replication_expected=0
 [[ -f /etc/codestra/kong-database/replication-expected ]] && replication_expected=1
+replication_lag=-1
+standby_in_recovery=-1
+standby_read_only=-1
+wal_receiver_up=-1
+replica_env=/etc/codestra/secrets/kong-database/replica-monitor.env
+if (( replication_expected == 1 )); then
+  [[ -f "$replica_env" && ! -L "$replica_env" \
+    && "$(stat -c '%a' "$replica_env")" == 600 \
+    && "$(stat -c '%u' "$replica_env")" == 0 ]] || {
+    echo "replication expected but protected replica monitor configuration is unavailable" >&2
+    exit 1
+  }
+  # The protected file contains libpq variable names and references a pgpass
+  # file; it is never emitted into metrics or logs.
+  set -a
+  # shellcheck disable=SC1090
+  source "$replica_env"
+  set +a
+  replica_values="$(psql -XAt -F '|' -v ON_ERROR_STOP=1 -c "
+select pg_is_in_recovery()::int,
+current_setting('transaction_read_only')::boolean::int,
+coalesce((select (status='streaming')::int from pg_stat_wal_receiver),0),
+coalesce(extract(epoch from clock_timestamp()-pg_last_xact_replay_timestamp()),0);
+")"
+  IFS='|' read -r standby_in_recovery standby_read_only wal_receiver_up replication_lag <<<"$replica_values"
+fi
 ha_values="$(docker exec "$db" psql -U kong -d kong -XAt -F '|' -v ON_ERROR_STOP=1 -c "
 select (not pg_is_in_recovery() and not current_setting('default_transaction_read_only')::boolean)::int,
 (select count(*) from pg_stat_replication where state='streaming'),
@@ -108,7 +134,7 @@ codestra_kong_db_migration_up_to_date $migration_up_to_date
 codestra_kong_db_replication_expected $replication_expected
 # HELP codestra_kong_db_replication_lag_seconds Replica replay lag, or -1 when no replica exists.
 # TYPE codestra_kong_db_replication_lag_seconds gauge
-codestra_kong_db_replication_lag_seconds -1
+codestra_kong_db_replication_lag_seconds $replication_lag
 # HELP codestra_kong_db_primary_writable The authoritative primary accepts writes.
 # TYPE codestra_kong_db_primary_writable gauge
 codestra_kong_db_primary_writable $primary_writable
@@ -129,13 +155,13 @@ codestra_kong_db_wal_archive_failures_total $wal_archive_failures
 codestra_kong_db_wal_archive_age_seconds $wal_archive_age
 # HELP codestra_kong_db_standby_in_recovery Standby recovery state; -1 until deployed.
 # TYPE codestra_kong_db_standby_in_recovery gauge
-codestra_kong_db_standby_in_recovery -1
+codestra_kong_db_standby_in_recovery $standby_in_recovery
 # HELP codestra_kong_db_standby_read_only Standby read-only state; -1 until deployed.
 # TYPE codestra_kong_db_standby_read_only gauge
-codestra_kong_db_standby_read_only -1
+codestra_kong_db_standby_read_only $standby_read_only
 # HELP codestra_kong_db_wal_receiver_up Standby WAL receiver state; -1 until deployed.
 # TYPE codestra_kong_db_wal_receiver_up gauge
-codestra_kong_db_wal_receiver_up -1
+codestra_kong_db_wal_receiver_up $wal_receiver_up
 EOF
 chmod 0644 "$temporary"
 mv -f "$temporary" "$output"
