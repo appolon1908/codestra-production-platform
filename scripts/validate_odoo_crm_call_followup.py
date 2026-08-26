@@ -84,6 +84,14 @@ def main() -> int:
         except ET.ParseError as exc:
             fail(errors, f"XML parse error in {xml_file.relative_to(ROOT)}: {exc}")
 
+    view_source = (MODULE / "views" / "call_followup_views.xml").read_text(
+        encoding="utf-8"
+    ) if (MODULE / "views" / "call_followup_views.xml").is_file() else ""
+    if 'default_period="today"' in view_source:
+        fail(errors, "Odoo 19 date filters do not accept default_period=today")
+    if "<search" in view_source and '<group expand="' in view_source:
+        fail(errors, "Odoo 19 search views do not accept legacy group wrappers")
+
     python_and_js = "\n".join(
         path.read_text(encoding="utf-8")
         for pattern in ("*.py", "*.js")

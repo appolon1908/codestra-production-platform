@@ -306,6 +306,9 @@ class CodestraCrmPostCallWizard(models.TransientModel):
             disposition_label,
             schedule_text,
         )
+        if self.notes:
+            body += Markup("<p><strong>%s</strong></p>") % _("Agent notes")
+            body += Markup(self.notes)
         followup.lead_id.message_post(
             body=body,
             subtype_xmlid="mail.mt_note",
@@ -334,7 +337,7 @@ class CodestraCrmPostCallWizard(models.TransientModel):
             "mail_id": mail.id or False,
             "popup_completed_at": fields.Datetime.now(),
         }
-        self.followup_id.with_context(skip_codestra_calendar_sync=True).write(values)
+        self.followup_id._write_from_workflow(values)
         self._post_chatter_summary(event)
         return {"type": "ir.actions.act_window_close"}
 

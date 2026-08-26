@@ -393,13 +393,19 @@ class CodestraCrmCallFollowup(models.Model):
         }
 
     def action_cancel_followup(self):
-        self.write(
+        if any(record.state != "pending" for record in self):
+            raise ValidationError(_("Only pending call follow-ups can be cancelled."))
+        self._write_from_workflow(
             {
                 "state": "cancelled",
                 "popup_completed_at": fields.Datetime.now(),
             }
         )
         return True
+
+    def _write_from_workflow(self, values):
+        """Apply state changes from trusted server-side workflow methods only."""
+        return super().write(values)
 
     def write(self, values):
         immutable = {
@@ -417,4 +423,10 @@ class CodestraCrmCallFollowup(models.Model):
         }
         if immutable.intersection(values):
             raise AccessError(_("Completed-call identity fields are immutable."))
+        if not self.env.user.has_group(
+            "codestra_crm_call_followup.group_call_followup_manager"
+        ):
+            raise AccessError(
+                _("Call follow-ups must be changed through the post-call workflow.")
+            )
         return super().write(values)

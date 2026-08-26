@@ -10,7 +10,7 @@ class CrmLead(models.Model):
         string="Call Follow-ups",
     )
     codestra_call_followup_count = fields.Integer(
-        string="Call Follow-ups",
+        string="Call Follow-up Count",
         compute="_compute_codestra_call_followup_count",
     )
     codestra_next_callback_at = fields.Datetime(

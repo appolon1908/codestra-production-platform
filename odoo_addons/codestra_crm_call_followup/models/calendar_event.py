@@ -41,9 +41,9 @@ class CalendarEvent(models.Model):
                         }
                     )
                 if followup_values:
-                    event.codestra_call_followup_id.with_context(
-                        skip_codestra_calendar_sync=True
-                    ).write(followup_values)
+                    event.codestra_call_followup_id._write_from_workflow(
+                        followup_values
+                    )
         return result
 
     @api.ondelete(at_uninstall=False)
@@ -52,7 +52,7 @@ class CalendarEvent(models.Model):
             return
         followups = self.mapped("codestra_call_followup_id")
         if followups:
-            followups.with_context(skip_codestra_calendar_sync=True).write(
+            followups._write_from_workflow(
                 {
                     "schedule_kind": "none",
                     "callback_at": False,
