@@ -1,12 +1,12 @@
 .o_dialog:has(.o_codestra_post_call_dialog) {
     .modal-dialog {
-        max-width: 980px;
+        max-width: 1080px;
     }
 
     .modal-content {
         border: 0;
-        border-radius: 18px;
-        box-shadow: 0 24px 70px rgba(23, 32, 51, 0.2);
+        border-radius: 20px;
+        box-shadow: 0 28px 80px rgba(23, 32, 51, 0.24);
         overflow: hidden;
     }
 }
@@ -16,49 +16,103 @@
     --codestra-muted: #667085;
     --codestra-border: #e3e8f0;
     --codestra-surface: #f6f8fb;
+    --codestra-surface-strong: #eef2ff;
     --codestra-accent: #4f46e5;
+    --codestra-accent-dark: #3730a3;
 
     .o_codestra_call_header {
         display: flex;
         justify-content: space-between;
-        gap: 24px;
+        gap: 28px;
         margin: -16px -16px 22px;
-        padding: 24px 28px;
+        padding: 28px 32px;
         color: #fff;
         background:
-            radial-gradient(circle at 90% 10%, rgba(255, 255, 255, 0.18), transparent 34%),
-            linear-gradient(135deg, var(--codestra-ink), #27385f);
+            radial-gradient(circle at 90% 10%, rgba(255, 255, 255, 0.2), transparent 34%),
+            linear-gradient(135deg, var(--codestra-ink), #30456f 62%, var(--codestra-accent-dark));
+
+        .o_codestra_call_heading {
+            max-width: 620px;
+        }
+
+        p {
+            color: rgba(255, 255, 255, 0.78);
+        }
     }
 
     .o_codestra_eyebrow {
         margin-bottom: 6px;
         font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.12em;
+        font-weight: 800;
+        letter-spacing: 0.14em;
         opacity: 0.72;
     }
 
     .o_codestra_call_meta {
         display: grid;
-        grid-template-columns: repeat(2, minmax(130px, 1fr));
+        grid-template-columns: repeat(2, minmax(145px, 1fr));
         gap: 12px;
-        min-width: 320px;
+        min-width: 340px;
+    }
 
-        .o_field_widget {
-            padding: 10px 12px;
+    .o_codestra_meta_item {
+        padding: 11px 13px;
+        background: rgba(255, 255, 255, 0.11);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 12px;
+
+        .o_codestra_meta_label {
+            display: block;
+            margin-bottom: 3px;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            opacity: 0.68;
+        }
+
+        .o_field_widget,
+        .o_field_widget input {
             color: #fff;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 10px;
+            font-weight: 700;
         }
     }
 
     .o_codestra_identity_card {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+        align-items: center;
+        gap: 14px;
         margin-bottom: 18px;
-        padding: 10px 16px;
+        padding: 14px 16px;
         background: var(--codestra-surface);
         border: 1px solid var(--codestra-border);
-        border-radius: 12px;
+        border-radius: 14px;
+    }
+
+    .o_codestra_identity_item {
+        min-width: 0;
+
+        .o_codestra_identity_label {
+            display: block;
+            margin-bottom: 3px;
+            color: var(--codestra-muted);
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+
+        .o_field_widget {
+            width: 100%;
+            overflow: hidden;
+            font-weight: 700;
+            text-overflow: ellipsis;
+        }
+    }
+
+    .o_codestra_identity_cta {
+        white-space: nowrap;
     }
 
     .nav-tabs {
@@ -69,7 +123,7 @@
         .nav-link {
             padding: 12px 16px;
             color: var(--codestra-muted);
-            font-weight: 600;
+            font-weight: 700;
             border-radius: 10px 10px 0 0;
         }
 
@@ -80,7 +134,7 @@
     }
 
     .tab-content {
-        min-height: 330px;
+        min-height: 380px;
         padding: 24px 8px 8px;
     }
 
@@ -90,13 +144,51 @@
         align-items: flex-start;
         justify-content: space-between;
         gap: 18px;
-        margin-bottom: 18px;
+        margin-bottom: 20px;
 
         h3 {
             margin-bottom: 4px;
             color: var(--codestra-ink);
-            font-size: 18px;
-            font-weight: 700;
+            font-size: 19px;
+            font-weight: 800;
+        }
+    }
+
+    .o_codestra_decision_grid {
+        margin-top: 18px;
+        padding: 14px 16px;
+        background: var(--codestra-surface);
+        border-radius: 12px;
+    }
+
+    .o_codestra_schedule_card,
+    .o_codestra_email_card {
+        margin-top: 18px;
+        padding: 20px;
+        background: var(--codestra-surface);
+        border: 1px solid var(--codestra-border);
+        border-radius: 14px;
+    }
+
+    .o_codestra_empty_state {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-top: 22px;
+        padding: 24px;
+        background: var(--codestra-surface);
+        border: 1px dashed #c9d2e1;
+        border-radius: 14px;
+
+        > .fa {
+            display: grid;
+            width: 44px;
+            height: 44px;
+            place-items: center;
+            color: var(--codestra-accent);
+            background: var(--codestra-surface-strong);
+            border-radius: 50%;
+            font-size: 20px;
         }
     }
 
@@ -106,7 +198,8 @@
     }
 
     .o_field_html {
-        min-height: 180px;
+        min-height: 190px;
+        background: #fff;
         border: 1px solid var(--codestra-border);
         border-radius: 12px;
         overflow: hidden;
@@ -114,22 +207,62 @@
 
     .alert {
         border: 0;
-        border-radius: 10px;
+        border-radius: 11px;
     }
 
     footer {
-        gap: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
         padding-top: 16px;
         border-top: 1px solid var(--codestra-border);
 
+        .o_codestra_primary_actions,
+        .o_codestra_secondary_actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
         .btn-primary {
-            padding-inline: 22px;
-            font-weight: 700;
+            padding-inline: 24px;
+            font-weight: 800;
+        }
+    }
+}
+
+@media (max-width: 991.98px) {
+    .o_codestra_post_call_dialog {
+        .o_codestra_identity_card {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .o_codestra_identity_cta {
+            justify-self: start;
+        }
+
+        footer {
+            align-items: flex-start;
+            flex-direction: column;
         }
     }
 }
 
 @media (max-width: 767.98px) {
+    .o_dialog:has(.o_codestra_post_call_dialog) {
+        .modal-dialog {
+            margin: 0;
+            min-height: 100%;
+        }
+
+        .modal-content {
+            min-height: 100vh;
+            border-radius: 0;
+        }
+    }
+
     .o_codestra_post_call_dialog {
         .o_codestra_call_header,
         .o_codestra_section_intro,
@@ -137,14 +270,38 @@
             flex-direction: column;
         }
 
-        .o_codestra_call_meta {
+        .o_codestra_call_header {
+            padding: 24px 22px;
+        }
+
+        .o_codestra_call_meta,
+        .o_codestra_identity_card {
             width: 100%;
             min-width: 0;
             grid-template-columns: 1fr;
         }
 
+        .nav-tabs {
+            flex-wrap: nowrap;
+            overflow-x: auto;
+
+            .nav-link {
+                white-space: nowrap;
+            }
+        }
+
         .tab-content {
             min-height: 0;
+        }
+
+        footer,
+        footer .o_codestra_primary_actions,
+        footer .o_codestra_secondary_actions {
+            width: 100%;
+        }
+
+        footer .btn {
+            flex: 1 1 auto;
         }
     }
 }
