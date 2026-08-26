@@ -193,6 +193,9 @@ def test_reconciler_is_exact_and_never_unions_legacy_hosts():
     assert "verify_security_plugins" in source
     assert "correlation-id" in source
     assert 'return "true" if value else "false"' in source
+    assert 'if not route.get("hosts") or public_hosts.intersection' in source
+    assert 'service.get("protocol")' in source
+    assert 'service.get("path")' in source
 
 
 def test_read_only_route_exporter_redacts_secret_values_without_exporting_credentials():
@@ -219,6 +222,10 @@ def test_read_only_route_exporter_redacts_secret_values_without_exporting_creden
             "&X-Amz-Signature=signature"
         ),
         "azure_url": "https://blob.example.invalid/object?sig=signature",
+        "gcs_url": (
+            "https://storage.example.invalid/object?X-Goog-Credential=credential"
+            "&X-Goog-Signature=signature"
+        ),
     }
     sanitized = module.sanitize(value)
     assert sanitized["client_secret"]["redacted"] is True
@@ -234,6 +241,7 @@ def test_read_only_route_exporter_redacts_secret_values_without_exporting_creden
     assert sanitized["safe_url"] == "https://hooks.example.invalid/path?offset=next"
     assert sanitized["aws_url"]["redacted"] is True
     assert sanitized["azure_url"]["redacted"] is True
+    assert sanitized["gcs_url"]["redacted"] is True
     rendered = json.dumps(sanitized)
     assert "do-not-export" not in rendered
     assert "method=\"GET\"" in source

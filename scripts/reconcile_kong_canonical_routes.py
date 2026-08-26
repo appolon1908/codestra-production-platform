@@ -195,6 +195,8 @@ def verify_contract_route(
     service = services[route["service"]["id"]]
     require_equal(service.get("host"), expected["serviceHost"], f"{expected['name']}.service.host")
     require_equal(service.get("port"), expected["servicePort"], f"{expected['name']}.service.port")
+    require_equal(service.get("protocol"), authority_manifest["service"].get("protocol"), f"{expected['name']}.service.protocol")
+    require_equal(service.get("path"), authority_manifest["service"].get("path"), f"{expected['name']}.service.path")
     plugins = enabled_plugins(admin, route["id"])
     missing = sorted(set(expected["requiredPlugins"]) - set(plugins))
     if missing:
@@ -345,7 +347,9 @@ def main() -> int:
 
     public_hosts = {manifest["canonicalHost"], manifest["legacyHost"]}
     public_routes = [
-        route for route in routes if public_hosts.intersection(route.get("hosts") or [])
+        route
+        for route in routes
+        if not route.get("hosts") or public_hosts.intersection(route.get("hosts") or [])
     ]
     unverified_public = sorted(
         route.get("name") or route["id"]
@@ -383,7 +387,7 @@ def main() -> int:
     legacy_routes = sorted(
         route.get("name") or route["id"]
         for route in routes_after
-        if manifest["legacyHost"] in (route.get("hosts") or [])
+        if not route.get("hosts") or manifest["legacyHost"] in (route.get("hosts") or [])
     )
     if not manifest["legacyHostEnabled"] and legacy_routes:
         print("LEGACY_PUBLIC_ROUTE_NAMES=" + ";".join(legacy_routes))

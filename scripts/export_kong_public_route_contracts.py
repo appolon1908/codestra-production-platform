@@ -140,6 +140,7 @@ def sensitive_scalar(value: object, key: str) -> bool:
     return any(
         sensitive_key(name)
         or name.lower().replace("-", "_") in SENSITIVE_QUERY_KEYS
+        or name.lower().replace("-", "_").endswith(("_credential", "_signature"))
         for name, _ in parse_qsl(parsed.query, keep_blank_values=True)
     )
 
