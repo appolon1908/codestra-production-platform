@@ -11,7 +11,7 @@ LABEL org.opencontainers.image.title="Codestra Odoo 19 Call Follow-up" \
       org.opencontainers.image.source="https://github.com/appolon1908-hue/codestra-production-platform" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
-      com.codestra.release.integration-sha="32ef97f27459cf57c58e7b329ab8ed0ae9c0f34d" \
+      com.codestra.release.integration-sha="b9b55274d726b2375f0a48ae30a2b1369c47e91c" \
       com.codestra.call-followup.automation-default="disabled"
 
 USER root
