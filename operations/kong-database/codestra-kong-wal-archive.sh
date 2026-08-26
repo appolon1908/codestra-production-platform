@@ -30,4 +30,3 @@ export AWS_SECRET_ACCESS_KEY="$(cat /etc/codestra/backup/b2-secret-access-key)"
 export AWS_DEFAULT_REGION="$(cat /etc/codestra/backup/b2-region)"
 restic backup --quiet --tag kong-database-wal "$artifact" "$artifact.sha256"
 touch "$spool/LAST_OFFHOST_SUCCESS"
-
