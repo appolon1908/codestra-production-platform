@@ -37,9 +37,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends nats-server
           python -m pip install --upgrade "setuptools==83.0.0"
-          python -m pip install pytest pytest-subtests PyYAML requests pip-audit "nats-py==2.15.0"
+          python -m pip install pytest pytest-subtests PyYAML requests pip-audit "nats-py==2.15.0" \
+            "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9"
           python -m pip install -e 'vicidial[test]'
           python -m pytest -q
+          python -m pytest -q \
+            deploy/kong-production-standby/auth-middleware/test_token_validation.py
           python -m pip_audit --local
 
       - name: Install checksum-verified Cosign
@@ -69,7 +72,10 @@ jobs:
             --dir middleware-release
           (cd middleware-release && sha256sum --check --strict SHA256SUMS)
           python tools/verify_middleware_release_evidence.py \
-            --directory middleware-release --github-env middleware-release-verified.env
+            --directory middleware-release --github-env middleware-release-verified.env \
+            --tuple config/production-release-tuple.json \
+            --run-id "${MIDDLEWARE_RELEASE_RUN_ID}" \
+            --artifact "${MIDDLEWARE_RELEASE_ARTIFACT}"
           cat middleware-release-verified.env >> "${GITHUB_ENV}"
           source middleware-release-verified.env
           subject="ghcr.io/codestra-srl/codestra-middleware@${MIDDLEWARE_IMAGE_DIGEST}"
@@ -88,9 +94,13 @@ jobs:
           python tools/verify_attestation_predicate.py \
             --verification middleware-sbom-verification.json \
             --predicate middleware-release/sbom.cdx.json
-          python tools/verify_attestation_predicate.py \
+          python tools/verify_slsa_provenance_attestation.py \
             --verification middleware-provenance-verification.json \
-            --predicate middleware-release/provenance.json
+            --provenance middleware-release/provenance.json \
+            --release-env middleware-release/RELEASE.env \
+            --sbom middleware-release/sbom.cdx.json \
+            --trivy middleware-release/trivy.json \
+            --grype middleware-release/grype-vex.json
           docker pull "${subject}"
           test "$(docker image inspect "${subject}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "${MIDDLEWARE_PROTECTED_SHA}"
           mapfile -t migration_heads < <(
@@ -114,6 +124,9 @@ jobs:
             --middleware-image-digest "${MIDDLEWARE_IMAGE_DIGEST}" \
             --middleware-signature-status "PASS" \
             --middleware-provenance-status "PASS" \
+            --middleware-sbom-sha256 "${MIDDLEWARE_SBOM_SHA256}" \
+            --middleware-provenance-sha256 "${MIDDLEWARE_PROVENANCE_SHA256}" \
+            --middleware-openvex-sha256 "${MIDDLEWARE_OPENVEX_SHA256}" \
             --migration-revision "${MIDDLEWARE_MIGRATION_REVISION}"
           install -m 0644 middleware-signature-verification.json \
             dist/middleware-signature-verification.json
@@ -127,12 +140,22 @@ jobs:
             dist/middleware-sbom.cdx.json
           install -m 0644 middleware-release/provenance.json \
             dist/middleware-provenance.json
+          install -m 0644 middleware-release/trivy.json \
+            dist/middleware-trivy.json
+          install -m 0644 middleware-release/grype-vex.json \
+            dist/middleware-grype-vex.json
+          install -m 0644 middleware-release/vex/openvex.json \
+            dist/middleware-openvex.json
+          install -m 0644 middleware-release/SHA256SUMS \
+            dist/middleware-source-SHA256SUMS
           (cd dist && sha256sum \
             middleware-signature-verification.json \
             middleware-provenance-verification.json \
             middleware-sbom-verification.json \
             middleware-RELEASE.env middleware-sbom.cdx.json \
-            middleware-provenance.json >> manifest.sha256)
+            middleware-provenance.json middleware-openvex.json middleware-trivy.json \
+            middleware-grype-vex.json middleware-source-SHA256SUMS \
+            >> manifest.sha256)
           (cd dist && sha256sum --check manifest.sha256)
           python - <<'PY'
           import json

@@ -38,6 +38,61 @@ def run(script: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 
 class BackupOperationsTests(unittest.TestCase):
+    def test_restore_rehearsal_preserves_isolated_owner_roles(self) -> None:
+        source = (
+            ROOT
+            / "operations"
+            / "readiness"
+            / "codestra-isolated-restore-rehearsal.sh"
+        ).read_text()
+        self.assertIn("CREATE ROLE middleware_data_owner;", source)
+        self.assertIn("CREATE ROLE keycloak_data_owner;", source)
+        self.assertNotIn("GRANT middleware_data_owner TO middleware_app;", source)
+        self.assertNotIn("GRANT keycloak_data_owner TO keycloak;", source)
+        self.assertIn("-O middleware_data_owner codestra_middleware", source)
+        self.assertIn("-O keycloak_data_owner keycloak", source)
+        self.assertIn("PRODUCTION-MIDDLEWARE-ROLE-BASELINE.txt", source)
+        self.assertIn("PRODUCTION-KEYCLOAK-ROLE-AFTER.txt", source)
+        self.assertIn("--exit-on-error", source)
+        self.assertNotIn("--no-owner", source)
+        self.assertIn("KEYCLOAK_DATA_OWNER_NOLOGIN=PASS", source)
+        self.assertIn("RESTORE_ROLE_MEMBERSHIP_SCOPE=ISOLATED_ONLY", source)
+        self.assertIn("PRODUCTION_ROLE_PRIVILEGES_UNCHANGED=PASS", source)
+        self.assertIn("PUBLISHED_PORT_COUNT=0", source)
+
+    def test_readiness_backup_publishes_last_success_after_evidence_validation(self) -> None:
+        source = (ROOT / "operations" / "readiness" / "codestra-local-consistency-backup.sh").read_text()
+        evidence = source.index('sha256sum -c EVIDENCE-SHA256SUMS')
+        marker = source.index('mv "$backup_root/.LAST_SUCCESS-${stamp}" "$backup_root/LAST_SUCCESS"')
+        self.assertGreater(marker, evidence)
+
+    def test_restore_rehearsal_recreates_rbac_owners_before_exact_restore(self) -> None:
+        backup = (ROOT / "operations" / "readiness" / "codestra-local-consistency-backup.sh").read_text()
+        source = (ROOT / "operations" / "readiness" / "codestra-isolated-restore-rehearsal.sh").read_text()
+        role = source.index("CREATE ROLE keycloak_data_owner;")
+        restore = source.index('restore_args=(--exit-on-error)')
+        self.assertLess(role, restore)
+        self.assertIn("CREATE ROLE middleware_data_owner;", source)
+        self.assertNotIn("GRANT middleware_data_owner TO middleware_app", source)
+        self.assertIn("pg_has_role('middleware_app','middleware_data_owner','MEMBER')", source)
+        self.assertIn("trap 'exit 130' INT", source)
+        self.assertIn("trap 'exit 143' TERM", source)
+        self.assertIn('expected-keycloak-owners.txt', backup)
+        self.assertIn('expected-default-acl.txt', backup)
+        self.assertNotIn('> "$work_dir/expected-keycloak-owners.txt"', source)
+        self.assertIn("OBJECT_OWNERSHIP=PASS", source)
+        self.assertIn("DEFAULT_PRIVILEGES_RESTORED=PASS", source)
+        self.assertIn("PRODUCTION_ROLE_PRIVILEGES_UNCHANGED=PASS", source)
+
+    def test_readiness_backup_validates_exact_root_owned_owner_waiver(self) -> None:
+        source = (ROOT / "operations" / "readiness" / "codestra-local-consistency-backup.sh").read_text()
+        self.assertIn("os.O_NOFOLLOW", source)
+        self.assertIn("os.fstat(stream.fileno())", source)
+        self.assertIn("info.st_uid != 0 or info.st_gid != 0", source)
+        self.assertIn("stat.S_IMODE(info.st_mode) != 0o600", source)
+        self.assertIn("hashlib.sha256(waiver).hexdigest()", source)
+        self.assertIn("if ! validate_owner_window_waiver; then", source)
+
     def test_backup_fails_closed_without_protected_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             result = run(
@@ -103,6 +158,61 @@ class BackupOperationsTests(unittest.TestCase):
 
 
 class MonitoringGovernanceTests(unittest.TestCase):
+    def test_monitoring_installer_does_not_repeat_promtool_argv_zero(self) -> None:
+        source = (MONITORING / "install-monitoring.sh").read_text()
+        self.assertIn("--entrypoint /bin/promtool", source)
+        self.assertIn("check config /etc/prometheus/prometheus.yml", source)
+        self.assertNotIn("promtool check config", source)
+
+    def test_platform_ci_publishes_required_legacy_status(self) -> None:
+        workflow = (ROOT / ".github/workflows/platform-source-gate.yml").read_text()
+        self.assertIn("statuses: write", workflow)
+        self.assertIn("TARGET_SHA: ${{ github.event.pull_request.head.sha }}", workflow)
+        self.assertIn('statuses/${TARGET_SHA}', workflow)
+        self.assertIn("-f context=validate", workflow)
+        self.assertIn("if: always()", workflow)
+
+    def test_middleware_database_exporters_are_wired(self) -> None:
+        compose = yaml.safe_load((MONITORING / "compose.monitoring.yaml").read_text())
+        services = compose["services"]
+        postgres = services["postgres-exporter"]
+        self.assertIn("backend", postgres["networks"])
+        self.assertEqual(
+            postgres["environment"]["DATA_SOURCE_URI"],
+            "codestra-postgres-1:5432/postgres?sslmode=disable",
+        )
+        self.assertEqual(postgres["environment"]["DATA_SOURCE_USER"], "codestra_monitoring")
+        self.assertEqual(
+            postgres["secrets"],
+            [{"source": "postgres_monitoring_credential", "target": "postgres_monitoring_password"}],
+        )
+        node = services["node-exporter"]
+        self.assertIn(
+            "--collector.textfile.directory=/host/var/lib/node_exporter/textfile_collector",
+            node["command"],
+        )
+        self.assertEqual(
+            compose["secrets"]["postgres_monitoring_credential"]["file"],
+            "/etc/codestra/secrets/monitoring-runtime/postgres_exporter_password",
+        )
+        prometheus = yaml.safe_load((MONITORING / "prometheus.yml").read_text())
+        jobs = {job["job_name"]: job for job in prometheus["scrape_configs"]}
+        self.assertEqual(
+            jobs["postgres-exporter"]["static_configs"][0]["targets"],
+            ["postgres-exporter:9187"],
+        )
+
+    def test_middleware_database_recovery_metrics_are_fail_closed(self) -> None:
+        source = (MONITORING / "exporters" / "recovery_metrics.sh").read_text()
+        self.assertIn("OFFSERVER_COPY=PASS", source)
+        self.assertIn("codestra_middleware_backup_last_success_timestamp_seconds", source)
+        self.assertIn("codestra_systemd_timer_failed", source)
+        self.assertIn("codestra_backup_replication_failures_total", source)
+        self.assertIn("systemctl is-failed --quiet codestra-scraper-middleware-backup.service", source)
+        self.assertIn("codestra_middleware_database_migration_match", source)
+        self.assertIn("codestra-middleware-integration-api-1 alembic heads", source)
+        self.assertIn("codestra-middleware-integration-api-1 alembic current", source)
+
     def test_receiver_validator_rejects_empty_invalid_and_placeholder_urls(self) -> None:
         config = MONITORING / "alertmanager.example.yml"
         names = ("primary_receiver_url", "secondary_receiver_url", "recovery_receiver_url", "rejected_route_url")
@@ -242,6 +352,22 @@ class MonitoringGovernanceTests(unittest.TestCase):
                 self.assertNotIn("url", webhook)
                 self.assertTrue(webhook["url_file"].startswith("/run/secrets/"))
                 self.assertTrue(webhook["send_resolved"])
+
+    def test_email_provisioning_foreign_keys_match_installed_canonical_ids(self) -> None:
+        migration = (
+            ROOT / "migrations" / "control_plane" / "003_campaign_email_provisioning.sql"
+        ).read_text()
+        self.assertIn("format_type(a.atttypid,a.atttypmod)", migration)
+        self.assertIn("campaign_id_type NOT IN ('text','uuid')", migration)
+        self.assertIn("agent_id_type NOT IN ('text','uuid')", migration)
+        self.assertEqual(
+            migration.count(
+                "%s NOT NULL REFERENCES control_plane.campaign(id)"
+            ),
+            2,
+        )
+        self.assertIn("%s NOT NULL REFERENCES control_plane.agent(id)", migration)
+        self.assertEqual(migration.count("DROP POLICY IF EXISTS"), 3)
 
 
 if __name__ == "__main__":

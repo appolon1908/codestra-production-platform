@@ -11,7 +11,7 @@ def verification(predicate: dict) -> str:
     return json.dumps({"payload": base64.b64encode(statement).decode()})
 
 
-def test_verified_predicate_must_equal_copied_evidence(tmp_path) -> None:
+def test_verified_sbom_predicate_must_equal_copied_evidence(tmp_path) -> None:
     predicate = {"bomFormat": "CycloneDX", "components": []}
     evidence = tmp_path / "sbom.json"
     evidence.write_text(json.dumps(predicate))

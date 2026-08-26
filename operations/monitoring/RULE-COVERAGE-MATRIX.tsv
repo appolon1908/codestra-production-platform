@@ -21,6 +21,7 @@ unexpected-workflow-activation	CodestraUnexpectedWorkflowActivation	critical	n8n
 unexpected-write-enablement	CodestraUnexpectedWriteEnablement	critical	integration	production	write enablement > 0	1m	operations/runbooks/alerts/unexpected-write-enablement.md	COVERED
 unexpected-send-events-enabled	CodestraUnexpectedSendEventsEnabled	critical	integration	production	SEND_EVENTS != 0	1m	operations/runbooks/alerts/unexpected-send-events-enabled.md	COVERED
 unexpected-production-callbacks-enabled	CodestraUnexpectedProductionCallbacksEnabled	critical	callback	production	PRODUCTION_CALLBACKS_ENABLED != 0	1m	operations/runbooks/alerts/unexpected-production-callbacks-enabled.md	COVERED
+integration-architecture-violation	CodestraIntegrationArchitectureViolation	critical	integration-governance	production	critical findings > 0	1m	operations/runbooks/alerts/integration-architecture-violation.md	COVERED
 vicidial-unavailable	CodestraVicidialUnavailable	critical	vicidial	production	service_up = 0	2m	operations/runbooks/alerts/vicidial-unavailable.md	COVERED
 asterisk-unavailable	CodestraAsteriskUnavailable	critical	asterisk	production	service_up = 0	2m	operations/runbooks/alerts/asterisk-unavailable.md	COVERED
 trunk-unavailable	CodestraTrunkUnavailable	critical	voice-trunk	production	trunk_up = 0	2m	operations/runbooks/alerts/trunk-unavailable.md	COVERED
@@ -42,6 +43,11 @@ call-setup-latency-excessive	CodestraCallSetupLatencyExcessive	critical	voice	pr
 stuck-asterisk-channel	CodestraStuckAsteriskChannel	critical	asterisk	production	channel age > 1h	5m	operations/runbooks/alerts/stuck-asterisk-channel.md	COVERED
 channel-cleanup-failure	CodestraChannelCleanupFailure	critical	asterisk	production	any failure / 10m	5m	operations/runbooks/alerts/channel-cleanup-failure.md	COVERED
 postgresql-unavailable	CodestraPostgresqlUnavailable	critical	postgresql	production	database_up = 0	2m	operations/runbooks/alerts/postgresql-unavailable.md	COVERED
+middleware-database-down	MiddlewareDatabaseDown	critical	middleware-database	production	exporter down or scrape error	2m	operations/runbooks/alerts/middleware-database-down.md	COVERED
+middleware-database-connection-warning	MiddlewareDatabaseConnectionWarning	critical	middleware-database	production	connections > 70% / 10m	10m	operations/runbooks/alerts/middleware-database-connection-warning.md	COVERED
+middleware-database-connection-critical	MiddlewareDatabaseConnectionCritical	critical	middleware-database	production	connections > 85% / 5m	5m	operations/runbooks/alerts/middleware-database-connection-critical.md	COVERED
+middleware-database-disk-low	MiddlewareDatabaseDiskLow	critical	middleware-database	production	root filesystem used > 85% / 15m	15m	operations/runbooks/alerts/middleware-database-disk-low.md	COVERED
+middleware-database-deadlocks	MiddlewareDatabaseDeadlocks	critical	middleware-database	production	any deadlock / 10m	2m	operations/runbooks/alerts/middleware-database-deadlocks.md	COVERED
 mariadb-unavailable	CodestraMariadbUnavailable	critical	mariadb	production	database_up = 0	2m	operations/runbooks/alerts/mariadb-unavailable.md	COVERED
 redis-unavailable	CodestraRedisUnavailable	critical	redis	production	service_up = 0	2m	operations/runbooks/alerts/redis-unavailable.md	COVERED
 database-connection-saturation	CodestraDatabaseConnectionSaturation	critical	database	production	connections > 90% / 10m	10m	operations/runbooks/alerts/database-connection-saturation.md	COVERED
@@ -59,6 +65,10 @@ backup-failure	CodestraBackupFailure	critical	backup	production	any failure / 1h
 off-server-replication-failure	CodestraOffServerReplicationFailure	critical	backup	production	any failure / 1h	1m	operations/runbooks/alerts/off-server-replication-failure.md	COVERED
 backup-checksum-failure	CodestraBackupChecksumFailure	critical	backup	production	any failure / 1h	1m	operations/runbooks/alerts/backup-checksum-failure.md	COVERED
 backup-stale	CodestraBackupStale	critical	backup	production	age > 26h / 15m	15m	operations/runbooks/alerts/backup-stale.md	COVERED
+middleware-database-backup-stale	MiddlewareDatabaseBackupStale	critical	middleware-database	production	age > 24h / 15m	15m	operations/runbooks/alerts/middleware-database-backup-stale.md	COVERED
+middleware-database-backup-failed	MiddlewareDatabaseBackupFailed	critical	middleware-database	production	timer or replication failure	1m	operations/runbooks/alerts/middleware-database-backup-failed.md	COVERED
+middleware-database-restore-overdue	MiddlewareDatabaseRestoreOverdue	critical	middleware-database	production	restore rehearsal age > 30d	1h	operations/runbooks/alerts/middleware-database-restore-overdue.md	COVERED
+middleware-database-migration-mismatch	MiddlewareDatabaseMigrationMismatch	critical	middleware-database	production	migration match = 0	5m	operations/runbooks/alerts/middleware-database-migration-mismatch.md	COVERED
 remote-backup-capacity-low	CodestraRemoteBackupCapacityLow	critical	backup	production	free < 10GiB / 30m	30m	operations/runbooks/alerts/remote-backup-capacity-low.md	COVERED
 backup-timer-disabled	CodestraBackupTimerDisabled	critical	backup	production	timer enabled = 0	5m	operations/runbooks/alerts/backup-timer-disabled.md	COVERED
 backup-timer-failed	CodestraBackupTimerFailed	critical	backup	production	timer failed > 0	2m	operations/runbooks/alerts/backup-timer-failed.md	COVERED

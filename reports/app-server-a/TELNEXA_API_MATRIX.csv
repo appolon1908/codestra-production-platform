@@ -1,0 +1,9 @@
+CAPABILITY,EXPECTED,ACTUAL,STATUS,EVIDENCE
+Public send,POST https://sms.telnexa.co/send,endpoint answered HTTP 400 without credential,PARTIAL,network and TLS only
+Private send,POST /v1/messages,configured at telnexa.internal.codestra.agency:8443,PARTIAL,mTLS/HMAC client implemented and unit-tested
+Health,health endpoint,HTTPS endpoint answered HTTP 400 without required client context,PARTIAL,not an authenticated health PASS
+DLR,POST /internal/dlr,SMS API route exists,PASS,signature/replay unit tests pass
+Inbound,/webhooks/sms/inbound,no matching live SMS API route discovered,FAIL,runtime route inventory
+Failure,/webhooks/sms/failed,no matching live SMS API route discovered,FAIL,runtime route inventory
+Query,GET message status,GET /messages/{message_id}/status exists,PARTIAL,customer authorization not exercised
+Billing,billing API if relevant,no provider billing API discovered,NOT_TESTED,not required for safe control-plane probe

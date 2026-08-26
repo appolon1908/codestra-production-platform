@@ -2,7 +2,7 @@
 
 Production persistence is database `codestra_odoo` plus the content-addressed filestore under Odoo's effective data directory. A pair is accepted only when its `BACKUP_ID` matches, its outer SHA-256 manifest passes, every database `store_fname` exists, each referenced object's SHA-1 equals `ir_attachment.checksum`, and ownership matches the recorded Odoo UID/GID.
 
-The isolated PostgreSQL role must be named `odoo_app` because the reviewed Odoo configuration fixes `db_user=odoo_app`. The isolated database is `codestra_odoo_restore`, and the restored filestore directory must use that same name. The internal Docker network must provide PostgreSQL alias `postgres` because the reviewed configuration fixes `db_host=postgres`.
+The isolated PostgreSQL role must be named `odoo_app` because the reviewed Odoo configuration fixes `db_user=odoo_app`. The isolated database is `codestra_odoo_restore`, and the restored filestore directory must use that same name. Production fixes `db_host=codestra-postgres-1`; do not replace it with the ambiguous `postgres` alias. A restore rehearsal may use a dedicated hostname only when its generated rehearsal configuration names that hostname explicitly and the isolated network contains no production containers.
 
 The rehearsal network must be Docker `internal=true`, use a collision-checked subnet, publish no ports, and mount no production secrets or identities. Start Odoo with `--max-cron-threads=0`, workers disabled, database listing disabled, and an exact restore database filter. Verify `/web/health` only from inside the container. An isolated secret unique to the rehearsal is mounted read-only and removed with the rehearsal resources.
 

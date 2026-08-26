@@ -1,0 +1,14 @@
+x-live-delivery-safety: &live-delivery-safety
+  environment:
+    LIVE_SMS_DELIVERY: "false"
+    LIVE_EMAIL_DELIVERY: "false"
+    LIVE_PSTN_DIALING: "false"
+  entrypoint: ["/opt/venv/bin/python", "-m", "control_plane_service.admission"]
+
+services:
+  api:
+    <<: *live-delivery-safety
+    command: ["python", "-m", "control_plane_service.server"]
+  worker:
+    <<: *live-delivery-safety
+    command: ["python", "-m", "control_plane_service.worker"]

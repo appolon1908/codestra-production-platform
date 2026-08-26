@@ -1,0 +1,1136 @@
+#!/usr/bin/python3
+"""Root-only, fail-closed Codestra production operation dispatcher."""
+
+from __future__ import annotations
+
+import datetime as dt
+import errno
+import fcntl
+import hashlib
+import hmac
+import ipaddress
+import json
+import os
+import pwd
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+ALLOWED_ACTIONS = {
+    "preflight",
+    "backup",
+    "validate-backup",
+    "restore-test",
+    "stage",
+    "canary",
+    "status",
+    "rollback",
+    "collect-evidence",
+    "stage-control-plane",
+    "validate-control-plane",
+    "rollback-control-plane",
+    "activate-control-plane",
+    "enable-production-web-traffic",
+    "disable-production-web-traffic",
+}
+READ_ONLY_ACTIONS = {"preflight", "status", "collect-evidence", "validate-control-plane"}
+RECOVERY_ACTIONS = {"rollback", "rollback-control-plane", "disable-production-web-traffic"}
+SAFETY_BYPASS_ACTIONS = {"status", "collect-evidence", "rollback", "rollback-control-plane", "disable-production-web-traffic"}
+CANONICAL_FALSE_FLAGS = {
+    "SEND_EVENTS",
+    "ENABLE_EXTERNAL_DELIVERY",
+    "ODOO_DELIVERY_ENABLED",
+    "CALLBACK_DISPATCH",
+    "ENABLE_VICIDIAL_WRITES",
+    "LIVE_WRITE",
+    "ODOO_WRITE",
+    "N8N_DELIVERY_ENABLED",
+    "PRODUCTION_DIALING",
+    "LIVE_CALL_CONTROL",
+    "GENERAL_AI_DIALING",
+}
+SYSTEMD_ACTIONS = {
+    "backup": "codestra-readiness-backup.service",
+    "restore-test": "codestra-readiness-restore.service",
+}
+BACKUP_STATE_VALIDATOR = Path("/opt/codestra/operations/backup/check-backup-state.sh")
+READINESS_BACKUP_ROOT = Path("/opt/codestra/backups/production-readiness-local")
+CONFIG_DIR = Path("/etc/codestra/production-operator")
+RELEASE_CONFIG = CONFIG_DIR / "release.json"
+MAINTENANCE_DATE = CONFIG_DIR / "maintenance-date"
+OWNER_WAIVER_DIR = Path(
+    "/opt/codestra/evidence/production-readiness-soak/20260822T022734Z"
+)
+OWNER_WINDOW_WAIVER = OWNER_WAIVER_DIR / "OWNER-MAINTENANCE-WINDOW-WAIVER.txt"
+OWNER_WINDOW_WAIVER_CHECKSUM = OWNER_WAIVER_DIR / "OWNER-MAINTENANCE-WINDOW-WAIVER.sha256"
+EVIDENCE_DIR = Path("/var/lib/codestra-production-operator/evidence")
+LOCK_FILE = Path("/run/lock/codestra-production-operator.lock")
+DATE_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])")
+STANDBY_CONTAINER = "codestra-production-standby-approved"
+STANDBY_ENTRYPOINT = ["/opt/venv/bin/python"]
+STANDBY_COMMAND = ["-c", "import threading; threading.Event().wait()"]
+MIDDLEWARE_IMAGE = "ghcr.io/codestra-srl/codestra-middleware"
+CONTROL_PLANE_PROJECT = "codestra-integration-control-plane"
+CONTROL_PLANE_RELEASE_ROOT = Path("/opt/codestra/releases/control-plane")
+CONTROL_PLANE_ARCHIVE_ROOT = Path("/home/codestra-admin")
+CONTROL_PLANE_ARCHIVE_CHECKSUM = CONFIG_DIR / "control-plane-archive.sha256"
+CONTROL_PLANE_BACKUP_ROOT = Path("/opt/codestra/backups/control-plane-protected-deploy")
+CONTROL_PLANE_DB_CONTAINER = "codestra-postgres-1"
+CONTROL_PLANE_DB = "control_plane"
+CONTROL_PLANE_API = "codestra-integration-control-plane-api-1"
+CONTROL_PLANE_WORKER = "codestra-integration-control-plane-worker-1"
+ACTIVE_RELEASE_POINTER = CONFIG_DIR / "active-release.json"
+PREVIOUS_RELEASE_POINTER = CONFIG_DIR / "previous-active-release.json"
+CORE_WEB_TRAFFIC_POINTER = CONFIG_DIR / "core-web-traffic.json"
+KONG_ADMIN_URL = "http://127.0.0.1:8001"
+KONG_TRAFFIC_GATE_INSTANCE = "codestra-core-web-api-traffic-gate"
+CORE_WEB_PROBE_URL = "https://api.codestra.co/api/v1/callbacks"
+AUTH_GATEWAY_CONTAINER = "codestra-identity-auth-gateway-1"
+AUTH_GATEWAY_NETWORK = "codestra_backend"
+AUTH_GATEWAY_PORT = 4180
+RFC1918_NETWORKS = tuple(
+    ipaddress.ip_network(cidr) for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
+MIDDLEWARE_RUNTIME_CONTAINERS = (
+    "codestra-middleware-integration-api-1",
+    "codestra-middleware-scheduler-1",
+    "codestra-middleware-notification-worker-1",
+)
+MIDDLEWARE_REQUIRED_FALSE_FLAGS = {
+    "CALLBACK_DELIVERY_ENABLED",
+    "CALLBACK_DISPATCH",
+    "CALLBACK_DISPATCH_ENABLED",
+    "ENABLE_EXTERNAL_DELIVERY",
+    "ENABLE_VICIDIAL_WRITES",
+    "EXTERNAL_DELIVERY_ENABLED",
+    "GENERAL_AI_DIALING",
+    "LIVE_CALL_CONTROL",
+    "LIVE_EMAIL_DELIVERY",
+    "LIVE_PSTN_DIALING",
+    "LIVE_SMS_DELIVERY",
+    "LIVE_WRITE",
+    "N8N_DELIVERY_ENABLED",
+    "ODOO_DELIVERY_ENABLED",
+    "ODOO_WRITE",
+    "ODOO_WRITE_ENABLED",
+    "PRODUCTION_DIALING",
+    "SEND_EVENTS",
+}
+VICIDIAL_CHANNELS_COMMAND = (
+    "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'core show channels count'"
+)
+VICIDIAL_REGISTRATIONS_COMMAND = (
+    "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'pjsip show registrations'"
+)
+
+
+class OperatorError(RuntimeError):
+    pass
+
+
+def checked_root_bytes(path: Path, *, expected_mode: int = 0o600) -> bytes:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise OperatorError(f"unsafe file type: {path}") from error
+        raise OperatorError(f"required root file unavailable: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OperatorError(f"unsafe file type: {path}")
+        if info.st_uid != 0 or info.st_gid != 0:
+            raise OperatorError(f"unsafe ownership: {path}")
+        if stat.S_IMODE(info.st_mode) != expected_mode:
+            raise OperatorError(f"unsafe mode: {path}")
+        return stream.read()
+
+
+def checked_root_file(path: Path, *, expected_mode: int = 0o600) -> str:
+    try:
+        return checked_root_bytes(path, expected_mode=expected_mode).decode("ascii").strip()
+    except UnicodeError as error:
+        raise OperatorError(f"required root file unreadable: {path}") from error
+
+
+OWNER_WINDOW_WAIVER_STATEMENTS = {
+    "MAINTENANCE_WINDOW=WAIVED_BY_OWNER",
+    "MAINTENANCE_WINDOW_WAIVER_APPROVED=YES",
+    "MAINTENANCE_WINDOW_WAIVER_AUTHORITY=OWNER",
+    "IMMEDIATE_PRODUCTION_MUTATION_AUTHORIZED=YES",
+}
+
+
+def validate_owner_window_waiver() -> dict[str, str]:
+    """Validate the one fixed, root-controlled owner maintenance waiver."""
+    if OWNER_WINDOW_WAIVER.parent != OWNER_WAIVER_DIR or OWNER_WINDOW_WAIVER_CHECKSUM.parent != OWNER_WAIVER_DIR:
+        raise OperatorError("owner waiver path escaped approved evidence directory")
+    waiver_bytes = checked_root_bytes(OWNER_WINDOW_WAIVER)
+    try:
+        waiver = waiver_bytes.decode("ascii")
+    except UnicodeError as error:
+        raise OperatorError("owner waiver is not ASCII") from error
+    checksum_record = checked_root_file(OWNER_WINDOW_WAIVER_CHECKSUM)
+    match = re.fullmatch(
+        r"([0-9a-f]{64})  OWNER-MAINTENANCE-WINDOW-WAIVER\.txt", checksum_record
+    )
+    if match is None:
+        raise OperatorError("owner waiver checksum record is malformed")
+    actual = hashlib.sha256(waiver_bytes).hexdigest()
+    if actual != match.group(1):
+        raise OperatorError("owner waiver checksum mismatch")
+    statements = set(waiver.splitlines())
+    if not OWNER_WINDOW_WAIVER_STATEMENTS <= statements:
+        raise OperatorError("owner waiver authorization statements are incomplete")
+    return {
+        "maintenance_window": "WAIVED_BY_OWNER",
+        "owner_window_waiver_evidence": "PASS",
+        "window_check": "BYPASSED_BY_VALID_OWNER_WAIVER",
+    }
+
+
+def require_maintenance_window(now: dt.datetime | None = None) -> dict[str, str]:
+    raw_date = checked_root_file(MAINTENANCE_DATE)
+    if not DATE_RE.fullmatch(raw_date):
+        raise OperatorError("maintenance date is malformed")
+    approved_date = dt.date.fromisoformat(raw_date)
+    current = now or dt.datetime.now(dt.timezone.utc)
+    local = current.astimezone(ZoneInfo("America/New_York"))
+    if local.date() == approved_date and 0 <= local.hour < 4:
+        return {
+            "maintenance_date": raw_date,
+            "maintenance_window": "PASS",
+            "owner_window_waiver_evidence": "NOT_REQUIRED",
+            "window_check": "APPROVED_WINDOW",
+        }
+    result = validate_owner_window_waiver()
+    return {"maintenance_date": raw_date, **result}
+
+
+def load_release_config() -> dict[str, str]:
+    raw = checked_root_file(RELEASE_CONFIG, expected_mode=0o644)
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise OperatorError("release tuple is malformed") from error
+    required = {"protected_sha", "image_digest", "change_id", "maintenance_date"}
+    if set(config) != required:
+        raise OperatorError("release tuple schema mismatch")
+    patterns = {
+        "protected_sha": r"[0-9a-f]{40}",
+        "image_digest": r"sha256:[0-9a-f]{64}",
+        "change_id": r"CHG-[0-9]{8}-CODESTRA-PRODUCTION-ACTIVATION-[0-9]{2}",
+        "maintenance_date": r"20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])",
+    }
+    if any(not isinstance(config[key], str) or re.fullmatch(patterns[key], config[key]) is None for key in required):
+        raise OperatorError("release tuple value rejected")
+    return config
+
+
+def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        check=False,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=1800,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+    )
+
+
+def validate_backup_state() -> dict[str, object]:
+    info = BACKUP_STATE_VALIDATOR.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise OperatorError("backup-state validator has unsafe file type")
+    if info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o755:
+        raise OperatorError("backup-state validator has unsafe ownership or mode")
+    invocation = run_fixed([
+        "/usr/bin/env",
+        f"CODESTRA_BACKUP_ROOT={READINESS_BACKUP_ROOT}",
+        str(BACKUP_STATE_VALIDATOR),
+    ])
+    if invocation.returncode != 0:
+        raise OperatorError("backup-state validation failed")
+    stamp = checked_root_file(READINESS_BACKUP_ROOT / "LAST_SUCCESS")
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp) is None:
+        raise OperatorError("readiness backup marker is malformed")
+    backup_dir = READINESS_BACKUP_ROOT / stamp
+    try:
+        directory_info = backup_dir.lstat()
+    except OSError as error:
+        raise OperatorError("readiness backup directory unavailable") from error
+    if (
+        stat.S_ISLNK(directory_info.st_mode)
+        or not stat.S_ISDIR(directory_info.st_mode)
+        or directory_info.st_uid != 0
+        or directory_info.st_gid != 0
+        or stat.S_IMODE(directory_info.st_mode) != 0o700
+    ):
+        raise OperatorError("readiness backup directory is unsafe")
+    checksum_text = checked_root_file(backup_dir / "EVIDENCE-SHA256SUMS")
+    expected_names = {f"codestra-{stamp}.tar.gz.gpg", "SHA256SUMS", "STATUS.txt"}
+    records: dict[str, str] = {}
+    for line in checksum_text.splitlines():
+        match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9._-]+)", line)
+        if match is None or match.group(2) in records:
+            raise OperatorError("readiness backup evidence manifest is malformed")
+        records[match.group(2)] = match.group(1)
+    if set(records) != expected_names:
+        raise OperatorError("readiness backup evidence manifest is incomplete")
+    for name, expected in records.items():
+        actual = hashlib.sha256(checked_root_bytes(backup_dir / name)).hexdigest()
+        if actual != expected:
+            raise OperatorError("readiness backup evidence checksum mismatch")
+    return {
+        "validator": str(BACKUP_STATE_VALIDATOR),
+        "returncode": 0,
+        "backup_stamp": stamp,
+        "evidence_integrity": "PASS",
+    }
+
+
+def run_bytes(command: list[str], *, stdin: bytes | None = None, timeout: int = 1800) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        command,
+        input=stdin,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=timeout,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+    )
+
+
+def docker_inspect(name: str) -> dict[str, object]:
+    result = run_bytes(["/usr/bin/docker", "inspect", name], timeout=30)
+    return json.loads(result.stdout)[0]
+
+
+def standby_configuration_matches(current: dict[str, object], subject: str) -> bool:
+    config = current["Config"]
+    host = current["HostConfig"]
+    return bool(
+        config["Image"] == subject
+        and config.get("Entrypoint") == STANDBY_ENTRYPOINT
+        and config.get("Cmd") == STANDBY_COMMAND
+        and host["NetworkMode"] == "none"
+        and host.get("ReadonlyRootfs") is True
+        and host.get("CapDrop") == ["ALL"]
+        and "no-new-privileges" in host.get("SecurityOpt", [])
+    )
+
+
+def stage_standby(config: dict[str, str]) -> dict[str, object]:
+    credential = sys.stdin.buffer.read(16384)
+    if not credential or len(credential) >= 16384 or any(item in credential for item in (b"\x00", b"\n", b"\r")):
+        raise OperatorError("invalid GHCR credential input")
+    subject = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
+    docker_config = Path(tempfile.mkdtemp(prefix="codestra-docker-", dir="/run"))
+    try:
+        run_bytes(["/usr/bin/docker", "--config", str(docker_config), "login", "ghcr.io", "--username", "appolon1908-hue", "--password-stdin"], stdin=credential, timeout=60)
+        credential = b""
+        run_bytes(["/usr/bin/docker", "--config", str(docker_config), "pull", "--quiet", subject])
+        image = json.loads(run_bytes(["/usr/bin/docker", "image", "inspect", subject], timeout=60).stdout)[0]
+        if subject not in image.get("RepoDigests", []):
+            raise OperatorError("pulled image digest mismatch")
+    finally:
+        credential = b""
+        shutil.rmtree(docker_config, ignore_errors=True)
+    create_standby = False
+    try:
+        existing = docker_inspect(STANDBY_CONTAINER)
+        if existing["Config"]["Image"] != subject:
+            raise OperatorError("standby exists with a different digest")
+        if standby_configuration_matches(existing, subject):
+            run_bytes(["/usr/bin/docker", "start", STANDBY_CONTAINER], timeout=60)
+        else:
+            if existing["State"].get("Running"):
+                run_bytes(["/usr/bin/docker", "stop", "--time", "20", STANDBY_CONTAINER], timeout=60)
+            run_bytes(["/usr/bin/docker", "rm", STANDBY_CONTAINER], timeout=60)
+            create_standby = True
+    except subprocess.CalledProcessError:
+        create_standby = True
+    if create_standby:
+        run_bytes([
+            "/usr/bin/docker", "create", "--name", STANDBY_CONTAINER,
+            "--network", "none", "--read-only", "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+            "--entrypoint", STANDBY_ENTRYPOINT[0],
+            "--env", "PSTN_DIALING=DISABLED", "--env", "PRODUCTION_DIALING=DISABLED",
+            "--env", "SEND_EVENTS=false", "--env", "ENABLE_EXTERNAL_DELIVERY=false",
+            "--env", "LIVE_WRITE=false", "--env", "ODOO_WRITE=false",
+            "--env", "N8N_DELIVERY_ENABLED=false", subject, *STANDBY_COMMAND,
+        ], timeout=120)
+        run_bytes(["/usr/bin/docker", "start", STANDBY_CONTAINER], timeout=60)
+    current = docker_inspect(STANDBY_CONTAINER)
+    if not standby_configuration_matches(current, subject):
+        raise OperatorError("standby isolation read-back failed")
+    time.sleep(5)
+    if not docker_inspect(STANDBY_CONTAINER)["State"]["Running"]:
+        raise OperatorError("standby exited during startup")
+    return {"subject": subject, "network_mode": "none"}
+
+
+def certify_standby(config: dict[str, str]) -> dict[str, object]:
+    current = docker_inspect(STANDBY_CONTAINER)
+    subject = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
+    if not standby_configuration_matches(current, subject) or not current["State"]["Running"]:
+        raise OperatorError("standby certification mismatch")
+    return {"subject": subject, "network_mode": "none"}
+
+
+def remove_standby(config: dict[str, str]) -> dict[str, object]:
+    try:
+        current = docker_inspect(STANDBY_CONTAINER)
+    except subprocess.CalledProcessError:
+        return {"candidate_present": False}
+    subject = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
+    if current["Config"]["Image"] != subject:
+        raise OperatorError("standby is outside the installed release tuple")
+    run_bytes(["/usr/bin/docker", "stop", "--time", "20", STANDBY_CONTAINER], timeout=60)
+    run_bytes(["/usr/bin/docker", "rm", STANDBY_CONTAINER], timeout=60)
+    return {"candidate_present": False}
+
+
+def control_plane_paths(config: dict[str, str]) -> tuple[Path, Path]:
+    sha = config["protected_sha"]
+    archive = CONTROL_PLANE_ARCHIVE_ROOT / f"codestra-production-platform-{sha}.tar.gz"
+    release = CONTROL_PLANE_RELEASE_ROOT / sha
+    return archive, release
+
+
+def validate_control_plane_archive(archive: Path, protected_sha: str) -> None:
+    """Reject links, devices, traversal, and unexpected archive roots."""
+    if not re.fullmatch(r"[0-9a-f]{40}", protected_sha):
+        raise OperatorError("protected SHA is malformed")
+    expected_root = "codestra"
+    try:
+        with tarfile.open(archive, mode="r:gz") as bundle:
+            members = bundle.getmembers()
+            if not members:
+                raise OperatorError("control-plane archive is empty")
+            for member in members:
+                parts = Path(member.name).parts
+                if (
+                    not parts
+                    or parts[0] != expected_root
+                    or member.name.startswith("/")
+                    or ".." in parts
+                    or member.issym()
+                    or member.islnk()
+                    or member.isdev()
+                    or member.isfifo()
+                ):
+                    raise OperatorError("control-plane archive member rejected")
+    except (tarfile.TarError, OSError) as error:
+        raise OperatorError("control-plane archive validation failed") from error
+
+
+def copy_pinned_control_plane_archive(source: Path, target: Path, expected: str) -> None:
+    """Copy once from the bootstrap account into a root-only immutable path."""
+    try:
+        descriptor = os.open(source, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise OperatorError("control-plane archive unavailable or unsafe") from error
+    digest = hashlib.sha256()
+    with os.fdopen(descriptor, "rb") as incoming:
+        info = os.fstat(incoming.fileno())
+        bootstrap_uid = pwd.getpwnam("codestra-admin").pw_uid
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != bootstrap_uid
+            or stat.S_IMODE(info.st_mode) != 0o600
+        ):
+            raise OperatorError("control-plane archive ownership or mode is unsafe")
+        output_descriptor = os.open(
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+        )
+        with os.fdopen(output_descriptor, "wb") as outgoing:
+            while chunk := incoming.read(1024 * 1024):
+                digest.update(chunk)
+                outgoing.write(chunk)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+    if digest.hexdigest() != expected:
+        target.unlink(missing_ok=True)
+        raise OperatorError("control-plane archive checksum mismatch")
+
+
+def prepare_control_plane_release(
+    trusted_archive: Path, release: Path, protected_sha: str, expected: str
+) -> None:
+    """Publish a complete extracted tree atomically and permit exact retries."""
+    marker = release / ".protected-archive.sha256"
+    if release.exists() or release.is_symlink():
+        if release.is_symlink() or not release.is_dir():
+            raise OperatorError("control-plane release path is unsafe")
+        if checked_root_file(marker, expected_mode=0o644) != expected:
+            raise OperatorError("existing control-plane release is not the approved archive")
+        return
+    release.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    candidate = Path(tempfile.mkdtemp(prefix=f".{protected_sha}.", dir=release.parent))
+    try:
+        os.chmod(candidate, 0o755)
+        run_bytes([
+            "/usr/bin/tar", "--extract", "--gzip", "--file", str(trusted_archive),
+            "--directory", str(candidate), "--strip-components=1",
+            "--no-same-owner", "--no-same-permissions",
+        ])
+        marker_path = candidate / marker.name
+        marker_path.write_text(expected + "\n", encoding="ascii")
+        marker_path.chmod(0o644)
+        candidate.rename(release)
+    except Exception:
+        shutil.rmtree(candidate, ignore_errors=True)
+        raise
+
+
+def validate_control_plane(config: dict[str, str]) -> dict[str, object]:
+    _, release = control_plane_paths(config)
+    expected = {
+        "core.py": hashlib.sha256((release / "control_plane_service/core.py").read_bytes()).hexdigest(),
+        "email_adapters.py": hashlib.sha256((release / "control_plane_service/email_adapters.py").read_bytes()).hexdigest(),
+        "postal_inbound.py": hashlib.sha256((release / "control_plane_service/postal_inbound.py").read_bytes()).hexdigest(),
+    }
+    for name, digest_value in expected.items():
+        result = run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_API, "sha256sum", f"/app/control_plane_service/{name}"], timeout=30)
+        if result.stdout.decode().split()[0] != digest_value:
+            raise OperatorError(f"control-plane source readback mismatch: {name}")
+    health = docker_inspect(CONTROL_PLANE_API)
+    if health["State"].get("Health", {}).get("Status") != "healthy":
+        raise OperatorError("control-plane API is not healthy")
+    worker = docker_inspect(CONTROL_PLANE_WORKER)
+    if worker["State"].get("Health", {}).get("Status") != "healthy":
+        raise OperatorError("control-plane worker is not healthy")
+    api_env = dict(
+        item.split("=", 1)
+        for item in health["Config"]["Env"]
+        if "=" in item
+    )
+    if api_env.get("SOURCE_SHA") != config["protected_sha"]:
+        raise OperatorError("control-plane source SHA environment readback mismatch")
+    if api_env.get("RELEASE_ID") != config["protected_sha"]:
+        raise OperatorError("control-plane release ID environment readback mismatch")
+    version_response = run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_API, "python", "-c",
+        (
+            "import urllib.request;"
+            "print(urllib.request.urlopen("
+            "'http://127.0.0.1:8096/version',timeout=3).read().decode())"
+        ),
+    ], timeout=30)
+    version = json.loads(version_response.stdout)
+    if (
+        version.get("source_sha") != config["protected_sha"]
+        or version.get("release_id") != config["protected_sha"]
+    ):
+        raise OperatorError("control-plane version endpoint readback mismatch")
+    query = (
+        "select count(*) from information_schema.tables where "
+        "table_schema='control_plane' and table_name in "
+        "('campaign_email_domain','agent_mailbox','mailbox_provisioning_event')"
+    )
+    tables = run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres", "-d", CONTROL_PLANE_DB, "-Atc", query], timeout=30)
+    if tables.stdout.decode().strip() != "3":
+        raise OperatorError("mailbox runtime schema readback failed")
+    env = docker_inspect(CONTROL_PLANE_WORKER)["Config"]["Env"]
+    flags = dict(item.split("=", 1) for item in env if "=" in item)
+    required_flags = {
+        "KLYROW_MODE": "test",
+        "TELNEXA_MODE": "simulator",
+        "LIVE_SMS_DELIVERY": "false",
+        "LIVE_EMAIL_DELIVERY": "false",
+        "LIVE_PSTN_DIALING": "false",
+    }
+    if any(flags.get(name) != value for name, value in required_flags.items()):
+        raise OperatorError("control-plane external delivery is not fail-closed")
+    return {"protected_source_readback": "PASS", "mailbox_runtime_tables": 3,
+            "control_plane_worker": "PASS",
+            "postal_inbound_adapter": "PASS", "external_delivery": "DISABLED"}
+
+
+def wait_control_plane_health(timeout_seconds: int = 120) -> None:
+    """Wait for Docker's scheduled health probe without accepting unhealthy state."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        health = docker_inspect(CONTROL_PLANE_API)["State"].get("Health", {}).get("Status")
+        if health == "healthy":
+            return
+        if health == "unhealthy":
+            raise OperatorError("control-plane API became unhealthy")
+        time.sleep(2)
+    raise OperatorError("control-plane API health check timed out")
+
+
+def stage_control_plane(config: dict[str, str]) -> dict[str, object]:
+    archive, release = control_plane_paths(config)
+    expected = checked_root_file(CONTROL_PLANE_ARCHIVE_CHECKSUM, expected_mode=0o644)
+    if re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        raise OperatorError("control-plane archive checksum is malformed")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup = CONTROL_PLANE_BACKUP_ROOT / stamp
+    backup.mkdir(mode=0o700, parents=True)
+    trusted_archive = backup / "protected-release.tar.gz"
+    copy_pinned_control_plane_archive(archive, trusted_archive, expected)
+    validate_control_plane_archive(trusted_archive, config["protected_sha"])
+    for container, label in ((CONTROL_PLANE_API, "api"), (CONTROL_PLANE_WORKER, "worker")):
+        image_id = str(docker_inspect(container)["Image"])
+        image_record = backup / f"{label}-image-id"
+        image_record.write_text(image_id + "\n", encoding="ascii")
+        image_record.chmod(0o600)
+        run_bytes(["/usr/bin/docker", "tag", image_id, f"codestra/{CONTROL_PLANE_PROJECT}-{label}:rollback-{stamp}"], timeout=60)
+    database_owner = run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", "postgres", "-Atc",
+        f"select pg_get_userbyid(datdba) from pg_database where datname='{CONTROL_PLANE_DB}'",
+    ], timeout=30).stdout.decode().strip()
+    if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
+        raise OperatorError("control-plane database owner readback failed")
+    owner_record = backup / "database-owner"
+    owner_record.write_text(database_owner + "\n", encoding="ascii")
+    owner_record.chmod(0o600)
+    with (backup / "control-plane.sql").open("wb") as dump:
+        result = run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "pg_dump", "-U", "postgres", "-d", CONTROL_PLANE_DB], timeout=1800)
+        dump.write(result.stdout)
+    (backup / "control-plane.sql").chmod(0o600)
+    dump_checksum = backup / "control-plane.sql.sha256"
+    dump_checksum.write_text(
+        hashlib.sha256((backup / "control-plane.sql").read_bytes()).hexdigest() + "\n",
+        encoding="ascii",
+    )
+    dump_checksum.chmod(0o600)
+    rollback_marker = CONTROL_PLANE_BACKUP_ROOT / "LAST_SUCCESS"
+    rollback_marker.write_text(stamp + "\n", encoding="ascii")
+    rollback_marker.chmod(0o600)
+    prepare_control_plane_release(trusted_archive, release, config["protected_sha"], expected)
+    compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
+               "--file", str(release / "deploy/control-plane/compose.yaml"),
+               "--file", str(release / "deploy/control-plane/compose.live-delivery-safety.yaml")]
+    try:
+        for migration in sorted((release / "migrations/control_plane").glob("*.sql")):
+            run_bytes(["/usr/bin/docker", "exec", "-i", CONTROL_PLANE_DB_CONTAINER, "psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", CONTROL_PLANE_DB], stdin=migration.read_bytes(), timeout=300)
+        run_bytes([
+            *compose, "build", "--pull=false",
+            "--build-arg", f"VCS_REF={config['protected_sha']}",
+            "--build-arg", f"BUILD_CREATED={stamp}",
+        ], timeout=1800)
+        run_bytes([*compose, "up", "--detach", "--remove-orphans"], timeout=300)
+        wait_control_plane_health()
+        result = validate_control_plane(config)
+    except Exception:
+        rollback_control_plane(config)
+        raise
+    return {"backup_stamp": stamp, **result}
+
+
+def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
+    rollback = validate_control_plane_rollback()
+    stamp = rollback["rollback_stamp"]
+    for label in ("api", "worker"):
+        run_bytes(["/usr/bin/docker", "tag", f"codestra/{CONTROL_PLANE_PROJECT}-{label}:rollback-{stamp}", f"{CONTROL_PLANE_PROJECT}-{label}:latest"], timeout=60)
+    _, release = control_plane_paths(config)
+    compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
+               "--file", str(release / "deploy/control-plane/compose.yaml"),
+               "--file", str(release / "deploy/control-plane/compose.live-delivery-safety.yaml")]
+    run_bytes([*compose, "stop", "--timeout", "30"], timeout=120)
+    backup = CONTROL_PLANE_BACKUP_ROOT / stamp
+    database_owner = checked_root_file(backup / "database-owner", expected_mode=0o600)
+    if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
+        raise OperatorError("control-plane rollback database owner is malformed")
+    database_dump = checked_root_bytes(backup / "control-plane.sql")
+    run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c",
+        f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{CONTROL_PLANE_DB}' and pid<>pg_backend_pid()",
+    ], timeout=30)
+    run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "dropdb", "-U", "postgres", "--if-exists", CONTROL_PLANE_DB], timeout=60)
+    run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "createdb", "-U", "postgres", "-O", database_owner, CONTROL_PLANE_DB], timeout=60)
+    run_bytes(["/usr/bin/docker", "exec", "-i", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres", "-d", CONTROL_PLANE_DB, "-v", "ON_ERROR_STOP=1"], stdin=database_dump, timeout=1800)
+    run_bytes([*compose, "up", "--detach", "--no-build"], timeout=300)
+    return {"rollback_stamp": stamp, "database_restored": "PASS", "external_delivery": "DISABLED"}
+
+
+def atomic_root_json(path: Path, payload: dict[str, object]) -> None:
+    """Commit a small root-owned state pointer without a partial-write window."""
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    descriptor = os.open(
+        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="ascii") as stream:
+            json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def validate_control_plane_rollback() -> dict[str, str]:
+    """Validate every artifact consumed by the bounded rollback operation."""
+    stamp = checked_root_file(CONTROL_PLANE_BACKUP_ROOT / "LAST_SUCCESS")
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp) is None:
+        raise OperatorError("control-plane rollback marker malformed")
+    backup = CONTROL_PLANE_BACKUP_ROOT / stamp
+    info = backup.lstat()
+    if (
+        backup.is_symlink()
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise OperatorError("control-plane rollback directory is unsafe")
+    owner = checked_root_file(backup / "database-owner")
+    if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", owner) is None:
+        raise OperatorError("control-plane rollback database owner is malformed")
+    dump = checked_root_bytes(backup / "control-plane.sql")
+    if not dump:
+        raise OperatorError("control-plane rollback database dump is empty")
+    expected_dump_digest = checked_root_file(backup / "control-plane.sql.sha256")
+    if re.fullmatch(r"[0-9a-f]{64}", expected_dump_digest) is None:
+        raise OperatorError("control-plane rollback database checksum is malformed")
+    if not hmac.compare_digest(hashlib.sha256(dump).hexdigest(), expected_dump_digest):
+        raise OperatorError("control-plane rollback database checksum mismatch")
+    for label in ("api", "worker"):
+        image_id = checked_root_file(backup / f"{label}-image-id")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
+            raise OperatorError("control-plane rollback image id is malformed")
+        tagged = docker_inspect(f"codestra/{CONTROL_PLANE_PROJECT}-{label}:rollback-{stamp}")
+        if tagged.get("Id") != image_id:
+            raise OperatorError("control-plane rollback image tag mismatch")
+    return {"rollback_stamp": stamp, "rollback_bundle": "PASS"}
+
+
+def require_action_evidence(action: str, config: dict[str, str]) -> Path:
+    """Require a prior PASS produced by this operator for the exact tuple."""
+    if not EVIDENCE_DIR.is_dir() or EVIDENCE_DIR.is_symlink():
+        raise OperatorError(f"{action} evidence directory unavailable")
+    for candidate in sorted(EVIDENCE_DIR.glob(f"*-{action}.json"), reverse=True):
+        try:
+            info = candidate.lstat()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o600
+            ):
+                continue
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if payload.get("status") == "PASS" and payload.get("release") == config:
+            return candidate
+    raise OperatorError(f"exact-tuple {action} evidence unavailable")
+
+
+def verify_middleware_runtime(config: dict[str, str]) -> dict[str, str]:
+    expected = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
+    for container in MIDDLEWARE_RUNTIME_CONTAINERS:
+        current = docker_inspect(container)
+        if current["Config"]["Image"] != expected:
+            raise OperatorError(f"middleware runtime digest mismatch: {container}")
+        health = current["State"].get("Health", {}).get("Status")
+        if health != "healthy":
+            raise OperatorError(f"middleware runtime unhealthy: {container}")
+        environment = dict(
+            item.split("=", 1) for item in current["Config"].get("Env", []) if "=" in item
+        )
+        if any(environment.get(name) != "false" for name in MIDDLEWARE_REQUIRED_FALSE_FLAGS):
+            raise OperatorError(f"middleware runtime delivery flag unsafe: {container}")
+    return {"middleware_subject": expected, "middleware_runtime_digest": "PASS"}
+
+
+def load_pointer(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    raw = checked_root_file(path, expected_mode=0o644)
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise OperatorError(f"state pointer malformed: {path}") from error
+    if not isinstance(value, dict):
+        raise OperatorError(f"state pointer malformed: {path}")
+    return value
+
+
+def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
+    """Commit the exact staged tuple only after every recovery gate passes."""
+    stage_evidence = require_action_evidence("stage-control-plane", config)
+    validation_evidence = require_action_evidence("validate-control-plane", config)
+    restore_evidence = require_action_evidence("restore-test", config)
+    backup = validate_backup_state()
+    rollback = validate_control_plane_rollback()
+    previous = load_pointer(ACTIVE_RELEASE_POINTER)
+    if previous is not None:
+        atomic_root_json(PREVIOUS_RELEASE_POINTER, previous)
+    try:
+        control_plane = validate_control_plane(config)
+        middleware = verify_middleware_runtime(config)
+        active = {
+            "protected_sha": config["protected_sha"],
+            "image_digest": config["image_digest"],
+            "change_id": config["change_id"],
+            "activated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "stage_evidence": stage_evidence.name,
+            "validation_evidence": validation_evidence.name,
+            "restore_evidence": restore_evidence.name,
+            "backup_stamp": backup["backup_stamp"],
+            "rollback_stamp": rollback["rollback_stamp"],
+        }
+        atomic_root_json(ACTIVE_RELEASE_POINTER, active)
+    except Exception:
+        rollback_control_plane(config)
+        raise
+    return {
+        **control_plane,
+        **middleware,
+        "active_platform_sha": config["protected_sha"],
+        "active_middleware_digest": config["image_digest"],
+        "rollback_ready": "PASS",
+    }
+
+
+def core_web_health(config: dict[str, str]) -> dict[str, object]:
+    active = load_pointer(ACTIVE_RELEASE_POINTER)
+    if not active or active.get("protected_sha") != config["protected_sha"] or active.get("image_digest") != config["image_digest"]:
+        raise OperatorError("exact control-plane release is not active")
+    validate_control_plane(config)
+    verify_middleware_runtime(config)
+    for container in ("codestra-postgres-1", "codestra-identity-keycloak-1", "codestra-kong-kong-gateway-1", "codestra-odoo-1"):
+        current = docker_inspect(container)
+        health = current["State"].get("Health", {}).get("Status")
+        if health != "healthy" or not current["State"].get("Running"):
+            raise OperatorError(f"core web dependency unhealthy: {container}")
+    probe_auth_gateway()
+    probe_core_web({401, 503})
+    return {
+        "core_web_dependencies": "PASS",
+        "auth_gateway_readiness": "PASS",
+        "caddy_serving_path": "PASS",
+    }
+
+
+def kong_json(method: str, path: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+    body = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
+    request = urllib.request.Request(
+        KONG_ADMIN_URL + path,
+        data=body,
+        method=method,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            raw = response.read(1024 * 1024)
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError) as error:
+        raise OperatorError("Kong traffic gate reconciliation failed") from error
+    try:
+        result = json.loads(raw or b"{}")
+    except json.JSONDecodeError as error:
+        raise OperatorError("Kong traffic gate returned invalid JSON") from error
+    if not isinstance(result, dict):
+        raise OperatorError("Kong traffic gate returned invalid data")
+    return result
+
+
+def kong_traffic_gate(enabled: bool) -> None:
+    plugins = kong_json("GET", "/plugins?size=1000").get("data", [])
+    matches = [
+        item for item in plugins
+        if item.get("name") == "request-termination"
+        and item.get("instance_name") == KONG_TRAFFIC_GATE_INSTANCE
+    ]
+    if len(matches) > 1:
+        raise OperatorError("duplicate Kong core traffic gates")
+    current = matches[0] if matches else None
+    if enabled and current is None:
+        current = kong_json("POST", "/plugins", {
+            "name": "request-termination",
+            "instance_name": KONG_TRAFFIC_GATE_INSTANCE,
+            "enabled": True,
+            "config": {"status_code": 503, "message": "core_web_api_maintenance"},
+            "tags": ["codestra-managed", "core-web-api-traffic-gate"],
+        })
+    elif not enabled and current is not None:
+        request = urllib.request.Request(
+            KONG_ADMIN_URL + f"/plugins/{current['id']}", method="DELETE"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                if response.status != 204:
+                    raise OperatorError("Kong traffic gate delete failed")
+        except (OSError, urllib.error.URLError, urllib.error.HTTPError) as error:
+            raise OperatorError("Kong traffic gate delete failed") from error
+    readback = kong_json("GET", "/plugins?size=1000").get("data", [])
+    present = any(
+        item.get("name") == "request-termination"
+        and item.get("instance_name") == KONG_TRAFFIC_GATE_INSTANCE
+        and item.get("enabled") is True
+        and item.get("config", {}).get("status_code") == 503
+        for item in readback
+    )
+    if present != enabled:
+        raise OperatorError("Kong traffic gate readback mismatch")
+
+
+def probe_auth_gateway() -> None:
+    current = docker_inspect(AUTH_GATEWAY_CONTAINER)
+    if not current["State"].get("Running"):
+        raise OperatorError("auth gateway is not running")
+    network = current.get("NetworkSettings", {}).get("Networks", {}).get(
+        AUTH_GATEWAY_NETWORK
+    )
+    if not isinstance(network, dict):
+        raise OperatorError("auth gateway private network is unavailable")
+    raw_address = network.get("IPAddress")
+    try:
+        address = ipaddress.ip_address(raw_address)
+    except ValueError as error:
+        raise OperatorError("auth gateway private address is invalid") from error
+    if not any(address in network for network in RFC1918_NETWORKS):
+        raise OperatorError("auth gateway address is not private")
+    request = urllib.request.Request(
+        f"http://{address}:{AUTH_GATEWAY_PORT}/ping", method="GET"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            status_code = response.status
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError) as error:
+        raise OperatorError("auth gateway readiness probe failed") from error
+    if status_code != 200:
+        raise OperatorError("auth gateway readiness probe failed")
+
+
+def probe_core_web(expected: int | set[int]) -> None:
+    request = urllib.request.Request(CORE_WEB_PROBE_URL, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            status_code = response.status
+    except urllib.error.HTTPError as error:
+        status_code = error.code
+    except (OSError, urllib.error.URLError) as error:
+        raise OperatorError("core Web/API probe failed") from error
+    expected_statuses = {expected} if isinstance(expected, int) else expected
+    if status_code not in expected_statuses:
+        raise OperatorError("core Web/API serving-state readback mismatch")
+
+
+def set_core_web_traffic(config: dict[str, str], enabled: bool) -> dict[str, object]:
+    health = core_web_health(config) if enabled else {}
+    try:
+        kong_traffic_gate(not enabled)
+        probe_core_web(401 if enabled else 503)
+        atomic_root_json(
+            CORE_WEB_TRAFFIC_POINTER,
+            {
+                "enabled": enabled,
+                "protected_sha": config["protected_sha"],
+                "image_digest": config["image_digest"],
+                "customer_wide_email": False,
+                "sms_production": False,
+                "voice_production": False,
+                "pstn_dialing": False,
+                "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            },
+        )
+    except Exception:
+        if enabled:
+            kong_traffic_gate(True)
+        raise
+    return {
+        **health,
+        "core_web_api_traffic": "ENABLED" if enabled else "DISABLED",
+        "customer_communications": "DISABLED",
+    }
+
+
+def safety_state() -> dict[str, object]:
+    channel = run_fixed(
+        ["/usr/bin/ssh", "codestra-vicidial", VICIDIAL_CHANNELS_COMMAND]
+    )
+    registrations = run_fixed(
+        ["/usr/bin/ssh", "codestra-vicidial", VICIDIAL_REGISTRATIONS_COMMAND]
+    )
+    runtime = run_fixed(
+        [
+            "/usr/bin/docker",
+            "inspect",
+            "codestra-middleware-1",
+            "--format",
+            "{{json .Config.Env}}",
+        ]
+    )
+    runtime_flags: dict[str, str] = {}
+    if runtime.returncode == 0:
+        try:
+            for entry in json.loads(runtime.stdout):
+                name, separator, value = entry.partition("=")
+                if separator:
+                    runtime_flags[name] = value
+        except (json.JSONDecodeError, TypeError):
+            runtime_flags = {}
+    flags_false = all(
+        runtime_flags.get(name) == "false" for name in CANONICAL_FALSE_FLAGS
+    )
+    calls = re.findall(r"(?m)^([0-9]+) active calls$", channel.stdout)
+    channels = re.findall(r"(?m)^([0-9]+) active channels$", channel.stdout)
+    return {
+        "pstatus": run_fixed(["/usr/bin/systemctl", "is-system-running"]).returncode,
+        "telephony_probe_pass": channel.returncode == 0 and registrations.returncode == 0,
+        "active_calls_zero": calls == ["0"],
+        "active_channels_zero": channels == ["0"],
+        "required_runtime_flags_false": flags_false,
+        "sip_registration_performed": "No objects found." not in registrations.stdout,
+    }
+
+
+def execute(action: str) -> tuple[int, dict[str, object]]:
+    if action not in ALLOWED_ACTIONS:
+        raise OperatorError("action is not allowlisted")
+    config = load_release_config()
+    window: dict[str, str] | None = None
+    if action not in READ_ONLY_ACTIONS | RECOVERY_ACTIONS:
+        window = require_maintenance_window()
+        if window["maintenance_date"] != config["maintenance_date"]:
+            raise OperatorError("maintenance date does not match release tuple")
+    elif action in READ_ONLY_ACTIONS:
+        try:
+            window = require_maintenance_window()
+        except OperatorError:
+            window = {
+                "maintenance_date": config["maintenance_date"],
+                "maintenance_window": "OUTSIDE_APPROVED_WINDOW",
+                "owner_window_waiver_evidence": "FAIL",
+                "window_check": "DENIED",
+            }
+    state = safety_state()
+    safe_for_activation = (
+        state["telephony_probe_pass"]
+        and state["active_calls_zero"]
+        and state["active_channels_zero"]
+        and state["required_runtime_flags_false"]
+        and not state["sip_registration_performed"]
+    )
+    if action not in SAFETY_BYPASS_ACTIONS and not safe_for_activation:
+        raise OperatorError("runtime safety state is not fail-closed")
+    result: dict[str, object] = {
+        "action": action,
+        "maintenance_date": None if window is None else window["maintenance_date"],
+        "window": window,
+        "release": config,
+        "safety": state,
+    }
+    if action in SYSTEMD_ACTIONS:
+        unit = SYSTEMD_ACTIONS[action]
+        invocation = run_fixed(["/usr/bin/systemctl", "start", "--wait", unit])
+        result.update({"unit": unit, "returncode": invocation.returncode})
+        if invocation.returncode != 0:
+            raise OperatorError(f"fixed unit failed: {unit}")
+    elif action == "validate-backup":
+        result.update(validate_backup_state())
+    elif action == "stage":
+        result.update(stage_standby(config))
+    elif action == "canary":
+        result.update(certify_standby(config))
+    elif action == "rollback":
+        result.update(remove_standby(config))
+    elif action == "stage-control-plane":
+        result.update(stage_control_plane(config))
+    elif action == "validate-control-plane":
+        result.update(validate_control_plane(config))
+    elif action == "rollback-control-plane":
+        result.update(rollback_control_plane(config))
+    elif action == "activate-control-plane":
+        result.update(activate_control_plane(config))
+    elif action == "enable-production-web-traffic":
+        result.update(set_core_web_traffic(config, True))
+    elif action == "disable-production-web-traffic":
+        result.update(set_core_web_traffic(config, False))
+    elif action in {"preflight", "status"}:
+        invocation = run_fixed(["/usr/bin/systemctl", "--failed", "--no-legend", "--plain"])
+        result.update({"returncode": invocation.returncode, "failed_units_present": bool(invocation.stdout.strip())})
+        if action == "preflight" and result["failed_units_present"]:
+            raise OperatorError("preflight found failed units")
+    else:
+        invocation = run_fixed(["/usr/bin/docker", "ps", "--format", "{{.Names}}|{{.Image}}|{{.Status}}"])
+        result.update({"returncode": invocation.returncode, "container_inventory_collected": invocation.returncode == 0})
+        if invocation.returncode != 0:
+            raise OperatorError("evidence collection failed")
+    return 0, result
+
+
+def write_evidence(action: str, status_value: str, detail: dict[str, object]) -> Path:
+    EVIDENCE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = EVIDENCE_DIR.lstat()
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise OperatorError("evidence directory is unsafe")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = EVIDENCE_DIR / f"{stamp}-{os.getpid()}-{action}.json"
+    payload = {"schema": "codestra.production-operator.v1", "status": status_value, **detail}
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    return target
+
+
+def main(argv: list[str]) -> int:
+    if os.geteuid() != 0:
+        print("operator rejected: root execution required", file=sys.stderr)
+        return 2
+    if len(argv) != 1 or argv[0] not in ALLOWED_ACTIONS:
+        print("operator rejected: exactly one allowlisted action is required", file=sys.stderr)
+        return 2
+    action = argv[0]
+    LOCK_FILE.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    descriptor = os.open(
+        LOCK_FILE,
+        os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW,
+        0o600,
+    )
+    with os.fdopen(descriptor, "a+", encoding="ascii") as lock:
+        lock_info = os.fstat(lock.fileno())
+        if lock_info.st_uid != 0 or stat.S_IMODE(lock_info.st_mode) != 0o600:
+            print("operator rejected: unsafe lock file", file=sys.stderr)
+            return 2
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            _, result = execute(action)
+            evidence = write_evidence(action, "PASS", result)
+            print(f"OPERATOR_RESULT=PASS\nACTION={action}\nEVIDENCE={evidence}")
+            return 0
+        except Exception as error:
+            detail = {"action": action, "error_class": type(error).__name__}
+            try:
+                evidence = write_evidence(action, "FAIL", detail)
+                print(f"EVIDENCE={evidence}", file=sys.stderr)
+            except Exception:
+                pass
+            print(f"operator rejected: {type(error).__name__}", file=sys.stderr)
+            return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

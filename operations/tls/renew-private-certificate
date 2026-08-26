@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+manifest=${CERTIFICATE_MANIFEST:-/etc/codestra/tls/certificates.tsv}
+renew_before_days=${RENEW_BEFORE_DAYS:-30}
+dry_run=false
+force=false
+
+usage() {
+  echo "usage: renew-private-certificate [--dry-run] [--force] <certificate-name>" >&2
+}
+
+while (($#)); do
+  case "$1" in
+    --dry-run) dry_run=true ;;
+    --force) force=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) name=${name:-$1} ;;
+  esac
+  shift
+done
+[ -n "${name:-}" ] || { usage; exit 2; }
+[ -r "$manifest" ] || { echo "certificate manifest is not readable: $manifest" >&2; exit 1; }
+
+record=$(awk -F'|' -v wanted="$name" '$1 == wanted { print; exit }' "$manifest")
+[ -n "$record" ] || { echo "unknown certificate: $name" >&2; exit 2; }
+IFS='|' read -r _ kind cert key ca_cert ca_key days subject sans reload owner <<<"$record"
+[ "$kind" != monitor ] || { echo "$name is monitor-only; its CA requires an approved overlap rotation" >&2; exit 2; }
+
+for path in "$cert" "$key" "$ca_cert" "$ca_key"; do
+  [ -r "$path" ] || { echo "required PKI file is not readable: $path" >&2; exit 1; }
+done
+openssl x509 -in "$cert" -noout >/dev/null
+openssl x509 -in "$ca_cert" -noout >/dev/null
+openssl pkey -in "$key" -noout -check >/dev/null 2>&1
+openssl pkey -in "$ca_key" -noout -check >/dev/null 2>&1
+
+if ! $force && openssl x509 -checkend "$((renew_before_days * 86400))" -noout -in "$cert" >/dev/null; then
+  echo "$name is not within the ${renew_before_days}-day renewal window"
+  exit 0
+fi
+
+work=$(mktemp -d /run/codestra-cert-renew.XXXXXX)
+cleanup() { rm -rf -- "$work"; }
+trap cleanup EXIT
+
+next_key="$work/certificate.key"
+next_csr="$work/certificate.csr"
+next_cert="$work/certificate.crt"
+extfile="$work/extensions.cnf"
+
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$next_key" >/dev/null 2>&1
+openssl req -new -key "$next_key" -subj "$subject" -out "$next_csr"
+{
+  echo '[leaf]'
+  echo 'basicConstraints=critical,CA:FALSE'
+  if [ "$kind" = client ]; then
+    echo 'keyUsage=critical,digitalSignature,keyEncipherment'
+    echo 'extendedKeyUsage=clientAuth'
+  else
+    echo 'keyUsage=critical,digitalSignature,keyEncipherment'
+    echo 'extendedKeyUsage=serverAuth'
+  fi
+  echo "subjectAltName=$sans"
+  echo 'authorityKeyIdentifier=keyid,issuer'
+  echo 'subjectKeyIdentifier=hash'
+} >"$extfile"
+serial="0x$(openssl rand -hex 16)"
+openssl x509 -req -in "$next_csr" -CA "$ca_cert" -CAkey "$ca_key" \
+  -set_serial "$serial" -days "$days" -sha256 -extfile "$extfile" -extensions leaf \
+  -out "$next_cert" >/dev/null 2>&1
+
+openssl verify -CAfile "$ca_cert" "$next_cert" >/dev/null
+openssl x509 -in "$next_cert" -checkend "$((renew_before_days * 86400))" -noout
+IFS=',' read -ra requested_sans <<<"$sans"
+for requested_san in "${requested_sans[@]}"; do
+  case "$requested_san" in
+    DNS:*) openssl x509 -in "$next_cert" -checkhost "${requested_san#DNS:}" -noout >/dev/null ;;
+    IP:*) openssl x509 -in "$next_cert" -checkip "${requested_san#IP:}" -noout >/dev/null ;;
+    URI:*) openssl x509 -in "$next_cert" -noout -ext subjectAltName | grep -F -- "$requested_san" >/dev/null ;;
+    *) echo "unsupported SAN profile: $requested_san" >&2; exit 1 ;;
+  esac
+done
+cert_pub=$(openssl x509 -in "$next_cert" -pubkey -noout | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | cut -d' ' -f1)
+key_pub=$(openssl pkey -in "$next_key" -pubout -outform DER 2>/dev/null | sha256sum | cut -d' ' -f1)
+[ "$cert_pub" = "$key_pub" ] || { echo "generated certificate/key mismatch" >&2; exit 1; }
+
+if $dry_run; then
+  echo "safe renewal test passed for $name; no certificate or key was changed"
+  exit 0
+fi
+
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+backup_dir="$(dirname "$cert")/.overlap-$name-$stamp"
+install -d -m 0700 "$backup_dir"
+install -m 0600 "$cert" "$backup_dir/certificate.crt"
+install -m 0600 "$key" "$backup_dir/certificate.key"
+install -m 0600 "$next_key" "$key.new"
+install -m 0644 "$next_cert" "$cert.new"
+mv -f -- "$key.new" "$key"
+mv -f -- "$cert.new" "$cert"
+
+IFS=',' read -ra targets <<<"$reload"
+for target in "${targets[@]}"; do
+  case "$target" in
+    none|'') ;;
+    docker:*) docker restart "${target#docker:}" >/dev/null ;;
+    systemd:*) systemctl reload-or-restart "${target#systemd:}" ;;
+    *) echo "unsupported reload target: $target" >&2; exit 1 ;;
+  esac
+done
+echo "renewed $name; overlap copy retained at $backup_dir; owner=$owner"

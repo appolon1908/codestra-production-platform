@@ -1,0 +1,45 @@
+import json
+from pathlib import Path
+
+
+MANIFEST = json.loads(Path("config/kong-canonical-middleware-routes.json").read_text())
+SOURCE = Path("scripts/reconcile_kong_canonical_routes.py").read_text()
+
+
+def test_only_proven_middleware_routes_are_public():
+    assert {route["path"] for route in MANIFEST["routes"]} == {
+        "/v1/crm", "/v1/email", "/v1/sms", "/v1/webhooks", "/v1/sms/dlr/telnexa",
+    }
+
+
+def test_authenticated_middleware_contract_routes_are_canonical():
+    routes = {route["name"]: route for route in MANIFEST["contractRoutes"]}
+    assert {path for route in routes.values() for path in route["paths"]} == {
+        "/api/v1/callbacks",
+        "/api/v1/control/callbacks",
+        "/api/v1/automation/policy-check",
+        "/api/v1/integrations/n8n/results",
+    }
+    for route in routes.values():
+        assert route["hosts"] == ["api.codestra.co"]
+        assert route["serviceHost"] == "codestra-middleware-integration-api-1"
+        assert route["servicePort"] == 8095
+        assert set(route["requiredPlugins"]) == {
+            "jwt", "correlation-id", "rate-limiting", "request-size-limiting"
+        }
+
+
+def test_every_route_has_explicit_security_controls():
+    for route in MANIFEST["routes"]:
+        assert route["methods"]
+        assert route["auth"] == "key-auth"
+        assert route["maxBodyMb"] > 0
+        assert route["ratePerMinute"] > 0
+
+
+def test_reconciler_is_dry_run_by_default_and_fail_closed():
+    assert 'parser.add_argument("--apply", action="store_true")' in SOURCE
+    assert "expected exactly one existing route" in SOURCE
+    assert "required auth plugin absent" in SOURCE
+    assert "limiter readback mismatch" in SOURCE
+    assert "unexpected_public" in SOURCE

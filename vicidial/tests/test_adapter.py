@@ -20,6 +20,7 @@ from codestra_vicidial.repository import (
     CollisionError,
     MemoryRepository,
     normalize_allowed_campaigns,
+    owned_user_group,
 )
 from codestra_vicidial.security import RequestAuthenticator
 from codestra_vicidial.service import AdapterService, FeatureFlags, ReadbackMismatch
@@ -33,6 +34,35 @@ def context() -> dict:
         "reason": "synthetic disabled provisioning test",
         "requested_at": "2026-07-27T20:00:00Z",
     }
+
+
+def test_user_group_namespace_has_only_exact_test_syn_exception() -> None:
+    assert owned_user_group("TEST_SYN", "TEST", "WEBTEST_SYN")
+    assert owned_user_group("COD-SERVICE-OUT", "COD", "COD_AGENTS")
+    assert not owned_user_group("TEST-SERVICE-OUT", "TEST", "WEBTEST_SYN")
+    assert not owned_user_group("TEST_SYN", "TEST", "WEBTEST_OTHER")
+    assert not owned_user_group("COD-SERVICE-OUT", "COD", "WEBTEST_SYN")
+
+
+@pytest.mark.parametrize(
+    ("canonical_id", "business_unit", "group_code"),
+    [
+        ("CAL-TEST-OUT", "CAL", "TST_CAL"),
+        ("COD-TEST-OUT", "COD", "TST_COD"),
+        ("FTP-TEST-OUT", "FTP", "TST_FTP"),
+        ("MBL-TEST-OUT", "MBL", "TST_MBL"),
+        ("MOY-TEST-OUT", "MOY", "TST_MOY"),
+        ("RLP-TEST-OUT", "RLP", "TST_RLP"),
+        ("SCP-TEST-OUT", "SCP", "TST_SCP"),
+        ("TRX-TEST-OUT", "TRX", "TST_TRX"),
+    ],
+)
+def test_certified_test_fixture_groups_are_exact(
+    canonical_id: str, business_unit: str, group_code: str
+) -> None:
+    assert owned_user_group(canonical_id, business_unit, group_code)
+    assert not owned_user_group(canonical_id, business_unit, group_code + "X")
+    assert not owned_user_group(canonical_id.replace("-TEST", "-LIVE"), business_unit, group_code)
 
 
 def campaign_payload() -> dict:
@@ -62,6 +92,52 @@ def campaign_payload() -> dict:
             "recording_policy_reference": "policy:test-recording-v1",
         },
     }
+
+
+@pytest.mark.parametrize("canonical_id", [
+    "COD-SERVICE-OUT",
+    "FTP-DONOR-SUPPORT-IN",
+    "COD-AI-OUT",
+    "CAL-WHOLESALE-OUT",
+    "TEST_SYN",
+])
+def test_canonical_campaign_accepts_approved_multi_segment_ids(canonical_id):
+    payload = campaign_payload()
+    payload["campaign"]["canonical_id"] = canonical_id
+    business_unit = "TEST" if canonical_id == "TEST_SYN" else canonical_id.split("-", 1)[0]
+    payload["campaign"]["business_unit"] = business_unit
+    payload["campaign"]["default_list_id"] = None
+    payload["campaign"]["lists"] = []
+    CampaignCommand.model_validate(payload)
+
+
+@pytest.mark.parametrize("canonical_id", [
+    "FTP--DONOR-IN", "FTP-DONOR-", "FTP-DONOR-LIVE", "ftp-DONOR-IN",
+    "FTP/DONOR/IN", "OTHER-DONOR-IN",
+])
+def test_canonical_campaign_still_rejects_unapproved_grammar(canonical_id):
+    payload = campaign_payload()
+    payload["campaign"]["canonical_id"] = canonical_id
+    payload["campaign"]["business_unit"] = "FTP"
+    with pytest.raises(ValidationError):
+        CampaignCommand.model_validate(payload)
+
+
+def test_all_certified_reconciliation_campaign_ids_match_contract():
+    report = Path(__file__).parents[1] / "reports/full-campaign-reconciliation.json"
+    rows = json.loads(report.read_text(encoding="utf-8"))["rows"]
+    assert len(rows) == 101
+    for row in rows:
+        payload = campaign_payload()
+        payload["campaign"].update({
+            "canonical_id": row["canonical"],
+            "actual_id": row["physical"],
+            "name": row["canonical"],
+            "business_unit": row["canonical"].split("-", 1)[0],
+            "default_list_id": None,
+            "lists": [],
+        })
+        CampaignCommand.model_validate(payload)
 
 
 @pytest.fixture
@@ -103,6 +179,7 @@ def test_route_contract_is_present(harness):
         ("POST", "/v1/campaigns/provision-disabled"),
         ("POST", "/v1/campaigns/update-disabled"),
         ("POST", "/v1/campaigns/disable"),
+        ("POST", "/v1/reconciliation/campaigns/provision-disabled"),
         ("GET", "/v1/campaigns/{campaign_id}/actual-state"),
         ("POST", "/v1/agents/sync"), ("POST", "/v1/agents/disable"),
         ("GET", "/v1/agents/{user_id}/actual-state"),
@@ -612,6 +689,19 @@ def test_transfer_target_requires_exact_campaign_and_business_unit(harness):
     })
     with pytest.raises(ValueError, match="ownership mismatch"):
         service.sync_transfer_policy("transfer-cross-campaign", command)
+
+
+def test_user_group_ownership_allows_same_business_unit_sharing(tmp_path):
+    state = StateStore(tmp_path / "shared-groups.sqlite3")
+    state.put_group_ownership("CAL_AGENTS", "CAL00001", "CAL", "user")
+    state.put_group_ownership("CAL_AGENTS", "CAL00002", "CAL", "user")
+    owner = state.group_owner("CAL_AGENTS")
+    assert owner is not None
+    assert owner["campaign_id"] == "CAL00001"
+    with pytest.raises(ValueError, match="group ownership collision"):
+        state.put_group_ownership("CAL_AGENTS", "COD00001", "COD", "user")
+    with pytest.raises(ValueError, match="group ownership collision"):
+        state.put_group_ownership("CAL_AGENTS", "CAL00003", "CAL", "inbound")
 
 
 def test_callback_external_id_requires_identical_immutable_payload(harness):

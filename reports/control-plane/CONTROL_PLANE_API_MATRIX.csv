@@ -1,0 +1,7 @@
+METHOD,PATH,CALLER,SCOPE,IDEMPOTENT,READBACK_REQUIRED
+POST,/api/v1/control/campaigns,odoo,campaign.write,YES,YES
+POST,/api/v1/control/agents,odoo,agent.write,YES,YES
+POST,/api/v1/control/memberships,odoo,campaign.write,YES,YES
+POST,/api/v1/control/adapters/execute,n8n,sync.execute,YES,YES
+POST,/api/v1/results/jobs/{job_id},n8n,sync.result.write,YES,YES
+POST,/api/v1/reconciliation/run,admin,reconciliation.execute,YES,N/A

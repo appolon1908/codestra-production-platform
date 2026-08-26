@@ -426,6 +426,23 @@ groups:
       runbook: operations/runbooks/alerts/unexpected-production-callbacks-enabled.md
       runbook_url: https://runbooks.codestra.agency/alerts/unexpected-production-callbacks-enabled
       dashboard: monitoring-evidence://application/unexpected-production-callbacks-enabled
+  - alert: CodestraIntegrationArchitectureViolation
+    expr: codestra_integration_architecture_critical_findings > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: integration-governance
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Integration architecture constitution violation detected
+      description: Integration architecture constitution violation detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: critical findings > 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/integration-architecture-violation.md
+      runbook_url: https://runbooks.codestra.agency/alerts/integration-architecture-violation
+      dashboard: monitoring-evidence://application/integration-architecture-violation
 - name: voice
   rules:
   - alert: CodestraVicidialUnavailable
@@ -787,6 +804,91 @@ groups:
       runbook: operations/runbooks/alerts/postgresql-unavailable.md
       runbook_url: https://runbooks.codestra.agency/alerts/postgresql-unavailable
       dashboard: monitoring-evidence://database-host/postgresql-unavailable
+  - alert: MiddlewareDatabaseDown
+    expr: up{job="postgres-exporter"} == 0 or pg_exporter_last_scrape_error != 0
+    for: 2m
+    labels:
+      severity: critical
+      service: middleware-database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware PostgreSQL is unavailable
+      description: Middleware PostgreSQL is unavailable. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: exporter down or scrape error
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-database-down.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-database-down
+      dashboard: monitoring-evidence://database-host/middleware-database-down
+  - alert: MiddlewareDatabaseConnectionWarning
+    expr: sum(pg_stat_database_numbackends{datname="codestra_middleware"}) / clamp_min(max(pg_settings_max_connections), 1) > 0.70
+    for: 10m
+    labels:
+      severity: critical
+      service: middleware-database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware database connection utilization is elevated
+      description: Middleware database connection utilization is elevated. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: connections > 70% / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-database-connection-warning.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-database-connection-warning
+      dashboard: monitoring-evidence://database-host/middleware-database-connection-warning
+  - alert: MiddlewareDatabaseConnectionCritical
+    expr: sum(pg_stat_database_numbackends{datname="codestra_middleware"}) / clamp_min(max(pg_settings_max_connections), 1) > 0.85
+    for: 5m
+    labels:
+      severity: critical
+      service: middleware-database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware database connection utilization is critical
+      description: Middleware database connection utilization is critical. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: connections > 85% / 5m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-database-connection-critical.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-database-connection-critical
+      dashboard: monitoring-evidence://database-host/middleware-database-connection-critical
+  - alert: MiddlewareDatabaseDiskLow
+    expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) > 0.85
+    for: 15m
+    labels:
+      severity: critical
+      service: middleware-database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware database host disk is low
+      description: Middleware database host disk is low. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: root filesystem used > 85% / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-database-disk-low.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-database-disk-low
+      dashboard: monitoring-evidence://database-host/middleware-database-disk-low
+  - alert: MiddlewareDatabaseDeadlocks
+    expr: increase(pg_stat_database_deadlocks{datname="codestra_middleware"}[10m]) > 0
+    for: 2m
+    labels:
+      severity: critical
+      service: middleware-database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware database deadlock detected
+      description: Middleware database deadlock detected. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: any deadlock / 10m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-database-deadlocks.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-database-deadlocks
+      dashboard: monitoring-evidence://database-host/middleware-database-deadlocks
   - alert: CodestraMariadbUnavailable
     expr: codestra_database_up{engine="mariadb"} == 0
     for: 2m
@@ -1163,6 +1265,74 @@ groups:
       runbook: operations/runbooks/alerts/backup-stale.md
       runbook_url: https://runbooks.codestra.agency/alerts/backup-stale
       dashboard: monitoring-evidence://backup/backup-stale
+  - alert: MiddlewareDatabaseBackupStale
+    expr: time() - codestra_middleware_backup_last_success_timestamp_seconds > 86400
+    for: 15m
+    labels:
+      severity: critical
+      service: middleware-database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware database backup is stale
+      description: Middleware database backup is stale. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: age > 24h / 15m
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-database-backup-stale.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-database-backup-stale
+      dashboard: monitoring-evidence://backup/middleware-database-backup-stale
+  - alert: MiddlewareDatabaseBackupFailed
+    expr: codestra_systemd_timer_failed{timer="codestra-scraper-middleware-backup.timer"} > 0 or increase(codestra_backup_replication_failures_total[1h]) > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: middleware-database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware database backup failed
+      description: Middleware database backup failed. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: timer or replication failure
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-database-backup-failed.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-database-backup-failed
+      dashboard: monitoring-evidence://backup/middleware-database-backup-failed
+  - alert: MiddlewareDatabaseRestoreOverdue
+    expr: time() - codestra_restore_test_last_success_timestamp_seconds > 2592000
+    for: 1h
+    labels:
+      severity: critical
+      service: middleware-database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware database restore rehearsal is overdue
+      description: Middleware database restore rehearsal is overdue. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: restore rehearsal age > 30d
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-database-restore-overdue.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-database-restore-overdue
+      dashboard: monitoring-evidence://backup/middleware-database-restore-overdue
+  - alert: MiddlewareDatabaseMigrationMismatch
+    expr: codestra_middleware_database_migration_match == 0
+    for: 5m
+    labels:
+      severity: critical
+      service: middleware-database
+      environment: production
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Middleware database migration head mismatches the approved release
+      description: Middleware database migration head mismatches the approved release. Investigate using the linked runbook; preserve safety interlocks and evidence.
+      current_value: '{{ $value }}'
+      threshold: migration match = 0
+      threshold_status: candidate_requires_post_deployment_tuning
+      runbook: operations/runbooks/alerts/middleware-database-migration-mismatch.md
+      runbook_url: https://runbooks.codestra.agency/alerts/middleware-database-migration-mismatch
+      dashboard: monitoring-evidence://backup/middleware-database-migration-mismatch
   - alert: CodestraRemoteBackupCapacityLow
     expr: codestra_backup_remote_free_bytes < 10737418240
     for: 30m

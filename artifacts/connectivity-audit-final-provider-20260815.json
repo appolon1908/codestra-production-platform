@@ -1,0 +1,2773 @@
+{
+  "control_plane": {
+    "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+    "real_bulk_sms_or_email_sent": false,
+    "run_id": "20260815T140234Z-f5355911",
+    "safe_mode": true,
+    "schema_version": "connectivity-audit.v1",
+    "started_and_completed_at": "2026-08-15T14:02:35.291063Z",
+    "summary": {
+      "fail": 0,
+      "pass": 51
+    },
+    "tests": [
+      {
+        "evidence": {
+          "response": {
+            "status": "ok"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "control-plane /health"
+      },
+      {
+        "evidence": {
+          "response": {
+            "outbound_safe_mode": false,
+            "status": "ready"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "control-plane /ready"
+      },
+      {
+        "evidence": {
+          "response": {
+            "production_delivery_enabled": false,
+            "providers": {
+              "klyrow": "test",
+              "telnexa": "simulator"
+            },
+            "status": "ready"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "control-plane /v1/ready"
+      },
+      {
+        "evidence": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "event_id": "audit-odoo-20260815T140234Z-f5355911",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": false,
+            "event_id": "audit-odoo-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "odoo valid auth/HMAC ingress"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-odoo-20260815T140234Z-f5355911",
+          "response": {
+            "error": "replayed_event_id"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "odoo immutable event replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-odoo-20260815T140234Z-f5355911",
+          "response": {
+            "error": "replayed_event_id"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "odoo idempotency conflict"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_api_key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "odoo missing credential rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_api_key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "odoo invalid credential rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "expired_timestamp"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "odoo stale HMAC rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_signature"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "odoo invalid HMAC rejected"
+      },
+      {
+        "evidence": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "event_id": "audit-n8n-20260815T140234Z-f5355911",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": false,
+            "event_id": "audit-n8n-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "n8n valid auth/HMAC ingress"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-n8n-20260815T140234Z-f5355911",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": true,
+            "event_id": "audit-n8n-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "n8n exact replay idempotency"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-n8n-20260815T140234Z-f5355911",
+          "response": {
+            "error": "idempotency_conflict"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "n8n idempotency conflict"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_api_key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "n8n missing credential rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_api_key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "n8n invalid credential rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "expired_timestamp"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "n8n stale HMAC rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_signature"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "n8n invalid HMAC rejected"
+      },
+      {
+        "evidence": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "event_id": "audit-telnexa-20260815T140234Z-f5355911",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": false,
+            "event_id": "audit-telnexa-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "telnexa valid auth/HMAC ingress"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-telnexa-20260815T140234Z-f5355911",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": true,
+            "event_id": "audit-telnexa-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "telnexa exact replay idempotency"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-telnexa-20260815T140234Z-f5355911",
+          "response": {
+            "error": "idempotency_conflict"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "telnexa idempotency conflict"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_api_key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "telnexa missing credential rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_api_key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "telnexa invalid credential rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "expired_timestamp"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "telnexa stale HMAC rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_signature"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "telnexa invalid HMAC rejected"
+      },
+      {
+        "evidence": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "event_id": "audit-klyrow-20260815T140234Z-f5355911",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": false,
+            "event_id": "audit-klyrow-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "klyrow valid auth/HMAC ingress"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-klyrow-20260815T140234Z-f5355911",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": true,
+            "event_id": "audit-klyrow-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "klyrow exact replay idempotency"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-klyrow-20260815T140234Z-f5355911",
+          "response": {
+            "error": "idempotency_conflict"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "klyrow idempotency conflict"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_api_key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "klyrow missing credential rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_api_key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "klyrow invalid credential rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "expired_timestamp"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "klyrow stale HMAC rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_signature"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "klyrow invalid HMAC rejected"
+      },
+      {
+        "evidence": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "event_id": "audit-kyqra-20260815T140234Z-f5355911",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": false,
+            "event_id": "audit-kyqra-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "kyqra valid auth/HMAC ingress"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-kyqra-20260815T140234Z-f5355911",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": true,
+            "event_id": "audit-kyqra-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "kyqra exact replay idempotency"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-kyqra-20260815T140234Z-f5355911",
+          "response": {
+            "error": "idempotency_conflict"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "kyqra idempotency conflict"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_api_key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "kyqra missing credential rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_api_key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "kyqra invalid credential rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "expired_timestamp"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "kyqra stale HMAC rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "error": "invalid_signature"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "kyqra invalid HMAC rejected"
+      },
+      {
+        "evidence": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "message_id": "0b881077-4bdd-4327-858a-fa4175c2ea57"
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "sms safe message accepted"
+      },
+      {
+        "evidence": {
+          "same_message_id": true
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "sms message idempotent replay"
+      },
+      {
+        "evidence": {
+          "carrier_or_bulk_submitted": false,
+          "message_id": "0b881077-4bdd-4327-858a-fa4175c2ea57",
+          "provider_status": "simulator_accepted"
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "sms simulator/test dispatch"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-telnexa-callback-20260815T140234Z-f5355911",
+          "message_id": "0b881077-4bdd-4327-858a-fa4175c2ea57",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": false,
+            "event_id": "audit-telnexa-callback-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "telnexa delivery callback"
+      },
+      {
+        "evidence": {
+          "message_id": "0b881077-4bdd-4327-858a-fa4175c2ea57",
+          "normalized_status": "delivered"
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "telnexa callback state read-back"
+      },
+      {
+        "evidence": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "message_id": "051e93fd-49ee-4517-8bf1-e36a5399d9df"
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "email safe message accepted"
+      },
+      {
+        "evidence": {
+          "same_message_id": true
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "email message idempotent replay"
+      },
+      {
+        "evidence": {
+          "carrier_or_bulk_submitted": false,
+          "message_id": "051e93fd-49ee-4517-8bf1-e36a5399d9df",
+          "provider_status": "test_accepted"
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "email simulator/test dispatch"
+      },
+      {
+        "evidence": {
+          "event_id": "audit-klyrow-callback-20260815T140234Z-f5355911",
+          "message_id": "051e93fd-49ee-4517-8bf1-e36a5399d9df",
+          "response": {
+            "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+            "duplicate": false,
+            "event_id": "audit-klyrow-callback-20260815T140234Z-f5355911",
+            "state": "queued"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "klyrow delivery callback"
+      },
+      {
+        "evidence": {
+          "message_id": "051e93fd-49ee-4517-8bf1-e36a5399d9df",
+          "normalized_status": "delivered"
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "klyrow callback state read-back"
+      },
+      {
+        "evidence": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "event_count": 7,
+          "sources": [
+            "klyrow",
+            "kyqra",
+            "n8n",
+            "odoo",
+            "telnexa"
+          ]
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "correlation trace read-back"
+      },
+      {
+        "evidence": {},
+        "expected": [
+          403
+        ],
+        "http_status": 403,
+        "status": "PASS",
+        "test": "operator invalid credential rejected"
+      },
+      {
+        "evidence": {
+          "body_sha256": "40510c02618bc58c7a872c310d929d8df8d214a86f65eeec6e5257f36d8bbca1"
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "Prometheus metrics reachable"
+      }
+    ]
+  },
+  "private_gateway": {
+    "run_id": "20260815T140235Z-8fe8bac6",
+    "safe_mode": true,
+    "schema_version": "private-gateway-audit.v1",
+    "summary": {
+      "fail": 0,
+      "pass": 42
+    },
+    "tests": [
+      {
+        "evidence": {
+          "response": {
+            "mode": "middleware",
+            "status": "ok"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "private gateway /health"
+      },
+      {
+        "evidence": {
+          "response": {
+            "mode": "middleware",
+            "status": "ok"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "private gateway /api/v1/kyqra/health"
+      },
+      {
+        "evidence": {
+          "response": {
+            "mode": "middleware",
+            "status": "ok"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "private gateway /api/v1/telnexa/health"
+      },
+      {
+        "evidence": {
+          "response": {
+            "mode": "middleware",
+            "status": "ok"
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "private gateway /api/v1/klyrow/health"
+      },
+      {
+        "evidence": {
+          "response": {
+            "events": [
+              {
+                "n": 41,
+                "state": "queued",
+                "system": "klyrow"
+              },
+              {
+                "n": 25,
+                "state": "queued",
+                "system": "kyqra"
+              },
+              {
+                "n": 29,
+                "state": "queued",
+                "system": "telnexa"
+              }
+            ]
+          }
+        },
+        "expected": [
+          200
+        ],
+        "http_status": 200,
+        "status": "PASS",
+        "test": "private gateway /metrics"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-kyqra-0-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-kyqra-0-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "kyqra route /api/v1/kyqra/jobs valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-kyqra-0-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-kyqra-0-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "kyqra route /api/v1/kyqra/jobs replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-kyqra-1-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-kyqra-1-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "kyqra route /api/v1/kyqra/results valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-kyqra-1-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-kyqra-1-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "kyqra route /api/v1/kyqra/results replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-kyqra-2-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-kyqra-2-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "kyqra route /api/v1/kyqra/progress valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-kyqra-2-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-kyqra-2-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "kyqra route /api/v1/kyqra/progress replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-kyqra-3-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-kyqra-3-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "kyqra route /api/v1/kyqra/failures valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-kyqra-3-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-kyqra-3-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "kyqra route /api/v1/kyqra/failures replay rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "detail": "invalid signature"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "kyqra invalid HMAC rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "detail": "expired timestamp"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "kyqra stale timestamp rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "detail": "invalid api key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "kyqra invalid API key rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-telnexa-0-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-telnexa-0-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "telnexa route /api/v1/telnexa/inbound valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-telnexa-0-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-telnexa-0-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "telnexa route /api/v1/telnexa/inbound replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-telnexa-1-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-telnexa-1-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "telnexa route /api/v1/telnexa/dlr valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-telnexa-1-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-telnexa-1-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "telnexa route /api/v1/telnexa/dlr replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-telnexa-2-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-telnexa-2-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "telnexa route /api/v1/telnexa/failure valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-telnexa-2-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-telnexa-2-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "telnexa route /api/v1/telnexa/failure replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-telnexa-3-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-telnexa-3-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "telnexa route /api/v1/telnexa/provider-status valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-telnexa-3-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-telnexa-3-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "telnexa route /api/v1/telnexa/provider-status replay rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "detail": "invalid signature"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "telnexa invalid HMAC rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "detail": "expired timestamp"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "telnexa stale timestamp rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "detail": "invalid api key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "telnexa invalid API key rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-0-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-klyrow-0-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/campaigns valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-0-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-klyrow-0-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/campaigns replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-1-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-klyrow-1-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/contacts valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-1-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-klyrow-1-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/contacts replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-2-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-klyrow-2-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/events valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-2-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-klyrow-2-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/events replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-3-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-klyrow-3-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/bounces valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-3-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-klyrow-3-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/bounces replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-4-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-klyrow-4-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/complaints valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-4-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-klyrow-4-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/complaints replay rejected"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-5-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": true,
+            "duplicate": false,
+            "event_id": "gateway-audit-klyrow-5-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          202
+        ],
+        "http_status": 202,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/unsubscribes valid signed event"
+      },
+      {
+        "evidence": {
+          "event_id": "gateway-audit-klyrow-5-20260815T140235Z-8fe8bac6",
+          "response": {
+            "accepted": false,
+            "detail": "replayed event id",
+            "event_id": "gateway-audit-klyrow-5-20260815T140235Z-8fe8bac6"
+          }
+        },
+        "expected": [
+          409
+        ],
+        "http_status": 409,
+        "status": "PASS",
+        "test": "klyrow route /api/v1/klyrow/unsubscribes replay rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "detail": "invalid signature"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "klyrow invalid HMAC rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "detail": "expired timestamp"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "klyrow stale timestamp rejected"
+      },
+      {
+        "evidence": {
+          "response": {
+            "detail": "invalid api key"
+          }
+        },
+        "expected": [
+          401
+        ],
+        "http_status": 401,
+        "status": "PASS",
+        "test": "klyrow invalid API key rejected"
+      }
+    ]
+  },
+  "real_bulk_sms_or_email_sent": false,
+  "run_id": "20260815T140234Z-f5355911",
+  "safe_mode": true,
+  "schema_version": "full-connectivity-audit.v1",
+  "summary": {
+    "fail": 0,
+    "pass": 93
+  },
+  "tests": [
+    {
+      "evidence": {
+        "response": {
+          "status": "ok"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "control-plane /health"
+    },
+    {
+      "evidence": {
+        "response": {
+          "outbound_safe_mode": false,
+          "status": "ready"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "control-plane /ready"
+    },
+    {
+      "evidence": {
+        "response": {
+          "production_delivery_enabled": false,
+          "providers": {
+            "klyrow": "test",
+            "telnexa": "simulator"
+          },
+          "status": "ready"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "control-plane /v1/ready"
+    },
+    {
+      "evidence": {
+        "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+        "event_id": "audit-odoo-20260815T140234Z-f5355911",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": false,
+          "event_id": "audit-odoo-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "odoo valid auth/HMAC ingress"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-odoo-20260815T140234Z-f5355911",
+        "response": {
+          "error": "replayed_event_id"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "odoo immutable event replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-odoo-20260815T140234Z-f5355911",
+        "response": {
+          "error": "replayed_event_id"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "odoo idempotency conflict"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_api_key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "odoo missing credential rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_api_key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "odoo invalid credential rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "expired_timestamp"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "odoo stale HMAC rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_signature"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "odoo invalid HMAC rejected"
+    },
+    {
+      "evidence": {
+        "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+        "event_id": "audit-n8n-20260815T140234Z-f5355911",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": false,
+          "event_id": "audit-n8n-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "n8n valid auth/HMAC ingress"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-n8n-20260815T140234Z-f5355911",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": true,
+          "event_id": "audit-n8n-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "n8n exact replay idempotency"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-n8n-20260815T140234Z-f5355911",
+        "response": {
+          "error": "idempotency_conflict"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "n8n idempotency conflict"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_api_key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "n8n missing credential rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_api_key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "n8n invalid credential rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "expired_timestamp"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "n8n stale HMAC rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_signature"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "n8n invalid HMAC rejected"
+    },
+    {
+      "evidence": {
+        "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+        "event_id": "audit-telnexa-20260815T140234Z-f5355911",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": false,
+          "event_id": "audit-telnexa-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "telnexa valid auth/HMAC ingress"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-telnexa-20260815T140234Z-f5355911",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": true,
+          "event_id": "audit-telnexa-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "telnexa exact replay idempotency"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-telnexa-20260815T140234Z-f5355911",
+        "response": {
+          "error": "idempotency_conflict"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "telnexa idempotency conflict"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_api_key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "telnexa missing credential rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_api_key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "telnexa invalid credential rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "expired_timestamp"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "telnexa stale HMAC rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_signature"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "telnexa invalid HMAC rejected"
+    },
+    {
+      "evidence": {
+        "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+        "event_id": "audit-klyrow-20260815T140234Z-f5355911",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": false,
+          "event_id": "audit-klyrow-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "klyrow valid auth/HMAC ingress"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-klyrow-20260815T140234Z-f5355911",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": true,
+          "event_id": "audit-klyrow-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "klyrow exact replay idempotency"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-klyrow-20260815T140234Z-f5355911",
+        "response": {
+          "error": "idempotency_conflict"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "klyrow idempotency conflict"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_api_key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "klyrow missing credential rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_api_key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "klyrow invalid credential rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "expired_timestamp"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "klyrow stale HMAC rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_signature"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "klyrow invalid HMAC rejected"
+    },
+    {
+      "evidence": {
+        "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+        "event_id": "audit-kyqra-20260815T140234Z-f5355911",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": false,
+          "event_id": "audit-kyqra-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "kyqra valid auth/HMAC ingress"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-kyqra-20260815T140234Z-f5355911",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": true,
+          "event_id": "audit-kyqra-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "kyqra exact replay idempotency"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-kyqra-20260815T140234Z-f5355911",
+        "response": {
+          "error": "idempotency_conflict"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "kyqra idempotency conflict"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_api_key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "kyqra missing credential rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_api_key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "kyqra invalid credential rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "expired_timestamp"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "kyqra stale HMAC rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "error": "invalid_signature"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "kyqra invalid HMAC rejected"
+    },
+    {
+      "evidence": {
+        "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+        "message_id": "0b881077-4bdd-4327-858a-fa4175c2ea57"
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "sms safe message accepted"
+    },
+    {
+      "evidence": {
+        "same_message_id": true
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "sms message idempotent replay"
+    },
+    {
+      "evidence": {
+        "carrier_or_bulk_submitted": false,
+        "message_id": "0b881077-4bdd-4327-858a-fa4175c2ea57",
+        "provider_status": "simulator_accepted"
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "sms simulator/test dispatch"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-telnexa-callback-20260815T140234Z-f5355911",
+        "message_id": "0b881077-4bdd-4327-858a-fa4175c2ea57",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": false,
+          "event_id": "audit-telnexa-callback-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "telnexa delivery callback"
+    },
+    {
+      "evidence": {
+        "message_id": "0b881077-4bdd-4327-858a-fa4175c2ea57",
+        "normalized_status": "delivered"
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "telnexa callback state read-back"
+    },
+    {
+      "evidence": {
+        "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+        "message_id": "051e93fd-49ee-4517-8bf1-e36a5399d9df"
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "email safe message accepted"
+    },
+    {
+      "evidence": {
+        "same_message_id": true
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "email message idempotent replay"
+    },
+    {
+      "evidence": {
+        "carrier_or_bulk_submitted": false,
+        "message_id": "051e93fd-49ee-4517-8bf1-e36a5399d9df",
+        "provider_status": "test_accepted"
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "email simulator/test dispatch"
+    },
+    {
+      "evidence": {
+        "event_id": "audit-klyrow-callback-20260815T140234Z-f5355911",
+        "message_id": "051e93fd-49ee-4517-8bf1-e36a5399d9df",
+        "response": {
+          "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+          "duplicate": false,
+          "event_id": "audit-klyrow-callback-20260815T140234Z-f5355911",
+          "state": "queued"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "klyrow delivery callback"
+    },
+    {
+      "evidence": {
+        "message_id": "051e93fd-49ee-4517-8bf1-e36a5399d9df",
+        "normalized_status": "delivered"
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "klyrow callback state read-back"
+    },
+    {
+      "evidence": {
+        "correlation_id": "connectivity-audit-20260815T140234Z-f5355911",
+        "event_count": 7,
+        "sources": [
+          "klyrow",
+          "kyqra",
+          "n8n",
+          "odoo",
+          "telnexa"
+        ]
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "correlation trace read-back"
+    },
+    {
+      "evidence": {},
+      "expected": [
+        403
+      ],
+      "http_status": 403,
+      "status": "PASS",
+      "test": "operator invalid credential rejected"
+    },
+    {
+      "evidence": {
+        "body_sha256": "40510c02618bc58c7a872c310d929d8df8d214a86f65eeec6e5257f36d8bbca1"
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "Prometheus metrics reachable"
+    },
+    {
+      "evidence": {
+        "response": {
+          "mode": "middleware",
+          "status": "ok"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "private gateway /health"
+    },
+    {
+      "evidence": {
+        "response": {
+          "mode": "middleware",
+          "status": "ok"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "private gateway /api/v1/kyqra/health"
+    },
+    {
+      "evidence": {
+        "response": {
+          "mode": "middleware",
+          "status": "ok"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "private gateway /api/v1/telnexa/health"
+    },
+    {
+      "evidence": {
+        "response": {
+          "mode": "middleware",
+          "status": "ok"
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "private gateway /api/v1/klyrow/health"
+    },
+    {
+      "evidence": {
+        "response": {
+          "events": [
+            {
+              "n": 41,
+              "state": "queued",
+              "system": "klyrow"
+            },
+            {
+              "n": 25,
+              "state": "queued",
+              "system": "kyqra"
+            },
+            {
+              "n": 29,
+              "state": "queued",
+              "system": "telnexa"
+            }
+          ]
+        }
+      },
+      "expected": [
+        200
+      ],
+      "http_status": 200,
+      "status": "PASS",
+      "test": "private gateway /metrics"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-kyqra-0-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-kyqra-0-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "kyqra route /api/v1/kyqra/jobs valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-kyqra-0-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-kyqra-0-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "kyqra route /api/v1/kyqra/jobs replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-kyqra-1-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-kyqra-1-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "kyqra route /api/v1/kyqra/results valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-kyqra-1-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-kyqra-1-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "kyqra route /api/v1/kyqra/results replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-kyqra-2-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-kyqra-2-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "kyqra route /api/v1/kyqra/progress valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-kyqra-2-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-kyqra-2-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "kyqra route /api/v1/kyqra/progress replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-kyqra-3-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-kyqra-3-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "kyqra route /api/v1/kyqra/failures valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-kyqra-3-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-kyqra-3-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "kyqra route /api/v1/kyqra/failures replay rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "detail": "invalid signature"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "kyqra invalid HMAC rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "detail": "expired timestamp"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "kyqra stale timestamp rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "detail": "invalid api key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "kyqra invalid API key rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-telnexa-0-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-telnexa-0-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "telnexa route /api/v1/telnexa/inbound valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-telnexa-0-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-telnexa-0-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "telnexa route /api/v1/telnexa/inbound replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-telnexa-1-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-telnexa-1-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "telnexa route /api/v1/telnexa/dlr valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-telnexa-1-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-telnexa-1-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "telnexa route /api/v1/telnexa/dlr replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-telnexa-2-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-telnexa-2-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "telnexa route /api/v1/telnexa/failure valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-telnexa-2-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-telnexa-2-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "telnexa route /api/v1/telnexa/failure replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-telnexa-3-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-telnexa-3-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "telnexa route /api/v1/telnexa/provider-status valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-telnexa-3-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-telnexa-3-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "telnexa route /api/v1/telnexa/provider-status replay rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "detail": "invalid signature"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "telnexa invalid HMAC rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "detail": "expired timestamp"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "telnexa stale timestamp rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "detail": "invalid api key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "telnexa invalid API key rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-0-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-klyrow-0-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/campaigns valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-0-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-klyrow-0-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/campaigns replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-1-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-klyrow-1-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/contacts valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-1-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-klyrow-1-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/contacts replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-2-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-klyrow-2-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/events valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-2-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-klyrow-2-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/events replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-3-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-klyrow-3-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/bounces valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-3-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-klyrow-3-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/bounces replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-4-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-klyrow-4-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/complaints valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-4-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-klyrow-4-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/complaints replay rejected"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-5-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": true,
+          "duplicate": false,
+          "event_id": "gateway-audit-klyrow-5-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        202
+      ],
+      "http_status": 202,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/unsubscribes valid signed event"
+    },
+    {
+      "evidence": {
+        "event_id": "gateway-audit-klyrow-5-20260815T140235Z-8fe8bac6",
+        "response": {
+          "accepted": false,
+          "detail": "replayed event id",
+          "event_id": "gateway-audit-klyrow-5-20260815T140235Z-8fe8bac6"
+        }
+      },
+      "expected": [
+        409
+      ],
+      "http_status": 409,
+      "status": "PASS",
+      "test": "klyrow route /api/v1/klyrow/unsubscribes replay rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "detail": "invalid signature"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "klyrow invalid HMAC rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "detail": "expired timestamp"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "klyrow stale timestamp rejected"
+    },
+    {
+      "evidence": {
+        "response": {
+          "detail": "invalid api key"
+        }
+      },
+      "expected": [
+        401
+      ],
+      "http_status": 401,
+      "status": "PASS",
+      "test": "klyrow invalid API key rejected"
+    }
+  ]
+}

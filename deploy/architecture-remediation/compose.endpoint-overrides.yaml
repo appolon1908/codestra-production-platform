@@ -1,0 +1,10 @@
+# Apply only to the codestra-integration-control-plane project.
+services:
+  api:
+    environment:
+      KLYROW_BASE_URL: https://10.40.0.4:18000
+      TELNEXA_BASE_URL: https://telnexa.internal.codestra.agency:8443
+  worker:
+    environment:
+      KLYROW_BASE_URL: https://10.40.0.4:18000
+      TELNEXA_BASE_URL: https://telnexa.internal.codestra.agency:8443

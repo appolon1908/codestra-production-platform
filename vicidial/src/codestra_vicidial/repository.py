@@ -46,6 +46,24 @@ def format_allowed_campaigns(campaigns: list[str]) -> str:
     return (" " + " ".join(campaigns) if campaigns else "") + " -"
 
 
+def owned_user_group(canonical_id: str, business_unit: str, group_code: str) -> bool:
+    """Accept the business-unit namespace or the one certified legacy fixture."""
+    certified_fixtures = {
+        "CAL-TEST-OUT": "TST_CAL",
+        "COD-TEST-OUT": "TST_COD",
+        "FTP-TEST-OUT": "TST_FTP",
+        "MBL-TEST-OUT": "TST_MBL",
+        "MOY-TEST-OUT": "TST_MOY",
+        "RLP-TEST-OUT": "TST_RLP",
+        "SCP-TEST-OUT": "TST_SCP",
+        "TEST_SYN": "WEBTEST_SYN",
+        "TRX-TEST-OUT": "TST_TRX",
+    }
+    return group_code.startswith(business_unit + "_") or certified_fixtures.get(
+        canonical_id
+    ) == group_code
+
+
 def additive_campaign_membership(current: str, desired: str) -> tuple[str, bool]:
     campaigns = normalize_allowed_campaigns(current)
     if desired in campaigns:
@@ -190,7 +208,9 @@ class MemoryRepository:
                 raise CollisionError(f"incompatible collision: {key}")
         for item in spec.groups:
             if item.kind == "user":
-                if not item.code.startswith(spec.business_unit + "_"):
+                if not owned_user_group(
+                    spec.canonical_id, spec.business_unit, item.code
+                ):
                     raise CollisionError(f"incompatible ownership: {item.code}")
                 current = self.groups.get((item.kind, item.code))
                 if current:
@@ -215,7 +235,9 @@ class MemoryRepository:
         for item in spec.groups:
             desired = {"code": item.code, "name": item.name, "kind": item.kind, "active": "N"}
             if item.kind == "user":
-                if not item.code.startswith(spec.business_unit + "_"):
+                if not owned_user_group(
+                    spec.canonical_id, spec.business_unit, item.code
+                ):
                     raise CollisionError(f"incompatible ownership: {item.code}")
                 current = self.groups.get((item.kind, item.code))
                 if current is None:
@@ -442,10 +464,25 @@ class MySQLRepository:
             "SELECT campaign_id,campaign_name,active,dial_method,local_call_time,"
             "campaign_recording,scheduled_callbacks,campaign_description "
             "FROM vicidial_campaigns WHERE campaign_id=%s", (spec.actual_id,))
-        adopted = self._check(current, desired_campaign,
-                              ("campaign_name", "active", "dial_method", "local_call_time",
-                               "campaign_recording", "scheduled_callbacks", "campaign_description"),
-                              spec.actual_id)
+        campaign_fields = (
+            "campaign_name", "active", "dial_method", "local_call_time",
+            "campaign_recording", "scheduled_callbacks", "campaign_description",
+        )
+        adopted = False
+        legacy_update = False
+        if current:
+            mismatches = [key for key in campaign_fields if current.get(key) != desired_campaign.get(key)]
+            if mismatches:
+                observed_hash = hashlib.sha256(
+                    json.dumps(current, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest()
+                if spec.adopt_existing_sha256 != observed_hash:
+                    raise CollisionError(f"incompatible ownership: {spec.actual_id}")
+                if current.get("active") != "N":
+                    raise CollisionError(f"active campaign cannot be adopted: {spec.actual_id}")
+                legacy_update = True
+            else:
+                adopted = True
         # Complete collision preflight before the first MyISAM write. MyISAM
         # cannot provide transactional rollback, so a late ownership collision
         # must never be discovered after earlier resources were inserted.
@@ -460,7 +497,9 @@ class MySQLRepository:
             )
         for item in spec.groups:
             if item.kind == "user":
-                if not item.code.startswith(spec.business_unit + "_"):
+                if not owned_user_group(
+                    spec.canonical_id, spec.business_unit, item.code
+                ):
                     raise CollisionError(f"incompatible ownership: {item.code}")
                 current_group = self._one(
                     "SELECT user_group AS code,group_name AS name,allowed_campaigns "
@@ -501,7 +540,15 @@ class MySQLRepository:
                  "category": item.category},
                 ("status_name", "selectable", "human_answered", "category"), item.code,
             )
-        if not adopted:
+        if legacy_update:
+            self._execute(
+                "UPDATE vicidial_campaigns SET campaign_name=%s,active='N',dial_method=%s,"
+                "local_call_time=%s,campaign_recording=%s,scheduled_callbacks=%s,"
+                "campaign_description=%s,hopper_level=0,auto_dial_level='0' WHERE campaign_id=%s",
+                (spec.name, spec.dial_method, spec.call_time, spec.recording_policy,
+                 desired_campaign["scheduled_callbacks"], description, spec.actual_id),
+            )
+        elif not adopted:
             self._execute(
                 "INSERT INTO vicidial_campaigns"
                 "(campaign_id,campaign_name,active,dial_method,local_call_time,"
@@ -510,7 +557,7 @@ class MySQLRepository:
                 (spec.actual_id, spec.name, spec.dial_method, spec.call_time,
                  spec.recording_policy, desired_campaign["scheduled_callbacks"], description))
         results.append({"type": "campaign", "id": spec.actual_id,
-                        "result": "adopted" if adopted else "created"})
+                        "result": "updated" if legacy_update else ("adopted" if adopted else "created")})
         for item in spec.lists:
             desired = {"list_id": item.list_id, "list_name": item.code,
                        "campaign_id": spec.actual_id, "active": "N"}

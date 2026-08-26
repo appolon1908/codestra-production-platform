@@ -1,0 +1,16 @@
+Defaults:codestra-production-operator env_reset,use_pty,!setenv,secure_path=/usr/sbin:/usr/bin:/sbin:/bin
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator preflight
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator backup
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator validate-backup
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator restore-test
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator stage
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator canary
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator status
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator rollback
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator collect-evidence
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator stage-control-plane
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator validate-control-plane
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator rollback-control-plane
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator activate-control-plane
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator enable-production-web-traffic
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator disable-production-web-traffic
