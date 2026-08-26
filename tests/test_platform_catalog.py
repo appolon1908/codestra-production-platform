@@ -28,6 +28,15 @@ def test_external_delivery_and_telephony_default_disabled() -> None:
     assert unsafe == []
 
 
+def test_campaign_automation_is_not_a_default_deployment_candidate() -> None:
+    row = next(
+        item
+        for item in catalog()["features"]
+        if item["feature_id"] == "middleware-campaign-automation"
+    )
+    assert row["deployment_candidate"] is False
+
+
 def test_deployment_gate_reports_known_middleware_blockers() -> None:
     blockers = deployment_blockers(
         catalog(),
@@ -35,6 +44,7 @@ def test_deployment_gate_reports_known_middleware_blockers() -> None:
     )
     rules = {item.location for item in blockers}
     assert "kong-route-authority-duplication" in rules
+    assert "campaign-lifecycle-entrypoints" in rules
     assert "generated-container-service-identities" in rules
     assert "shared-postgresql-runtime-pitr" in rules
 
