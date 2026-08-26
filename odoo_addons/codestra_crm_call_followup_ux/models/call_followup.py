@@ -41,20 +41,28 @@ class CodestraCrmCallFollowupUx(models.Model):
         for record in self:
             if not manager and record.agent_id != self.env.user:
                 raise AccessError(
-                    _("Only the assigned agent or a call-follow-up manager may perform this action.")
+                    _(
+                        "Only the assigned agent or a call-follow-up manager "
+                        "may perform this action."
+                    )
                 )
 
     def _snooze_for(self, minutes):
+        """Persist a snooze without deciding how the caller's window behaves."""
         self.ensure_one()
         self._assert_agent_workflow_access()
         try:
             minutes = int(minutes)
         except (TypeError, ValueError) as exc:
-            raise ValidationError(_("The snooze duration must be an integer.")) from exc
+            raise ValidationError(
+                _("The snooze duration must be an integer.")
+            ) from exc
         if minutes not in ALLOWED_SNOOZE_MINUTES:
             raise ValidationError(_("Choose a supported snooze duration."))
         if self.state != "pending" or self.popup_completed_at:
-            raise ValidationError(_("Only an unfinished post-call action can be snoozed."))
+            raise ValidationError(
+                _("Only an unfinished post-call action can be snoozed.")
+            )
 
         now = fields.Datetime.now()
         self._write_from_workflow(
@@ -64,19 +72,24 @@ class CodestraCrmCallFollowupUx(models.Model):
                 "last_snoozed_at": now,
             }
         )
-        return {"type": "ir.actions.act_window_close"}
+        return True
+
+    def _snooze_and_reload(self, minutes):
+        self.ensure_one()
+        self._snooze_for(minutes)
+        return {"type": "ir.actions.client", "tag": "reload"}
 
     def action_snooze_5(self):
         self.ensure_one()
-        return self._snooze_for(5)
+        return self._snooze_and_reload(5)
 
     def action_snooze_15(self):
         self.ensure_one()
-        return self._snooze_for(15)
+        return self._snooze_and_reload(15)
 
     def action_snooze_30(self):
         self.ensure_one()
-        return self._snooze_for(30)
+        return self._snooze_and_reload(30)
 
     @api.model
     def get_pending_post_call_actions(self, limit=5):
@@ -170,7 +183,9 @@ class CodestraCrmCallFollowupUx(models.Model):
                     "followup_id": record.id,
                     "event_id": record.event_id,
                     "title": _("Post-call reminder"),
-                    "message": _("Your snoozed post-call action is ready."),
+                    "message": _(
+                        "Your snoozed post-call action is ready."
+                    ),
                 },
             )
         return len(records)

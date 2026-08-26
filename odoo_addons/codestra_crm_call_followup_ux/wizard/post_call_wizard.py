@@ -14,17 +14,22 @@ class CodestraCrmPostCallWizardUx(models.TransientModel):
         readonly=True,
     )
 
+    def _snooze_and_close(self, minutes):
+        self.ensure_one()
+        self.followup_id._snooze_for(minutes)
+        return {"type": "ir.actions.act_window_close"}
+
     def action_snooze_5(self):
         self.ensure_one()
-        return self.followup_id.action_snooze_5()
+        return self._snooze_and_close(5)
 
     def action_snooze_15(self):
         self.ensure_one()
-        return self.followup_id.action_snooze_15()
+        return self._snooze_and_close(15)
 
     def action_snooze_30(self):
         self.ensure_one()
-        return self.followup_id.action_snooze_30()
+        return self._snooze_and_close(30)
 
     def action_send_email_and_complete(self):
         self.ensure_one()
@@ -40,7 +45,9 @@ class CodestraCrmPostCallWizardUx(models.TransientModel):
     def action_open_crm_record(self):
         self.ensure_one()
         if not self.lead_id:
-            raise ValidationError(_("This call is not linked to a CRM lead or opportunity."))
+            raise ValidationError(
+                _("This call is not linked to a CRM lead or opportunity.")
+            )
         return {
             "type": "ir.actions.act_window",
             "name": self.lead_id.display_name,
@@ -54,7 +61,9 @@ class CodestraCrmPostCallWizardUx(models.TransientModel):
     def action_open_customer(self):
         self.ensure_one()
         if not self.partner_id:
-            raise ValidationError(_("This call is not linked to a customer."))
+            raise ValidationError(
+                _("This call is not linked to a customer.")
+            )
         return {
             "type": "ir.actions.act_window",
             "name": self.partner_id.display_name,
