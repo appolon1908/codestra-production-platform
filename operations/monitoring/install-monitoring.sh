@@ -46,7 +46,7 @@ docker run --rm \
     -v "$ROOT/prometheus.yml":/etc/prometheus/prometheus.yml:ro \
     -v "$ROOT/rules":/etc/prometheus/rules:ro \
     prom/prometheus@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893 \
-    promtool check config /etc/prometheus/prometheus.yml
+    check config /etc/prometheus/prometheus.yml
 docker run --rm \
     --entrypoint /bin/amtool \
     -v "$CONFIG":/etc/alertmanager/alertmanager.yml:ro \
