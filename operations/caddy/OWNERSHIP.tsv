@@ -1,0 +1,14 @@
+path	classification	owner
+/etc/caddy/Caddyfile	SOURCE_CONTROLLED	Platform Operations
+/etc/caddy/sites/*.caddy	SOURCE_CONTROLLED	Platform Operations
+/etc/caddy/conf.d/*.caddy	SOURCE_CONTROLLED	Platform Operations
+/etc/caddy/snippets/*.caddy	SOURCE_CONTROLLED	Platform Operations
+/etc/systemd/system/caddy.service	SOURCE_CONTROLLED	Platform Operations
+/etc/systemd/system/caddy.service.d/*.conf	SOURCE_CONTROLLED	Platform Operations
+/etc/logrotate.d/codestra-caddy	SOURCE_CONTROLLED	Platform Operations
+/etc/caddy/secrets/*	SECRET_REFERENCE	Security Operations
+/etc/caddy/private/*	SECRET_REFERENCE	Security Operations
+/etc/codestra/pki/middleware-private-ingress/*	SECRET_REFERENCE	Security Operations
+/var/lib/caddy	RUNTIME_STATE	Platform Operations
+/run/caddy/admin.sock	RUNTIME_STATE	Caddy
+/etc/caddy/sites/*.before-*	OBSOLETE	Platform Operations

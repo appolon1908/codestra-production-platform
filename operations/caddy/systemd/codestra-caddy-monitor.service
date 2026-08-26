@@ -1,0 +1,10 @@
+[Unit]
+Description=Codestra Caddy production resilience probes
+After=network-online.target caddy.service
+[Service]
+Type=oneshot
+ExecStart=/opt/codestra/operations/caddy/scripts/monitor.sh
+User=root
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true

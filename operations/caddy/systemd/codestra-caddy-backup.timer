@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily encrypted Caddy state backup
+[Timer]
+OnCalendar=*-*-* 02:17:00
+RandomizedDelaySec=20m
+Persistent=true
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,48 @@
+groups:
+- name: caddy-production-resilience
+  rules:
+  - alert: CaddyServiceDown
+    expr: codestra_caddy_service_up == 0
+    for: 2m
+    labels: {severity: critical}
+  - alert: CaddyConfigurationDrift
+    expr: codestra_caddy_unexpected_drift > 0
+    for: 5m
+    labels: {severity: critical}
+  - alert: CaddyBackupStaleWarning
+    expr: codestra_caddy_backup_age_seconds > 86400
+    for: 10m
+    labels: {severity: warning}
+  - alert: CaddyBackupStaleCritical
+    expr: codestra_caddy_backup_age_seconds > 172800
+    for: 10m
+    labels: {severity: critical}
+  - alert: CaddyPublicBehaviorFailure
+    expr: codestra_caddy_https_expected_response == 0
+    for: 5m
+    labels: {severity: critical}
+  - alert: CaddyKongCanaryFailure
+    expr: codestra_caddy_kong_canary_ok == 0
+    for: 3m
+    labels: {severity: critical}
+  - alert: CaddyWebSocketCanaryFailure
+    expr: codestra_caddy_websocket_expected_response == 0
+    for: 3m
+    labels: {severity: critical}
+  - alert: CaddyUnexpectedRestart
+    expr: increase(codestra_caddy_restarts_total[15m]) > 0
+    labels: {severity: warning}
+  - alert: CaddyInternalCertificateNearExpiry
+    expr: codestra_caddy_internal_certificate_hours_remaining <= 2
+    for: 5m
+    labels: {severity: critical}
+  - alert: CaddyCertificateRenewalFailure
+    expr: codestra_caddy_certificate_renewal_errors > 0
+    labels: {severity: critical}
+  - alert: CaddyReloadFailure
+    expr: codestra_caddy_reload_errors > 0
+    labels: {severity: critical}
+  - alert: CaddyMTLSProbeFailure
+    expr: codestra_caddy_mtls_authorized_handshake_ok == 0
+    for: 5m
+    labels: {severity: critical}

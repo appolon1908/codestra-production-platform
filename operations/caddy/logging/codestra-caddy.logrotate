@@ -1,0 +1,14 @@
+/var/log/caddy/*.log {
+    daily
+    rotate 30
+    maxsize 100M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 caddy caddy
+    sharedscripts
+    postrotate
+        /bin/systemctl kill -s USR1 caddy.service >/dev/null 2>&1 || true
+    endscript
+}

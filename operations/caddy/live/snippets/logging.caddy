@@ -1,0 +1,2 @@
+# Site-specific logs must explicitly delete sensitive request and response headers.
+# Existing production sites retain their current destinations during migration.

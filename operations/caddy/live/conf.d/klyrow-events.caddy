@@ -1,0 +1,45 @@
+# Private Klyrow delivery-event ingress. The application origin is loopback-only;
+# this listener is the sole private-network entry point and requires a client
+# certificate rooted in the Codestra platform provider trust chain.
+https://middleware-email-events.internal.codestra.agency:18080 {
+	bind 10.40.0.1
+	tls /etc/caddy/private/klyrow-events/tls-fullchain.crt /etc/caddy/private/klyrow-events/tls.key {
+		client_auth {
+			mode require_and_verify
+			# Trust only the provisioned Klyrow provider workload certificate.
+			trust_pool file /etc/caddy/private/klyrow-events/klyrow-client.crt
+		}
+	}
+
+	request_body {
+		max_size 256KB
+	}
+
+	@klyrow_event {
+		remote_ip 10.40.0.4
+		method POST
+		path /internal/provider-events/klyrow
+	}
+	handle @klyrow_event {
+		reverse_proxy 127.0.0.1:18180 {
+			header_up X-Forwarded-Proto https
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	handle {
+		respond "Forbidden" 403
+	}
+
+	log {
+		output file /var/log/caddy/klyrow-events-access.log {
+			roll_size 20MiB
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format filter {
+			request>headers>Authorization delete
+			request>headers>Cookie delete
+			request>headers>X-Api-Key delete
+		}
+	}
+}

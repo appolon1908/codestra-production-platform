@@ -1,0 +1,362 @@
+api.codestra.agency {
+	import security_headers
+	encode gzip
+	request_body {
+		max_size 10MB
+	}
+	@realtime path /ws/agent /api/v1/realtime/sessions /healthz /readyz /version
+	handle @realtime {
+		reverse_proxy 127.0.0.1:18102 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:18101 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	log {
+		output file /var/log/caddy/access.log
+		format filter {
+			resp_headers>X-Auth-Request-Access-Token replace REDACTED
+		}
+	}
+}
+
+crm.codestra.agency {
+	import security_headers
+	encode gzip
+	@reseller path /reseller /reseller/*
+	handle @reseller {
+		uri strip_prefix /reseller
+		reverse_proxy 127.0.0.1:18104
+	}
+	handle {
+		reverse_proxy 127.0.0.1:18105
+	}
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+n8n.codestra.agency {
+	import security_headers
+	encode gzip
+	@health path /healthz /healthz/readiness
+	handle @health {
+		reverse_proxy 127.0.0.1:18106
+	}
+	@staff_private remote_ip private_ranges
+	handle @staff_private {
+		reverse_proxy 127.0.0.1:18106
+	}
+	handle {
+		respond "Staff identity network required" 403
+	}
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+n8n-staging.codestra.agency {
+	import security_headers
+	encode gzip
+	@health path /healthz /healthz/readiness
+	handle @health {
+		reverse_proxy 127.0.0.1:18107
+	}
+	@staff_private remote_ip private_ranges
+	handle @staff_private {
+		reverse_proxy 127.0.0.1:18107
+	}
+	handle {
+		respond "Staff identity network required" 403
+	}
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+# Private staging service origins. These names are separate from production
+# origins and use Caddy's local CA for the staging-only proxy.
+api.staging.internal.codestra.agency {
+	tls internal
+	import security_headers
+	encode gzip
+	reverse_proxy 127.0.0.1:18108
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+n8n.staging.internal.codestra.agency {
+	tls internal
+	import security_headers
+	encode gzip
+	@live path /health/live
+	handle @live {
+		rewrite * /healthz
+		reverse_proxy 127.0.0.1:18107
+	}
+	@ready path /health/ready
+	handle @ready {
+		rewrite * /healthz/readiness
+		reverse_proxy 127.0.0.1:18107
+	}
+	@metadata path /.well-known/codestra-service
+	handle @metadata {
+		header Content-Type application/json
+		respond `{"service":"codestra-n8n","environment":"staging","contract_version":"1.0","live_path":"/health/live","ready_path":"/health/ready"}` 200
+	}
+	handle {
+		reverse_proxy 127.0.0.1:18109
+	}
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+auth.staging.internal.codestra.agency {
+	tls internal
+	import security_headers
+	encode gzip
+	reverse_proxy 127.0.0.1:18110
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+odoo.staging.internal.codestra.agency {
+	tls internal
+	import security_headers
+	encode gzip
+	reverse_proxy 127.0.0.1:18111
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+bridge-staging.codestra.agency {
+	import security_headers
+	encode gzip
+	route {
+		@private_callback path /api/v1/events/vicidial
+		respond @private_callback 404
+		reverse_proxy 127.0.0.1:18108
+	}
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+middleware.internal.codestra.agency {
+	tls /etc/codestra/pki/middleware-private-ingress/server.crt /etc/codestra/pki/middleware-private-ingress/server.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /etc/codestra/pki/middleware-private-ingress/client-ca.crt
+		}
+	}
+	import security_headers
+	route {
+		@authorized_callback {
+			remote_ip 10.40.0.2
+			method POST
+			path /api/v1/events/vicidial
+		}
+		reverse_proxy @authorized_callback 127.0.0.1:18112
+		respond 403
+	}
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+middleware-staging.internal.codestra.agency {
+	tls /etc/codestra/pki/middleware-private-ingress/staging-server.crt /etc/codestra/pki/middleware-private-ingress/staging-server.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /etc/codestra/pki/middleware-private-ingress/client-ca.crt
+		}
+	}
+	import security_headers
+	route {
+		@staging_event {
+			remote_ip 65.21.67.207
+			method POST
+			path /api/v1/staging/events/vicidial
+		}
+		handle @staging_event {
+			rewrite * /api/v1/events/vicidial
+			reverse_proxy 127.0.0.1:18108
+		}
+		respond 403
+	}
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+# BEGIN CODESTRA_AGENT_DESKTOP_PREVIEW
+phone.codestra.agency {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Robots-Tag "noindex, nofollow"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+		Permissions-Policy "camera=(), geolocation=(), microphone=(self)"
+		Content-Security-Policy "default-src 'self'; connect-src 'self' wss://wss.codestra.agency:8089 wss://api.codestra.agency; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"
+	}
+	@oauth path /oauth2/*
+	handle @oauth {
+		reverse_proxy 127.0.0.1:18113
+	}
+	@webphone path /webphone-api/* /ws/agent
+	handle @webphone {
+		request_body {
+			max_size 16KB
+		}
+		reverse_proxy 127.0.0.1:18113
+	}
+	handle_path /realtime-api/* {
+		request_body {
+			max_size 16KB
+		}
+		route {
+			forward_auth 127.0.0.1:18113 {
+				uri /oauth2/auth
+				header_up X-Real-IP {remote_host}
+				copy_headers X-Auth-Request-Access-Token
+			}
+			request_header Authorization "Bearer {http.request.header.X-Auth-Request-Access-Token}"
+			reverse_proxy 127.0.0.1:18102
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:18114 {
+			header_down -Content-Security-Policy
+		}
+	}
+	log {
+		output file /var/log/caddy/access.log
+		format filter {
+			resp_headers>X-Auth-Request-Access-Token replace REDACTED
+		}
+	}
+}
+# END CODESTRA_AGENT_DESKTOP_PREVIEW
+
+# BEGIN CODESTRA_AGENT_DESKTOP_DIALER
+dialer.codestra.agency {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Robots-Tag "noindex, nofollow"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+		Permissions-Policy "camera=(), geolocation=(), microphone=(self)"
+		Content-Security-Policy "default-src 'self'; connect-src 'self' wss://wss.codestra.agency:8089 wss://api.codestra.agency; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"
+	}
+	@oauth path /oauth2/*
+	handle @oauth {
+		reverse_proxy 127.0.0.1:18113
+	}
+	@dialer_protected {
+		not path /oauth2/*
+	}
+	forward_auth @dialer_protected 127.0.0.1:18113 {
+		uri /oauth2/auth
+		header_up X-Real-IP {remote_host}
+		copy_headers X-Auth-Request-User
+		@unauthenticated status 401
+		handle_response @unauthenticated {
+			redir * /oauth2/sign_in?rd={scheme}://{host}{uri} 302
+		}
+	}
+	@webphone path /webphone-api/* /ws/agent
+	handle @webphone {
+		request_body {
+			max_size 16KB
+		}
+		reverse_proxy 127.0.0.1:18113
+	}
+	handle_path /realtime-api/* {
+		request_body {
+			max_size 16KB
+		}
+		route {
+			forward_auth 127.0.0.1:18113 {
+				uri /oauth2/auth
+				header_up X-Real-IP {remote_host}
+				copy_headers X-Auth-Request-Access-Token
+			}
+			request_header Authorization "Bearer {http.request.header.X-Auth-Request-Access-Token}"
+			reverse_proxy 127.0.0.1:18102
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:18114 {
+			header_down -Content-Security-Policy
+		}
+	}
+	log {
+		output file /var/log/caddy/access.log
+		format filter {
+			resp_headers>X-Auth-Request-Access-Token replace REDACTED
+		}
+	}
+}
+# END CODESTRA_AGENT_DESKTOP_DIALER
+
+monitoring.codestra.co {
+	import security_headers
+	encode zstd gzip
+	request_body {
+		max_size 256KB
+	}
+	route {
+		@monitoring_receiver path /healthz /readyz /api/v1/alerts/* /api/v1/dashboard
+		reverse_proxy @monitoring_receiver 127.0.0.1:18115
+		respond 404
+	}
+	log {
+		output file /var/log/caddy/access.log
+	}
+}
+
+# Public reseller/customer API ingress. Kong remains the authentication and
+# routing boundary; existing api.codestra.agency middleware ingress is unchanged.
+api.codestra.co {
+	import security_headers
+	encode zstd gzip
+	request_body {
+		max_size 10MB
+	}
+	@realtime path /ws/agent /api/v1/realtime/sessions /healthz /readyz /version
+	handle @realtime {
+		reverse_proxy 127.0.0.1:18102 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:18101 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	log {
+		output file /var/log/caddy/api-codestra-co-access.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+		format filter {
+			request>headers>Apikey delete
+			request>headers>X-Api-Key delete
+			request>headers>Authorization delete
+			request>uri query {
+				delete apikey
+			}
+		}
+	}
+}

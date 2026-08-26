@@ -1,0 +1,10 @@
+{
+	admin unix//run/caddy/admin.sock
+	email admin@codestra.agency
+	default_bind 65.109.65.169 127.0.0.1
+	skip_install_trust
+}
+
+import snippets/*.caddy
+import sites/*.caddy
+import conf.d/*.caddy

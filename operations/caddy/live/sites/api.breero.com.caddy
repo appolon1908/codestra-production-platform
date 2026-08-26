@@ -1,0 +1,45 @@
+# Activation gate: api.breero.com DNS must resolve to 65.109.65.169 first.
+# This site always enters through Kong's proxy listener; Kong Admin is never used.
+api.breero.com {
+	import security_headers
+	encode zstd gzip
+	request_body {
+		max_size 10MB
+	}
+	@health {
+		method GET
+		path /health /health/ready
+	}
+	handle @health {
+		reverse_proxy 127.0.0.1:8000 {
+			import proxy_common
+		}
+	}
+	@api path /api/v1 /api/v1/*
+	handle @api {
+		# Breero browser sessions, OIDC callbacks, and API RBAC are enforced by
+		# Breero itself. The scraper token certifier belongs only on scraper
+		# routes; applying it here blocks the Authorization Code callback.
+		reverse_proxy 127.0.0.1:8000 {
+			import proxy_common
+		}
+	}
+	handle {
+		respond "Not Found" 404
+	}
+	log {
+		output file /var/log/caddy/api-breero-access.log {
+			roll_size 20MiB
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format filter {
+			request>headers>Authorization delete
+			request>headers>Cookie delete
+			request>headers>Proxy-Authorization delete
+			request>headers>X-Api-Key delete
+			request>headers>Apikey delete
+			response>headers>Set-Cookie delete
+		}
+	}
+}
