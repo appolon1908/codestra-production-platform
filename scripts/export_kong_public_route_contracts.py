@@ -54,6 +54,15 @@ SENSITIVE_HEADER_NAMES = {
     "x-api-key",
     "x-auth-token",
 }
+SENSITIVE_QUERY_KEYS = {
+    "access_token",
+    "credential",
+    "signature",
+    "sig",
+    "x_amz_credential",
+    "x_amz_security_token",
+    "x_amz_signature",
+}
 SENSITIVE_ASSIGNMENT = re.compile(
     r"(?i)(?:^|[\s,;])(?:api[-_ ]?key|authorization|client_secret|cookie|"
     r"password|private_key|proxy-authorization|secret|set-cookie|shared_secret|"
@@ -128,7 +137,22 @@ def sensitive_scalar(value: object, key: str) -> bool:
         return False
     if parsed.username or parsed.password:
         return True
-    return any(sensitive_key(name) for name, _ in parse_qsl(parsed.query, keep_blank_values=True))
+    return any(
+        sensitive_key(name)
+        or name.lower().replace("-", "_") in SENSITIVE_QUERY_KEYS
+        for name, _ in parse_qsl(parsed.query, keep_blank_values=True)
+    )
+
+
+def sanitized_origin(value: str) -> str:
+    parsed = urlsplit(value)
+    hostname = parsed.hostname or ""
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
+    netloc = hostname
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    return parsed._replace(netloc=netloc, path="", query="", fragment="").geturl()
 
 
 def sanitize(value, key: str = ""):
@@ -248,7 +272,7 @@ def main() -> int:
         "schema": "codestra.kong.public-route-evidence.v1",
         "mode": "read-only",
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-        "admin_origin": urlsplit(args.admin_url)._replace(path="", query="", fragment="").geturl(),
+        "admin_origin": sanitized_origin(args.admin_url),
         "credentials_exported": False,
         "routes": records,
     }

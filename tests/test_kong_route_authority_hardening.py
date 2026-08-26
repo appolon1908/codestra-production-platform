@@ -214,6 +214,11 @@ def test_read_only_route_exporter_redacts_secret_values_without_exporting_creden
             "https://hooks.example.invalid/path?safe=value&api_key=do-not-export-query"
         ),
         "safe_url": "https://hooks.example.invalid/path?offset=next",
+        "aws_url": (
+            "https://bucket.example.invalid/object?X-Amz-Credential=credential"
+            "&X-Amz-Signature=signature"
+        ),
+        "azure_url": "https://blob.example.invalid/object?sig=signature",
     }
     sanitized = module.sanitize(value)
     assert sanitized["client_secret"]["redacted"] is True
@@ -227,6 +232,8 @@ def test_read_only_route_exporter_redacts_secret_values_without_exporting_creden
     assert sanitized["token_url"]["redacted"] is True
     assert sanitized["api_key_url"]["redacted"] is True
     assert sanitized["safe_url"] == "https://hooks.example.invalid/path?offset=next"
+    assert sanitized["aws_url"]["redacted"] is True
+    assert sanitized["azure_url"]["redacted"] is True
     rendered = json.dumps(sanitized)
     assert "do-not-export" not in rendered
     assert "method=\"GET\"" in source
@@ -241,6 +248,14 @@ def test_exporter_pagination_cannot_leave_the_selected_admin_origin():
         module.safe_next(
             "http://127.0.0.1:8001", "http://attacker.invalid/routes?offset=next"
         )
+
+
+def test_exporter_admin_origin_strips_basic_auth_credentials():
+    module = _exporter()
+    assert (
+        module.sanitized_origin("http://admin:password@127.0.0.1:8001/routes?q=1")
+        == "http://127.0.0.1:8001"
+    )
 
 
 def test_inline_and_standalone_control_plane_scope_policies_are_identical():
