@@ -8,7 +8,14 @@ immutable Odoo image:
 - `codestra_crm_call_followup_ux`
 - `codestra_crm_call_followup_automation`
 
-Source integration SHA: `32ef97f27459cf57c58e7b329ab8ed0ae9c0f34d`.
+Source integration SHA: `b9b55274d726b2375f0a48ae30a2b1369c47e91c`.
+
+Component heads:
+
+- core: `3bf43b689da96eb1ab2444c30133a2dc43563be4`
+- API: `985869b17ebd3211b87c48cf620bb34a011b910b`
+- UX: `3bcca91f62a8e1ca67c9e4b850a72a9f317ed431`
+- automation: `fde96222979e43f213f49eeee3d695bfdc862ddb`
 
 ## Safety defaults
 
