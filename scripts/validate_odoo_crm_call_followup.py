@@ -78,8 +78,16 @@ def main() -> int:
             fail(errors, "staging mail inbox release root is absent from the Odoo addon path")
         if "ODOO_CALL_CENTER_ADDON_RELEASE:?" not in staging_source:
             fail(errors, "staging overlay does not fail closed on call-center source parity")
-        if ":/mnt/call-center-addons/call_center_campaign:ro" not in staging_source:
-            fail(errors, "staging overlay does not pin call_center_campaign read-only")
+        for module_name in (
+            "call_center_core",
+            "call_center_campaign",
+            "call_center_compliance",
+            "call_center_lead_validation",
+            "call_center_orchestration",
+        ):
+            mount = f":/mnt/call-center-addons/{module_name}:ro"
+            if mount not in staging_source:
+                fail(errors, f"staging overlay does not pin {module_name} read-only")
 
     if MANIFEST.is_file():
         try:
