@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_followup_report_search" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.report.search</field>
+        <field name="model">codestra.crm.call.followup.report</field>
+        <field name="arch" type="xml">
+            <search string="Call Follow-up Analytics">
+                <field name="name"/>
+                <field name="agent_id"/>
+                <field name="partner_id"/>
+                <field name="lead_id"/>
+                <field name="disposition"/>
+                <filter name="my_calls" string="My Calls" domain="[('agent_id', '=', uid)]"/>
+                <filter name="pending" string="Pending" domain="[('is_pending', '=', True)]"/>
+                <filter name="pending_over_10" string="Pending Over 10 Minutes" domain="[('pending_over_10_minutes', '=', True)]"/>
+                <filter name="completed" string="Completed" domain="[('is_completed', '=', True)]"/>
+                <filter name="callbacks" string="Callbacks" domain="[('is_callback', '=', True)]"/>
+                <filter name="appointments" string="Appointments" domain="[('is_appointment', '=', True)]"/>
+                <filter name="email_failed" string="Email Failed" domain="[('email_failed', '=', True)]"/>
+                <separator/>
+                <filter name="call_date" string="Call Date" date="ended_at"/>
+                <group>
+                    <filter name="group_day" string="Call Day" context="{'group_by': 'call_day'}"/>
+                    <filter name="group_week" string="Call Week" context="{'group_by': 'call_week'}"/>
+                    <filter name="group_month" string="Call Month" context="{'group_by': 'call_month'}"/>
+                    <filter name="group_agent" string="Agent" context="{'group_by': 'agent_id'}"/>
+                    <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>
+                    <filter name="group_outcome" string="Outcome" context="{'group_by': 'disposition'}"/>
+                    <filter name="group_schedule" string="Next Step" context="{'group_by': 'schedule_kind'}"/>
+                    <filter name="group_completion" string="Completion SLA" context="{'group_by': 'completion_bucket'}"/>
+                    <filter name="group_email" string="Email State" context="{'group_by': 'email_state'}"/>
+                    <filter name="group_company" string="Company" context="{'group_by': 'company_id'}" groups="base.group_multi_company"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_followup_report_list" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.report.list</field>
+        <field name="model">codestra.crm.call.followup.report</field>
+        <field name="arch" type="xml">
+            <list string="Call Follow-up Analytics" create="0" edit="0" delete="0"
+                  decoration-danger="pending_over_10_minutes or email_failed"
+                  decoration-warning="is_pending"
+                  decoration-success="is_completed and completed_within_5_minutes">
+                <field name="ended_at"/>
+                <field name="agent_id"/>
+                <field name="partner_id" optional="show"/>
+                <field name="lead_id" optional="hide"/>
+                <field name="duration_seconds" optional="hide"/>
+                <field name="state" widget="badge"/>
+                <field name="disposition" optional="show"/>
+                <field name="completion_minutes" optional="show"/>
+                <field name="completion_bucket" optional="show"/>
+                <field name="schedule_kind" optional="show"/>
+                <field name="callback_at" optional="show"/>
+                <field name="email_state" optional="show" widget="badge"/>
+                <field name="company_id" optional="hide" groups="base.group_multi_company"/>
+                <field name="pending_over_10_minutes" column_invisible="True"/>
+                <field name="email_failed" column_invisible="True"/>
+                <field name="is_pending" column_invisible="True"/>
+                <field name="is_completed" column_invisible="True"/>
+                <field name="completed_within_5_minutes" column_invisible="True"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_followup_report_form" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.report.form</field>
+        <field name="model">codestra.crm.call.followup.report</field>
+        <field name="arch" type="xml">
+            <form string="Call Follow-up KPI Record" create="0" edit="0" delete="0">
+                <sheet>
+                    <div class="oe_title"><h1><field name="name" readonly="1"/></h1></div>
+                    <group>
+                        <group string="Call">
+                            <field name="followup_id"/>
+                            <field name="ended_at"/>
+                            <field name="duration_seconds"/>
+                            <field name="agent_id"/>
+                            <field name="partner_id"/>
+                            <field name="lead_id"/>
+                        </group>
+                        <group string="Completion">
+                            <field name="state"/>
+                            <field name="disposition"/>
+                            <field name="popup_completed_at"/>
+                            <field name="completion_minutes"/>
+                            <field name="completion_bucket"/>
+                            <field name="pending_age_minutes"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Scheduled Next Step">
+                            <field name="schedule_kind"/>
+                            <field name="callback_at"/>
+                            <field name="callback_lead_minutes"/>
+                            <field name="calendar_event_id"/>
+                        </group>
+                        <group string="Email">
+                            <field name="send_post_call_email"/>
+                            <field name="mail_id"/>
+                            <field name="email_state"/>
+                            <field name="email_failed"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_followup_report_pivot" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.report.pivot</field>
+        <field name="model">codestra.crm.call.followup.report</field>
+        <field name="arch" type="xml">
+            <pivot string="Call Follow-up Performance" disable_linking="False">
+                <field name="call_month" type="row"/>
+                <field name="agent_id" type="row"/>
+                <field name="state" type="col"/>
+                <field name="call_count" type="measure"/>
+                <field name="duration_seconds" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="view_followup_report_graph" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.report.graph</field>
+        <field name="model">codestra.crm.call.followup.report</field>
+        <field name="arch" type="xml">
+            <graph string="Call Follow-up Volume" type="bar" stacked="1">
+                <field name="call_day" type="row"/>
+                <field name="state" type="col"/>
+                <field name="call_count" type="measure"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="view_followup_completion_graph" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.report.completion.graph</field>
+        <field name="model">codestra.crm.call.followup.report</field>
+        <field name="arch" type="xml">
+            <graph string="Post-call Completion SLA" type="bar">
+                <field name="completion_bucket" type="row"/>
+                <field name="call_count" type="measure"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="action_followup_analytics" model="ir.actions.act_window">
+        <field name="name">Call Follow-up Analytics</field>
+        <field name="res_model">codestra.crm.call.followup.report</field>
+        <field name="view_mode">graph,pivot,list,form</field>
+        <field name="search_view_id" ref="view_followup_report_search"/>
+        <field name="context">{'search_default_call_date': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No call-follow-up records are available for this scope.</p>
+            <p>This dashboard is read-only. Operational changes remain in the assigned call-follow-up workflow.</p>
+        </field>
+    </record>
+
+    <record id="action_followup_completion_sla" model="ir.actions.act_window">
+        <field name="name">Post-call Completion SLA</field>
+        <field name="res_model">codestra.crm.call.followup.report</field>
+        <field name="view_mode">graph,pivot,list</field>
+        <field name="view_id" ref="view_followup_completion_graph"/>
+        <field name="search_view_id" ref="view_followup_report_search"/>
+    </record>
+
+    <menuitem id="menu_followup_analytics"
+              name="Call Follow-up Analytics"
+              parent="crm.crm_menu_report"
+              action="action_followup_analytics"
+              sequence="22"
+              groups="codestra_crm_call_followup.group_call_followup_user"/>
+
+    <menuitem id="menu_followup_completion_sla"
+              name="Post-call Completion SLA"
+              parent="crm.crm_menu_report"
+              action="action_followup_completion_sla"
+              sequence="23"
+              groups="codestra_crm_call_followup.group_call_followup_manager"/>
+</odoo>
