@@ -12,4 +12,4 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/etc/codestra/secrets/shared-postgresql
-ReadWritePaths=/var/spool/codestra/postgresql-shared /opt/codestra/backups/postgresql-shared
+ReadWritePaths=/var/spool/codestra/postgresql-shared /opt/codestra/backups/postgresql-shared /var/lib/codestra-shared-postgresql
