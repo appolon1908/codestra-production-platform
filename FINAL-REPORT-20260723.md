@@ -57,7 +57,7 @@ campaign activation, database migration, or production cutover was performed.
 | Gate 3A remediation retest | Technically completed, formal gate remains no-go | Commit `04a4a27`; Ruff PASS, mypy PASS for 24 files, 34 tests PASS and one isolated-DB test skipped; all WP-00R policy subsets PASS; 40 workflow definitions inactive |
 | Gate 3A clean reproducibility | Technically completed | Commit `0359813`; two detached clean source/test/build runs produced source archive `ad101a7...` and identical image digest `sha256:23ebbc...`; both runs passed Ruff, mypy, and 34 tests |
 | Gate 3A hardened runtime/SBOM | Technically completed with upstream vulnerability limitation | Non-root distroless runtime, read-only smoke PASS, all capabilities dropped; CycloneDX SBOM preserved; zero critical and zero Python-package high/critical findings |
-| Backup operational framework | Technically completed, activation externally blocked | Commit `bc8fb30`; encrypted paired capture, strict-host-key replication, freshness/capacity checks, report-only retention, systemd units; 4/4 unit tests PASS |
+| Backup operational framework | Technically completed, activation externally blocked | Commit `bc8fb30`; encrypted paired capture and restore validation, report-only retention, systemd units; 4/4 unit tests PASS |
 | Monitoring and alert framework | Technically completed, production routing externally blocked | Commit `b0e7c87`; pinned Prometheus stack, 29 rules and three runbooks validate; placeholder deployment rejected; isolated firing and resolved delivery PASS |
 
 ## 3. Remaining Blockers
