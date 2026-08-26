@@ -135,4 +135,3 @@ CADDY_KONG_MIDDLEWARE_CANARY=BLOCKED
    middleware production deployment and verify mTLS from the actual containers.
 4. Re-run the operator. Only if it reports zero calls/channels and activation
    safe may a source-controlled narrow Kong canary be reviewed and executed.
-

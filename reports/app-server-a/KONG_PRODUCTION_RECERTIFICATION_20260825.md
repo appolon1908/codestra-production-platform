@@ -142,4 +142,3 @@ CADDY_KONG_MIDDLEWARE_CANARY=BLOCKED
   treated as a trusted unique audit identity.
 - The two exited Kong-related containers are retained as RBAC rehearsal and
   migration provenance; neither participates in live traffic.
-

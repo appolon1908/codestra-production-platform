@@ -99,4 +99,3 @@ After that, deploy the committed Server A consumer update using its established
 root installer, run official safety status, and proceed only if calls and
 channels are both zero. This is a privilege-boundary deployment requirement,
 not authorization to activate production traffic.
-
