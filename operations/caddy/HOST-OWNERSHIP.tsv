@@ -1,19 +1,19 @@
 host	scope	tls	mtls	upstream	protocol	auth_boundary	kong_fronted	log_boundary	owner
-api.breero.com	public	acme	yes	breero backend	https	mTLS	no	provider-callback	Integrations
-api.codestra.agency	public	acme	no	127.0.0.1:18101 / 18102	http	Kong/realtime	yes	public-api	Platform
-api.codestra.co	public	acme	no	127.0.0.1:18101 / 18102	http	Kong/realtime	yes	public-api	Platform
-api.staging.internal.codestra.agency	internal	caddy-pki	no	127.0.0.1:18101	http	Kong	yes	staging	Platform
-auth.codestra.co	public	acme	no	Keycloak	http	Keycloak	no	auth	Identity
-auth.staging.internal.codestra.agency	internal	caddy-pki	no	Keycloak	http	Keycloak	no	staging	Identity
-bridge-staging.codestra.agency	public	acme	no	127.0.0.1:18116	http	service	no	provider-callback	Integrations
+api.breero.com	public	acme	no	127.0.0.1:8000	http	Kong + Breero OIDC/RBAC	yes	provider-callback	Integrations
+api.codestra.agency	public	acme	no	127.0.0.1:18101/18102	http	Kong/realtime	yes	public-api	Platform
+api.codestra.co	public	acme	no	127.0.0.1:18101/18102	http	Kong/realtime	yes	public-api	Platform
+api.staging.internal.codestra.agency	internal	caddy-pki	no	127.0.0.1:18108	http	middleware staging	no	staging	Platform
+auth.codestra.co	public	acme	no	127.0.0.1:18103	http	Keycloak	no	auth	Identity
+auth.staging.internal.codestra.agency	internal	caddy-pki	no	127.0.0.1:18110	http	Keycloak	no	staging	Identity
+bridge-staging.codestra.agency	public	acme	no	127.0.0.1:18108	http	middleware staging	no	provider-callback	Integrations
 crm.codestra.agency	public	acme	no	127.0.0.1:18104/18105	http/websocket	Odoo	no	odoo	Business Apps
-dialer.codestra.agency	public	acme	no	127.0.0.1:18102	http/websocket	gateway	no	websocket	Realtime
-middleware-email-events.internal.codestra.agency	internal	explicit	yes	127.0.0.1:18096	http	mTLS	no	internal-mtls	Middleware
-middleware-staging.internal.codestra.agency	internal	explicit	yes	127.0.0.1:18130	http	mTLS	no	internal-mtls	Middleware
-middleware.internal.codestra.agency	internal	explicit	yes	127.0.0.1:18082	http	mTLS	no	internal-mtls	Middleware
-monitoring.codestra.co	public	acme	no	127.0.0.1:19090	http	basic auth	no	monitoring	Platform
-n8n-staging.codestra.agency	public	acme	no	127.0.0.1:15678	http	application	no	n8n	Automation
-n8n.codestra.agency	public	acme	no	127.0.0.1:5678	http	application	no	n8n	Automation
-n8n.staging.internal.codestra.agency	internal	caddy-pki	no	127.0.0.1:15678	http	application	no	staging	Automation
+dialer.codestra.agency	public	acme	no	127.0.0.1:18102/18113/18114	http/websocket	gateway + auth	no	websocket	Realtime
+middleware-email-events.internal.codestra.agency	internal	explicit	yes	127.0.0.1:18180	http	mTLS	no	internal-mtls	Middleware
+middleware-staging.internal.codestra.agency	internal	explicit	yes	127.0.0.1:18108	http	mTLS	no	internal-mtls	Middleware
+middleware.internal.codestra.agency	internal	explicit	yes	127.0.0.1:18112	http	mTLS	no	internal-mtls	Middleware
+monitoring.codestra.co	public	acme	no	127.0.0.1:18115	http	basic auth	no	monitoring	Platform
+n8n-staging.codestra.agency	public	acme	no	127.0.0.1:18107	http	application	no	n8n	Automation
+n8n.codestra.agency	public	acme	no	127.0.0.1:18106	http	application	no	n8n	Automation
+n8n.staging.internal.codestra.agency	internal	caddy-pki	no	127.0.0.1:18107/18109	http	application	no	staging	Automation
 odoo.staging.internal.codestra.agency	internal	caddy-pki	no	127.0.0.1:18104/18105	http/websocket	Odoo	no	staging	Business Apps
-phone.codestra.agency	public	acme	no	127.0.0.1:18102	http/websocket	gateway	no	websocket	Realtime
+phone.codestra.agency	public	acme	no	127.0.0.1:18102/18113/18114	http/websocket	gateway + auth	no	websocket	Realtime

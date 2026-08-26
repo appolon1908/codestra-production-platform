@@ -13,11 +13,23 @@ walk(cfg)
 expected={line.split('\t')[0] for line in (root/'HOST-OWNERSHIP.tsv').read_text().splitlines()[1:] if line}
 assert hosts==expected,(sorted(hosts-expected),sorted(expected-hosts))
 for pth in root.rglob('*'):
-    if pth.is_file() and pth != pathlib.Path(__file__):
+    if pth.is_file() and pth != pathlib.Path(__file__) and '__pycache__' not in pth.parts:
         data=pth.read_bytes()
         assert b'BEGIN PRIVATE KEY' not in data and b'BEGIN RSA PRIVATE KEY' not in data, pth
 site=(root/'live/sites/current-production.caddy').read_text()
 assert 'reverse_proxy 127.0.0.1:18101' in site and 'reverse_proxy 127.0.0.1:18102' in site
+all_config='\n'.join(p.read_text() for p in (root/'live').rglob('*.caddy'))
+for line in (root/'HOST-OWNERSHIP.tsv').read_text().splitlines()[1:]:
+    fields=line.split('\t')
+    host, upstream=fields[0], fields[4]
+    assert host in all_config, host
+    if upstream.startswith('127.0.0.1:'):
+        for endpoint in upstream.split('/'):
+            if endpoint.startswith('127.0.0.1:'):
+                target=endpoint
+            else:
+                target='127.0.0.1:'+endpoint
+            assert target in all_config, (host,target)
 print('CADDY_HOST_OWNERSHIP=PASS')
 print('CADDY_SECRET_SCAN=PASS')
 print('CADDY_KONG_CONTRACT_TESTS=PASS')
