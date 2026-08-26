@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_followup_policy_list" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.policy.list</field>
+        <field name="model">codestra.crm.call.followup.policy</field>
+        <field name="arch" type="xml">
+            <list string="Call Follow-up Automation Policies">
+                <field name="name"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="pending_sla_minutes"/>
+                <field name="callback_grace_minutes"/>
+                <field name="escalation_user_id"/>
+                <field name="active" widget="boolean_toggle"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_followup_policy_form" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.policy.form</field>
+        <field name="model">codestra.crm.call.followup.policy</field>
+        <field name="arch" type="xml">
+            <form string="Call Follow-up Automation Policy">
+                <header>
+                    <button name="action_run_automation_now" type="object"
+                            string="Run Safe Automation Now" class="btn-primary"
+                            confirm="Queue and process due call-follow-up automation for this company now?"/>
+                    <field name="active" widget="boolean_toggle"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name"/>
+                        <h1><field name="name"/></h1>
+                    </div>
+                    <group>
+                        <group string="Scope">
+                            <field name="company_id" options="{'no_create': true}"/>
+                            <field name="escalation_user_id" options="{'no_create': true}"/>
+                            <field name="activity_type_id" options="{'no_create': true}"/>
+                        </group>
+                        <group string="Durability">
+                            <field name="max_attempts"/>
+                            <field name="retry_base_minutes"/>
+                        </group>
+                    </group>
+                    <group string="Service Levels">
+                        <field name="pending_sla_minutes"/>
+                        <field name="callback_grace_minutes"/>
+                    </group>
+                    <group string="Automations">
+                        <field name="create_pending_activity"/>
+                        <field name="create_missed_callback_activity"/>
+                        <field name="repair_calendar_reminders"/>
+                    </group>
+                    <notebook>
+                        <page string="Implementation Notes">
+                            <field name="notes" widget="html" placeholder="Document the approved escalation and operating policy..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_followup_job_search" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.job.search</field>
+        <field name="model">codestra.crm.call.followup.job</field>
+        <field name="arch" type="xml">
+            <search string="Call Follow-up Automation Jobs">
+                <field name="name"/>
+                <field name="followup_id"/>
+                <field name="policy_id"/>
+                <field name="idempotency_key"/>
+                <filter name="pending" string="Pending" domain="[('state', '=', 'pending')]"/>
+                <filter name="retry" string="Retry" domain="[('state', '=', 'retry')]"/>
+                <filter name="dead" string="Dead Letter" domain="[('state', '=', 'dead')]"/>
+                <filter name="done" string="Done" domain="[('state', '=', 'done')]"/>
+                <group>
+                    <filter name="group_state" string="State" context="{'group_by': 'state'}"/>
+                    <filter name="group_type" string="Job Type" context="{'group_by': 'job_type'}"/>
+                    <filter name="group_company" string="Company" context="{'group_by': 'company_id'}" groups="base.group_multi_company"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_followup_job_list" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.job.list</field>
+        <field name="model">codestra.crm.call.followup.job</field>
+        <field name="arch" type="xml">
+            <list string="Call Follow-up Automation Jobs" create="0" edit="0" delete="0"
+                  decoration-danger="state == 'dead'"
+                  decoration-warning="state == 'retry'"
+                  decoration-success="state == 'done'">
+                <field name="next_attempt_at"/>
+                <field name="job_type"/>
+                <field name="followup_id"/>
+                <field name="policy_id" optional="hide"/>
+                <field name="attempt_count"/>
+                <field name="max_attempts" optional="hide"/>
+                <field name="state" widget="badge"
+                       decoration-danger="state == 'dead'"
+                       decoration-warning="state == 'retry'"
+                       decoration-success="state == 'done'"
+                       decoration-info="state == 'running'"/>
+                <field name="last_error" optional="show"/>
+                <field name="company_id" optional="hide" groups="base.group_multi_company"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_followup_job_form" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.job.form</field>
+        <field name="model">codestra.crm.call.followup.job</field>
+        <field name="arch" type="xml">
+            <form string="Call Follow-up Automation Job" create="0" edit="0" delete="0">
+                <header>
+                    <field name="state" widget="statusbar" statusbar_visible="pending,running,retry,done,dead"/>
+                </header>
+                <sheet>
+                    <div class="oe_title"><h1><field name="name" readonly="1"/></h1></div>
+                    <group>
+                        <group string="Job">
+                            <field name="job_type"/>
+                            <field name="followup_id"/>
+                            <field name="policy_id"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                            <field name="idempotency_key"/>
+                        </group>
+                        <group string="Execution">
+                            <field name="attempt_count"/>
+                            <field name="max_attempts"/>
+                            <field name="next_attempt_at"/>
+                            <field name="locked_at"/>
+                            <field name="completed_at"/>
+                            <field name="activity_id"/>
+                        </group>
+                    </group>
+                    <group string="Safe Error Evidence" invisible="not last_error">
+                        <field name="last_error"/>
+                    </group>
+                    <notebook>
+                        <page string="Payload"><field name="payload_json" widget="json"/></page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_call_followup_form_automation" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.form.automation</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button name="action_open_automation_jobs" type="object"
+                        class="oe_stat_button" icon="fa-cogs"
+                        groups="codestra_crm_call_followup.group_call_followup_manager">
+                    <field name="automation_job_count" widget="statinfo" string="Automation Jobs"/>
+                </button>
+            </xpath>
+            <xpath expr="//header/field[@name='state']" position="before">
+                <button name="action_retry_failed_automation" type="object"
+                        string="Retry Automation" class="btn-secondary"
+                        invisible="automation_exception_count == 0"
+                        groups="codestra_crm_call_followup.group_call_followup_manager"
+                        confirm="Return failed automation jobs for this follow-up to the durable queue?"/>
+            </xpath>
+            <xpath expr="//page[@string='Integration']/group" position="inside">
+                <separator string="Automation"/>
+                <field name="automation_policy_id" readonly="1"/>
+                <field name="automation_pending_sla_at" readonly="1"/>
+                <field name="automation_missed_callback_at" readonly="1"/>
+                <field name="automation_reminders_repaired_at" readonly="1"/>
+                <field name="automation_last_job_at" readonly="1"/>
+                <field name="automation_exception_count" readonly="1"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="action_followup_policy" model="ir.actions.act_window">
+        <field name="name">Call Follow-up Automation</field>
+        <field name="res_model">codestra.crm.call.followup.policy</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <record id="action_call_followup_automation_job" model="ir.actions.act_window">
+        <field name="name">Call Follow-up Automation Jobs</field>
+        <field name="res_model">codestra.crm.call.followup.job</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_followup_job_search"/>
+    </record>
+
+    <menuitem id="menu_followup_policy"
+              name="Call Follow-up Automation"
+              parent="crm.crm_menu_config"
+              action="action_followup_policy"
+              sequence="24"
+              groups="codestra_crm_call_followup.group_call_followup_manager"/>
+
+    <menuitem id="menu_followup_automation_jobs"
+              name="Call Follow-up Automation Jobs"
+              parent="crm.crm_menu_report"
+              action="action_call_followup_automation_job"
+              sequence="25"
+              groups="codestra_crm_call_followup.group_call_followup_manager"/>
+</odoo>
