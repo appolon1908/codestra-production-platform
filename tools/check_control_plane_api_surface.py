@@ -230,6 +230,17 @@ def _handler_methods(name: str, assurance: dict[str, Any]) -> set[str]:
     return {str(value).upper() for value in configured}
 
 
+def delegated_handler_called(
+    name: str,
+    methods: set[str],
+    handler_sources: dict[str, str],
+) -> bool:
+    if name.startswith("do_"):
+        return True
+    call = f"self.{name}("
+    return all(call in handler_sources.get(f"do_{method}", "") for method in methods)
+
+
 def _endpoint_handler(
     row: dict[str, Any],
     assurance_entry: dict[str, Any],
@@ -467,6 +478,13 @@ def validate(
                         f"{handler} does not prove methods {methods}; allowed={sorted(allowed)}",
                     )
                 )
+            if not delegated_handler_called(handler, set(methods), handler_sources):
+                findings.append(Finding(
+                    "critical",
+                    "implementation-delegation-binding",
+                    identity,
+                    f"HTTP dispatchers do not call delegated handler {handler}",
+                ))
             implementation_tokens = [
                 str(value)
                 for value in row["implementation_tokens"]

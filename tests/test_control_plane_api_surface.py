@@ -7,6 +7,7 @@ from pathlib import Path
 from tools.check_control_plane_api_surface import (
     REQUIRED_FIELDS,
     coverage_gaps,
+    delegated_handler_called,
     endpoint_route_predicate_covered,
     implementation_handler_sources,
     load_yaml,
@@ -191,3 +192,15 @@ def test_message_event_branch_has_exact_method_bound_evidence() -> None:
     token = assurance()["endpoints"]["messages-events"]["tokens"][0]
     assert token in handler
     assert token not in handler.replace(token, "event_request=False")
+    behavior = assurance()["endpoints"]["messages-events"]["tokens"][1]
+    assert behavior in handler
+    assert behavior not in handler.replace(behavior, "STORE.get_message(message_id,tenant)")
+
+
+def test_delegated_handlers_must_be_called_by_each_http_dispatcher() -> None:
+    source = (ROOT / "control_plane_service/server.py").read_text(encoding="utf-8")
+    handlers = implementation_handler_sources(source)
+    assert delegated_handler_called("crm_get", {"GET"}, handlers)
+    assert delegated_handler_called("crm_mutation", {"POST", "PATCH"}, handlers)
+    handlers["do_GET"] = handlers["do_GET"].replace("self.crm_get(parsed)", "False")
+    assert not delegated_handler_called("crm_get", {"GET"}, handlers)

@@ -245,6 +245,13 @@ def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
         if missing := _missing(row, GAP_FIELDS):
             findings.append(Finding("critical", "gap-schema", identity, f"missing fields: {', '.join(missing)}"))
             continue
+        if not isinstance(row["required_before_server_push"], bool):
+            findings.append(Finding(
+                "critical",
+                "gap-server-push-flag",
+                identity,
+                "required_before_server_push must be a Boolean",
+            ))
         if row["severity"] not in SEVERITIES:
             findings.append(Finding("critical", "gap-severity", identity, str(row["severity"])))
         if row["status"] not in GAP_STATUSES:
