@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly shared PostgreSQL restic verification and pruning
+
+[Timer]
+OnCalendar=Sun *-*-* 02:45:00 UTC
+Persistent=true
+RandomizedDelaySec=30m
+Unit=codestra-shared-postgres-restic-maintenance.service
+
+[Install]
+WantedBy=timers.target
