@@ -1,0 +1,4 @@
+# Use only in an isolated recovery instance populated from the approved base backup.
+restore_command = '/usr/local/sbin/codestra-shared-postgres-restore-wal.sh %f %p'
+recovery_target_time = 'REQUIRED_APPROVED_TARGET_TIMESTAMP'
+recovery_target_action = 'pause'
