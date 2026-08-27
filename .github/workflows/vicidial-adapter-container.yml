@@ -84,7 +84,7 @@ jobs:
           tar -C "${RUNNER_TEMP}/host-release" -czf evidence/vicidial-host-release.tar.gz "${SOURCE_SHA}"
           sha256sum evidence/vicidial-host-release.tar.gz > evidence/vicidial-host-release.tar.gz.sha256
       - uses: docker/setup-buildx-action@v3
-      - name: Build linux/amd64 locally with provenance and SBOM attestations
+      - name: Build one linux/amd64 image for Docker testing and OCI export
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -98,8 +98,10 @@ jobs:
           build-args: |
             SOURCE_SHA=${{ env.SOURCE_SHA }}
             BUILD_DATE=2026-01-01T00:00:00Z
-          sbom: true
-          provenance: mode=max
+          # The docker exporter cannot emit an attested manifest list. Generate
+          # reviewable SBOM and provenance from this exact loaded image below.
+          sbom: false
+          provenance: false
       - name: Test container contract
         env:
           VICIDIAL_CONTAINER_TEST_IMAGE: codestra/vicidial-restricted-adapter:${{ env.SOURCE_SHA }}

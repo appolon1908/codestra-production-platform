@@ -149,8 +149,10 @@ def test_workflow_builds_without_push_and_generates_evidence():
     text = (ROOT / ".github/workflows/vicidial-adapter-container.yml").read_text()
     assert "platforms: linux/amd64" in text
     assert "push: false" in text
-    assert "sbom: true" in text
-    assert "provenance: mode=max" in text
+    assert "sbom: false" in text
+    assert "provenance: false" in text
+    assert "uses: anchore/sbom-action@" in text
+    assert "vicidial/docker/generate_provenance.py" in text
     assert "upload-artifact" in text
     assert "ref: ${{ env.SOURCE_SHA }}" in text
     assert "persist-credentials: false" in text
