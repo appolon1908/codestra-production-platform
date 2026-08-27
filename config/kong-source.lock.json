@@ -1,6 +1,96 @@
 {
   "commit": "007055bbd05b9cd1c7cc33d3810ec17a3ec9fbba",
   "component": "kong-gateway",
+  "external_route_contracts": {
+    "callback": {
+      "document": {
+        "audience": "codestra-callback-api",
+        "campaign": "TEST_SYN",
+        "consumer": {
+          "custom_id": "codestra-odoo-callback-service",
+          "username": "codestra-odoo-callback-service"
+        },
+        "host": "api.codestra.co",
+        "issuer": "https://auth.codestra.co/realms/codestra",
+        "requiredRole": "service",
+        "routes": [
+          {
+            "maxBodyMb": 1,
+            "methods": [
+              "POST"
+            ],
+            "name": "codestra-callback-control",
+            "paths": [
+              "/api/v1/control/callbacks"
+            ],
+            "ratePerMinute": 60,
+            "requiredScope": "callbacks.write",
+            "strip_path": false
+          },
+          {
+            "maxBodyMb": 1,
+            "methods": [
+              "GET"
+            ],
+            "name": "codestra-callback-read",
+            "paths": [
+              "/api/v1/callbacks"
+            ],
+            "ratePerMinute": 120,
+            "requiredScope": "callbacks.read",
+            "strip_path": false
+          }
+        ],
+        "service": {
+          "connect_timeout": 3000,
+          "host": "codestra-middleware-integration-api-1",
+          "name": "codestra-callback-api",
+          "port": 8095,
+          "protocol": "http",
+          "read_timeout": 10000,
+          "retries": 1,
+          "write_timeout": 10000
+        },
+        "tenant": "COD"
+      },
+      "path": "config/kong-callback-routes.json"
+    },
+    "campaign_automation": {
+      "document": {
+        "audience": "codestra-middleware",
+        "consumer": {
+          "custom_id": "codestra-n8n-campaign-crm-production",
+          "username": "codestra-n8n-campaign-crm-production"
+        },
+        "environment": "production",
+        "host": "api.codestra.co",
+        "issuer": "https://auth.codestra.co/realms/codestra",
+        "routes": [
+          {
+            "max_body_mb": 1,
+            "name": "codestra-campaign-policy-check",
+            "path": "/api/v1/automation/policy-check",
+            "rate_per_minute": 120,
+            "scope": "n8n.policy.check"
+          },
+          {
+            "max_body_mb": 1,
+            "name": "codestra-campaign-result-submit",
+            "path": "/api/v1/integrations/n8n/results",
+            "rate_per_minute": 120,
+            "scope": "n8n.results.submit"
+          }
+        ],
+        "service": {
+          "host": "codestra-middleware-integration-api-1",
+          "name": "codestra-campaign-automation-api",
+          "port": 8095,
+          "protocol": "http"
+        }
+      },
+      "path": "config/kong-campaign-automation-routes.json"
+    }
+  },
   "local_implementation_paths_must_be_absent": [
     "deploy/kong",
     "deploy/kong-production-standby",
@@ -120,11 +210,43 @@
   ],
   "schema": "codestra.platform.external-source-lock.v1",
   "security_contracts": {
-    "authenticated_role_headers": [
-      "platform_admin",
-      "tenant_admin"
-    ],
-    "system_admin_required_scope": "platform.admin"
+    "system_admin": {
+      "authenticated_role_headers": [
+        "platform_admin",
+        "tenant_admin"
+      ],
+      "openid_connect_config": {
+        "audience": [
+          "codestra-control-plane"
+        ],
+        "auth_methods": [
+          "bearer"
+        ],
+        "consumer_claim": [
+          "azp"
+        ],
+        "issuer": "https://auth.codestra.co/realms/codestra/.well-known/openid-configuration",
+        "scopes_required": [
+          "openid"
+        ]
+      },
+      "policy_path": "deploy/kong/scope-policy.lua",
+      "required_scope": "platform.admin",
+      "route": {
+        "hosts": [
+          "api.codestra.co"
+        ],
+        "methods": [
+          "GET"
+        ],
+        "name": "control-plane-system-admin",
+        "paths": [
+          "/v1/admin/system"
+        ],
+        "strip_path": false
+      },
+      "service": "codestra-control-plane"
+    }
   },
   "source_platform_sha": "f3a16308194378a7b1580e04943dc98d64619077",
   "source_route_pr": 130,
