@@ -617,13 +617,24 @@ class MySQLRepository:
                 ("status_name", "selectable", "human_answered", "category"), item.code,
             )
         if legacy_update:
-            self._execute(
+            affected = self._execute(
                 "UPDATE vicidial_campaigns SET campaign_name=%s,active='N',dial_method=%s,"
                 "local_call_time=%s,campaign_recording=%s,scheduled_callbacks=%s,"
-                "campaign_description=%s,hopper_level=0,auto_dial_level='0' WHERE campaign_id=%s",
+                "campaign_description=%s,hopper_level=0,auto_dial_level='0' "
+                "WHERE campaign_id=%s AND campaign_name<=>%s AND active='N' "
+                "AND dial_method<=>%s AND local_call_time<=>%s "
+                "AND campaign_recording<=>%s AND scheduled_callbacks<=>%s "
+                "AND campaign_description<=>%s",
                 (spec.name, spec.dial_method, spec.call_time, spec.recording_policy,
-                 desired_campaign["scheduled_callbacks"], description, spec.actual_id),
+                 desired_campaign["scheduled_callbacks"], description, spec.actual_id,
+                 current.get("campaign_name"), current.get("dial_method"),
+                 current.get("local_call_time"), current.get("campaign_recording"),
+                 current.get("scheduled_callbacks"), current.get("campaign_description")),
             )
+            if affected != 1:
+                raise CollisionError(
+                    f"campaign adoption proof became stale: {spec.actual_id}"
+                )
         elif not adopted:
             self._execute(
                 "INSERT INTO vicidial_campaigns"

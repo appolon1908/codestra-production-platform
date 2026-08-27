@@ -238,6 +238,16 @@ def test_mysql_agent_adoption_uses_myisam_table_lock_through_ownership():
     assert "finally:" in service_source
 
 
+def test_mysql_campaign_adoption_revalidates_proof_in_conditional_mutation():
+    source = inspect.getsource(MySQLRepository.provision_campaign_disabled)
+    assert "campaign_name<=>%s AND active='N'" in source
+    assert "dial_method<=>%s AND local_call_time<=>%s" in source
+    assert "campaign_recording<=>%s AND scheduled_callbacks<=>%s" in source
+    assert "campaign_description<=>%s" in source
+    assert "if affected != 1:" in source
+    assert "campaign adoption proof became stale" in source
+
+
 def test_mysql_agent_disable_does_not_parse_legacy_campaign_membership():
     source = inspect.getsource(MySQLRepository.disable_agent)
     view_source = inspect.getsource(MySQLRepository._agent_disable_view)
