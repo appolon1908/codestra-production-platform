@@ -164,6 +164,12 @@ def test_workflow_builds_without_push_and_generates_evidence():
     assert "path: evidence/evidence-export/" in text
     assert "vicidial-adapter-oci-${{ env.SOURCE_SHA }}" in text
     assert "vicidial-host-release-${{ env.SOURCE_SHA }}" in text
+    assert "if: always()" not in text
+    assert text.count("if: success()") == 3
+    assert "sha256sum evidence/vicidial-adapter.oci.tar" not in text
+    assert "sha256sum evidence/vicidial-host-release.tar.gz" not in text
+    assert "sha256sum vicidial-adapter.oci.tar > vicidial-adapter.oci.tar.sha256" in text
+    assert "sha256sum vicidial-host-release.tar.gz > vicidial-host-release.tar.gz.sha256" in text
     assert text.count("docker compose -f vicidial/docker/compose.") == 2
 
 

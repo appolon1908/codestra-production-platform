@@ -82,7 +82,7 @@ jobs:
             --source-sha "${SOURCE_SHA}" \
             --generated-at 2026-01-01T00:00:00Z
           tar -C "${RUNNER_TEMP}/host-release" -czf evidence/vicidial-host-release.tar.gz "${SOURCE_SHA}"
-          sha256sum evidence/vicidial-host-release.tar.gz > evidence/vicidial-host-release.tar.gz.sha256
+          (cd evidence && sha256sum vicidial-host-release.tar.gz > vicidial-host-release.tar.gz.sha256)
       - uses: docker/setup-buildx-action@v3
       - name: Build one linux/amd64 image for Docker testing and OCI export
         uses: docker/build-push-action@v6
@@ -120,7 +120,7 @@ jobs:
             --metadata evidence/IMAGE_METADATA.json \
             --source-sha "${SOURCE_SHA}" \
             --output evidence/OCI_EXPORT_VERIFICATION.json
-          sha256sum evidence/vicidial-adapter.oci.tar > evidence/vicidial-adapter.oci.tar.sha256
+          (cd evidence && sha256sum vicidial-adapter.oci.tar > vicidial-adapter.oci.tar.sha256)
       - name: Generate and verify source manifest
         run: |
           python vicidial/scripts/generate_release_manifest.py --root . \
@@ -203,13 +203,13 @@ jobs:
             --report-format json --report-path evidence/EVIDENCE_SECRET_SCAN.json \
             "${export_dir}"
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
           name: vicidial-adapter-container-evidence
           path: evidence/evidence-export/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
           name: vicidial-adapter-oci-${{ env.SOURCE_SHA }}
           path: |
@@ -217,7 +217,7 @@ jobs:
             evidence/vicidial-adapter.oci.tar.sha256
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
           name: vicidial-host-release-${{ env.SOURCE_SHA }}
           path: |
