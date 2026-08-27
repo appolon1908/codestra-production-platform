@@ -1,0 +1,15 @@
+{
+  "schema_version": "2.0",
+  "zones": [
+    {"id":"edge-public","members":["caddy"],"public_ingress":[80,443]},
+    {"id":"gateway-core-private","members":["caddy","kong-core-dp"],"public_ingress":[]},
+    {"id":"gateway-beyvra-private","members":["caddy","kong-beyvra-dp"],"public_ingress":[]},
+    {"id":"gateway-telephony-private","members":["middleware","kong-telephony-dp","vicidial-adapter"],"public_ingress":[]},
+    {"id":"middleware-control-private","members":["kong-core-dp","kong-beyvra-dp","kong-telephony-dp","middleware"],"public_ingress":[]},
+    {"id":"automation-core-private","members":["n8n-core","n8n-core-postgresql","n8n-core-redis","middleware"],"public_ingress":[]},
+    {"id":"automation-beyvra-private","members":["n8n-beyvra","n8n-beyvra-postgresql","n8n-beyvra-redis","middleware"],"public_ingress":[]},
+    {"id":"automation-telephony-private","members":["n8n-telephony","n8n-telephony-postgresql","n8n-telephony-redis","middleware"],"public_ingress":[]},
+    {"id":"provider-vlan-private","members":["middleware","klyrow-adapter","telnexa-adapter","kyqra-adapter","vicidial-adapter"],"public_ingress":[]}
+  ],
+  "forbidden_public_services": ["kong-admin","kong-manager","n8n-editor","n8n-api","postgresql","redis","nats","temporal","postal","mautic","jasmin","vicidial-adapter-admin"]
+}

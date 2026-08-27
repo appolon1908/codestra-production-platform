@@ -1,0 +1,19 @@
+{
+  "schema_version": "2.0",
+  "LIVE_WRITE": false,
+  "ODOO_WRITE": false,
+  "ENABLE_EXTERNAL_DELIVERY": false,
+  "LIVE_EMAIL_DELIVERY": false,
+  "LIVE_SMS_DELIVERY": false,
+  "SOCIAL_PUBLISH": false,
+  "CRAWLER_EXECUTION": false,
+  "CRAWLER_WRITEBACK": false,
+  "PROVISIONING_WRITE": false,
+  "PRODUCTION_DIALING": false,
+  "CALLBACK_DISPATCH": false,
+  "TELEPHONY_ADMIN_WRITE": false,
+  "BEYVRA_OPERATIONS_WRITE": false,
+  "BEYVRA_FINANCIAL_EFFECTS": false,
+  "PRIVACY_WRITE": false,
+  "DEAD_LETTER_REPLAY": false
+}

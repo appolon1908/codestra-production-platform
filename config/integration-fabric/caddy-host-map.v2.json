@@ -1,0 +1,17 @@
+{
+  "schema_version": "2.0",
+  "source_only": true,
+  "hosts": [
+    {"host":"api.codestra.co","kong_cell":"core-communications","public":true},
+    {"host":"api.klyrow.com","kong_cell":"core-communications","public":true},
+    {"host":"api.telnexa.co","kong_cell":"core-communications","public":true},
+    {"host":"social.codestra.co","kong_cell":"core-communications","public":true},
+    {"host":"auth.codestra.co","upstream":"keycloak","public":true,"api_gateway_bypass_reason":"OIDC_AUTHORITY"},
+    {"host":"api.beyvra.com","kong_cell":"beyvra-financial","public":true},
+    {"host":"telephony.internal.codestra.invalid","kong_cell":"telephony-private","public":false}
+  ],
+  "public_ports": [80,443],
+  "public_kong_admin": false,
+  "public_n8n": false,
+  "public_databases": false
+}

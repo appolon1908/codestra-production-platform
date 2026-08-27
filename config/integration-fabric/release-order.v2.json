@@ -1,0 +1,22 @@
+{
+  "schema_version": "2.0",
+  "ordered_dependencies": [
+    "N8N governance baseline",
+    "Kong source authority",
+    "Middleware n8n control-plane contract",
+    "Codestra integration-fabric architecture",
+    "Keycloak service identity contract",
+    "Kong cell architecture",
+    "Odoo/Klyrow/Telnexa/Postly/Kyqra/VICIdial/Beyvra/provisioning contracts",
+    "n8n shared runtime templates",
+    "isolated runtime composition",
+    "no-effect staging",
+    "backup and restore",
+    "rollback rehearsal",
+    "inactive production import",
+    "workflow activation approval",
+    "capability-specific canary"
+  ],
+  "feature_branch_deployment": false,
+  "live_server_mutation_from_source_pr": false
+}
