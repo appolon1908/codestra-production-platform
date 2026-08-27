@@ -72,6 +72,12 @@ def main() -> int:
     metadata = json.loads(args.metadata.read_text(encoding="utf-8"))[0]
     expected_config = metadata["Id"]
     with tarfile.open(args.archive, "r") as archive:
+        try:
+            layout = json.loads(member_bytes(archive, "oci-layout"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("OCI layout metadata is invalid JSON") from exc
+        if not isinstance(layout, dict) or layout.get("imageLayoutVersion") != "1.0.0":
+            raise ValueError("OCI image layout version is not 1.0.0")
         index = member_json(archive, "index.json")
         roots = index.get("manifests", [])
         if len(roots) != 1:
@@ -115,6 +121,7 @@ def main() -> int:
         tested_diff_ids = metadata.get("RootFS", {}).get("Layers")
         if tested_diff_ids != diff_ids:
             raise ValueError("OCI rootfs differs from tested Docker image")
+        layout_sha256 = hashlib.sha256(member_bytes(archive, "oci-layout")).hexdigest()
         index_sha256 = hashlib.sha256(member_bytes(archive, "index.json")).hexdigest()
 
     document = {
@@ -125,6 +132,7 @@ def main() -> int:
         "oci_config_digest": manifest["config"]["digest"],
         "oci_layer_digests": [item["digest"] for item in layers],
         "rootfs_diff_ids": diff_ids,
+        "oci_layout_sha256": layout_sha256,
         "index_sha256": index_sha256,
         "archive_sha256": hashlib.sha256(args.archive.read_bytes()).hexdigest(),
         "status": "PASS",

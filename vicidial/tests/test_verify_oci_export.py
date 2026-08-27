@@ -53,6 +53,7 @@ def _direct_oci_archive(path, source_sha: str, architecture: str = "amd64") -> t
         "manifests": [manifest_descriptor],
     })
     with tarfile.open(path, "w") as archive:
+        _write_member(archive, "oci-layout", _json_bytes({"imageLayoutVersion": "1.0.0"}))
         _write_member(archive, "index.json", index)
         _write_member(archive, f"blobs/sha256/{config_digest.split(':')[1]}", config)
         _write_member(archive, f"blobs/sha256/{manifest_digest.split(':')[1]}", manifest)
@@ -87,6 +88,35 @@ def test_verifier_accepts_direct_single_platform_manifest(monkeypatch, tmp_path)
 def test_verifier_rejects_direct_wrong_platform(monkeypatch, tmp_path):
     _run_verifier(monkeypatch, tmp_path, architecture="arm64")
     with pytest.raises(ValueError, match="linux/amd64"):
+        runpy.run_path("vicidial/scripts/verify_oci_export.py", run_name="__main__")
+
+
+@pytest.mark.parametrize("mutation,match", [
+    ("missing", "member missing: oci-layout"),
+    ("version", "layout version is not 1.0.0"),
+    ("malformed", "layout metadata is invalid JSON"),
+])
+def test_verifier_rejects_invalid_oci_layout(monkeypatch, tmp_path, mutation, match):
+    source_sha = "a" * 40
+    archive_path = tmp_path / "image.oci.tar"
+    image_id, diff_id = _direct_oci_archive(archive_path, source_sha)
+    with tarfile.open(archive_path, "r") as source:
+        members = {item.name: source.extractfile(item).read() for item in source if item.isfile()}
+    if mutation == "missing":
+        del members["oci-layout"]
+    elif mutation == "version":
+        members["oci-layout"] = _json_bytes({"imageLayoutVersion": "0.9.0"})
+    else:
+        members["oci-layout"] = b"not json"
+    with tarfile.open(archive_path, "w") as target:
+        for name, payload in members.items():
+            _write_member(target, name, payload)
+    metadata = tmp_path / "metadata.json"
+    metadata.write_text(json.dumps([{"Id": image_id, "RootFS": {"Layers": [diff_id]}}]))
+    output = tmp_path / "verification.json"
+    monkeypatch.setattr(sys, "argv", ["verify_oci_export.py", "--archive", str(archive_path),
+        "--metadata", str(metadata), "--source-sha", source_sha, "--output", str(output)])
+    with pytest.raises(ValueError, match=match):
         runpy.run_path("vicidial/scripts/verify_oci_export.py", run_name="__main__")
 
 
