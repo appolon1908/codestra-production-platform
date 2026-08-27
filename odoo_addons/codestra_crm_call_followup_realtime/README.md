@@ -2,6 +2,12 @@
 
 Optional Odoo 19 extension for coordinating automatic post-call popups across multiple tabs, browser windows, workers, and reconnects.
 
+This addon is authoritative only for popup claims on durable Odoo follow-up
+records. Odoo bus is a notification hint. Telephony event session, replay, and
+delivery authority remains the immutable 6101 WebSocket gateway described in
+`docs/REALTIME_AUTHORITY.md`; this addon does not bypass middleware or replace
+that gateway.
+
 ## Behavior
 
 - one browser tab atomically claims one pending post-call action;
