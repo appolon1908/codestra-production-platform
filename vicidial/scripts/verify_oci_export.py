@@ -35,16 +35,30 @@ def main() -> int:
     expected_config = metadata["Id"]
     with tarfile.open(args.archive, "r") as archive:
         index = member_json(archive, "index.json")
-        outer = blob_json(archive, index["manifests"][0]["digest"])
-        candidates = [item for item in outer.get("manifests", [])
-                      if item.get("platform") == {"architecture": "amd64", "os": "linux"}]
-        if len(candidates) != 1:
-            raise ValueError("OCI archive does not contain one linux/amd64 image")
-        manifest_descriptor = candidates[0]
-        manifest = blob_json(archive, manifest_descriptor["digest"])
+        roots = index.get("manifests", [])
+        if len(roots) != 1:
+            raise ValueError("OCI archive does not contain exactly one root manifest")
+        root_descriptor = roots[0]
+        outer = blob_json(archive, root_descriptor["digest"])
+        if "manifests" in outer:
+            candidates = [
+                item for item in outer["manifests"]
+                if item.get("platform") == {"architecture": "amd64", "os": "linux"}
+            ]
+            if len(candidates) != 1:
+                raise ValueError("OCI archive does not contain one linux/amd64 image")
+            manifest_descriptor = candidates[0]
+            manifest = blob_json(archive, manifest_descriptor["digest"])
+        elif "config" in outer:
+            manifest_descriptor = root_descriptor
+            manifest = outer
+        else:
+            raise ValueError("OCI root is neither an image manifest nor an image index")
         if manifest["config"]["digest"] != expected_config:
             raise ValueError("OCI config digest differs from tested Docker image ID")
         config = blob_json(archive, manifest["config"]["digest"])
+        if (config.get("architecture"), config.get("os")) != ("amd64", "linux"):
+            raise ValueError("OCI archive does not contain one linux/amd64 image")
         labels = config.get("config", {}).get("Labels", {})
         if labels.get("org.opencontainers.image.revision") != args.source_sha:
             raise ValueError("OCI source revision differs from exact head")
