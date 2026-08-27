@@ -5,6 +5,8 @@ from datetime import timedelta
 from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 
+from ..models.call_followup import POST_CALL_BUS_CHANNEL
+
 
 class CodestraCrmPostCallWizardHardening(models.TransientModel):
     _inherit = "codestra.crm.post.call.wizard"
@@ -19,7 +21,6 @@ class CodestraCrmPostCallWizardHardening(models.TransientModel):
             followup_id
         ).exists()
         if followup:
-            # Preserve an explicit agent choice to disable immediate email.
             values["send_post_call_email"] = followup.send_post_call_email
         return values
 
@@ -48,11 +49,17 @@ class CodestraCrmPostCallWizardHardening(models.TransientModel):
             )
         if self.schedule_kind != "none":
             if not self.callback_at:
-                raise ValidationError(_("Choose a callback or appointment date and time."))
+                raise ValidationError(
+                    _("Choose a callback or appointment date and time.")
+                )
             if self.callback_at <= fields.Datetime.now():
-                raise ValidationError(_("The callback or appointment must be in the future."))
+                raise ValidationError(
+                    _("The callback or appointment must be in the future.")
+                )
             if not 5 <= self.duration_minutes <= 480:
-                raise ValidationError(_("The duration must be between 5 and 480 minutes."))
+                raise ValidationError(
+                    _("The duration must be between 5 and 480 minutes.")
+                )
         if self.email_to:
             self._validate_email_list(self.email_to, _("Recipient"), required=False)
         if self.email_cc:
@@ -64,7 +71,9 @@ class CodestraCrmPostCallWizardHardening(models.TransientModel):
             "disposition": self.disposition,
             "notes": self.notes,
             "schedule_kind": self.schedule_kind,
-            "callback_at": self.callback_at if self.schedule_kind != "none" else False,
+            "callback_at": (
+                self.callback_at if self.schedule_kind != "none" else False
+            ),
             "duration_minutes": self.duration_minutes,
             "reminder_email_enabled": self.reminder_email_enabled,
             "send_post_call_email": self.send_post_call_email,
@@ -96,7 +105,10 @@ class CodestraCrmPostCallWizardHardening(models.TransientModel):
         followup._write_from_workflow(self._draft_values())
         return self._success_notification(
             _("Draft saved"),
-            _("Your post-call notes and preferences were saved without completing the call."),
+            _(
+                "Your post-call notes and preferences were saved without "
+                "completing the call."
+            ),
         )
 
     def action_snooze_10_minutes(self):
@@ -107,26 +119,17 @@ class CodestraCrmPostCallWizardHardening(models.TransientModel):
         followup._write_from_workflow(
             self._draft_values(snoozed_until=snoozed_until)
         )
+        self.env["bus.bus"].sudo()._sendone(
+            followup.agent_id.partner_id,
+            POST_CALL_BUS_CHANNEL,
+            {
+                "status": "snoozed",
+                "followup_id": followup.id,
+                "event_id": followup.event_id,
+                "snoozed_until": fields.Datetime.to_string(snoozed_until),
+            },
+        )
         return self._success_notification(
             _("Follow-up snoozed"),
             _("The post-call form will become available again in 10 minutes."),
         )
-
-    def _calendar_event_values(self):
-        values = super()._calendar_event_values()
-        values.update(
-            {
-                "active": True,
-                "codestra_schedule_kind": self.schedule_kind,
-            }
-        )
-        return values
-
-    def action_complete(self):
-        result = super().action_complete()
-        completed = self.mapped("followup_id").filtered(
-            lambda followup: followup.state == "completed"
-        )
-        if completed:
-            completed._write_from_workflow({"snoozed_until": False})
-        return result

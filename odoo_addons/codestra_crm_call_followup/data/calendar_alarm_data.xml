@@ -7,13 +7,5 @@
             <field name="duration">30</field>
             <field name="interval">minutes</field>
         </record>
-
-        <record id="calendar_alarm_email_15_minutes" model="calendar.alarm">
-            <field name="name">Email client and agent — 15 minutes</field>
-            <field name="alarm_type">email</field>
-            <field name="duration">15</field>
-            <field name="interval">minutes</field>
-            <field name="mail_template_id" ref="mail_template_callback_reminder_15"/>
-        </record>
     </data>
 </odoo>

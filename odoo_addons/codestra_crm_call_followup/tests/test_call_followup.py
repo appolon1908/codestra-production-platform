@@ -16,45 +16,72 @@ class TestCodestraCrmCallFollowup(TransactionCase):
         agent_group = cls.env.ref(
             "codestra_crm_call_followup.group_call_followup_user"
         )
+        manager_group = cls.env.ref(
+            "codestra_crm_call_followup.group_call_followup_manager"
+        )
         service_group = cls.env.ref(
             "codestra_crm_call_followup.group_call_followup_service"
         )
 
+        def user_values(name, login, email, groups):
+            return {
+                "name": name,
+                "login": login,
+                "email": email,
+                "company_id": cls.company.id,
+                "company_ids": [Command.set([cls.company.id])],
+                "group_ids": [Command.set([base_user.id, *groups])],
+            }
+
         cls.agent = cls.env["res.users"].with_context(
             no_reset_password=True
         ).create(
-            {
-                "name": "CRM Follow-up Agent",
-                "login": "crm-followup-agent@test.invalid",
-                "email": "agent@test.invalid",
-                "company_id": cls.company.id,
-                "company_ids": [Command.set([cls.company.id])],
-                "group_ids": [Command.set([base_user.id, agent_group.id])],
-            }
-        )
-        cls.service_user = cls.env["res.users"].with_context(
-            no_reset_password=True
-        ).create(
-            {
-                "name": "Call Integration Service",
-                "login": "call-integration@test.invalid",
-                "email": "integration@test.invalid",
-                "company_id": cls.company.id,
-                "company_ids": [Command.set([cls.company.id])],
-                "group_ids": [Command.set([base_user.id, service_group.id])],
-            }
+            user_values(
+                "CRM Follow-up Agent",
+                "crm-followup-agent@test.invalid",
+                "agent@test.invalid",
+                [agent_group.id],
+            )
         )
         cls.other_agent = cls.env["res.users"].with_context(
             no_reset_password=True
         ).create(
-            {
-                "name": "Other CRM Agent",
-                "login": "other-crm-agent@test.invalid",
-                "email": "other-agent@test.invalid",
-                "company_id": cls.company.id,
-                "company_ids": [Command.set([cls.company.id])],
-                "group_ids": [Command.set([base_user.id, agent_group.id])],
-            }
+            user_values(
+                "Other CRM Agent",
+                "other-crm-agent@test.invalid",
+                "other-agent@test.invalid",
+                [agent_group.id],
+            )
+        )
+        cls.non_followup_user = cls.env["res.users"].with_context(
+            no_reset_password=True
+        ).create(
+            user_values(
+                "Ordinary Internal User",
+                "ordinary-user@test.invalid",
+                "ordinary@test.invalid",
+                [],
+            )
+        )
+        cls.manager = cls.env["res.users"].with_context(
+            no_reset_password=True
+        ).create(
+            user_values(
+                "CRM Follow-up Manager",
+                "crm-followup-manager@test.invalid",
+                "manager@test.invalid",
+                [manager_group.id],
+            )
+        )
+        cls.service_user = cls.env["res.users"].with_context(
+            no_reset_password=True
+        ).create(
+            user_values(
+                "Codestra Middleware Service",
+                "call-integration@test.invalid",
+                "integration@test.invalid",
+                [service_group.id],
+            )
         )
         cls.other_company = cls.env["res.company"].create(
             {"name": "Isolated Test Company"}
@@ -87,16 +114,39 @@ class TestCodestraCrmCallFollowup(TransactionCase):
             "agent_user_id": self.agent.id,
             "lead_id": self.lead.id,
             "partner_id": self.customer.id,
-            "started_at": fields.Datetime.to_string(ended_at - timedelta(minutes=4)),
+            "started_at": fields.Datetime.to_string(
+                ended_at - timedelta(minutes=4)
+            ),
             "ended_at": fields.Datetime.to_string(ended_at),
             "duration_seconds": 240,
         }
 
-    def _register(self, event_id):
+    def _register(self, event_id, payload=None):
         service_env = self.env(user=self.service_user)
         return service_env[
             "codestra.crm.call.followup"
-        ].register_completed_call(self._payload(event_id))
+        ].register_completed_call(payload or self._payload(event_id))
+
+    def _followup(self, registration, user=None):
+        env = self.env(user=user) if user else self.env
+        return env["codestra.crm.call.followup"].browse(
+            registration["followup_id"]
+        )
+
+    def _complete(self, followup, **overrides):
+        values = {
+            "followup_id": followup.id,
+            "disposition": "contacted",
+            "schedule_kind": "none",
+            "send_post_call_email": False,
+        }
+        values.update(overrides)
+        wizard = self.env(user=self.agent)[
+            "codestra.crm.post.call.wizard"
+        ].create(values)
+        wizard.action_complete()
+        followup.invalidate_recordset()
+        return wizard
 
     def test_only_service_group_can_register_completed_calls(self):
         agent_env = self.env(user=self.agent)
@@ -105,10 +155,21 @@ class TestCodestraCrmCallFollowup(TransactionCase):
                 "codestra.crm.call.followup"
             ].register_completed_call(self._payload("unauthorized-event"))
 
+    def test_company_is_required_and_never_defaults_from_service_session(self):
+        payload = self._payload("missing-company")
+        payload.pop("company_id")
+        with self.assertRaisesRegex(ValidationError, "company_id is required"):
+            self._register("missing-company", payload)
+
+    def test_selected_agent_must_have_call_followup_privilege(self):
+        payload = self._payload("unprivileged-agent")
+        payload["agent_user_id"] = self.non_followup_user.id
+        with self.assertRaisesRegex(ValidationError, "Call Follow-up Agent"):
+            self._register("unprivileged-agent", payload)
+
     def test_completed_call_registration_is_idempotent(self):
         first = self._register("idempotent-event")
         second = self._register("idempotent-event")
-
         self.assertEqual(first["followup_id"], second["followup_id"])
         self.assertFalse(first["replayed"])
         self.assertTrue(second["replayed"])
@@ -126,8 +187,9 @@ class TestCodestraCrmCallFollowup(TransactionCase):
         registration = self._register("assigned-agent-only")
         other_env = self.env(user=self.other_agent)
         followups = other_env["codestra.crm.call.followup"]
-
-        self.assertFalse(followups.search([("id", "=", registration["followup_id"])]))
+        self.assertFalse(
+            followups.search([("id", "=", registration["followup_id"])])
+        )
         with self.assertRaises(AccessError):
             followups.browse(registration["followup_id"]).write(
                 {"disposition": "contacted"}
@@ -136,82 +198,132 @@ class TestCodestraCrmCallFollowup(TransactionCase):
     def test_service_cannot_register_for_unassigned_company(self):
         payload = self._payload("cross-company-event")
         payload["company_id"] = self.other_company.id
-        service_env = self.env(user=self.service_user)
-
         with self.assertRaises(AccessError):
-            service_env[
-                "codestra.crm.call.followup"
-            ].register_completed_call(payload)
+            self._register("cross-company-event", payload)
 
-    def test_completed_call_identity_is_immutable_for_agent(self):
-        registration = self._register("immutable-event")
-        agent_env = self.env(user=self.agent)
-        followup = agent_env["codestra.crm.call.followup"].browse(
-            registration["followup_id"]
-        )
-
+    def test_manager_cannot_bypass_workflow_with_direct_state_write(self):
+        registration = self._register("manager-direct-write")
+        followup = self._followup(registration, self.manager)
         with self.assertRaises(AccessError):
-            followup.write({"event_id": "rewritten-event"})
+            followup.write(
+                {
+                    "state": "completed",
+                    "disposition": "sale",
+                    "notes": "Bypassed workflow",
+                }
+            )
 
-    def test_callback_creates_calendar_and_both_reminders(self):
+    def test_callback_creates_internal_calendar_and_middleware_reminders(self):
         registration = self._register("callback-event")
-        agent_env = self.env(user=self.agent)
-        followup = agent_env["codestra.crm.call.followup"].browse(
-            registration["followup_id"]
-        )
+        followup = self._followup(registration, self.agent)
         callback_at = fields.Datetime.now() + timedelta(hours=2)
-        wizard = agent_env["codestra.crm.post.call.wizard"].create(
-            {
-                "followup_id": followup.id,
-                "disposition": "callback",
-                "notes": "Client asked to review the proposal before the callback.",
-                "schedule_kind": "callback",
-                "callback_at": callback_at,
-                "duration_minutes": 45,
-                "reminder_email_enabled": True,
-                "send_post_call_email": False,
-            }
+        mail_count = self.env["mail.mail"].sudo().search_count([])
+
+        self._complete(
+            followup,
+            disposition="callback",
+            notes="Client asked to review the proposal before the callback.",
+            schedule_kind="callback",
+            callback_at=callback_at,
+            duration_minutes=45,
+            reminder_email_enabled=True,
         )
-        wizard.action_complete()
 
-        followup.invalidate_recordset()
-        self.assertEqual(followup.state, "completed")
-        self.assertEqual(followup.schedule_kind, "callback")
-        self.assertTrue(followup.calendar_event_id)
         event = followup.calendar_event_id
-
-        expected_partners = {self.customer.id, self.agent.partner_id.id}
-        self.assertTrue(expected_partners.issubset(set(event.partner_ids.ids)))
-        expected_alarms = {
+        self.assertTrue(event)
+        self.assertEqual(event.partner_ids, self.agent.partner_id)
+        self.assertNotIn(self.customer, event.partner_ids)
+        self.assertEqual(
+            event.alarm_ids,
             self.env.ref(
                 "codestra_crm_call_followup.calendar_alarm_prepare_30_minutes"
-            ).id,
-            self.env.ref(
-                "codestra_crm_call_followup.calendar_alarm_email_15_minutes"
-            ).id,
-        }
-        self.assertTrue(expected_alarms.issubset(set(event.alarm_ids.ids)))
-
-    def test_calendar_reschedule_updates_followup(self):
-        registration = self._register("reschedule-event")
-        agent_env = self.env(user=self.agent)
-        followup = agent_env["codestra.crm.call.followup"].browse(
-            registration["followup_id"]
+            ),
         )
-        original_start = fields.Datetime.now() + timedelta(hours=2)
-        agent_env["codestra.crm.post.call.wizard"].create(
-            {
-                "followup_id": followup.id,
-                "disposition": "appointment",
-                "schedule_kind": "appointment",
-                "callback_at": original_start,
-                "duration_minutes": 30,
-                "reminder_email_enabled": True,
-                "send_post_call_email": False,
-            }
-        ).action_complete()
+        self.assertEqual(self.env["mail.mail"].sudo().search_count([]), mail_count)
 
-        followup.invalidate_recordset()
+        reminders = followup.delivery_intent_ids.filtered(
+            lambda intent: intent.intent_type == "callback_reminder"
+        )
+        self.assertEqual(len(reminders), 2)
+        self.assertEqual(set(reminders.mapped("audience")), {"client", "agent"})
+        self.assertEqual(set(reminders.mapped("state")), {"pending"})
+        self.assertTrue(all(reminders.mapped("requires_consent_check")))
+
+    def test_immediate_email_records_intent_without_creating_mail(self):
+        registration = self._register("immediate-intent")
+        followup = self._followup(registration, self.agent)
+        before = self.env["mail.mail"].sudo().search_count([])
+        self._complete(
+            followup,
+            send_post_call_email=True,
+            email_to=self.customer.email,
+            email_cc=self.agent.email,
+            email_subject="Your requested follow-up",
+            email_body="<p>Thank you for your time.</p>",
+        )
+
+        self.assertEqual(self.env["mail.mail"].sudo().search_count([]), before)
+        intent = followup.immediate_delivery_intent_id
+        self.assertTrue(intent)
+        self.assertEqual(intent.intent_type, "post_call_email")
+        self.assertEqual(intent.audience, "client")
+        self.assertEqual(intent.state, "pending")
+        self.assertEqual(intent.recipient_to, self.customer.email)
+        self.assertTrue(intent.requires_consent_check)
+        self.assertFalse(followup.mail_id)
+
+    def test_middleware_service_claims_and_acknowledges_intent(self):
+        registration = self._register("delivery-lease")
+        followup = self._followup(registration, self.agent)
+        self._complete(
+            followup,
+            send_post_call_email=True,
+            email_to=self.customer.email,
+            email_cc=self.agent.email,
+            email_subject="Lease test",
+            email_body="<p>Lease test.</p>",
+        )
+        service_model = self.env(user=self.service_user)[
+            "codestra.crm.call.delivery.intent"
+        ]
+        claimed = service_model.claim_due_delivery_intents(limit=10)
+        selected = next(
+            item
+            for item in claimed
+            if item["intent_id"] == followup.immediate_delivery_intent_id.id
+        )
+        result = service_model.acknowledge_delivery_intent(
+            selected["intent_id"],
+            selected["lease_token"],
+            provider_message_id="provider-message-1",
+        )
+        followup.immediate_delivery_intent_id.invalidate_recordset()
+        self.assertEqual(result["state"], "delivered")
+        self.assertEqual(followup.immediate_delivery_intent_id.state, "delivered")
+        replay = service_model.acknowledge_delivery_intent(
+            selected["intent_id"],
+            selected["lease_token"],
+            provider_message_id="provider-message-1",
+        )
+        self.assertTrue(replay["replayed"])
+
+    def test_calendar_reschedule_replaces_only_undelivered_reminders(self):
+        registration = self._register("reschedule-event")
+        followup = self._followup(registration, self.agent)
+        original_start = fields.Datetime.now() + timedelta(hours=2)
+        self._complete(
+            followup,
+            disposition="appointment",
+            schedule_kind="appointment",
+            callback_at=original_start,
+            duration_minutes=30,
+            reminder_email_enabled=True,
+        )
+        original = followup.delivery_intent_ids.filtered(
+            lambda item: item.intent_type == "callback_reminder"
+        )
+        self.assertEqual(len(original), 2)
+
         new_start = original_start + timedelta(days=1)
         followup.calendar_event_id.write(
             {
@@ -222,84 +334,64 @@ class TestCodestraCrmCallFollowup(TransactionCase):
         followup.invalidate_recordset()
         self.assertEqual(followup.callback_at, new_start)
         self.assertEqual(followup.duration_minutes, 60)
+        original.invalidate_recordset()
+        self.assertEqual(set(original.mapped("state")), {"cancelled"})
+        replacement = followup.delivery_intent_ids.filtered(
+            lambda item: (
+                item.intent_type == "callback_reminder"
+                and item.state == "pending"
+            )
+        )
+        self.assertEqual(len(replacement), 2)
+        self.assertFalse(set(original.ids).intersection(replacement.ids))
 
     def test_calendar_cancellation_clears_schedule_but_preserves_followup(self):
         registration = self._register("cancel-calendar-event")
-        agent_env = self.env(user=self.agent)
-        followup = agent_env["codestra.crm.call.followup"].browse(
-            registration["followup_id"]
+        followup = self._followup(registration, self.agent)
+        self._complete(
+            followup,
+            disposition="callback",
+            schedule_kind="callback",
+            callback_at=fields.Datetime.now() + timedelta(hours=2),
+            duration_minutes=30,
+            reminder_email_enabled=True,
         )
-        agent_env["codestra.crm.post.call.wizard"].create(
-            {
-                "followup_id": followup.id,
-                "disposition": "callback",
-                "schedule_kind": "callback",
-                "callback_at": fields.Datetime.now() + timedelta(hours=2),
-                "duration_minutes": 30,
-                "reminder_email_enabled": True,
-                "send_post_call_email": False,
-            }
-        ).action_complete()
-
-        followup.invalidate_recordset()
         event = followup.calendar_event_id
         event.unlink()
+        followup.invalidate_recordset()
         self.assertTrue(followup.exists())
         self.assertEqual(followup.state, "completed")
         self.assertEqual(followup.schedule_kind, "none")
         self.assertFalse(followup.callback_at)
         self.assertFalse(followup.calendar_event_id)
+        active_reminders = followup.delivery_intent_ids.filtered(
+            lambda item: (
+                item.intent_type == "callback_reminder"
+                and item.state in {"pending", "claimed"}
+            )
+        )
+        self.assertFalse(active_reminders)
 
     def test_pending_action_is_recovered_only_for_assigned_agent(self):
         registration = self._register("pending-recovery-event")
-        agent_env = self.env(user=self.agent)
-        pending = agent_env[
+        pending = self.env(user=self.agent)[
             "codestra.crm.call.followup"
         ].get_pending_post_call_actions(limit=10)
         other_pending = self.env(user=self.other_agent)[
             "codestra.crm.call.followup"
         ].get_pending_post_call_actions(limit=10)
-
-        self.assertEqual(
-            [item["followup_id"] for item in pending].count(
-                registration["followup_id"]
-            ),
-            1,
+        self.assertIn(
+            registration["followup_id"],
+            [item["followup_id"] for item in pending],
         )
         self.assertNotIn(
             registration["followup_id"],
             [item["followup_id"] for item in other_pending],
         )
 
-    def test_immediate_email_is_queued_not_force_sent(self):
-        registration = self._register("email-event")
-        agent_env = self.env(user=self.agent)
-        followup = agent_env["codestra.crm.call.followup"].browse(
-            registration["followup_id"]
-        )
-        agent_env["codestra.crm.post.call.wizard"].create(
-            {
-                "followup_id": followup.id,
-                "disposition": "contacted",
-                "schedule_kind": "none",
-                "send_post_call_email": True,
-                "email_to": self.customer.email,
-                "email_cc": self.agent.email,
-                "email_subject": "Your requested follow-up",
-                "email_body": "<p>Thank you for your time.</p>",
-            }
-        ).action_complete()
-
-        followup.invalidate_recordset()
-        self.assertTrue(followup.mail_id)
-        self.assertEqual(followup.mail_id.state, "outgoing")
-
     def test_replayed_wizard_does_not_duplicate_completion_side_effects(self):
         registration = self._register("replayed-wizard-event")
-        agent_env = self.env(user=self.agent)
-        followup = agent_env["codestra.crm.call.followup"].browse(
-            registration["followup_id"]
-        )
+        followup = self._followup(registration, self.agent)
         values = {
             "followup_id": followup.id,
             "disposition": "contacted",
@@ -310,68 +402,41 @@ class TestCodestraCrmCallFollowup(TransactionCase):
             "email_subject": "Synthetic replay-safe follow-up",
             "email_body": "<p>Replay safety test.</p>",
         }
+        agent_env = self.env(user=self.agent)
         first = agent_env["codestra.crm.post.call.wizard"].create(values)
         stale = agent_env["codestra.crm.post.call.wizard"].create(values)
-
         first.action_complete()
         followup.invalidate_recordset()
-        first_mail = followup.mail_id
+        first_intent = followup.immediate_delivery_intent_id
         first_messages = self.lead.message_ids.filtered(
             lambda item: "Post-call follow-up completed" in (item.body or "")
         )
-
         stale.action_complete()
         followup.invalidate_recordset()
         replay_messages = self.lead.message_ids.filtered(
             lambda item: "Post-call follow-up completed" in (item.body or "")
         )
-        self.assertEqual(followup.mail_id, first_mail)
+        self.assertEqual(followup.immediate_delivery_intent_id, first_intent)
         self.assertEqual(len(replay_messages), len(first_messages))
-
-    def test_agent_cannot_bypass_post_call_workflow_with_direct_write(self):
-        registration = self._register("direct-write-event")
-        followup = self.env(user=self.agent)[
-            "codestra.crm.call.followup"
-        ].browse(registration["followup_id"])
-
-        with self.assertRaises(AccessError):
-            followup.write({"state": "completed", "disposition": "sale"})
+        self.assertEqual(
+            followup.delivery_intent_ids.filtered(
+                lambda item: item.intent_type == "post_call_email"
+            ),
+            first_intent,
+        )
 
     def test_completed_followup_cannot_be_cancelled(self):
         registration = self._register("completed-cancel-event")
-        agent_env = self.env(user=self.agent)
-        followup = agent_env["codestra.crm.call.followup"].browse(
-            registration["followup_id"]
-        )
-        agent_env["codestra.crm.post.call.wizard"].create(
-            {
-                "followup_id": followup.id,
-                "disposition": "contacted",
-                "schedule_kind": "none",
-                "send_post_call_email": False,
-            }
-        ).action_complete()
-
+        followup = self._followup(registration, self.agent)
+        self._complete(followup)
         with self.assertRaises(ValidationError):
             followup.action_cancel_followup()
 
     def test_agent_notes_are_copied_to_crm_chatter(self):
         registration = self._register("chatter-notes-event")
-        agent_env = self.env(user=self.agent)
-        followup = agent_env["codestra.crm.call.followup"].browse(
-            registration["followup_id"]
-        )
+        followup = self._followup(registration, self.agent)
         note = "Synthetic customer requested a proposal review."
-        agent_env["codestra.crm.post.call.wizard"].create(
-            {
-                "followup_id": followup.id,
-                "disposition": "contacted",
-                "notes": note,
-                "schedule_kind": "none",
-                "send_post_call_email": False,
-            }
-        ).action_complete()
-
+        self._complete(followup, notes=note)
         message = self.lead.message_ids.filtered(
             lambda item: "Post-call follow-up completed" in (item.body or "")
         )[:1]

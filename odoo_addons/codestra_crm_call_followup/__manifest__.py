@@ -1,12 +1,12 @@
 {
     "name": "Codestra CRM Call Follow-up",
-    "version": "19.0.1.1.0",
-    "summary": "Modern post-call CRM workflow, callback calendar, and appointment reminders",
+    "version": "19.0.1.2.0",
+    "summary": "Replay-safe post-call workflow with Middleware-owned delivery intents",
     "description": (
         "Provides versioned and idempotent post-call APIs, a modern agent popup, "
         "structured outcomes and notes, draft and snooze recovery, callback and "
-        "appointment scheduling, a 30-minute preparation reminder, and queued "
-        "15-minute email reminders for the client and assigned agent."
+        "appointment scheduling, a 30-minute internal preparation reminder, and "
+        "durable email delivery intents consumed exclusively by Codestra Middleware."
     ),
     "author": "Codestra",
     "website": "https://codestra.co",
@@ -21,6 +21,7 @@
         "data/calendar_alarm_data.xml",
         "views/post_call_wizard_views.xml",
         "views/call_followup_views.xml",
+        "views/delivery_intent_views.xml",
         "views/crm_lead_views.xml",
     ],
     "assets": {

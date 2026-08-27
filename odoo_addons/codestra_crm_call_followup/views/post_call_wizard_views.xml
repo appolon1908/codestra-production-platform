@@ -6,11 +6,12 @@
         <field name="arch" type="xml">
             <form string="Complete Post-call Follow-up" class="o_codestra_post_call_dialog">
                 <field name="followup_id" invisible="1"/>
+                <field name="delivery_intent_id" invisible="1"/>
                 <div class="o_codestra_call_header">
                     <div>
                         <div class="o_codestra_eyebrow">CALL COMPLETED</div>
                         <h2 class="mb-1">Finish the customer follow-up</h2>
-                        <p class="text-muted mb-0">Capture the outcome, schedule the next step, and review the client email.</p>
+                        <p class="text-muted mb-0">Capture the outcome, schedule the next step, and review the client message.</p>
                     </div>
                     <div class="o_codestra_call_meta">
                         <field name="call_ended_at" readonly="1"/>
@@ -49,7 +50,7 @@
                             <field name="reminder_email_enabled"/>
                         </group>
                         <div class="alert alert-info" role="alert" invisible="schedule_kind == 'none'">
-                            Odoo will show the agent a preparation popup 30 minutes before the event. When email reminders are enabled, both the linked client and assigned agent receive a reminder 15 minutes before the event.
+                            Odoo shows the assigned agent an internal preparation notification 30 minutes before the event. Email reminders are recorded as durable commands for Codestra Middleware, which performs consent checks, suppression, provider delivery, retry, and reconciliation.
                         </div>
                     </page>
 
@@ -57,7 +58,7 @@
                         <div class="o_codestra_email_toolbar">
                             <div>
                                 <h3>Follow-up email</h3>
-                                <p class="text-muted mb-0">Review and edit the professional message before it is queued.</p>
+                                <p class="text-muted mb-0">Review the message that will be handed to Codestra Middleware for controlled delivery.</p>
                             </div>
                             <field name="send_post_call_email" widget="boolean_toggle"/>
                         </div>
@@ -68,7 +69,7 @@
                         </group>
                         <field name="email_body" widget="html" invisible="not send_post_call_email" required="send_post_call_email"/>
                         <div class="alert alert-secondary" role="alert" invisible="send_post_call_email">
-                            No immediate email will be sent. Scheduled reminder rules remain controlled by the Callback / Appointment tab.
+                            No immediate email command will be created. Scheduled reminder preferences remain controlled by the Callback / Appointment tab.
                         </div>
                     </page>
                 </notebook>

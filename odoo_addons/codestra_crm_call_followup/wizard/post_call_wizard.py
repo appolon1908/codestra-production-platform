@@ -9,7 +9,11 @@ from odoo.exceptions import ValidationError
 from odoo.fields import Command
 from odoo.tools import email_split
 
-from ..models.call_followup import DISPOSITION_SELECTION, SCHEDULE_KIND_SELECTION
+from ..models.call_followup import (
+    DISPOSITION_SELECTION,
+    POST_CALL_BUS_CHANNEL,
+    SCHEDULE_KIND_SELECTION,
+)
 
 
 class CodestraCrmPostCallWizard(models.TransientModel):
@@ -44,16 +48,28 @@ class CodestraCrmPostCallWizard(models.TransientModel):
     reminder_email_enabled = fields.Boolean(
         string="Email client and agent 15 minutes before",
         default=True,
+        help=(
+            "Creates durable email intents for Codestra Middleware. Odoo does not "
+            "send the reminder directly."
+        ),
     )
 
     send_post_call_email = fields.Boolean(
         string="Send follow-up email now",
         default=True,
+        help=(
+            "Creates a durable email intent for Codestra Middleware. Odoo does not "
+            "send the message directly."
+        ),
     )
     email_to = fields.Char(string="To")
     email_cc = fields.Char(string="CC")
     email_subject = fields.Char(string="Subject")
     email_body = fields.Html(string="Email", sanitize=True)
+    delivery_intent_id = fields.Many2one(
+        "codestra.crm.call.delivery.intent",
+        readonly=True,
+    )
 
     @api.model
     def default_get(self, field_names):
@@ -75,7 +91,7 @@ class CodestraCrmPostCallWizard(models.TransientModel):
                 "callback_at": followup.callback_at,
                 "duration_minutes": followup.duration_minutes or 30,
                 "reminder_email_enabled": followup.reminder_email_enabled,
-                "send_post_call_email": bool(followup.email_to),
+                "send_post_call_email": followup.send_post_call_email,
                 "email_to": followup.email_to,
                 "email_cc": followup.email_cc or followup.agent_id.email,
                 "email_subject": followup.email_subject,
@@ -174,7 +190,10 @@ class CodestraCrmPostCallWizard(models.TransientModel):
         if self.reminder_email_enabled:
             if not self.followup_id.partner_id:
                 raise ValidationError(
-                    _("Link the CRM lead to a customer/contact before enabling client reminders.")
+                    _(
+                        "Link the CRM lead to a customer/contact before enabling "
+                        "client reminders."
+                    )
                 )
             self._validate_email_list(
                 self.followup_id.partner_id.email,
@@ -188,18 +207,13 @@ class CodestraCrmPostCallWizard(models.TransientModel):
             )
 
     def _calendar_alarm_ids(self):
-        alarm_ids = [
+        # Odoo owns only the internal 30-minute preparation notification.
+        # Middleware owns every external reminder email.
+        return [
             self.env.ref(
                 "codestra_crm_call_followup.calendar_alarm_prepare_30_minutes"
             ).id
         ]
-        if self.reminder_email_enabled:
-            alarm_ids.append(
-                self.env.ref(
-                    "codestra_crm_call_followup.calendar_alarm_email_15_minutes"
-                ).id
-            )
-        return alarm_ids
 
     def _calendar_event_values(self):
         followup = self.followup_id
@@ -214,7 +228,6 @@ class CodestraCrmPostCallWizard(models.TransientModel):
             if self.schedule_kind == "callback"
             else _("Appointment with %s") % client_name
         )
-        partner_ids = (client | followup.agent_id.partner_id).ids
         stop = self.callback_at + timedelta(minutes=self.duration_minutes)
         description = Markup("<p><strong>%s</strong></p>") % _(
             "Prepared from the completed-call CRM workflow."
@@ -228,57 +241,58 @@ class CodestraCrmPostCallWizard(models.TransientModel):
             "start": self.callback_at,
             "stop": stop,
             "user_id": followup.agent_id.id,
-            "partner_ids": [Command.set(partner_ids)],
+            # Client attendees are deliberately excluded. Native Odoo calendar
+            # invitations and updates are not an authorized delivery channel.
+            "partner_ids": [Command.set([followup.agent_id.partner_id.id])],
             "alarm_ids": [Command.set(self._calendar_alarm_ids())],
             "description": description,
             "codestra_call_followup_id": followup.id,
+            "codestra_schedule_kind": self.schedule_kind,
+            "active": True,
         }
 
     def _schedule_or_remove_calendar_event(self):
         followup = self.followup_id
         event = followup.calendar_event_id
+        context = {
+            "skip_codestra_followup_sync": True,
+            "no_mail_to_attendees": True,
+            "mail_notify_force_send": False,
+        }
         if self.schedule_kind == "none":
             if event:
-                event.with_context(
-                    skip_codestra_followup_sync=True,
-                    mail_notify_force_send=False,
-                ).unlink()
+                event.with_context(**context).unlink()
             return self.env["calendar.event"].browse()
 
         values = self._calendar_event_values()
         if event:
-            event.with_context(skip_codestra_followup_sync=True).write(values)
+            event.with_context(**context).write(values)
             return event
-        return self.env["calendar.event"].create(values)
+        return self.env["calendar.event"].with_context(**context).create(values)
 
     def _queue_post_call_email(self):
+        """Record a local intent; Middleware performs the external delivery."""
+
         if not self.send_post_call_email:
-            return self.env["mail.mail"].browse()
+            self.delivery_intent_id = False
+            return self.env["codestra.crm.call.delivery.intent"].browse()
+
         followup = self.followup_id
-        template = self.env.ref(
-            "codestra_crm_call_followup.mail_template_post_call_followup"
-        ).sudo()
-        sender = (
-            followup.agent_id.email_formatted
-            or followup.company_id.email_formatted
-            or self.env.user.email_formatted
+        intent = followup._create_delivery_intent(
+            intent_type="post_call_email",
+            audience="client",
+            idempotency_key=(
+                f"call-followup:{followup.company_id.id}:{followup.id}:"
+                "post-call-email:v1"
+            ),
+            available_at=fields.Datetime.now(),
+            recipient_to=self.email_to.strip(),
+            recipient_cc=(self.email_cc or "").strip() or False,
+            subject=self.email_subject.strip(),
+            body_html=self.email_body,
         )
-        email_values = {
-            "email_to": self.email_to.strip(),
-            "email_cc": (self.email_cc or "").strip() or False,
-            "author_id": followup.agent_id.partner_id.id,
-            "subject": self.email_subject.strip(),
-            "body_html": self.email_body,
-        }
-        if sender:
-            email_values["email_from"] = sender
-        mail_id = template.send_mail(
-            followup.id,
-            force_send=False,
-            raise_exception=True,
-            email_values=email_values,
-        )
-        return self.env["mail.mail"].sudo().browse(mail_id)
+        self.delivery_intent_id = intent
+        return intent
 
     def _post_chatter_summary(self, event):
         followup = self.followup_id
@@ -316,13 +330,11 @@ class CodestraCrmPostCallWizard(models.TransientModel):
 
     def _claim_pending_followup(self):
         """Serialize completion and reject stale/replayed wizard submissions."""
+
         self.ensure_one()
         followup = self.followup_id.exists()
         if not followup:
             return False
-        # PostgreSQL rechecks the pending predicate after a concurrent row lock is
-        # released. The losing submission therefore observes no row and performs
-        # none of the calendar, mail, or chatter side effects below.
         self.env.cr.execute(
             f"SELECT id FROM {followup._table} "
             "WHERE id = %s AND state = 'pending' FOR UPDATE",
@@ -335,15 +347,17 @@ class CodestraCrmPostCallWizard(models.TransientModel):
         self._validate_completion()
         if not self._claim_pending_followup():
             return {"type": "ir.actions.act_window_close"}
-        event = self._schedule_or_remove_calendar_event()
-        mail = self._queue_post_call_email()
 
+        event = self._schedule_or_remove_calendar_event()
+        intent = self._queue_post_call_email()
         values = {
             "state": "completed",
             "disposition": self.disposition,
             "notes": self.notes,
             "schedule_kind": self.schedule_kind,
-            "callback_at": self.callback_at if self.schedule_kind != "none" else False,
+            "callback_at": (
+                self.callback_at if self.schedule_kind != "none" else False
+            ),
             "duration_minutes": self.duration_minutes,
             "calendar_event_id": event.id or False,
             "reminder_email_enabled": self.reminder_email_enabled,
@@ -352,11 +366,23 @@ class CodestraCrmPostCallWizard(models.TransientModel):
             "email_cc": self.email_cc,
             "email_subject": self.email_subject,
             "email_body": self.email_body,
-            "mail_id": mail.id or False,
+            "mail_id": False,
+            "immediate_delivery_intent_id": intent.id or False,
             "popup_completed_at": fields.Datetime.now(),
+            "snoozed_until": False,
         }
         self.followup_id._write_from_workflow(values)
+        self.followup_id._sync_reminder_delivery_intents()
         self._post_chatter_summary(event)
+        self.env["bus.bus"].sudo()._sendone(
+            self.followup_id.agent_id.partner_id,
+            POST_CALL_BUS_CHANNEL,
+            {
+                "status": "completed",
+                "followup_id": self.followup_id.id,
+                "event_id": self.followup_id.event_id,
+            },
+        )
         return {"type": "ir.actions.act_window_close"}
 
     def action_complete_without_email(self):

@@ -3,3 +3,5 @@ access_call_followup_agent,codestra.crm.call.followup agent,model_codestra_crm_c
 access_call_followup_manager,codestra.crm.call.followup manager,model_codestra_crm_call_followup,group_call_followup_manager,1,1,0,0
 access_post_call_wizard_agent,codestra.crm.post.call.wizard agent,model_codestra_crm_post_call_wizard,group_call_followup_user,1,1,1,1
 access_post_call_wizard_manager,codestra.crm.post.call.wizard manager,model_codestra_crm_post_call_wizard,group_call_followup_manager,1,1,1,1
+access_delivery_intent_manager,codestra.crm.call.delivery.intent manager,model_codestra_crm_call_delivery_intent,group_call_followup_manager,1,0,0,0
+access_delivery_intent_service,codestra.crm.call.delivery.intent service,model_codestra_crm_call_delivery_intent,group_call_followup_service,1,1,0,0

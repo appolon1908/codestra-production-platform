@@ -8,6 +8,7 @@ on:
       - "scripts/test_odoo_crm_call_followup_disposable.sh"
       - ".github/workflows/odoo-crm-call-followup.yml"
       - "docs/CODEX_ODOO19_CRM_CALL_FOLLOWUP.md"
+      - "docs/runbooks/ODOO_CRM_CALL_FOLLOWUP_RELEASE.md"
   push:
     branches:
       - "feature/odoo19-crm-call-followup-final-20260826"
@@ -17,40 +18,121 @@ on:
       - "scripts/test_odoo_crm_call_followup_disposable.sh"
       - ".github/workflows/odoo-crm-call-followup.yml"
       - "docs/CODEX_ODOO19_CRM_CALL_FOLLOWUP.md"
+      - "docs/runbooks/ODOO_CRM_CALL_FOLLOWUP_RELEASE.md"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: odoo-crm-call-followup-${{ github.ref }}
+  group: odoo-crm-call-followup-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  static-gate:
-    name: Odoo 19 addon static gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  source-head-validation:
+    if: github.event_name == 'pull_request'
+    name: Validate exact Odoo call-follow-up source head
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
 
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
+      - name: Check out exact source head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source-head identity
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          printf 'VALIDATED_SOURCE_SHA=%s\n' "$EXPECTED_SHA"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
-      - name: Reject whitespace and conflict markers
+      - name: Run source-head static gate
         run: |
           git diff --check
           ! git grep -nE '^(<<<<<<< |=======$|>>>>>>> )' -- . ':!*.md'
+          python -m compileall -q odoo_addons/codestra_crm_call_followup scripts/validate_odoo_crm_call_followup.py
+          python scripts/validate_odoo_crm_call_followup.py
 
-      - name: Compile Python sources
-        run: python -m compileall -q odoo_addons/codestra_crm_call_followup scripts/validate_odoo_crm_call_followup.py
+      - name: Install, test, upgrade, migrate, and uninstall in disposable Odoo 19
+        run: bash scripts/test_odoo_crm_call_followup_disposable.sh
 
-      - name: Validate Odoo 19 addon invariants
-        run: python scripts/validate_odoo_crm_call_followup.py
+  merge-result-validation:
+    if: github.event_name == 'pull_request'
+    name: Validate Odoo call-follow-up merge result
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
 
-      - name: Install, test, upgrade, and uninstall in disposable Odoo 19
+    steps:
+      - name: Check out exact merge result
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact merge-result identity
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          printf 'VALIDATED_MERGE_SHA=%s\n' "$EXPECTED_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Run merge-result static gate
+        run: |
+          git diff --check
+          ! git grep -nE '^(<<<<<<< |=======$|>>>>>>> )' -- . ':!*.md'
+          python -m compileall -q odoo_addons/codestra_crm_call_followup scripts/validate_odoo_crm_call_followup.py
+          python scripts/validate_odoo_crm_call_followup.py
+
+      - name: Test merged Odoo 19 and PostgreSQL runtime
+        run: bash scripts/test_odoo_crm_call_followup_disposable.sh
+
+  pushed-sha-validation:
+    if: github.event_name != 'pull_request'
+    name: Validate exact pushed Odoo call-follow-up SHA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out exact pushed SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact pushed identity
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          printf 'VALIDATED_PUSH_SHA=%s\n' "$EXPECTED_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Run pushed-SHA static gate
+        run: |
+          git diff --check
+          ! git grep -nE '^(<<<<<<< |=======$|>>>>>>> )' -- . ':!*.md'
+          python -m compileall -q odoo_addons/codestra_crm_call_followup scripts/validate_odoo_crm_call_followup.py
+          python scripts/validate_odoo_crm_call_followup.py
+
+      - name: Test pushed Odoo 19 and PostgreSQL runtime
         run: bash scripts/test_odoo_crm_call_followup_disposable.sh

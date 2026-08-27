@@ -2,12 +2,12 @@
 <odoo>
     <data noupdate="1">
         <record id="mail_template_post_call_followup" model="mail.template">
-            <field name="name">CRM: Post-call follow-up</field>
+            <field name="name">CRM: Post-call delivery content</field>
             <field name="model_id" ref="model_codestra_crm_call_followup"/>
             <field name="subject">Thank you for speaking with {{ object.company_id.name }}</field>
-            <field name="email_from">{{ object.agent_id.email_formatted or user.email_formatted }}</field>
-            <field name="email_to">{{ object.email_to or object.partner_id.email or object.lead_id.email_from }}</field>
-            <field name="email_cc">{{ object.email_cc or object.agent_id.email }}</field>
+            <field name="email_from"></field>
+            <field name="email_to"></field>
+            <field name="email_cc"></field>
             <field name="lang">{{ object.partner_id.lang or object.lead_id.partner_id.lang or user.lang }}</field>
             <field name="auto_delete" eval="True"/>
             <field name="body_html" type="html">
@@ -24,7 +24,8 @@
                                 Hello <t t-out="object.partner_id.name or object.lead_id.contact_name or 'there'"/>,
                             </p>
                             <p style="margin:0 0 16px;">
-                                Thank you for speaking with <t t-out="object.agent_id.name"/>. This message confirms that we have recorded your request and the agreed next step.
+                                Thank you for speaking with <t t-out="object.agent_id.name"/>.
+                                This message confirms that we have recorded your request and the agreed next step.
                             </p>
                             <p style="margin:0 0 16px;">
                                 Reply directly to this email if anything needs to be corrected before the follow-up.
@@ -39,13 +40,14 @@
             </field>
         </record>
 
-        <record id="mail_template_callback_reminder_15" model="mail.template">
-            <field name="name">Calendar: Client and agent 15-minute preparation reminder</field>
-            <field name="model_id" ref="calendar.model_calendar_attendee"/>
-            <field name="subject">Reminder: {{ object.event_id.name }} starts in 15 minutes</field>
-            <field name="email_from">{{ object.event_id.user_id.email_formatted or user.email_formatted }}</field>
-            <field name="email_to">{{ object.partner_id.email }}</field>
-            <field name="lang">{{ object.partner_id.lang or user.lang }}</field>
+        <record id="mail_template_callback_reminder_client_15" model="mail.template">
+            <field name="name">CRM: Client 15-minute callback reminder content</field>
+            <field name="model_id" ref="model_codestra_crm_call_followup"/>
+            <field name="subject">Reminder: {{ object.calendar_event_id.name }} starts in 15 minutes</field>
+            <field name="email_from"></field>
+            <field name="email_to"></field>
+            <field name="email_cc"></field>
+            <field name="lang">{{ object.partner_id.lang or object.lead_id.partner_id.lang or user.lang }}</field>
             <field name="auto_delete" eval="True"/>
             <field name="body_html" type="html">
                 <div style="margin:0;padding:28px;background:#f6f8fb;font-family:Arial,sans-serif;color:#172033;">
@@ -53,22 +55,65 @@
                         <div style="padding:24px 28px;background:#172033;color:#ffffff;">
                             <div style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.75;">15-minute reminder</div>
                             <div style="font-size:24px;font-weight:700;margin-top:6px;">
-                                <t t-out="object.event_id.name"/>
+                                <t t-out="object.calendar_event_id.name"/>
                             </div>
                         </div>
                         <div style="padding:28px;line-height:1.6;">
-                            <p style="margin:0 0 16px;">Hello <t t-out="object.partner_id.name or 'there'"/>,</p>
                             <p style="margin:0 0 16px;">
-                                Your callback or appointment begins in 15 minutes. Please review any relevant information and be ready at the scheduled time.
+                                Hello <t t-out="object.partner_id.name or object.lead_id.contact_name or 'there'"/>,
+                            </p>
+                            <p style="margin:0 0 16px;">
+                                Your callback or appointment begins in 15 minutes.
+                                Please be ready at the scheduled time.
                             </p>
                             <div style="padding:16px 18px;background:#f6f8fb;border-radius:10px;margin:22px 0;">
                                 <strong>Starts:</strong>
-                                <t t-out="format_datetime(object.event_id.start, tz=object.partner_id.tz or object.event_id.user_id.tz)"/>
+                                <t t-out="format_datetime(object.callback_at, tz=object.partner_id.tz or object.agent_id.tz)"/>
                             </div>
                             <p style="margin:0;color:#5c667a;font-size:13px;">
-                                Organizer: <t t-out="object.event_id.user_id.name"/>
-                                <t t-if="object.event_id.user_id.email"> · <t t-out="object.event_id.user_id.email"/></t>
+                                Organizer: <t t-out="object.agent_id.name"/>
+                                <t t-if="object.agent_id.email"> · <t t-out="object.agent_id.email"/></t>
                             </p>
+                        </div>
+                    </div>
+                </div>
+            </field>
+        </record>
+
+        <record id="mail_template_callback_reminder_agent_15" model="mail.template">
+            <field name="name">CRM: Agent 15-minute preparation reminder content</field>
+            <field name="model_id" ref="model_codestra_crm_call_followup"/>
+            <field name="subject">Prepare now: {{ object.calendar_event_id.name }} starts in 15 minutes</field>
+            <field name="email_from"></field>
+            <field name="email_to"></field>
+            <field name="email_cc"></field>
+            <field name="lang">{{ object.agent_id.lang or user.lang }}</field>
+            <field name="auto_delete" eval="True"/>
+            <field name="body_html" type="html">
+                <div style="margin:0;padding:28px;background:#f6f8fb;font-family:Arial,sans-serif;color:#172033;">
+                    <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e3e8f0;border-radius:16px;overflow:hidden;">
+                        <div style="padding:24px 28px;background:#172033;color:#ffffff;">
+                            <div style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.75;">Agent preparation reminder</div>
+                            <div style="font-size:24px;font-weight:700;margin-top:6px;">
+                                <t t-out="object.calendar_event_id.name"/>
+                            </div>
+                        </div>
+                        <div style="padding:28px;line-height:1.6;">
+                            <p style="margin:0 0 16px;">Hello <t t-out="object.agent_id.name"/>,</p>
+                            <p style="margin:0 0 16px;">
+                                Your client callback or appointment begins in 15 minutes.
+                                Review the call notes and prepare the next action.
+                            </p>
+                            <div style="padding:16px 18px;background:#f6f8fb;border-radius:10px;margin:22px 0;">
+                                <strong>Starts:</strong>
+                                <t t-out="format_datetime(object.callback_at, tz=object.agent_id.tz)"/>
+                            </div>
+                            <t t-if="object.notes">
+                                <div style="margin-top:18px;">
+                                    <strong>Call notes</strong>
+                                    <div t-out="object.notes"/>
+                                </div>
+                            </t>
                         </div>
                     </div>
                 </div>

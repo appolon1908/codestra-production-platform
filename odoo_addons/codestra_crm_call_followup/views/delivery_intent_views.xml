@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_codestra_call_delivery_intent_search" model="ir.ui.view">
+        <field name="name">codestra.crm.call.delivery.intent.search</field>
+        <field name="model">codestra.crm.call.delivery.intent</field>
+        <field name="arch" type="xml">
+            <search string="Middleware Delivery Intents">
+                <field name="name"/>
+                <field name="idempotency_key"/>
+                <field name="followup_id"/>
+                <field name="recipient_to"/>
+                <filter name="pending" string="Pending" domain="[('state', '=', 'pending')]"/>
+                <filter name="claimed" string="Claimed" domain="[('state', '=', 'claimed')]"/>
+                <filter name="dead_letter" string="Dead Letter" domain="[('state', '=', 'dead_letter')]"/>
+                <filter name="delivered" string="Delivered" domain="[('state', '=', 'delivered')]"/>
+                <group>
+                    <filter name="group_state" string="State" context="{'group_by': 'state'}"/>
+                    <filter name="group_type" string="Type" context="{'group_by': 'intent_type'}"/>
+                    <filter name="group_company" string="Company" context="{'group_by': 'company_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_codestra_call_delivery_intent_list" model="ir.ui.view">
+        <field name="name">codestra.crm.call.delivery.intent.list</field>
+        <field name="model">codestra.crm.call.delivery.intent</field>
+        <field name="arch" type="xml">
+            <list string="Middleware Delivery Intents" create="0" edit="0" delete="0"
+                  decoration-warning="state == 'pending'"
+                  decoration-info="state == 'claimed'"
+                  decoration-success="state == 'delivered'"
+                  decoration-danger="state == 'dead_letter'"
+                  decoration-muted="state == 'cancelled'">
+                <field name="available_at"/>
+                <field name="intent_type"/>
+                <field name="audience"/>
+                <field name="followup_id"/>
+                <field name="recipient_to"/>
+                <field name="attempt_count"/>
+                <field name="state" widget="badge"/>
+                <field name="provider_message_id" optional="hide"/>
+                <field name="company_id" groups="base.group_multi_company" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_codestra_call_delivery_intent_form" model="ir.ui.view">
+        <field name="name">codestra.crm.call.delivery.intent.form</field>
+        <field name="model">codestra.crm.call.delivery.intent</field>
+        <field name="arch" type="xml">
+            <form string="Middleware Delivery Intent" create="0" edit="0" delete="0">
+                <header>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="pending,claimed,delivered,dead_letter,cancelled"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="Business Intent">
+                            <field name="followup_id" readonly="1"/>
+                            <field name="intent_type" readonly="1"/>
+                            <field name="audience" readonly="1"/>
+                            <field name="channel" readonly="1"/>
+                            <field name="available_at" readonly="1"/>
+                            <field name="requires_consent_check" readonly="1"/>
+                        </group>
+                        <group string="Middleware Processing">
+                            <field name="idempotency_key" readonly="1"/>
+                            <field name="correlation_id" readonly="1"/>
+                            <field name="attempt_count" readonly="1"/>
+                            <field name="lease_expires_at" readonly="1"/>
+                            <field name="provider_message_id" readonly="1"/>
+                            <field name="delivered_at" readonly="1"/>
+                            <field name="company_id" readonly="1" groups="base.group_multi_company"/>
+                        </group>
+                    </group>
+                    <group string="Recipient">
+                        <field name="recipient_to" readonly="1"/>
+                        <field name="recipient_cc" readonly="1"/>
+                        <field name="subject" readonly="1"/>
+                    </group>
+                    <notebook>
+                        <page string="Content">
+                            <field name="body_html" readonly="1" widget="html"/>
+                        </page>
+                        <page string="Failure">
+                            <field name="last_error" readonly="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_codestra_call_delivery_intent" model="ir.actions.act_window">
+        <field name="name">Delivery Intents</field>
+        <field name="res_model">codestra.crm.call.delivery.intent</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_codestra_call_delivery_intent_search"/>
+        <field name="context">{'search_default_pending': 1}</field>
+    </record>
+
+    <menuitem id="menu_codestra_call_delivery_intent"
+              name="Delivery Intents"
+              parent="crm.crm_menu_sales"
+              action="action_codestra_call_delivery_intent"
+              sequence="16"
+              groups="codestra_crm_call_followup.group_call_followup_manager"/>
+
+    <record id="view_codestra_call_followup_form_delivery_intents" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.form.delivery.intents</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="view_codestra_call_followup_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button name="action_open_delivery_intents" type="object"
+                        class="oe_stat_button" icon="fa-paper-plane"
+                        groups="codestra_crm_call_followup.group_call_followup_manager">
+                    <field name="delivery_intent_count" widget="statinfo" string="Delivery Intents"/>
+                </button>
+            </xpath>
+            <xpath expr="//page[@string='Integration']//group" position="inside">
+                <field name="immediate_delivery_intent_id" readonly="1"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

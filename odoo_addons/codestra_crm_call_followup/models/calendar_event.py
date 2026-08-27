@@ -22,17 +22,56 @@ class CalendarEvent(models.Model):
         "A call follow-up can be linked to only one calendar event.",
     )
 
+    def _codestra_linked_events(self, values=None):
+        linked = self.filtered("codestra_call_followup_id")
+        if values and values.get("codestra_call_followup_id"):
+            linked |= self
+        return linked
+
+    def _codestra_no_mail(self):
+        return self.with_context(
+            no_mail_to_attendees=True,
+            mail_notify_force_send=False,
+        )
+
     def write(self, values):
-        result = super().write(values)
-        if self.env.context.get("skip_codestra_followup_sync"):
+        # Suppress native attendee email only for Codestra call events. Ordinary
+        # Odoo calendar events retain standard invitation behavior.
+        linked = self._codestra_linked_events(values)
+        ordinary = self - linked
+        result = True
+        if ordinary:
+            result = super(CalendarEvent, ordinary).write(values) and result
+        if linked:
+            protected = linked._codestra_no_mail()
+            result = super(CalendarEvent, protected).write(values) and result
+
+        if not linked or self.env.context.get("skip_codestra_followup_sync"):
             return result
 
         if {"start", "stop", "active", "codestra_schedule_kind"}.intersection(values):
-            for event in self.filtered("codestra_call_followup_id"):
+            for event in linked.filtered("codestra_call_followup_id"):
+                followup = event.codestra_call_followup_id
                 followup_values = {}
+
                 if "active" in values and not event.active:
-                    # Preserve the link to the archived event. This retains audit
-                    # history and allows the same event to be safely reactivated.
+                    # Rows created by 19.0.1.0.0 can have a null event-side
+                    # schedule kind. Preserve the authoritative follow-up kind
+                    # before clearing the active schedule.
+                    preserved_kind = event.codestra_schedule_kind
+                    if (
+                        not preserved_kind
+                        and followup.schedule_kind in {"callback", "appointment"}
+                    ):
+                        preserved_kind = followup.schedule_kind
+                        super(
+                            CalendarEvent,
+                            event.with_context(
+                                skip_codestra_followup_sync=True,
+                                no_mail_to_attendees=True,
+                                mail_notify_force_send=False,
+                            ),
+                        ).write({"codestra_schedule_kind": preserved_kind})
                     followup_values.update(
                         {
                             "schedule_kind": "none",
@@ -44,16 +83,36 @@ class CalendarEvent(models.Model):
                         followup_values["callback_at"] = event.start
                     if event.start and event.stop:
                         followup_values["duration_minutes"] = int(
-                            max(1, round((event.stop - event.start).total_seconds() / 60))
+                            max(
+                                1,
+                                round(
+                                    (event.stop - event.start).total_seconds() / 60
+                                ),
+                            )
                         )
-                    if event.codestra_schedule_kind:
-                        followup_values["schedule_kind"] = event.codestra_schedule_kind
+                    restored_kind = event.codestra_schedule_kind
+                    if (
+                        not restored_kind
+                        and followup.schedule_kind in {"callback", "appointment"}
+                    ):
+                        restored_kind = followup.schedule_kind
+                    if restored_kind:
+                        followup_values["schedule_kind"] = restored_kind
                     followup_values["calendar_event_id"] = event.id
 
                 if followup_values:
-                    event.codestra_call_followup_id._write_from_workflow(
-                        followup_values
-                    )
+                    followup._write_from_workflow(followup_values)
+                    followup._sync_reminder_delivery_intents()
+        return result
+
+    def unlink(self):
+        linked = self.filtered("codestra_call_followup_id")
+        ordinary = self - linked
+        result = True
+        if ordinary:
+            result = super(CalendarEvent, ordinary).unlink() and result
+        if linked:
+            result = super(CalendarEvent, linked._codestra_no_mail()).unlink() and result
         return result
 
     @api.ondelete(at_uninstall=False)
@@ -69,3 +128,4 @@ class CalendarEvent(models.Model):
                     "calendar_event_id": False,
                 }
             )
+            followups._sync_reminder_delivery_intents()
