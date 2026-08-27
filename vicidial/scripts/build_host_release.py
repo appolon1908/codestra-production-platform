@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,7 @@ def main() -> int:
 
     source = args.source.resolve()
     output = args.output.resolve()
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     if output.exists():
         raise ValueError("host release output already exists")
     output.mkdir(parents=True)

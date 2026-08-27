@@ -1,8 +1,10 @@
 #!/usr/bin/env python3.11
 """Verify the complete deterministic flattened host release manifest."""
 from __future__ import annotations
-import argparse, json
+import argparse, json, sys
 from pathlib import Path
+
+sys.dont_write_bytecode = True
 from generate_installed_manifest import build
 
 
