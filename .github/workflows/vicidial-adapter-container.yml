@@ -197,8 +197,8 @@ jobs:
           jq 'map({Id,Digest,RepoDigests,Architecture,Os,Config:{User:.Config.User,Labels:.Config.Labels}})' \
             evidence/IMAGE_METADATA.json > "${export_dir}/IMAGE_METADATA.json"
           find "${export_dir}" -type f -exec chmod 0600 {} +
-          (cd "${export_dir}" && find . -type f -print0 | sort -z | xargs -0 sha256sum) \
-            > evidence/EVIDENCE_EXPORT_CHECKSUMS.sha256
+          (cd "${export_dir}" && find . -type f ! -name CHECKSUMS.sha256 -print0 | sort -z | xargs -0 sha256sum) \
+            > "${export_dir}/CHECKSUMS.sha256"
           "${RUNNER_TEMP}/gitleaks-bin" dir --no-banner --redact --exit-code 1 \
             --report-format json --report-path evidence/EVIDENCE_SECRET_SCAN.json \
             "${export_dir}"
@@ -206,4 +206,21 @@ jobs:
         if: always()
         with:
           name: vicidial-adapter-container-evidence
-          path: evidence/
+          path: evidence/evidence-export/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vicidial-adapter-oci-${{ env.SOURCE_SHA }}
+          path: |
+            evidence/vicidial-adapter.oci.tar
+            evidence/vicidial-adapter.oci.tar.sha256
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vicidial-host-release-${{ env.SOURCE_SHA }}
+          path: |
+            evidence/vicidial-host-release.tar.gz
+            evidence/vicidial-host-release.tar.gz.sha256
+          if-no-files-found: warn

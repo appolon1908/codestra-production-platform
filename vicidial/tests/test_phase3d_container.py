@@ -161,6 +161,9 @@ def test_workflow_builds_without_push_and_generates_evidence():
     assert "Enforce exact source secret gate" in text
     assert "Enforce exact-image secret gate" in text
     assert "EVIDENCE_SECRET_SCAN.json" in text
+    assert "path: evidence/evidence-export/" in text
+    assert "vicidial-adapter-oci-${{ env.SOURCE_SHA }}" in text
+    assert "vicidial-host-release-${{ env.SOURCE_SHA }}" in text
     assert text.count("docker compose -f vicidial/docker/compose.") == 2
 
 
