@@ -107,7 +107,8 @@ def test_installed_layout_manifest_is_flattened_and_tamper_evident(tmp_path: Pat
 def test_host_release_builder_is_ci_enforced() -> None:
     workflow = (ROOT / ".github/workflows/vicidial-adapter-container.yml").read_text()
     assert "build_host_release.py" in workflow
-    assert "vicidial-host-release.tar.gz" in workflow
+    assert "sole production deployable" in workflow
+    assert "vicidial-host-release.tar.gz" not in workflow
 
 
 def test_oci_export_is_from_tested_build_and_verified() -> None:

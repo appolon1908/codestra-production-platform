@@ -73,16 +73,37 @@ jobs:
           PYTHONPATH=vicidial/src python -m pytest -q --junitxml=evidence/test-results/phase3c.xml vicidial/tests/test_phase3c_domains.py
           PYTHONPATH=vicidial/src python -m pytest -q --junitxml=evidence/test-results/phase3d.xml vicidial/tests/test_phase3d_container.py
           PYTHONPATH=vicidial/src python -m pytest -q --junitxml=evidence/test-results/full.xml vicidial/tests
-      - name: Build and verify manifest-bound host release
+      - name: Verify deterministic installed-layout contract
         run: |
-          release_root="${RUNNER_TEMP}/host-release/${SOURCE_SHA}"
+          release_root="${RUNNER_TEMP}/installed-layout/${SOURCE_SHA}"
           python vicidial/scripts/build_host_release.py \
             --source vicidial \
             --output "${release_root}" \
             --source-sha "${SOURCE_SHA}" \
             --generated-at 2026-01-01T00:00:00Z
-          tar -C "${RUNNER_TEMP}/host-release" -czf evidence/vicidial-host-release.tar.gz "${SOURCE_SHA}"
-          (cd evidence && sha256sum vicidial-host-release.tar.gz > vicidial-host-release.tar.gz.sha256)
+          test -s "${release_root}/INSTALLED_MANIFEST.json"
+          "${release_root}/.venv/bin/python" "${release_root}/scripts/verify_installed_manifest.py" \
+            --root "${release_root}" --manifest "${release_root}/INSTALLED_MANIFEST.json"
+          runtime_secret="${RUNNER_TEMP}/installed-layout-hmac"
+          head -c 32 /dev/zero > "${runtime_secret}"
+          chmod 0600 "${runtime_secret}"
+          CODESTRA_RELEASE_METADATA_REQUIRED=true \
+          CODESTRA_RELEASE_MANIFEST_ROOT="${release_root}" \
+          CODESTRA_RELEASE_MANIFEST_FILE="${release_root}/INSTALLED_MANIFEST.json" \
+          CODESTRA_ADAPTER_DEPLOYMENT=staging-read-only \
+          CODESTRA_ADAPTER_BACKEND=memory \
+          ENABLE_VICIDIAL_WRITES=false ENABLE_PROVISIONING=false \
+          ENABLE_AGENT_SYNC=false ENABLE_LEAD_PUBLICATION=false \
+          ENABLE_IVR_CALLBACKS=false ENABLE_WARM_TRANSFER=false \
+          ENABLE_PRODUCTION_DIALING=false \
+          AUTHORIZED_APPLICATION_SERVER_IP=65.109.65.169 \
+          AUTHORIZED_PRIVATE_SOURCE_IP=10.40.0.1 \
+          MIDDLEWARE_BASE_URL=https://api.codestra.co \
+          KEYCLOAK_ISSUER_URL=https://auth.codestra.co/realms/codestra \
+          CODESTRA_ADAPTER_HMAC_FILE="${runtime_secret}" \
+            "${release_root}/.venv/bin/python" "${release_root}/scripts/validate_runtime.py"
+          # This layout is validation evidence only. The immutable OCI image is
+          # the sole production deployable; never package the CI runner runtime.
       - uses: docker/setup-buildx-action@v3
       - name: Build one linux/amd64 image for Docker testing and OCI export
         uses: docker/build-push-action@v6
@@ -215,12 +236,4 @@ jobs:
           path: |
             evidence/vicidial-adapter.oci.tar
             evidence/vicidial-adapter.oci.tar.sha256
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: vicidial-host-release-${{ env.SOURCE_SHA }}
-          path: |
-            evidence/vicidial-host-release.tar.gz
-            evidence/vicidial-host-release.tar.gz.sha256
           if-no-files-found: warn

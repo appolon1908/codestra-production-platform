@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import subprocess
@@ -41,16 +40,19 @@ def main() -> int:
     shutil.copy2(source / "pyproject.toml", output / "pyproject.toml")
     shutil.copy2(source / "docker/requirements.lock", output / "requirements.lock")
     (output / "SOURCE.COMMIT").write_text(args.source_sha + "\n", encoding="utf-8")
-    build_info = {
-        "built_at": args.generated_at,
-        "environment": "production-candidate",
-        "git_sha": args.source_sha,
-    }
-    (output / "BUILD_INFO.json").write_text(
-        json.dumps(build_info, sort_keys=True) + "\n", encoding="utf-8"
+    run(
+        sys.executable,
+        str(output / "scripts/generate_build_info.py"),
+        "--git-sha", args.source_sha,
+        "--environment", "production-candidate",
+        "--built-at", args.generated_at,
+        "--output", str(output / "BUILD_INFO.json"),
     )
 
-    run(sys.executable, "-m", "venv", str(output / ".venv"))
+    # This builder is retained for deterministic installed-layout validation.
+    # Its output is deliberately not a production artifact: Python wheels and
+    # interpreter copies created on a CI runner are not an openSUSE runtime.
+    run(sys.executable, "-m", "venv", "--copies", str(output / ".venv"))
     python = output / ".venv/bin/python"
     run(str(python), "-m", "pip", "install", "--requirement", str(output / "requirements.lock"))
     run(str(python), "-m", "pip", "uninstall", "--yes", "pip", "setuptools", "wheel")
