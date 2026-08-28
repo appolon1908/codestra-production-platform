@@ -21,8 +21,10 @@ Promotion sequence:
 6. Record an explicit production approval.
 7. Deploy the identical digests to production and preserve read-back evidence.
 
-An `accepted` environment gate must embed at least one pinned evidence file.
-Production cannot be accepted while staging remains pending or rejected.
+An `accepted` environment gate must embed separately pinned integration,
+backup, restore, monitoring, and rollback evidence. Production additionally
+requires pinned approval evidence and cannot be accepted while staging remains
+pending or rejected.
 
 Release records belong on short-lived `release/<change-id>` branches and merge
 into `release/production-activation`. They must never contain private keys,

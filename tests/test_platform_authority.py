@@ -55,7 +55,19 @@ def test_every_host_component_has_a_catalog_definition() -> None:
 
 def _release_manifest() -> dict:
     sha = "0" * 64
-    evidence = {"path": "evidence/staging.json", "sha256": sha}
+    evidence = {
+        evidence_class: {
+            "path": f"evidence/{evidence_class}.json",
+            "sha256": sha,
+        }
+        for evidence_class in (
+            "integration",
+            "backup",
+            "restore",
+            "monitoring",
+            "rollback",
+        )
+    }
     return {
         "schema_version": "platform-release-manifest.v1",
         "release_id": "release-20260828",
@@ -87,10 +99,10 @@ def _release_manifest() -> dict:
         },
         "promotion": {
             "identical_digests_required": True,
-            "staging": {"status": "accepted", "evidence": [evidence]},
-            "production": {"status": "pending", "evidence": []},
+            "staging": {"status": "accepted", "evidence": evidence},
+            "production": {"status": "pending", "evidence": {}},
         },
-        "evidence": [evidence],
+        "evidence": list(evidence.values()),
     }
 
 
@@ -101,7 +113,7 @@ def test_accepted_environment_gate_requires_pinned_evidence() -> None:
         )
     )
     manifest = _release_manifest()
-    manifest["promotion"]["staging"]["evidence"] = []
+    manifest["promotion"]["staging"]["evidence"] = {}
     with pytest.raises(ValidationError):
         Draft202012Validator(schema).validate(manifest)
 
@@ -122,11 +134,54 @@ def test_production_acceptance_requires_staging_acceptance() -> None:
         )
     )
     manifest = _release_manifest()
-    manifest["promotion"]["staging"] = {"status": "pending", "evidence": []}
-    production_evidence = deepcopy(manifest["evidence"])
+    manifest["promotion"]["staging"] = {"status": "pending", "evidence": {}}
+    production_evidence = deepcopy(manifest["promotion"]["staging"]["evidence"])
+    production_evidence.update(
+        {
+            evidence_class: {
+                "path": f"evidence/production-{evidence_class}.json",
+                "sha256": "0" * 64,
+            }
+            for evidence_class in (
+                "integration",
+                "backup",
+                "restore",
+                "monitoring",
+                "rollback",
+                "approval",
+            )
+        }
+    )
     manifest["promotion"]["production"] = {
         "status": "accepted",
         "evidence": production_evidence,
+    }
+    with pytest.raises(ValidationError):
+        Draft202012Validator(schema).validate(manifest)
+
+
+@pytest.mark.parametrize(
+    "missing_class",
+    ["integration", "backup", "restore", "monitoring", "rollback", "approval"],
+)
+def test_production_acceptance_requires_every_evidence_class(
+    missing_class: str,
+) -> None:
+    schema = json.loads(
+        (ROOT / "release/platform-release-manifest.v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    manifest = _release_manifest()
+    evidence = deepcopy(manifest["promotion"]["staging"]["evidence"])
+    evidence["approval"] = {
+        "path": "evidence/production-approval.json",
+        "sha256": "0" * 64,
+    }
+    evidence.pop(missing_class)
+    manifest["promotion"]["production"] = {
+        "status": "accepted",
+        "evidence": evidence,
     }
     with pytest.raises(ValidationError):
         Draft202012Validator(schema).validate(manifest)

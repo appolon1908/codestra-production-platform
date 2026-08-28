@@ -60,7 +60,7 @@
       "properties": {
         "identical_digests_required": {"const": true},
         "staging": {"$ref": "#/$defs/environment_gate"},
-        "production": {"$ref": "#/$defs/environment_gate"}
+        "production": {"$ref": "#/$defs/production_gate"}
       },
       "allOf": [
         {
@@ -110,9 +110,16 @@
       "properties": {
         "status": {"enum": ["pending", "accepted", "rejected"]},
         "evidence": {
-          "type": "array",
-          "items": {"$ref": "#/$defs/pinned_file"},
-          "uniqueItems": true
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "integration": {"$ref": "#/$defs/pinned_file"},
+            "backup": {"$ref": "#/$defs/pinned_file"},
+            "restore": {"$ref": "#/$defs/pinned_file"},
+            "monitoring": {"$ref": "#/$defs/pinned_file"},
+            "rollback": {"$ref": "#/$defs/pinned_file"},
+            "approval": {"$ref": "#/$defs/pinned_file"}
+          }
         }
       },
       "allOf": [
@@ -122,7 +129,27 @@
             "required": ["status"]
           },
           "then": {
-            "properties": {"evidence": {"minItems": 1}}
+            "properties": {
+              "evidence": {
+                "required": ["integration", "backup", "restore", "monitoring", "rollback"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "production_gate": {
+      "allOf": [
+        {"$ref": "#/$defs/environment_gate"},
+        {
+          "if": {
+            "properties": {"status": {"const": "accepted"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "evidence": {"required": ["approval"]}
+            }
           }
         }
       ]

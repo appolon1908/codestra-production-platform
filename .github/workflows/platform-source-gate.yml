@@ -53,7 +53,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends nats-server
-          python -m pip install pytest pytest-subtests PyYAML requests "nats-py==2.15.0" \
+          python -m pip install pytest pytest-subtests PyYAML requests jsonschema \
+            openapi-spec-validator "nats-py==2.15.0" \
             "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9"
 
       - name: Verify recovered source evidence hashes
@@ -115,7 +116,6 @@ jobs:
 
       - name: Validate control-plane contracts and deployment
         run: |
-          python -m pip install jsonschema openapi-spec-validator
           python - <<'PY'
           import json
           from pathlib import Path

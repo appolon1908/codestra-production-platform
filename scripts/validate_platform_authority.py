@@ -89,10 +89,17 @@ def validate_release_schema() -> None:
         "^sha256:[0-9a-f]{64}$"
     )
     gate = schema["$defs"]["environment_gate"]
-    assert gate["properties"]["evidence"]["items"]["$ref"] == (
-        "#/$defs/pinned_file"
-    )
-    assert gate["allOf"][0]["then"]["properties"]["evidence"]["minItems"] == 1
+    evidence = gate["properties"]["evidence"]
+    required_evidence = {"integration", "backup", "restore", "monitoring", "rollback"}
+    assert set(evidence["properties"]) == required_evidence | {"approval"}
+    assert set(
+        gate["allOf"][0]["then"]["properties"]["evidence"]["required"]
+    ) == required_evidence
+    production_gate = schema["$defs"]["production_gate"]
+    assert production_gate["allOf"][0]["$ref"] == "#/$defs/environment_gate"
+    assert production_gate["allOf"][1]["then"]["properties"]["evidence"][
+        "required"
+    ] == ["approval"]
     promotion = schema["properties"]["promotion"]
     assert promotion["allOf"][0]["then"]["properties"]["staging"][
         "properties"
@@ -114,6 +121,9 @@ def validate_caddy_home() -> None:
         encoding="utf-8"
     )
     assert "api.codestra.co" in api and "import security_headers" in api
+    assert "reverse_proxy codestra-websocket-gateway-gateway-1:8080" in api
+    assert "reverse_proxy codestra-kong-kong-gateway-1:8000" in api
+    assert "reverse_proxy 127.0.0.1" not in api
     assert "auth.codestra.co" in auth and "import security_headers" in auth
     assert "reverse_proxy keycloak:8080" in auth
     assert re.search(r"\(security_headers\)\s*\{", snippets)
