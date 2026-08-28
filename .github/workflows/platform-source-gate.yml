@@ -7,10 +7,13 @@ on:
       - "campaign_provisioning/**"
       - "control_plane/**"
       - "control_plane_service/**"
+      - "contracts/**"
       - "eventing/**"
       - "identity/**"
       - "integrations/**"
       - "operations/**"
+      - "release/**"
+      - "composition/**"
       - "config/**"
       - "deploy/**"
       - "docs/**"
@@ -21,6 +24,7 @@ on:
       - "tel_events/**"
       - "tools/**"
       - "tests/**"
+      - "README.md"
       - "pytest.ini"
       - ".gitleaksignore"
       - ".gitignore"
@@ -121,12 +125,17 @@ jobs:
 
           schema = json.loads(Path("schemas/integration-event-envelope-v1.schema.json").read_text())
           Draft202012Validator.check_schema(schema)
+          platform_release_schema = json.loads(
+              Path("release/platform-release-manifest.v1.schema.json").read_text()
+          )
+          Draft202012Validator.check_schema(platform_release_schema)
           manifest = json.loads(Path("n8n/control-plane/workflow-manifest.json").read_text())
           assert manifest["defaults"]["active"] is False
           names = [item["name"] for item in manifest["workflows"]]
           assert len(names) == len(set(names)) and len(names) >= 4
           validate_spec(yaml.safe_load(Path("docs/openapi/control-plane-v1.yaml").read_text()))
           PY
+          python scripts/validate_platform_authority.py
           CONTROL_PLANE_ENV_FILE="$PWD/config/control-plane.env.example" \
             docker compose -f deploy/control-plane/compose.yaml config --quiet
           docker build -f deploy/control-plane/Dockerfile -t codestra-control-plane:ci .

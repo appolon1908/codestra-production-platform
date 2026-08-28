@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.codestra.co/platform/platform-release-manifest.v1.schema.json",
+  "title": "Codestra Platform Release Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release_id", "created_at", "authority", "contracts", "runtime", "services", "edge", "promotion", "evidence"],
+  "properties": {
+    "schema_version": {"const": "platform-release-manifest.v1"},
+    "release_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{7,127}$"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "git_sha"],
+      "properties": {
+        "repository": {"const": "appolon1908-hue/codestra-production-platform"},
+        "git_sha": {"$ref": "#/$defs/git_sha"}
+      }
+    },
+    "contracts": {"$ref": "#/$defs/pinned_file"},
+    "runtime": {"$ref": "#/$defs/pinned_file"},
+    "services": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["service_id", "repository", "git_sha", "image", "service_manifest_sha256"],
+        "properties": {
+          "service_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"},
+          "repository": {"type": "string", "pattern": "^appolon1908-hue/[A-Za-z0-9._-]+$"},
+          "git_sha": {"$ref": "#/$defs/git_sha"},
+          "image": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reference", "digest"],
+            "properties": {
+              "reference": {"type": "string", "pattern": "^[a-z0-9.-]+/[a-z0-9._/-]+$"},
+              "digest": {"$ref": "#/$defs/image_digest"}
+            }
+          },
+          "service_manifest_sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caddy", "kong"],
+      "properties": {
+        "caddy": {"$ref": "#/$defs/pinned_file"},
+        "kong": {"$ref": "#/$defs/pinned_file"}
+      }
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["staging", "production", "identical_digests_required"],
+      "properties": {
+        "identical_digests_required": {"const": true},
+        "staging": {"$ref": "#/$defs/environment_gate"},
+        "production": {"$ref": "#/$defs/environment_gate"}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/pinned_file"}
+    }
+  },
+  "$defs": {
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "image_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "pinned_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]+$"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "environment_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence_sha256"],
+      "properties": {
+        "status": {"enum": ["pending", "accepted", "rejected"]},
+        "evidence_sha256": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/sha256"},
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

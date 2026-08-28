@@ -1,0 +1,87 @@
+{
+  "schema_version": "runtime-composition.v1",
+  "description": "Environment-neutral desired-state inputs; no live data or secrets",
+  "authority": {
+    "repository": "appolon1908-hue/codestra-production-platform",
+    "branch": "release/production-activation"
+  },
+  "environment_model": {
+    "source_branch": "release/production-activation",
+    "deployment_environments": ["development", "staging", "production"],
+    "promotion_rule": "promote the identical immutable image digests accepted in staging",
+    "secrets_in_git": false
+  },
+  "hosts": [
+    {
+      "id": "application-server-a",
+      "components": ["caddy", "kong", "middleware", "odoo-19", "n8n", "keycloak", "postgresql", "redis", "nats-jetstream", "temporal", "observability"]
+    },
+    {
+      "id": "provider-host",
+      "components": ["kyqra-crawler", "telnexa", "klyrow"]
+    }
+  ],
+  "components": [
+    {
+      "id": "caddy",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "operations/caddy",
+      "role": "public TLS and hostname routing",
+      "deployment_state": "reviewed-projection-required"
+    },
+    {
+      "id": "kong",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/kong/control-plane.yml",
+      "role": "API gateway policy",
+      "deployment_state": "fail-closed"
+    },
+    {
+      "id": "middleware",
+      "source_repository": "appolon1908-hue/Middleware-",
+      "source_path": "Dockerfile",
+      "composition_input": "deploy/middleware/compose.approved-release.yaml",
+      "role": "cross-system write boundary",
+      "deployment_state": "digest-required"
+    },
+    {
+      "id": "odoo-19",
+      "source_repository": "appolon1908-hue/Odoo",
+      "source_path": ".",
+      "composition_input": "deploy/odoo/compose.production.yaml",
+      "role": "business system of record",
+      "deployment_state": "approval-required"
+    },
+    {
+      "id": "n8n",
+      "source_repository": "appolon1908-hue/N8N",
+      "source_path": ".",
+      "composition_input": "deploy/n8n/compose.password-file.yaml",
+      "role": "asynchronous automation",
+      "deployment_state": "workflows-inactive-by-default"
+    },
+    {
+      "id": "keycloak",
+      "source_repository": "appolon1908-hue/Keycloak",
+      "source_path": ".",
+      "composition_input": "deploy/keycloak/cod-web-out-email-production.json",
+      "role": "human and service identity",
+      "deployment_state": "contract-and-secret-reference-required"
+    },
+    {
+      "id": "kyqra-crawler",
+      "source_repository": "appolon1908-hue/kyqra-crawler",
+      "source_path": "docker-compose.yml",
+      "role": "crawler API and crawl execution",
+      "deployment_state": "runtime-verification-required"
+    },
+    {
+      "id": "observability",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "operations/monitoring",
+      "composition_input": "operations/monitoring/compose.monitoring.yaml",
+      "role": "private metrics, logs, alerts, and release identity",
+      "deployment_state": "reviewed-projection-required"
+    }
+  ]
+}
