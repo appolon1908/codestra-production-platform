@@ -18,6 +18,10 @@ back it up, render these reviewed files into that path, run `caddy validate`,
 and use a graceful reload. Editing a live container or an untracked host file
 does not change source authority.
 
+Server A runs Caddy as a Compose service. Container-to-container upstreams
+therefore use shared-network DNS names such as `keycloak:8080`; loopback inside
+the Caddy container must not be used for a different service.
+
 The Middleware repository's `platform/caddy` branch owns integration review,
 route compatibility, and edge tests. Production Caddy files and their release
 digest are owned here and pinned by the platform release manifest.

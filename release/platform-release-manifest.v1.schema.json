@@ -61,7 +61,28 @@
         "identical_digests_required": {"const": true},
         "staging": {"$ref": "#/$defs/environment_gate"},
         "production": {"$ref": "#/$defs/environment_gate"}
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "production": {
+                "properties": {"status": {"const": "accepted"}},
+                "required": ["status"]
+              }
+            },
+            "required": ["production"]
+          },
+          "then": {
+            "properties": {
+              "staging": {
+                "properties": {"status": {"const": "accepted"}},
+                "required": ["status"]
+              }
+            }
+          }
+        }
+      ]
     },
     "evidence": {
       "type": "array",
@@ -85,15 +106,26 @@
     "environment_gate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "evidence_sha256"],
+      "required": ["status", "evidence"],
       "properties": {
         "status": {"enum": ["pending", "accepted", "rejected"]},
-        "evidence_sha256": {
+        "evidence": {
           "type": "array",
-          "items": {"$ref": "#/$defs/sha256"},
+          "items": {"$ref": "#/$defs/pinned_file"},
           "uniqueItems": true
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "accepted"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {"evidence": {"minItems": 1}}
+          }
+        }
+      ]
     }
   }
 }

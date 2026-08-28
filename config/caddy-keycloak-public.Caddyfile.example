@@ -8,5 +8,5 @@ auth.codestra.co {
 		Referrer-Policy strict-origin-when-cross-origin
 	}
 	encode gzip
-	reverse_proxy 127.0.0.1:18103
+	reverse_proxy keycloak:8080
 }

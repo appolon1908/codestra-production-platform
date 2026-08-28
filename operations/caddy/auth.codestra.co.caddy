@@ -3,5 +3,5 @@
 auth.codestra.co {
 	import security_headers
 	encode zstd gzip
-	reverse_proxy 127.0.0.1:18103
+	reverse_proxy keycloak:8080
 }

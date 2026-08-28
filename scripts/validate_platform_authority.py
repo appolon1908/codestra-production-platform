@@ -59,6 +59,13 @@ def validate_composition() -> None:
     by_id = {item["id"]: item for item in components}
     assert by_id["caddy"]["source_path"] == "operations/caddy"
     assert by_id["kyqra-crawler"]["source_repository"] == CANONICAL_KYQRA_REPOSITORY
+    host_components = {
+        component_id
+        for host in composition.get("hosts", [])
+        for component_id in host.get("components", [])
+    }
+    unresolved = host_components - set(by_id)
+    assert not unresolved, f"undefined host components: {sorted(unresolved)}"
     repositories = {item.get("source_repository") for item in components}
     assert RETIRED_KYQRA_REPOSITORY not in repositories
     for component in components:
@@ -81,6 +88,15 @@ def validate_release_schema() -> None:
     assert schema["$defs"]["image_digest"]["pattern"] == (
         "^sha256:[0-9a-f]{64}$"
     )
+    gate = schema["$defs"]["environment_gate"]
+    assert gate["properties"]["evidence"]["items"]["$ref"] == (
+        "#/$defs/pinned_file"
+    )
+    assert gate["allOf"][0]["then"]["properties"]["evidence"]["minItems"] == 1
+    promotion = schema["properties"]["promotion"]
+    assert promotion["allOf"][0]["then"]["properties"]["staging"][
+        "properties"
+    ]["status"]["const"] == "accepted"
 
 
 def validate_caddy_home() -> None:
@@ -99,7 +115,7 @@ def validate_caddy_home() -> None:
     )
     assert "api.codestra.co" in api and "import security_headers" in api
     assert "auth.codestra.co" in auth and "import security_headers" in auth
-    assert "reverse_proxy 127.0.0.1:18103" in auth
+    assert "reverse_proxy keycloak:8080" in auth
     assert re.search(r"\(security_headers\)\s*\{", snippets)
 
 

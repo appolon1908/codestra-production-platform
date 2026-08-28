@@ -82,6 +82,49 @@
       "composition_input": "operations/monitoring/compose.monitoring.yaml",
       "role": "private metrics, logs, alerts, and release identity",
       "deployment_state": "reviewed-projection-required"
+    },
+    {
+      "id": "postgresql",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "operations/shared-postgresql",
+      "composition_input": "operations/shared-postgresql/compose.pitr-activation.yaml",
+      "role": "authoritative durable platform state and recovery",
+      "deployment_state": "backup-restore-evidence-required"
+    },
+    {
+      "id": "redis",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "config/redis-production-runtime-lock.json",
+      "role": "ephemeral cache, lease, lock, and rate coordination",
+      "deployment_state": "immutable-runtime-lock-required"
+    },
+    {
+      "id": "nats-jetstream",
+      "source_repository": "appolon1908-hue/Middleware-",
+      "source_path": "app/nats_transport.py",
+      "role": "durable cross-service event transport",
+      "deployment_state": "private-credentials-and-runtime-verification-required"
+    },
+    {
+      "id": "temporal",
+      "source_repository": "appolon1908-hue/Middleware-",
+      "source_path": "app/temporal_workflows.py",
+      "role": "recoverable long-running business workflows",
+      "deployment_state": "private-identity-and-runtime-verification-required"
+    },
+    {
+      "id": "telnexa",
+      "source_repository": "appolon1908-hue/telnexa",
+      "source_path": ".",
+      "role": "SMS provider control plane and Jasmin boundary",
+      "deployment_state": "provider-host-release-evidence-required"
+    },
+    {
+      "id": "klyrow",
+      "source_repository": "appolon1908-hue/klyrow.com",
+      "source_path": ".",
+      "role": "email provider control plane and Mautic/Postal boundary",
+      "deployment_state": "provider-host-release-evidence-required"
     }
   ]
 }
