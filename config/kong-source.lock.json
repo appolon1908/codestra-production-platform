@@ -210,6 +210,7 @@
   ],
   "schema": "codestra.platform.external-source-lock.v1",
   "security_contracts": {
+    "system_admin_required_scope": "platform.admin",
     "system_admin": {
       "authenticated_role_headers": [
         "platform_admin",
