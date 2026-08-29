@@ -61,7 +61,10 @@ def main() -> int:
         if snippet not in js:
             errors.append(f"realtime browser service missing invariant: {snippet}")
 
-    combined = "\n".join(path.read_text(encoding="utf-8") for path in MODULE.rglob("*.*"))
+    combined = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in MODULE.rglob("*.*")
+    )
     for forbidden in ("requests.post(", "auth=\"public\"", "vicidial/non_agent_api.php"):
         if forbidden in combined.lower():
             errors.append(f"forbidden realtime integration pattern: {forbidden}")
