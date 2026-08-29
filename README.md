@@ -6,7 +6,9 @@ This repository is retained as **historical deployment, runtime-reconciliation a
 
 It is **not the central release-authority repository for the current Codestra architecture**. Current services ship independently from their owning repositories and couple through versioned contracts. A multi-repository feature is considered released only when its participating repositories have immutable source/artifact identities and a cross-repository evidence note; no mutable central manifest may silently override a product repository's accepted source.
 
-Future shared API-edge Caddy source belongs with the gateway/edge authority in `appolon1908-hue/Kong` under the reviewed Caddy edge model. Existing Caddy/runtime material in this repository remains migration/reconciliation evidence until explicitly ported or retired through a separate, read-back-verified cutover.
+The dedicated `appolon1908-hue/Caddy` repository is the principal source for future shared Caddy edge configuration. Existing `operations/caddy/` material here is historical migration/reconciliation evidence. `appolon1908-hue/Kong` remains principal for Kong gateway services, routes, plugins and OIDC policy; Caddy forwarding to Kong does not make Kong the Caddy source authority.
+
+The reviewed historical `operations/caddy/api.codestra.co.caddy` baseline has been imported into `appolon1908-hue/Caddy` with provenance recorded. This historical copy remains unchanged as evidence and must not receive new Caddy feature development.
 
 Do not delete historical manifests, checksums, backup references, rollback evidence or runtime reconciliation records merely because authority has moved. They remain evidence for previously deployed states.
 
