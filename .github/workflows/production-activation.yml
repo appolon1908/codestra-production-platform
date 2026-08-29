@@ -1,144 +1,19 @@
-name: Protected production activation
+name: Historical production activation — reference only
 
 on:
   workflow_dispatch:
-    inputs:
-      action:
-        description: Allowlisted operator action
-        required: true
-        type: choice
-        default: preflight
-        options: [preflight, backup, validate-backup, restore-test, stage, canary, status, rollback, collect-evidence, stage-control-plane, validate-control-plane, rollback-control-plane, activate-control-plane, enable-production-web-traffic, disable-production-web-traffic]
-      protected_sha:
-        description: Exact protected platform SHA
-        required: true
-      image_digest:
-        description: Exact immutable middleware digest
-        required: true
-      change_id:
-        description: Approved change identifier
-        required: true
-        default: CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01
-      maintenance_date:
-        description: Approved date in YYYY-MM-DD
-        required: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: codestra-production-activation
-  cancel-in-progress: false
-
 jobs:
-  verify:
+  reference-only-block:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ inputs.protected_sha }}
-          persist-credentials: false
-      - name: Require protected source and fixed release tuple
-        env:
-          ACTION: ${{ inputs.action }}
-          PROTECTED_SHA: ${{ inputs.protected_sha }}
-          IMAGE_DIGEST: ${{ inputs.image_digest }}
-          CHANGE_ID: ${{ inputs.change_id }}
-          MAINTENANCE_DATE: ${{ inputs.maintenance_date }}
-          GH_TOKEN: ${{ github.token }}
+      - name: Refuse central production activation
         run: |
-          test "$(git rev-parse HEAD)" = "${PROTECTED_SHA}"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/release%2Fproduction-activation" --jq .commit.sha)" = "${PROTECTED_SHA}"
-          mkdir -m 0700 "${RUNNER_TEMP}/release"
-          gh release download "protected-${PROTECTED_SHA}" \
-            --repo "${GITHUB_REPOSITORY}" --dir "${RUNNER_TEMP}/release"
-          (cd "${RUNNER_TEMP}/release" && sha256sum --check --strict manifest.sha256)
-          install -m 0700 -d "${RUNNER_TEMP}/signature"
-          printf 'codestra-release %s\n' "${{ secrets.CODESTRA_RELEASE_SIGNING_PUBLIC_KEY }}" \
-            > "${RUNNER_TEMP}/signature/allowed_signers"
-          ssh-keygen -Y verify -q \
-            -f "${RUNNER_TEMP}/signature/allowed_signers" \
-            -I codestra-release -n codestra-release \
-            -s "${RUNNER_TEMP}/release/manifest.sha256.sig" \
-            < "${RUNNER_TEMP}/release/manifest.sha256"
-          printf 'SIGNING_PUBLIC_KEY_FINGERPRINT=%s\n' "$(
-            printf '%s\n' "${{ secrets.CODESTRA_RELEASE_SIGNING_PUBLIC_KEY }}" |
-              ssh-keygen -lf /dev/stdin -E sha256 | awk '{print $2}'
-          )"
-          python tools/validate_activation_request.py \
-            --action "${ACTION}" --sha "${PROTECTED_SHA}" \
-            --digest "${IMAGE_DIGEST}" --change-id "${CHANGE_ID}" \
-            --maintenance-date "${MAINTENANCE_DATE}" \
-            --manifest "${RUNNER_TEMP}/release/deployment-manifest.json"
-          python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
-          python tools/check_integration_architecture.py \
-            --evidence "${RUNNER_TEMP}/integration-architecture.json"
-      - name: Preserve fail-closed result
-        run: |
-          printf '%s\n' \
-            'PSTN_DIALING=DISABLED' \
-            'PRODUCTION_DIALING=DISABLED' \
-            'CALLS_PLACED=0' \
-            'PAYMENT_CHARGES_PERFORMED=0' \
-            'CUSTOMER_MESSAGES_SENT=0'
-
-  approved-operation:
-    needs: verify
-    environment: production
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    permissions:
-      contents: read
-    steps:
-      - name: Configure pinned restricted operator transport
-        env:
-          OPERATOR_KEY: ${{ secrets.CODESTRA_PRODUCTION_OPERATOR_SSH_KEY }}
-          OPERATOR_KNOWN_HOSTS: ${{ secrets.CODESTRA_PRODUCTION_OPERATOR_KNOWN_HOSTS }}
-          OPERATOR_HOST: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_HOST }}
-          OPERATOR_USER: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_USER }}
-        run: |
-          set -euo pipefail
-          test -n "${OPERATOR_KEY}"
-          test -n "${OPERATOR_KNOWN_HOSTS}"
-          test "${OPERATOR_HOST}" = '65.109.65.169'
-          test "${OPERATOR_USER}" = 'codestra-production-operator'
-          install -m 0700 -d "${RUNNER_TEMP}/operator-ssh"
-          printf '%s\n' "${OPERATOR_KEY}" > "${RUNNER_TEMP}/operator-ssh/id_ed25519"
-          printf '%s\n' "${OPERATOR_KNOWN_HOSTS}" > "${RUNNER_TEMP}/operator-ssh/known_hosts"
-          chmod 0600 "${RUNNER_TEMP}/operator-ssh/id_ed25519" "${RUNNER_TEMP}/operator-ssh/known_hosts"
-          ssh-keygen -y -f "${RUNNER_TEMP}/operator-ssh/id_ed25519" >/dev/null
-          ssh-keygen -F "${OPERATOR_HOST}" -f "${RUNNER_TEMP}/operator-ssh/known_hosts" >/dev/null
-
-      - name: Invoke certified allowlisted operator
-        env:
-          ACTION: ${{ inputs.action }}
-          PROTECTED_SHA: ${{ inputs.protected_sha }}
-          IMAGE_DIGEST: ${{ inputs.image_digest }}
-          CHANGE_ID: ${{ inputs.change_id }}
-          MAINTENANCE_DATE: ${{ inputs.maintenance_date }}
-          OPERATOR_HOST: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_HOST }}
-          OPERATOR_USER: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_USER }}
-          GHCR_TOKEN: ${{ secrets.CODESTRA_GHCR_DEPLOYMENT_READ_TOKEN }}
-        run: |
-          set -euo pipefail
-          ssh_args=(
-            -F /dev/null -T
-            -i "${RUNNER_TEMP}/operator-ssh/id_ed25519"
-            -o BatchMode=yes
-            -o ClearAllForwardings=yes
-            -o ConnectTimeout=15
-            -o IdentitiesOnly=yes
-            -o LogLevel=ERROR
-            -o PasswordAuthentication=no
-            -o StrictHostKeyChecking=yes
-            -o UserKnownHostsFile="${RUNNER_TEMP}/operator-ssh/known_hosts"
-          )
-          command="${ACTION} ${PROTECTED_SHA} ${IMAGE_DIGEST} ${CHANGE_ID} ${MAINTENANCE_DATE}"
-          if test "${ACTION}" = stage; then
-            test -n "${GHCR_TOKEN}"
-            printf '%s' "${GHCR_TOKEN}" |
-              ssh "${ssh_args[@]}" "${OPERATOR_USER}@${OPERATOR_HOST}" "${command}"
-          else
-            ssh "${ssh_args[@]}" "${OPERATOR_USER}@${OPERATOR_HOST}" "${command}" </dev/null
-          fi
+          echo 'REFERENCE_ONLY_REPOSITORY=YES'
+          echo 'CENTRAL_PRODUCTION_ACTIVATION=DISABLED'
+          echo 'Use each component principal repository and its reviewed deployment/activation path.'
+          echo 'Historical workflow implementation remains available in repository history.'
+          exit 1
