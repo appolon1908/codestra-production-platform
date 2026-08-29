@@ -2,14 +2,14 @@
 
 ## Full Codex Engineering, API, Database, Design and Production Mission
 
-**Mission owner:** Codestra  
-**Primary platform:** Odoo 19 + Codestra middleware + VICIdial + n8n  
-**Primary execution host:** Server A — `65.109.65.169` / `10.40.0.1`  
-**VICIdial host:** `65.21.67.207` — preserve this server and discover its current private address  
-**Provider host:** `37.27.128.39` / `10.40.0.4`  
-**Canonical API:** `https://api.codestra.co`  
-**Canonical identity issuer:** `https://auth.codestra.co/realms/codestra`  
-**Primary platform repository:** `appolon1908-hue/codestra-production-platform`  
+**Mission owner:** Codestra
+**Primary platform:** Odoo 19 + Codestra middleware + VICIdial + n8n
+**Primary execution host:** Server A — `65.109.65.169` / `10.40.0.1`
+**VICIdial host:** `65.21.67.207` — preserve this server and discover its current private address
+**Provider host:** `37.27.128.39` / `10.40.0.4`
+**Canonical API:** `https://api.codestra.co`
+**Canonical identity issuer:** `https://auth.codestra.co/realms/codestra`
+**Primary platform repository:** `appolon1908-hue/codestra-production-platform`
 **Existing Odoo module:** `codestra_vicidial_crm`
 
 ---
