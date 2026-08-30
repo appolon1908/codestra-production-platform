@@ -11,7 +11,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "deploy/middleware/compose.appolon-integration-api.yaml"
 LOCK = ROOT / "deploy/middleware/appolon-integration-api-lock.json"
-EXPECTED_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware@sha256:d9bbdda6b13983b429fdb063f500474421da9e14884c03415101a17a49e887f4"
+EXPECTED_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware@sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820"
 DISABLED = {
     "OUTBOX_DISPATCH_ENABLED",
     "ODOO_WRITE",
@@ -68,9 +68,9 @@ def validate() -> None:
     assert all(environment[name] == "false" for name in DISABLED)
     assert environment["APP_ENV"] == "production"
     assert environment["RUNTIME_PROFILE_ID"] == "codestra-middleware-production-compose-v1"
-    assert environment["APP_SOURCE_SHA"] == "24a86223d850a77cce3b72644e9fad7ff4f9acb0"
-    assert environment["IMAGE_DIGEST"] == "sha256:d9bbdda6b13983b429fdb063f500474421da9e14884c03415101a17a49e887f4"
-    assert environment["BUILD_TIME"] == "2026-08-30T12:50:23Z"
+    assert environment["APP_SOURCE_SHA"] == "f6748a58f8d2590520a4f28776770957061cdea1"
+    assert environment["IMAGE_DIGEST"] == "sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820"
+    assert environment["BUILD_TIME"] == "2026-08-30T13:24:37Z"
     assert environment["PRODUCTION_DIALING"] == "DISABLED"
     assert service["env_file"] == [{
         "path": "/etc/codestra/secrets/appolon-middleware-production.env",
@@ -78,11 +78,13 @@ def validate() -> None:
     }]
     assert SECRET_PATTERN.search(raw) is None
     assert lock["source"] == "https://github.com/appolon1908-hue/Middleware-"
-    assert lock["revision"] == "24a86223d850a77cce3b72644e9fad7ff4f9acb0"
-    assert lock["release_run"] == 33312550094
+    assert lock["revision"] == "f6748a58f8d2590520a4f28776770957061cdea1"
+    assert lock["release_run"] == 33314094004
     assert lock["runtime_profile"] == "codestra-middleware-production-compose-v1"
+    assert lock["database_name"] == "codestra_middleware_appolon"
+    assert lock["database_role"] == "appolon_middleware_api"
     assert lock["production_writes_enabled"] is False
-    assert lock["deployment_state"] == "REPOSITORY_ALIGNED_NOT_APPLIED"
+    assert lock["deployment_state"] == "ISOLATED_DATABASE_REVIEW_REQUIRED"
     assert lock["rollback"]["requires_separate_protected_apply"] is True
     assert lock["rollback"]["action"] == "remove_appolon_service_and_preserve_legacy_runtime"
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", lock["rollback"]["previous_image_digest"])
