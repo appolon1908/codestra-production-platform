@@ -27,9 +27,13 @@ readiness, migration head, and public route contracts.
 The protected `rollout-middleware` operator captures a transaction-consistent
 custom-format dump, database owner, Alembic head, checksum, and validated
 readiness-backup stamp before migration. `rollback-middleware` stops the three
-Middleware writers, preserves a checksum-bound failed-state dump, restores the
-pre-change database before starting the captured images, and refuses PASS until
-the prior migration head, image IDs, health, and fail-closed flags read back.
+replaced Middleware writers, preserves a checksum-bound failed-state dump,
+disables new database connections before terminating all remaining sessions,
+and recreates the database with connection limit zero. It restores the
+pre-change database as the PostgreSQL superuser, restores the captured
+connection policy only after `pg_restore`, starts the captured images, and
+refuses PASS until the prior migration head, image IDs, health, and fail-closed
+flags read back.
 
 ## Authorization authority
 

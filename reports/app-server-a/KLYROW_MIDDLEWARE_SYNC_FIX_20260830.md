@@ -63,9 +63,12 @@ directory before Docker Compose reads them. A retry preserves the original
 rollback point, and rollback must read back every captured image ID before it
 can record PASS. The rollback bundle also captures the pre-change Middleware
 database, owner, Alembic head, checksum, and validated readiness-backup
-reference. Rollback stops the three Middleware writers, preserves the failed
-database state, restores that pre-change database, and verifies its prior head.
-It never recreates PostgreSQL, Redis, Odoo, Kong, or n8n.
+reference. Rollback stops the three replaced Middleware writers, preserves the
+failed database state, disables new database connections before terminating all
+remaining client sessions, and recreates the database with connection limit
+zero. It restores the captured connection policy only after the pre-change dump
+is fully restored and verifies the prior head. It never recreates PostgreSQL,
+Redis, Odoo, Kong, or n8n.
 
 Do not replay the production Klyrow DLQ during deployment. After activation,
 submit one reserved `connectivity-audit` event, repeat its exact event ID to

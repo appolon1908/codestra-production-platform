@@ -372,7 +372,12 @@ def test_middleware_snapshot_flushes_bundle_before_marker(monkeypatch, tmp_path)
     monkeypatch.setattr(OPERATOR, "middleware_database_revision", lambda: "0054_previous")
 
     def run(command, **kwargs):
-        if "psql" in command:
+        statement = command[-1] if command else ""
+        if "datallowconn" in statement:
+            return subprocess.CompletedProcess(command, 0, b"true\n")
+        if "datconnlimit" in statement:
+            return subprocess.CompletedProcess(command, 0, b"-1\n")
+        if "pg_get_userbyid" in statement:
             return subprocess.CompletedProcess(command, 0, b"middleware_data_owner\n")
         if "pg_dump" in command:
             return subprocess.CompletedProcess(command, 0, b"pre-change-dump")
@@ -401,6 +406,8 @@ def test_middleware_snapshot_flushes_bundle_before_marker(monkeypatch, tmp_path)
     expected_members = {
         *(f"{service}.image-id" for service in OPERATOR.MIDDLEWARE_RUNTIME_SERVICES),
         "database-owner",
+        "database-allows-connections",
+        "database-connection-limit",
         "database-head",
         "readiness-backup-stamp",
         "middleware.dump",
@@ -435,6 +442,8 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
             "override": Path("/rollback.override.yaml"),
             "image_ids": image_ids,
             "database_owner": "middleware_data_owner",
+            "database_allows_connections": "true",
+            "database_connection_limit": "-1",
             "database_head": "0054_previous",
             "database_dump": b"pre-change-dump",
             "readiness_backup_stamp": "20260830T180000Z",
@@ -468,6 +477,34 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
     commands = [command for command, _ in calls]
     restore_index = next(index for index, command in enumerate(commands) if "pg_restore" in command)
     start_index = next(index for index, command in enumerate(commands) if "--force-recreate" in command)
+    fence_index = next(
+        index
+        for index, command in enumerate(commands)
+        if any("allow_connections false" in part for part in command)
+    )
+    terminate_index = next(
+        index
+        for index, command in enumerate(commands)
+        if any("pg_terminate_backend" in part for part in command)
+    )
+    create_index = next(
+        index
+        for index, command in enumerate(commands)
+        if any("create database" in part for part in command)
+    )
+    limit_restore_index = next(
+        index
+        for index, command in enumerate(commands)
+        if any("connection limit -1" in part for part in command)
+    )
+    connection_restore_index = next(
+        index
+        for index, command in enumerate(commands)
+        if any("allow_connections true" in part for part in command)
+    )
+    assert fence_index < terminate_index < create_index < restore_index
+    assert any("connection limit 0" in part for part in commands[create_index])
+    assert restore_index < limit_restore_index < connection_restore_index < start_index
     assert restore_index < start_index
     assert calls[restore_index][1]["stdin"] == b"pre-change-dump"
     assert (backup / result["failed_state_preserved"]).read_bytes() == b"failed-state-dump"
@@ -491,6 +528,8 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
             "override": Path("/rollback.override.yaml"),
             "image_ids": image_ids,
             "database_owner": "middleware_data_owner",
+            "database_allows_connections": "true",
+            "database_connection_limit": "-1",
             "database_head": "0054_previous",
             "database_dump": b"pre-change-dump",
             "readiness_backup_stamp": "20260830T180000Z",
@@ -502,13 +541,13 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
         lambda value, rollback_override: ["docker", "compose"],
     )
     calls = []
-    fail_createdb_once = True
+    fail_create_once = True
 
     def run(command, **kwargs):
-        nonlocal fail_createdb_once
+        nonlocal fail_create_once
         calls.append((command, kwargs))
-        if "createdb" in command and fail_createdb_once:
-            fail_createdb_once = False
+        if any("create database" in part for part in command) and fail_create_once:
+            fail_create_once = False
             raise subprocess.CalledProcessError(1, command)
         output = b"failed-state-dump" if "pg_dump" in command else b""
         return subprocess.CompletedProcess(command, 0, output)
@@ -564,6 +603,8 @@ def test_middleware_rollback_rejects_wrong_restored_image(monkeypatch, tmp_path)
             "override": Path("/rollback.override.yaml"),
             "image_ids": image_ids,
             "database_owner": "middleware_data_owner",
+            "database_allows_connections": "true",
+            "database_connection_limit": "-1",
             "database_head": "0054_previous",
             "database_dump": b"pre-change-dump",
             "readiness_backup_stamp": "20260830T180000Z",

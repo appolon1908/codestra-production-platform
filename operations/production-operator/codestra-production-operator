@@ -1038,6 +1038,34 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
     ], timeout=30).stdout.decode().strip()
     if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
         raise OperatorError("Middleware database owner readback failed")
+    database_allows_connections = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        f"select case when datallowconn then 'true' else 'false' end from pg_database where datname='{MIDDLEWARE_DB}'",
+    ], timeout=30).stdout.decode().strip()
+    if database_allows_connections not in {"true", "false"}:
+        raise OperatorError("Middleware database connection policy readback failed")
+    database_connection_limit = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        f"select datconnlimit from pg_database where datname='{MIDDLEWARE_DB}'",
+    ], timeout=30).stdout.decode().strip()
+    if re.fullmatch(r"-1|[0-9]{1,10}", database_connection_limit) is None:
+        raise OperatorError("Middleware database connection limit readback failed")
     database_head = middleware_database_revision()
     database_dump = run_bytes([
         "/usr/bin/docker",
@@ -1053,6 +1081,16 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
         raise OperatorError("Middleware pre-change database dump is empty")
     database_digest = hashlib.sha256(database_dump).hexdigest()
     atomic_root_text(backup / "database-owner", database_owner + "\n", mode=0o600)
+    atomic_root_text(
+        backup / "database-allows-connections",
+        database_allows_connections + "\n",
+        mode=0o600,
+    )
+    atomic_root_text(
+        backup / "database-connection-limit",
+        database_connection_limit + "\n",
+        mode=0o600,
+    )
     atomic_root_text(backup / "database-head", database_head + "\n", mode=0o600)
     atomic_root_text(
         backup / "readiness-backup-stamp",
@@ -1106,6 +1144,12 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
     database_owner = checked_root_file(backup / "database-owner")
     if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
         raise OperatorError("Middleware rollback database owner is malformed")
+    database_allows_connections = checked_root_file(backup / "database-allows-connections")
+    if database_allows_connections not in {"true", "false"}:
+        raise OperatorError("Middleware rollback connection policy is malformed")
+    database_connection_limit = checked_root_file(backup / "database-connection-limit")
+    if re.fullmatch(r"-1|[0-9]{1,10}", database_connection_limit) is None:
+        raise OperatorError("Middleware rollback connection limit is malformed")
     database_head = checked_root_file(backup / "database-head")
     if re.fullmatch(r"[0-9a-z_]{1,80}", database_head) is None:
         raise OperatorError("Middleware rollback database head is malformed")
@@ -1125,6 +1169,8 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
         "override": override,
         "image_ids": image_ids,
         "database_owner": database_owner,
+        "database_allows_connections": database_allows_connections,
+        "database_connection_limit": database_connection_limit,
         "database_head": database_head,
         "database_dump": database_dump,
         "readiness_backup_stamp": readiness_backup_stamp,
@@ -1295,6 +1341,20 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
             "-v",
             "ON_ERROR_STOP=1",
             "-c",
+            f"alter database {MIDDLEWARE_DB} with allow_connections false",
+        ], timeout=30)
+        run_bytes([
+            "/usr/bin/docker",
+            "exec",
+            MIDDLEWARE_DB_CONTAINER,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
             f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{MIDDLEWARE_DB}' and pid<>pg_backend_pid()",
         ], timeout=30)
         run_bytes([
@@ -1302,13 +1362,51 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
             "dropdb", "-U", "postgres", "--if-exists", MIDDLEWARE_DB,
         ], timeout=60)
         run_bytes([
-            "/usr/bin/docker", "exec", MIDDLEWARE_DB_CONTAINER,
-            "createdb", "-U", "postgres", "-O", str(bundle["database_owner"]), MIDDLEWARE_DB,
+            "/usr/bin/docker",
+            "exec",
+            MIDDLEWARE_DB_CONTAINER,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f"create database {MIDDLEWARE_DB} with owner {bundle['database_owner']} connection limit 0",
         ], timeout=60)
         run_bytes([
             "/usr/bin/docker", "exec", "-i", MIDDLEWARE_DB_CONTAINER,
             "pg_restore", "-U", "postgres", "--exit-on-error", "-d", MIDDLEWARE_DB,
         ], stdin=bundle["database_dump"], timeout=1800)
+        run_bytes([
+            "/usr/bin/docker",
+            "exec",
+            MIDDLEWARE_DB_CONTAINER,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f"alter database {MIDDLEWARE_DB} with connection limit {bundle['database_connection_limit']}",
+        ], timeout=30)
+        run_bytes([
+            "/usr/bin/docker",
+            "exec",
+            MIDDLEWARE_DB_CONTAINER,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f"alter database {MIDDLEWARE_DB} with allow_connections {bundle['database_allows_connections']}",
+        ], timeout=30)
         progress = record_middleware_rollback_progress(
             backup,
             "DATABASE_RESTORED",
