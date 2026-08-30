@@ -161,8 +161,21 @@ def test_activation_requires_exact_stage_and_validation_evidence(monkeypatch):
         lambda action, config: required.append(action) or Path(f"/{action}.json"),
     )
     monkeypatch.setattr(OPERATOR, "validate_backup_state", lambda: {"backup_stamp": "20260823T000000Z"})
-    monkeypatch.setattr(OPERATOR, "require_evidence_value", lambda path, key, value: None)
+    bindings = []
+    monkeypatch.setattr(
+        OPERATOR,
+        "require_evidence_value",
+        lambda path, key, value: bindings.append((path, key, value)),
+    )
     monkeypatch.setattr(OPERATOR, "validate_control_plane_rollback", lambda: {"rollback_stamp": "20260823T000001Z"})
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_middleware_rollback",
+        lambda config: {
+            "stamp": "20260823T000002Z",
+            "bundle_sha256": "a" * 64,
+        },
+    )
     monkeypatch.setattr(OPERATOR, "load_pointer", lambda path: None)
     monkeypatch.setattr(OPERATOR, "validate_control_plane", lambda config: {"control_plane": "PASS"})
     monkeypatch.setattr(OPERATOR, "verify_middleware_runtime", lambda config: {"middleware_runtime_digest": "PASS"})
@@ -173,6 +186,106 @@ def test_activation_requires_exact_stage_and_validation_evidence(monkeypatch):
     assert written["protected_sha"] == config["protected_sha"]
     assert result["rollback_ready"] == "PASS"
     assert "rollout-middleware" in required
+    assert bindings == [
+        (Path("/restore-test.json"), "tested_backup_stamp", "20260823T000000Z"),
+        (
+            Path("/rollout-middleware.json"),
+            "middleware_backup_stamp",
+            "20260823T000002Z",
+        ),
+        (
+            Path("/rollout-middleware.json"),
+            "middleware_rollback_bundle_sha256",
+            "a" * 64,
+        ),
+    ]
+    assert written["middleware_backup_stamp"] == "20260823T000002Z"
+    assert written["middleware_rollback_bundle_sha256"] == "a" * 64
+
+
+def test_activation_rejects_missing_or_corrupt_middleware_rollback(monkeypatch):
+    config = OPERATOR.load_release_config()
+    monkeypatch.setattr(
+        OPERATOR,
+        "require_action_evidence",
+        lambda action, value: Path(f"/{action}.json"),
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_backup_state",
+        lambda: {"backup_stamp": "20260823T000000Z"},
+    )
+    monkeypatch.setattr(OPERATOR, "require_evidence_value", lambda *args: None)
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_control_plane_rollback",
+        lambda: {"rollback_stamp": "20260823T000001Z"},
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_middleware_rollback",
+        lambda value: (_ for _ in ()).throw(
+            OPERATOR.OperatorError("Middleware rollback database dump checksum mismatch")
+        ),
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "load_pointer",
+        lambda path: pytest.fail("activation state must remain untouched"),
+    )
+
+    with pytest.raises(
+        OPERATOR.OperatorError,
+        match="Middleware rollback database dump checksum mismatch",
+    ):
+        OPERATOR.activate_control_plane(config)
+
+
+def test_activation_rejects_middleware_rollback_not_bound_to_rollout(monkeypatch):
+    config = OPERATOR.load_release_config()
+    evidence = Path("/rollout-middleware.json")
+    monkeypatch.setattr(
+        OPERATOR,
+        "require_action_evidence",
+        lambda action, value: evidence if action == "rollout-middleware" else Path(f"/{action}.json"),
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_backup_state",
+        lambda: {"backup_stamp": "20260823T000000Z"},
+    )
+
+    def require_binding(path, key, expected):
+        if key == "middleware_rollback_bundle_sha256":
+            raise OPERATOR.OperatorError(
+                "operator evidence middleware_rollback_bundle_sha256 mismatch"
+            )
+
+    monkeypatch.setattr(OPERATOR, "require_evidence_value", require_binding)
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_control_plane_rollback",
+        lambda: {"rollback_stamp": "20260823T000001Z"},
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_middleware_rollback",
+        lambda value: {
+            "stamp": "20260823T000002Z",
+            "bundle_sha256": "b" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "load_pointer",
+        lambda path: pytest.fail("activation state must remain untouched"),
+    )
+
+    with pytest.raises(
+        OPERATOR.OperatorError,
+        match="middleware_rollback_bundle_sha256 mismatch",
+    ):
+        OPERATOR.activate_control_plane(config)
 
 
 def test_restore_test_records_one_stable_backup_stamp(monkeypatch):
@@ -386,6 +499,7 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
         lambda value: {
             "stamp": "20260830T200000Z",
             "database_clients_running": (),
+            "bundle_sha256": "a" * 64,
         },
     )
     monkeypatch.setattr(
@@ -465,6 +579,7 @@ def test_middleware_rollout_failure_invokes_bounded_rollback(monkeypatch):
         lambda value: {
             "stamp": "20260830T200000Z",
             "database_clients_running": (),
+            "bundle_sha256": "a" * 64,
         },
     )
     monkeypatch.setattr(
@@ -503,6 +618,7 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
         lambda value: {
             "stamp": "20260830T190000Z",
             "database_clients_running": (),
+            "bundle_sha256": "a" * 64,
         },
     )
     monkeypatch.setattr(

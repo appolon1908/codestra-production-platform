@@ -1562,7 +1562,8 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
         or stat.S_IMODE(info.st_mode) != 0o700
     ):
         raise OperatorError("Middleware rollback directory is unsafe")
-    if middleware_rollback_target(stamp) != config:
+    rollback_target = middleware_rollback_target(stamp)
+    if rollback_target != config:
         raise OperatorError("Middleware rollback target does not match the exact release")
     image_ids: dict[str, str] = {}
     for service in MIDDLEWARE_RUNTIME_SERVICES:
@@ -1574,7 +1575,7 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
             raise OperatorError("Middleware rollback image tag mismatch")
         image_ids[service] = image_id
     override = backup / "rollback.override.yaml"
-    checked_root_bytes(override)
+    override_digest = hashlib.sha256(checked_root_bytes(override)).hexdigest()
     database_owner = checked_root_file(backup / "database-owner")
     if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
         raise OperatorError("Middleware rollback database owner is malformed")
@@ -1614,6 +1615,26 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
         or not hmac.compare_digest(database_dump_digest, expected_dump_digest)
     ):
         raise OperatorError("Middleware rollback database dump checksum mismatch")
+    bundle_manifest = {
+        "stamp": stamp,
+        "release": rollback_target,
+        "image_ids": image_ids,
+        "override_sha256": override_digest,
+        "database_owner": database_owner,
+        "database_allows_connections": database_allows_connections,
+        "database_connection_limit": database_connection_limit,
+        "database_head": database_head,
+        "database_clients_running": list(database_clients_running),
+        "database_dump_sha256": expected_dump_digest,
+        "readiness_backup_stamp": readiness_backup_stamp,
+    }
+    bundle_digest = hashlib.sha256(
+        json.dumps(
+            bundle_manifest,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     return {
         "stamp": stamp,
         "override": override,
@@ -1626,6 +1647,23 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
         "database_dump_path": database_dump_path,
         "database_dump_sha256": expected_dump_digest,
         "readiness_backup_stamp": readiness_backup_stamp,
+        "bundle_sha256": bundle_digest,
+    }
+
+
+def middleware_rollback_evidence(bundle: dict[str, object]) -> dict[str, str]:
+    stamp = bundle.get("stamp")
+    digest = bundle.get("bundle_sha256")
+    if (
+        not isinstance(stamp, str)
+        or re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp) is None
+        or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+    ):
+        raise OperatorError("Middleware rollback evidence binding is malformed")
+    return {
+        "middleware_backup_stamp": stamp,
+        "middleware_rollback_bundle_sha256": digest,
     }
 
 
@@ -2055,7 +2093,7 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
             resume_middleware_database_clients(stamp, database_clients_running)
         return {
             **runtime,
-            "middleware_backup_stamp": stamp,
+            **middleware_rollback_evidence(bundle),
             "middleware_database_head": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
             "middleware_rollout": "PASS",
             "middleware_already_current": True,
@@ -2092,7 +2130,7 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
         raise
     return {
         **runtime,
-        "middleware_backup_stamp": stamp,
+        **middleware_rollback_evidence(bundle),
         "middleware_database_head": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
         "middleware_rollout": "PASS",
     }
@@ -2124,6 +2162,9 @@ def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
         backup["backup_stamp"],
     )
     rollback = validate_control_plane_rollback()
+    middleware_rollback = validate_middleware_rollback(config)
+    for key, expected in middleware_rollback_evidence(middleware_rollback).items():
+        require_evidence_value(middleware_evidence, key, expected)
     previous = load_pointer(ACTIVE_RELEASE_POINTER)
     if previous is not None:
         atomic_root_json(PREVIOUS_RELEASE_POINTER, previous)
@@ -2141,6 +2182,8 @@ def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
             "middleware_evidence": middleware_evidence.name,
             "backup_stamp": backup["backup_stamp"],
             "rollback_stamp": rollback["rollback_stamp"],
+            "middleware_backup_stamp": middleware_rollback["stamp"],
+            "middleware_rollback_bundle_sha256": middleware_rollback["bundle_sha256"],
         }
         atomic_root_json(ACTIVE_RELEASE_POINTER, active)
     except Exception:
