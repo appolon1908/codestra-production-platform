@@ -129,6 +129,7 @@ MIDDLEWARE_PROJECT_DIRECTORY = Path("/opt/codestra/compose")
 MIDDLEWARE_COMPOSE_RELEASE_ROOT = Path("/opt/codestra/releases/middleware-compose")
 MIDDLEWARE_BACKUP_ROOT = Path("/opt/codestra/backups/middleware-protected-deploy")
 MIDDLEWARE_ROLLBACK_MARKER = MIDDLEWARE_BACKUP_ROOT / "LAST_SUCCESS"
+MIDDLEWARE_ROLLBACK_PROGRESS = "rollback-progress.json"
 MIDDLEWARE_DB_CONTAINER = "codestra-postgres-1"
 MIDDLEWARE_DB = "codestra_middleware"
 MIDDLEWARE_REQUIRED_DATABASE_HEAD = "0056_klyrow_delivery_events"
@@ -702,22 +703,74 @@ def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
     return {"rollback_stamp": stamp, "database_restored": "PASS", "external_delivery": "DISABLED"}
 
 
-def atomic_root_json(path: Path, payload: dict[str, object]) -> None:
-    """Commit a small root-owned state pointer without a partial-write window."""
-    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+def checked_operator_bytes(path: Path, *, expected_mode: int) -> bytes:
+    """Read a no-follow file owned by the effective operator identity."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise OperatorError(f"operator state unavailable: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OperatorError(f"operator state type unsafe: {path}")
+        if info.st_uid != os.geteuid() or info.st_gid != os.getegid():
+            raise OperatorError(f"operator state ownership unsafe: {path}")
+        if stat.S_IMODE(info.st_mode) != expected_mode:
+            raise OperatorError(f"operator state mode unsafe: {path}")
+        return stream.read()
+
+
+def fsync_directory(path: Path) -> None:
     descriptor = os.open(
-        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644
+        path,
+        os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
     )
     try:
-        with os.fdopen(descriptor, "w", encoding="ascii") as stream:
-            json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
-            stream.write("\n")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def atomic_root_bytes(path: Path, payload: bytes, *, mode: int) -> None:
+    """Atomically publish and read back root-operator state."""
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    descriptor = os.open(
+        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            os.fchmod(stream.fileno(), mode)
+            stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        fsync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
+    if checked_operator_bytes(path, expected_mode=mode) != payload:
+        raise OperatorError(f"operator state readback mismatch: {path}")
+
+
+def atomic_root_text(path: Path, value: str, *, mode: int) -> None:
+    try:
+        payload = value.encode("ascii")
+    except UnicodeError as error:
+        raise OperatorError("operator state is not ASCII") from error
+    atomic_root_bytes(path, payload, mode=mode)
+
+
+def atomic_root_json(
+    path: Path,
+    payload: dict[str, object],
+    *,
+    mode: int = 0o644,
+) -> None:
+    """Commit a small root-owned state pointer without a partial-write window."""
+    encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "ascii"
+    )
+    atomic_root_bytes(path, encoded, mode=mode)
 
 
 def validate_control_plane_rollback() -> dict[str, str]:
@@ -1014,8 +1067,7 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
     target = backup / "rollout-target.json"
     target.write_text(json.dumps(config, sort_keys=True, separators=(",", ":")) + "\n", encoding="ascii")
     target.chmod(0o600)
-    MIDDLEWARE_ROLLBACK_MARKER.write_text(stamp + "\n", encoding="ascii")
-    MIDDLEWARE_ROLLBACK_MARKER.chmod(0o600)
+    atomic_root_text(MIDDLEWARE_ROLLBACK_MARKER, stamp + "\n", mode=0o600)
     return stamp
 
 
@@ -1074,73 +1126,88 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
     }
 
 
-def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
-    bundle = validate_middleware_rollback(config)
-    stamp = str(bundle["stamp"])
+def middleware_rollback_progress(backup: Path) -> dict[str, str] | None:
+    progress_path = backup / MIDDLEWARE_ROLLBACK_PROGRESS
+    if not progress_path.exists():
+        if progress_path.is_symlink():
+            raise OperatorError("Middleware rollback progress is unsafe")
+        return None
+    try:
+        progress = json.loads(
+            checked_operator_bytes(progress_path, expected_mode=0o600).decode("ascii")
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OperatorError("Middleware rollback progress is malformed") from error
+    required = {"phase", "failed_state", "failed_state_sha256"}
+    if not isinstance(progress, dict) or set(progress) != required:
+        raise OperatorError("Middleware rollback progress schema mismatch")
+    if progress["phase"] not in {"FAILED_STATE_PRESERVED", "DATABASE_RESTORED", "COMPLETE"}:
+        raise OperatorError("Middleware rollback progress phase is invalid")
+    failed_state = progress["failed_state"]
+    failed_digest = progress["failed_state_sha256"]
+    if (
+        not isinstance(failed_state, str)
+        or re.fullmatch(r"failed-state-[0-9]{8}T[0-9]{6}Z-[0-9]+\.dump", failed_state) is None
+        or not isinstance(failed_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", failed_digest) is None
+    ):
+        raise OperatorError("Middleware rollback failed-state reference is malformed")
+    failed_bytes = checked_operator_bytes(backup / failed_state, expected_mode=0o600)
+    checksum = checked_operator_bytes(
+        backup / f"{failed_state}.sha256", expected_mode=0o600
+    ).decode("ascii").strip()
+    if (
+        not failed_bytes
+        or not hmac.compare_digest(hashlib.sha256(failed_bytes).hexdigest(), failed_digest)
+        or not hmac.compare_digest(checksum, failed_digest)
+    ):
+        raise OperatorError("Middleware rollback failed-state checksum mismatch")
+    return {key: str(value) for key, value in progress.items()}
+
+
+def record_middleware_rollback_progress(
+    backup: Path,
+    phase: str,
+    failed_state: str,
+    failed_digest: str,
+) -> dict[str, str]:
+    progress = {
+        "phase": phase,
+        "failed_state": failed_state,
+        "failed_state_sha256": failed_digest,
+    }
+    atomic_root_json(
+        backup / MIDDLEWARE_ROLLBACK_PROGRESS,
+        progress,
+        mode=0o600,
+    )
+    readback = middleware_rollback_progress(backup)
+    if readback != progress:
+        raise OperatorError("Middleware rollback progress readback mismatch")
+    return progress
+
+
+def prepare_middleware_rollout(stamp: str) -> None:
+    """Retire only a completed retry marker before a new rollout attempt."""
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    progress = middleware_rollback_progress(backup)
+    if progress is None:
+        return
+    if progress["phase"] != "COMPLETE":
+        raise OperatorError("Middleware rollback is incomplete; resume rollback before rollout")
+    progress_path = backup / MIDDLEWARE_ROLLBACK_PROGRESS
+    archived = backup / f"rollback-progress-complete-{time.time_ns()}.json"
+    expected = checked_operator_bytes(progress_path, expected_mode=0o600)
+    os.replace(progress_path, archived)
+    fsync_directory(backup)
+    if checked_operator_bytes(archived, expected_mode=0o600) != expected:
+        raise OperatorError("Middleware completed rollback archive readback mismatch")
+
+
+def verify_middleware_rollback_readback(bundle: dict[str, object]) -> str:
     image_ids = bundle["image_ids"]
     if not isinstance(image_ids, dict):
         raise OperatorError("Middleware rollback image map is malformed")
-    compose = middleware_compose(config, rollback_override=bundle["override"])
-    run_bytes([
-        *compose,
-        "stop",
-        "--timeout",
-        "30",
-        *MIDDLEWARE_RUNTIME_SERVICES,
-    ], timeout=180)
-    backup = MIDDLEWARE_BACKUP_ROOT / stamp
-    failed_state = backup / f"failed-state-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}.dump"
-    failed_dump = run_bytes([
-        "/usr/bin/docker",
-        "exec",
-        MIDDLEWARE_DB_CONTAINER,
-        "pg_dump",
-        "-U",
-        "postgres",
-        "-Fc",
-        MIDDLEWARE_DB,
-    ], timeout=1800).stdout
-    if not failed_dump:
-        raise OperatorError("Middleware failed-state database dump is empty")
-    failed_state.write_bytes(failed_dump)
-    failed_state.chmod(0o600)
-    failed_checksum = failed_state.with_suffix(".dump.sha256")
-    failed_checksum.write_text(hashlib.sha256(failed_dump).hexdigest() + "\n", encoding="ascii")
-    failed_checksum.chmod(0o600)
-    run_bytes([
-        "/usr/bin/docker",
-        "exec",
-        MIDDLEWARE_DB_CONTAINER,
-        "psql",
-        "-U",
-        "postgres",
-        "-d",
-        "postgres",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-c",
-        f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{MIDDLEWARE_DB}' and pid<>pg_backend_pid()",
-    ], timeout=30)
-    run_bytes([
-        "/usr/bin/docker", "exec", MIDDLEWARE_DB_CONTAINER,
-        "dropdb", "-U", "postgres", "--if-exists", MIDDLEWARE_DB,
-    ], timeout=60)
-    run_bytes([
-        "/usr/bin/docker", "exec", MIDDLEWARE_DB_CONTAINER,
-        "createdb", "-U", "postgres", "-O", str(bundle["database_owner"]), MIDDLEWARE_DB,
-    ], timeout=60)
-    run_bytes([
-        "/usr/bin/docker", "exec", "-i", MIDDLEWARE_DB_CONTAINER,
-        "pg_restore", "-U", "postgres", "--exit-on-error", "-d", MIDDLEWARE_DB,
-    ], stdin=bundle["database_dump"], timeout=1800)
-    run_bytes([
-        *compose,
-        "up",
-        "--detach",
-        "--no-deps",
-        "--force-recreate",
-        *MIDDLEWARE_RUNTIME_SERVICES,
-    ], timeout=600)
     wait_middleware_health()
     for service, container in MIDDLEWARE_RUNTIME_SERVICES.items():
         current = docker_inspect(container)
@@ -1154,12 +1221,116 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
     restored_head = middleware_database_revision()
     if restored_head != bundle["database_head"]:
         raise OperatorError("Middleware rollback database head readback mismatch")
+    return restored_head
+
+
+def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
+    bundle = validate_middleware_rollback(config)
+    stamp = str(bundle["stamp"])
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    progress = middleware_rollback_progress(backup)
+    if progress is not None and progress["phase"] == "COMPLETE":
+        restored_head = verify_middleware_rollback_readback(bundle)
+        return {
+            "middleware_rollback_stamp": stamp,
+            "middleware_rollback": "PASS",
+            "middleware_database_head": restored_head,
+            "readiness_backup_stamp": bundle["readiness_backup_stamp"],
+            "failed_state_preserved": progress["failed_state"],
+            "middleware_rollback_already_complete": True,
+        }
+    compose = middleware_compose(config, rollback_override=bundle["override"])
+    run_bytes([
+        *compose,
+        "stop",
+        "--timeout",
+        "30",
+        *MIDDLEWARE_RUNTIME_SERVICES,
+    ], timeout=180)
+    if progress is None:
+        failed_state_name = (
+            f"failed-state-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+            f"-{os.getpid()}.dump"
+        )
+        failed_dump = run_bytes([
+            "/usr/bin/docker",
+            "exec",
+            MIDDLEWARE_DB_CONTAINER,
+            "pg_dump",
+            "-U",
+            "postgres",
+            "-Fc",
+            MIDDLEWARE_DB,
+        ], timeout=1800).stdout
+        if not failed_dump:
+            raise OperatorError("Middleware failed-state database dump is empty")
+        failed_digest = hashlib.sha256(failed_dump).hexdigest()
+        atomic_root_bytes(backup / failed_state_name, failed_dump, mode=0o600)
+        atomic_root_text(
+            backup / f"{failed_state_name}.sha256",
+            failed_digest + "\n",
+            mode=0o600,
+        )
+        progress = record_middleware_rollback_progress(
+            backup,
+            "FAILED_STATE_PRESERVED",
+            failed_state_name,
+            failed_digest,
+        )
+    if progress["phase"] == "FAILED_STATE_PRESERVED":
+        run_bytes([
+            "/usr/bin/docker",
+            "exec",
+            MIDDLEWARE_DB_CONTAINER,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{MIDDLEWARE_DB}' and pid<>pg_backend_pid()",
+        ], timeout=30)
+        run_bytes([
+            "/usr/bin/docker", "exec", MIDDLEWARE_DB_CONTAINER,
+            "dropdb", "-U", "postgres", "--if-exists", MIDDLEWARE_DB,
+        ], timeout=60)
+        run_bytes([
+            "/usr/bin/docker", "exec", MIDDLEWARE_DB_CONTAINER,
+            "createdb", "-U", "postgres", "-O", str(bundle["database_owner"]), MIDDLEWARE_DB,
+        ], timeout=60)
+        run_bytes([
+            "/usr/bin/docker", "exec", "-i", MIDDLEWARE_DB_CONTAINER,
+            "pg_restore", "-U", "postgres", "--exit-on-error", "-d", MIDDLEWARE_DB,
+        ], stdin=bundle["database_dump"], timeout=1800)
+        progress = record_middleware_rollback_progress(
+            backup,
+            "DATABASE_RESTORED",
+            progress["failed_state"],
+            progress["failed_state_sha256"],
+        )
+    run_bytes([
+        *compose,
+        "up",
+        "--detach",
+        "--no-deps",
+        "--force-recreate",
+        *MIDDLEWARE_RUNTIME_SERVICES,
+    ], timeout=600)
+    restored_head = verify_middleware_rollback_readback(bundle)
+    progress = record_middleware_rollback_progress(
+        backup,
+        "COMPLETE",
+        progress["failed_state"],
+        progress["failed_state_sha256"],
+    )
     return {
         "middleware_rollback_stamp": stamp,
         "middleware_rollback": "PASS",
         "middleware_database_head": restored_head,
         "readiness_backup_stamp": bundle["readiness_backup_stamp"],
-        "failed_state_preserved": failed_state.name,
+        "failed_state_preserved": progress["failed_state"],
     }
 
 
@@ -1215,6 +1386,7 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
             "middleware_rollout": "PASS",
             "middleware_already_current": True,
         }
+    prepare_middleware_rollout(stamp)
     try:
         run_bytes([
             *compose,

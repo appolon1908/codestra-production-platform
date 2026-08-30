@@ -325,6 +325,35 @@ def test_compose_layers_are_copied_before_privileged_use(monkeypatch, tmp_path):
     assert all(path.stat().st_mode & 0o777 == 0o600 for path in trusted)
 
 
+def test_middleware_rollback_marker_is_published_atomically(monkeypatch, tmp_path):
+    marker = tmp_path / "LAST_SUCCESS"
+    replacements = []
+    fsyncs = []
+    real_replace = OPERATOR.os.replace
+    real_fsync = OPERATOR.os.fsync
+
+    def replace(source, destination):
+        replacements.append((Path(source), Path(destination)))
+        real_replace(source, destination)
+
+    def fsync(descriptor):
+        fsyncs.append(descriptor)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(OPERATOR.os, "replace", replace)
+    monkeypatch.setattr(OPERATOR.os, "fsync", fsync)
+    OPERATOR.atomic_root_text(marker, "20260830T190000Z\n", mode=0o600)
+
+    assert marker.read_text() == "20260830T190000Z\n"
+    assert marker.stat().st_mode & 0o777 == 0o600
+    assert len(replacements) == 1
+    assert replacements[0][1] == marker
+    assert len(fsyncs) >= 2
+    assert not list(tmp_path.glob(".LAST_SUCCESS.*.tmp"))
+    snapshot_source = OPERATOR_PATH.read_text()
+    assert "atomic_root_text(MIDDLEWARE_ROLLBACK_MARKER, stamp + \"\\n\", mode=0o600)" in snapshot_source
+
+
 def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch, tmp_path):
     config = OPERATOR.load_release_config()
     stamp = "20260830T190000Z"
@@ -379,6 +408,83 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
     assert restore_index < start_index
     assert calls[restore_index][1]["stdin"] == b"pre-change-dump"
     assert (backup / result["failed_state_preserved"]).read_bytes() == b"failed-state-dump"
+
+
+def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
+    config = OPERATOR.load_release_config()
+    stamp = "20260830T191500Z"
+    backup = tmp_path / stamp
+    backup.mkdir(mode=0o700)
+    monkeypatch.setattr(OPERATOR, "MIDDLEWARE_BACKUP_ROOT", tmp_path)
+    image_ids = {
+        service: "sha256:" + str(index) * 64
+        for index, service in enumerate(OPERATOR.MIDDLEWARE_RUNTIME_SERVICES, 1)
+    }
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_middleware_rollback",
+        lambda value: {
+            "stamp": stamp,
+            "override": Path("/rollback.override.yaml"),
+            "image_ids": image_ids,
+            "database_owner": "middleware_data_owner",
+            "database_head": "0054_previous",
+            "database_dump": b"pre-change-dump",
+            "readiness_backup_stamp": "20260830T180000Z",
+        },
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_compose",
+        lambda value, rollback_override: ["docker", "compose"],
+    )
+    calls = []
+    fail_createdb_once = True
+
+    def run(command, **kwargs):
+        nonlocal fail_createdb_once
+        calls.append((command, kwargs))
+        if "createdb" in command and fail_createdb_once:
+            fail_createdb_once = False
+            raise subprocess.CalledProcessError(1, command)
+        output = b"failed-state-dump" if "pg_dump" in command else b""
+        return subprocess.CompletedProcess(command, 0, output)
+
+    monkeypatch.setattr(OPERATOR, "run_bytes", run)
+    monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
+    monkeypatch.setattr(OPERATOR, "middleware_database_revision", lambda: "0054_previous")
+
+    def inspect(container):
+        service = next(
+            service
+            for service, expected_container in OPERATOR.MIDDLEWARE_RUNTIME_SERVICES.items()
+            if expected_container == container
+        )
+        environment = [f"{name}=false" for name in OPERATOR.MIDDLEWARE_REQUIRED_FALSE_FLAGS]
+        return {"Image": image_ids[service], "Config": {"Env": environment}}
+
+    monkeypatch.setattr(OPERATOR, "docker_inspect", inspect)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        OPERATOR.rollback_middleware(config)
+    progress = OPERATOR.middleware_rollback_progress(backup)
+    assert progress is not None
+    assert progress["phase"] == "FAILED_STATE_PRESERVED"
+    with pytest.raises(OPERATOR.OperatorError, match="rollback is incomplete"):
+        OPERATOR.prepare_middleware_rollout(stamp)
+
+    result = OPERATOR.rollback_middleware(config)
+    assert result["middleware_rollback"] == "PASS"
+    assert sum("pg_dump" in command for command, _ in calls) == 1
+    assert sum("dropdb" in command for command, _ in calls) == 2
+    complete = OPERATOR.middleware_rollback_progress(backup)
+    assert complete is not None
+    assert complete["phase"] == "COMPLETE"
+
+    call_count = len(calls)
+    repeated = OPERATOR.rollback_middleware(config)
+    assert repeated["middleware_rollback_already_complete"] is True
+    assert len(calls) == call_count
 
 
 def test_middleware_rollback_rejects_wrong_restored_image(monkeypatch, tmp_path):
