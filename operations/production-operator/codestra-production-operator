@@ -1415,6 +1415,24 @@ def verify_middleware_rollback_readback(bundle: dict[str, object]) -> str:
     return restored_head
 
 
+def middleware_database_exists() -> bool:
+    result = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        f"select case when exists(select 1 from pg_database where datname='{MIDDLEWARE_DB}') then 'true' else 'false' end",
+    ], timeout=30).stdout.decode().strip()
+    if result not in {"true", "false"}:
+        raise OperatorError("Middleware database existence readback failed")
+    return result == "true"
+
+
 def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
     bundle = validate_middleware_rollback(config)
     stamp = str(bundle["stamp"])
@@ -1469,20 +1487,21 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
             failed_digest,
         )
     if progress["phase"] == "FAILED_STATE_PRESERVED":
-        run_bytes([
-            "/usr/bin/docker",
-            "exec",
-            MIDDLEWARE_DB_CONTAINER,
-            "psql",
-            "-U",
-            "postgres",
-            "-d",
-            "postgres",
-            "-v",
-            "ON_ERROR_STOP=1",
-            "-c",
-            f"alter database {MIDDLEWARE_DB} with allow_connections false",
-        ], timeout=30)
+        if middleware_database_exists():
+            run_bytes([
+                "/usr/bin/docker",
+                "exec",
+                MIDDLEWARE_DB_CONTAINER,
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                "postgres",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                f"alter database {MIDDLEWARE_DB} with allow_connections false",
+            ], timeout=30)
         run_bytes([
             "/usr/bin/docker",
             "exec",

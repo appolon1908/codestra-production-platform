@@ -561,6 +561,7 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
 
     monkeypatch.setattr(OPERATOR, "stream_command_to_atomic_file", stream_dump)
     monkeypatch.setattr(OPERATOR, "run_with_verified_file_stdin", restore)
+    monkeypatch.setattr(OPERATOR, "middleware_database_exists", lambda: True)
     monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
     monkeypatch.setattr(OPERATOR, "middleware_database_revision", lambda: "0054_previous")
 
@@ -649,13 +650,19 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
     )
     calls = []
     fail_create_once = True
+    database_present = True
+    existence_checks = []
 
     def run(command, **kwargs):
-        nonlocal fail_create_once
+        nonlocal fail_create_once, database_present
         calls.append((command, kwargs))
+        if "dropdb" in command:
+            database_present = False
         if any("create database" in part for part in command) and fail_create_once:
             fail_create_once = False
             raise subprocess.CalledProcessError(1, command)
+        if any("create database" in part for part in command):
+            database_present = True
         return subprocess.CompletedProcess(command, 0, b"")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
@@ -672,6 +679,12 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
 
     monkeypatch.setattr(OPERATOR, "stream_command_to_atomic_file", stream_dump)
     monkeypatch.setattr(OPERATOR, "run_with_verified_file_stdin", restore)
+
+    def database_exists():
+        existence_checks.append(database_present)
+        return database_present
+
+    monkeypatch.setattr(OPERATOR, "middleware_database_exists", database_exists)
     monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
     monkeypatch.setattr(OPERATOR, "middleware_database_revision", lambda: "0054_previous")
 
@@ -698,6 +711,11 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
     assert result["middleware_rollback"] == "PASS"
     assert sum("pg_dump" in command for command, _ in calls) == 1
     assert sum("dropdb" in command for command, _ in calls) == 2
+    assert existence_checks == [True, False]
+    assert sum(
+        any("allow_connections false" in part for part in command)
+        for command, _ in calls
+    ) == 1
     complete = OPERATOR.middleware_rollback_progress(backup)
     assert complete is not None
     assert complete["phase"] == "COMPLETE"
@@ -706,6 +724,28 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
     repeated = OPERATOR.rollback_middleware(config)
     assert repeated["middleware_rollback_already_complete"] is True
     assert len(calls) == call_count
+
+
+@pytest.mark.parametrize(("output", "expected"), [(b"true\n", True), (b"false\n", False)])
+def test_middleware_database_existence_readback(monkeypatch, output, expected):
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_bytes",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, output),
+    )
+
+    assert OPERATOR.middleware_database_exists() is expected
+
+
+def test_middleware_database_existence_rejects_unknown_output(monkeypatch):
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_bytes",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, b""),
+    )
+
+    with pytest.raises(OPERATOR.OperatorError, match="existence readback failed"):
+        OPERATOR.middleware_database_exists()
 
 
 def test_middleware_rollback_rejects_wrong_restored_image(monkeypatch, tmp_path):
@@ -751,6 +791,7 @@ def test_middleware_rollback_rejects_wrong_restored_image(monkeypatch, tmp_path)
         "run_with_verified_file_stdin",
         lambda command, path, digest, **kwargs: subprocess.CompletedProcess(command, 0, b""),
     )
+    monkeypatch.setattr(OPERATOR, "middleware_database_exists", lambda: True)
     monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
     monkeypatch.setattr(
         OPERATOR,
