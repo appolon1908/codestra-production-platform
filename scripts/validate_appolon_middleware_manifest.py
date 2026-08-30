@@ -11,7 +11,10 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "deploy/middleware/compose.appolon-integration-api.yaml"
 LOCK = ROOT / "deploy/middleware/appolon-integration-api-lock.json"
-EXPECTED_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware@sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820"
+EXPECTED_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware@sha256:83e6fd7d6e824a6259b574f0aacbbf08dc58f4419caf0193344d61e5717d5d63"
+EXPECTED_SOURCE = "c4fb367577581f004745760c83963cdd96ed518e"
+EXPECTED_RELEASE_RUN = 33306692194
+EXPECTED_BUILD_TIME = "2026-08-30T10:31:49Z"
 DISABLED = {
     "OUTBOX_DISPATCH_ENABLED",
     "ODOO_WRITE",
@@ -67,10 +70,10 @@ def validate() -> None:
     environment = service["environment"]
     assert all(environment[name] == "false" for name in DISABLED)
     assert environment["APP_ENV"] == "production"
-    assert environment["RUNTIME_PROFILE_ID"] == "codestra-middleware-production-compose-v1"
-    assert environment["APP_SOURCE_SHA"] == "f6748a58f8d2590520a4f28776770957061cdea1"
-    assert environment["IMAGE_DIGEST"] == "sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820"
-    assert environment["BUILD_TIME"] == "2026-08-30T13:24:37Z"
+    assert environment["RUNTIME_PROFILE_ID"] == "codestra-middleware-production-v1"
+    assert environment["APP_SOURCE_SHA"] == EXPECTED_SOURCE
+    assert environment["IMAGE_DIGEST"] == EXPECTED_IMAGE.rsplit("@", 1)[1]
+    assert environment["BUILD_TIME"] == EXPECTED_BUILD_TIME
     assert environment["PRODUCTION_DIALING"] == "DISABLED"
     assert service["env_file"] == [{
         "path": "/etc/codestra/secrets/appolon-middleware-production.env",
@@ -78,9 +81,9 @@ def validate() -> None:
     }]
     assert SECRET_PATTERN.search(raw) is None
     assert lock["source"] == "https://github.com/appolon1908-hue/Middleware-"
-    assert lock["revision"] == "f6748a58f8d2590520a4f28776770957061cdea1"
-    assert lock["release_run"] == 33314094004
-    assert lock["runtime_profile"] == "codestra-middleware-production-compose-v1"
+    assert lock["revision"] == EXPECTED_SOURCE
+    assert lock["release_run"] == EXPECTED_RELEASE_RUN
+    assert lock["runtime_profile"] == "codestra-middleware-production-v1"
     assert lock["database_name"] == "codestra_middleware_appolon"
     assert lock["database_role"] == "appolon_middleware_api"
     assert lock["production_writes_enabled"] is False

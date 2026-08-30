@@ -28,21 +28,24 @@ exposes no host port. Kong reaches the new N8N control-plane runtime only
 through the external private `codestra-kong_kong_backend` network and stable
 alias `middleware-integration-api`.
 
-The deployment candidate is source
-`f6748a58f8d2590520a4f28776770957061cdea1`, signed release run
-`33314094004`, and immutable image digest
-`sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820`.
-It selects the fail-closed `codestra-middleware-production-compose-v1`
-runtime profile added specifically for Server A's private Compose topology.
+The frozen deployment candidate is source
+`c4fb367577581f004745760c83963cdd96ed518e`, signed release run
+`33306692194`, and immutable image digest
+`sha256:83e6fd7d6e824a6259b574f0aacbbf08dc58f4419caf0193344d61e5717d5d63`.
+Its recorded build time is `2026-08-30T10:31:49Z`. The manifest selects the
+image's fail-closed `codestra-middleware-production-v1` runtime profile.
 
 The first protected start reached PostgreSQL but stopped before serving because
 the legacy `codestra_middleware` database reports unrelated Alembic revision
 `0054_campaign_actions`. The canonical migration tool refused to guess or stamp
 that lineage and applied no migration. The failed side-by-side container was
-removed; the legacy runtime remained healthy. The reviewed replacement profile
-therefore requires dedicated database `codestra_middleware_appolon` and role
-`appolon_middleware_api`. This isolates the canonical SQL migration ledger and
-prevents either runtime from changing the other's schema.
+removed; the legacy runtime remained healthy. The captured Compose topology
+identified dedicated database `codestra_middleware_appolon` and role
+`appolon_middleware_api` as the required isolation boundary. Those values
+remain recorded in the release lock. Because the frozen image's built-in
+production profile uses different dependency DNS and TLS requirements, a
+separate protected topology review remains mandatory; this repository
+alignment does not authorize an apply.
 
 The healthy legacy service remains in place on port `8095` for its 132-route
 contract. Existing callback, campaign, and control-plane health consumers keep
