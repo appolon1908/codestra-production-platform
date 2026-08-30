@@ -29,13 +29,25 @@ custom-format dump, database owner, Alembic head, checksum, and validated
 readiness-backup stamp before migration. The accepted `restore-test` evidence
 must name that exact backup stamp. Dumps, checksum validation, and restore input
 are streamed rather than buffered in operator memory. `rollback-middleware` stops the three
-replaced Middleware writers, preserves a checksum-bound failed-state dump,
-disables new database connections before terminating all remaining sessions,
-and recreates the database with connection limit zero. It restores the
+replaced Middleware writers, sets connection limit zero and terminates all
+remaining sessions before preserving a checksum-bound failed-state dump, then
+disables all target-database connections and recreates the database with
+connection limit zero. It restores the
 pre-change database as the PostgreSQL superuser, restores the captured
 connection policy only after `pg_restore`, starts the captured images, and
 refuses PASS until the prior migration head, image IDs, health, and fail-closed
 flags read back.
+
+An incomplete or lost-response retry reuses its original rollback bundle. Once
+rollback is `COMPLETE`, the next rollout first verifies that restored state and
+captures a new pre-change snapshot; it never reuses the stale pre-first-attempt
+dump after the restored services have resumed writes.
+
+Run `stage` before `restore-test`. The restore service accepts only the
+root-owned backup named by the backup `LAST_SUCCESS` marker, uses the exact
+staged digest to run `alembic upgrade head` on the internal-only restored
+database, reads back `0056_klyrow_delivery_events` and both delivery inbox
+tables, and only then atomically publishes checksum-bound restore evidence.
 
 ## Authorization authority
 

@@ -78,6 +78,7 @@ SYSTEMD_ACTIONS = {
 }
 BACKUP_STATE_VALIDATOR = Path("/opt/codestra/operations/backup/check-backup-state.sh")
 READINESS_BACKUP_ROOT = Path("/opt/codestra/backups/production-readiness-local")
+READINESS_RESTORE_ROOT = Path("/opt/codestra/evidence/production-readiness-restore")
 CONFIG_DIR = Path("/etc/codestra/production-operator")
 RELEASE_CONFIG = CONFIG_DIR / "release.json"
 MAINTENANCE_DATE = CONFIG_DIR / "maintenance-date"
@@ -133,6 +134,7 @@ MIDDLEWARE_ROLLBACK_PROGRESS = "rollback-progress.json"
 MIDDLEWARE_DB_CONTAINER = "codestra-postgres-1"
 MIDDLEWARE_DB = "codestra_middleware"
 MIDDLEWARE_REQUIRED_DATABASE_HEAD = "0056_klyrow_delivery_events"
+MIDDLEWARE_REQUIRED_SOURCE_SHA = "f199b6c40f4e467979e9a8b255a0e686321a182d"
 MIDDLEWARE_COMPOSE_LAYERS = (
     (Path("/opt/codestra/compose/compose.yaml"), "4798c36ba65c2274b634b9b0997bfbf86bbccab53574cb3b64fd9897fa472dcb"),
     (Path("/opt/codestra/compose/compose.middleware-runtime.yaml"), "d6e2ba0372ecc8f7bc6e7a2bc0fb124bb71159664ab6110cc7478aa63a6a2906"),
@@ -337,6 +339,82 @@ def validate_backup_state() -> dict[str, object]:
         "returncode": 0,
         "backup_stamp": stamp,
         "evidence_integrity": "PASS",
+    }
+
+
+def validate_restore_result(
+    expected_backup_stamp: str, config: dict[str, str]
+) -> dict[str, str]:
+    """Bind the published restore PASS to one backup and exact candidate image."""
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", expected_backup_stamp) is None:
+        raise OperatorError("expected restore backup stamp is malformed")
+    restore_stamp = checked_root_file(READINESS_RESTORE_ROOT / "LAST_SUCCESS")
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", restore_stamp) is None:
+        raise OperatorError("readiness restore marker is malformed")
+    restore_dir = READINESS_RESTORE_ROOT / restore_stamp
+    try:
+        directory_info = restore_dir.lstat()
+    except OSError as error:
+        raise OperatorError("readiness restore directory unavailable") from error
+    if (
+        stat.S_ISLNK(directory_info.st_mode)
+        or not stat.S_ISDIR(directory_info.st_mode)
+        or directory_info.st_uid != 0
+        or directory_info.st_gid != 0
+        or stat.S_IMODE(directory_info.st_mode) != 0o700
+    ):
+        raise OperatorError("readiness restore directory is unsafe")
+    checksum_text = checked_root_file(restore_dir / "SHA256SUMS")
+    records: dict[str, str] = {}
+    for line in checksum_text.splitlines():
+        match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9._-]+)", line)
+        if match is None or match.group(2) in records:
+            raise OperatorError("readiness restore checksum manifest is malformed")
+        records[match.group(2)] = match.group(1)
+    expected_files = {
+        "RESTORE-RESULT.txt",
+        "ODOO-FILESTORE-VALIDATION.json",
+        "PRODUCTION-MIDDLEWARE-ROLE-BASELINE.txt",
+        "PRODUCTION-MIDDLEWARE-ROLE-AFTER.txt",
+        "PRODUCTION-KEYCLOAK-ROLE-BASELINE.txt",
+        "PRODUCTION-KEYCLOAK-ROLE-AFTER.txt",
+    }
+    if set(records) != expected_files:
+        raise OperatorError("readiness restore checksum manifest is incomplete")
+    for name, expected in records.items():
+        actual, _ = hash_operator_file(restore_dir / name)
+        if not hmac.compare_digest(actual, expected):
+            raise OperatorError("readiness restore evidence checksum mismatch")
+    result_text = checked_root_file(restore_dir / "RESTORE-RESULT.txt")
+    values: dict[str, str] = {}
+    for line in result_text.splitlines():
+        key, separator, value = line.partition("=")
+        if (
+            not separator
+            or re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", key) is None
+            or key in values
+            or not value
+        ):
+            raise OperatorError("readiness restore result is malformed")
+        values[key] = value
+    expected_values = {
+        "RESTORE_REHEARSAL_GATE": "PASS",
+        "RESTORE_BACKUP_STAMP": expected_backup_stamp,
+        "MIDDLEWARE_CANDIDATE_IMAGE": f"{MIDDLEWARE_IMAGE}@{config['image_digest']}",
+        "MIDDLEWARE_CANDIDATE_SOURCE_SHA": MIDDLEWARE_REQUIRED_SOURCE_SHA,
+        "MIDDLEWARE_MIGRATION_HEAD": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
+        "MIDDLEWARE_SCHEMA_TABLE_COUNT": "2",
+        "MIDDLEWARE_ISOLATED_MIGRATION_GATE": "PASS",
+    }
+    if any(values.get(key) != value for key, value in expected_values.items()):
+        raise OperatorError("readiness restore result binding mismatch")
+    return {
+        "restore_evidence_stamp": restore_stamp,
+        "tested_backup_stamp": expected_backup_stamp,
+        "tested_backup_evidence_integrity": "PASS",
+        "isolated_middleware_migration": "PASS",
+        "tested_middleware_database_head": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
+        "tested_middleware_source_sha": MIDDLEWARE_REQUIRED_SOURCE_SHA,
     }
 
 
@@ -1137,16 +1215,29 @@ def middleware_rollback_target(stamp: str) -> dict[str, str]:
     return value
 
 
+def reusable_middleware_snapshot(config: dict[str, str]) -> str | None:
+    """Reuse only an active attempt; a completed rollback needs fresh state."""
+    if not (MIDDLEWARE_ROLLBACK_MARKER.exists() or MIDDLEWARE_ROLLBACK_MARKER.is_symlink()):
+        return None
+    previous_stamp = checked_root_file(MIDDLEWARE_ROLLBACK_MARKER)
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", previous_stamp) is None:
+        raise OperatorError("Middleware rollback marker malformed")
+    if middleware_rollback_target(previous_stamp) != config:
+        return None
+    bundle = validate_middleware_rollback(config)
+    progress = middleware_rollback_progress(MIDDLEWARE_BACKUP_ROOT / previous_stamp)
+    if progress is not None and progress["phase"] == "COMPLETE":
+        verify_middleware_rollback_readback(bundle)
+        return None
+    return previous_stamp
+
+
 def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: str) -> str:
     if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", readiness_backup_stamp) is None:
         raise OperatorError("readiness backup reference is malformed")
-    if MIDDLEWARE_ROLLBACK_MARKER.exists() or MIDDLEWARE_ROLLBACK_MARKER.is_symlink():
-        previous_stamp = checked_root_file(MIDDLEWARE_ROLLBACK_MARKER)
-        if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", previous_stamp) is None:
-            raise OperatorError("Middleware rollback marker malformed")
-        if middleware_rollback_target(previous_stamp) == config:
-            validate_middleware_rollback(config)
-            return previous_stamp
+    previous_stamp = reusable_middleware_snapshot(config)
+    if previous_stamp is not None:
+        return previous_stamp
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup = MIDDLEWARE_BACKUP_ROOT / stamp
     backup.mkdir(mode=0o700, parents=True)
@@ -1433,6 +1524,41 @@ def middleware_database_exists() -> bool:
     return result == "true"
 
 
+def fence_middleware_database_clients() -> bool:
+    """Block non-superuser writers and terminate existing target sessions."""
+    if not middleware_database_exists():
+        return False
+    run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        f"alter database {MIDDLEWARE_DB} with connection limit 0",
+    ], timeout=30)
+    run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{MIDDLEWARE_DB}' and pid<>pg_backend_pid()",
+    ], timeout=30)
+    return True
+
+
 def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
     bundle = validate_middleware_rollback(config)
     stamp = str(bundle["stamp"])
@@ -1456,7 +1582,13 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
         "30",
         *MIDDLEWARE_RUNTIME_SERVICES,
     ], timeout=180)
+    database_fenced = False
     if progress is None:
+        database_fenced = fence_middleware_database_clients()
+        if not database_fenced:
+            raise OperatorError(
+                "Middleware database missing before failed-state preservation"
+            )
         failed_state_name = (
             f"failed-state-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
             f"-{os.getpid()}.dump"
@@ -1487,7 +1619,8 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
             failed_digest,
         )
     if progress["phase"] == "FAILED_STATE_PRESERVED":
-        if middleware_database_exists():
+        database_exists = database_fenced or fence_middleware_database_clients()
+        if database_exists:
             run_bytes([
                 "/usr/bin/docker",
                 "exec",
@@ -1502,20 +1635,6 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
                 "-c",
                 f"alter database {MIDDLEWARE_DB} with allow_connections false",
             ], timeout=30)
-        run_bytes([
-            "/usr/bin/docker",
-            "exec",
-            MIDDLEWARE_DB_CONTAINER,
-            "psql",
-            "-U",
-            "postgres",
-            "-d",
-            "postgres",
-            "-v",
-            "ON_ERROR_STOP=1",
-            "-c",
-            f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{MIDDLEWARE_DB}' and pid<>pg_backend_pid()",
-        ], timeout=30)
         run_bytes([
             "/usr/bin/docker", "exec", MIDDLEWARE_DB_CONTAINER,
             "dropdb", "-U", "postgres", "--if-exists", MIDDLEWARE_DB,
@@ -1642,6 +1761,16 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
         restore_evidence,
         "tested_backup_stamp",
         backup_state["backup_stamp"],
+    )
+    require_evidence_value(
+        restore_evidence,
+        "isolated_middleware_migration",
+        "PASS",
+    )
+    require_evidence_value(
+        restore_evidence,
+        "tested_middleware_database_head",
+        MIDDLEWARE_REQUIRED_DATABASE_HEAD,
     )
     certify_standby(config)
     compose = middleware_compose(config)
@@ -1947,6 +2076,18 @@ def safety_state() -> dict[str, object]:
     }
 
 
+def recovery_safety_state() -> dict[str, object]:
+    """Keep recovery callable without waiting on fallible remote safety probes."""
+    return {
+        "probe_status": "SKIPPED_FOR_RECOVERY",
+        "telephony_probe_pass": False,
+        "active_calls_zero": False,
+        "active_channels_zero": False,
+        "required_runtime_flags_false": False,
+        "sip_registration_performed": False,
+    }
+
+
 def execute(action: str) -> tuple[int, dict[str, object]]:
     if action not in ALLOWED_ACTIONS:
         raise OperatorError("action is not allowlisted")
@@ -1966,7 +2107,7 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
                 "owner_window_waiver_evidence": "FAIL",
                 "window_check": "DENIED",
             }
-    state = safety_state()
+    state = recovery_safety_state() if action in RECOVERY_ACTIONS else safety_state()
     safe_for_activation = (
         state["telephony_probe_pass"]
         and state["active_calls_zero"]
@@ -1986,6 +2127,9 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
     if action in SYSTEMD_ACTIONS:
         unit = SYSTEMD_ACTIONS[action]
         restore_backup_before = validate_backup_state() if action == "restore-test" else None
+        if restore_backup_before is not None:
+            require_action_evidence("stage", config)
+            certify_standby(config)
         invocation = run_fixed(["/usr/bin/systemctl", "start", "--wait", unit])
         result.update({"unit": unit, "returncode": invocation.returncode})
         if invocation.returncode != 0:
@@ -1994,10 +2138,11 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
             restore_backup_after = validate_backup_state()
             if restore_backup_after["backup_stamp"] != restore_backup_before["backup_stamp"]:
                 raise OperatorError("readiness backup changed during restore test")
-            result.update({
-                "tested_backup_stamp": restore_backup_before["backup_stamp"],
-                "tested_backup_evidence_integrity": "PASS",
-            })
+            result.update(
+                validate_restore_result(
+                    str(restore_backup_before["backup_stamp"]), config
+                )
+            )
     elif action == "validate-backup":
         result.update(validate_backup_state())
     elif action == "stage":

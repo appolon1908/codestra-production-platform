@@ -35,9 +35,12 @@ Use the protected production activation workflow in this order:
 1. `preflight`
 2. `backup`
 3. `validate-backup`
-4. `restore-test`
-5. `stage` to pull and certify the exact Middleware image in an isolated
+4. `stage` to pull and certify the exact Middleware image in an isolated
    standby container
+5. `restore-test` to select only the backup named by `LAST_SUCCESS`, migrate
+   that isolated restore with the exact staged image through
+   `0056_klyrow_delivery_events`, and publish checksum-bound backup, source,
+   image, and schema readback evidence
 6. `stage-control-plane` to validate and extract the exact protected platform
    archive containing the reviewed Middleware override
 7. `validate-control-plane`
@@ -59,16 +62,17 @@ and installed tuple before allowing the workflow to connect. The rollout uses
 the root/captured Compose paths and SHA-256 values in
 `MIDDLEWARE_COMPOSE_LAYERS`; a changed, missing, linked, or writable layer is a
 hard failure. Verified bytes are copied into an exact-release root-owned
-directory before Docker Compose reads them. A retry preserves the original
-rollback point, and rollback must read back every captured image ID before it
+directory before Docker Compose reads them. An active-attempt retry preserves
+the original rollback point; after completed rollback, the next attempt verifies
+the restored state and captures a fresh snapshot. Rollback must read back every captured image ID before it
 can record PASS. The rollback bundle also captures the pre-change Middleware
 database, owner, Alembic head, checksum, and validated readiness-backup
 reference; the selected stamp must equal the stamp recorded by `restore-test`.
 Database dumps, validation, and restore input are streamed without buffering a
 full dump in operator memory. Rollback stops the three replaced Middleware writers, preserves the
-failed database state, disables new database connections before terminating all
-remaining client sessions, and recreates the database with connection limit
-zero. It restores the captured connection policy only after the pre-change dump
+failed database state only after setting connection limit zero and terminating
+all remaining client sessions, then disables target-database connections and
+recreates the database with connection limit zero. It restores the captured connection policy only after the pre-change dump
 is fully restored and verifies the prior head. It never recreates PostgreSQL,
 Redis, Odoo, Kong, or n8n.
 

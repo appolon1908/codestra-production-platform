@@ -4,12 +4,18 @@ umask 077
 
 backup_root=/opt/codestra/backups/production-readiness-local
 evidence_root=/opt/codestra/evidence/production-readiness-restore
+release_config=/etc/codestra/production-operator/release.json
+middleware_repository=ghcr.io/codestra-srl/codestra-middleware
+middleware_source_sha=f199b6c40f4e467979e9a8b255a0e686321a182d
+middleware_required_head=0056_klyrow_delivery_events
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 work_dir="${evidence_root}/.work-${stamp}"
 final_dir="${evidence_root}/${stamp}"
 suffix=$(printf '%s' "$stamp" | tr -cd '0-9A-Za-z')
 container="codestra-readiness-restore-${suffix}"
 odoo_container="codestra-readiness-restore-odoo-${suffix}"
+middleware_migrate_container="codestra-readiness-restore-middleware-migrate-${suffix}"
+middleware_current_container="codestra-readiness-restore-middleware-current-${suffix}"
 network="codestra-readiness-restore-${suffix}"
 volume="codestra_readiness_restore_${suffix}"
 rehearsal_started_ns=$(date +%s%N)
@@ -36,6 +42,8 @@ for candidate in \
 done
 
 cleanup() {
+    docker rm -f "$middleware_current_container" >/dev/null 2>&1 || true
+    docker rm -f "$middleware_migrate_container" >/dev/null 2>&1 || true
     docker rm -f "$odoo_container" >/dev/null 2>&1 || true
     docker rm -f "$container" >/dev/null 2>&1 || true
     docker volume rm "$volume" >/dev/null 2>&1 || true
@@ -64,13 +72,67 @@ on_error() {
 }
 trap on_error ERR
 
-latest=$(find "$backup_root" -mindepth 2 -maxdepth 2 -type f -name STATUS.txt -print0 \
-    | xargs -0 -r grep -l '^BACKUP_STATUS=PASS$' \
-    | sort | tail -n1)
-test -n "$latest"
-backup_dir=$(dirname "$latest")
-encrypted=$(find "$backup_dir" -maxdepth 1 -type f -name 'codestra-*.tar.gz.gpg' | sort | tail -n1)
-test -n "$encrypted"
+backup_stamp=$(python3 - "$backup_root/LAST_SUCCESS" <<'PY'
+import os
+import re
+import stat
+import sys
+
+descriptor = os.open(sys.argv[1], os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+with os.fdopen(descriptor, "rb") as stream:
+    info = os.fstat(stream.fileno())
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o600
+    ):
+        raise SystemExit("unsafe readiness backup marker")
+    value = stream.read().decode("ascii").strip()
+if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", value) is None:
+    raise SystemExit("malformed readiness backup marker")
+print(value)
+PY
+)
+backup_dir="${backup_root}/${backup_stamp}"
+test ! -L "$backup_dir"
+test "$(stat -c '%U:%G:%a' "$backup_dir")" = root:root:700
+grep -qx 'BACKUP_STATUS=PASS' "$backup_dir/STATUS.txt"
+encrypted="${backup_dir}/codestra-${backup_stamp}.tar.gz.gpg"
+test -f "$encrypted"
+test ! -L "$encrypted"
+
+mapfile -t release_values < <(python3 - "$release_config" <<'PY'
+import json
+import os
+import re
+import stat
+import sys
+
+descriptor = os.open(sys.argv[1], os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+with os.fdopen(descriptor, "rb") as stream:
+    info = os.fstat(stream.fileno())
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o644
+    ):
+        raise SystemExit("unsafe production release tuple")
+    value = json.load(stream)
+if set(value) != {"protected_sha", "image_digest", "change_id", "maintenance_date"}:
+    raise SystemExit("production release tuple schema mismatch")
+if re.fullmatch(r"sha256:[0-9a-f]{64}", value.get("image_digest", "")) is None:
+    raise SystemExit("production release image digest malformed")
+print(value["image_digest"])
+PY
+)
+test "${#release_values[@]}" -eq 1
+middleware_image="${middleware_repository}@${release_values[0]}"
+docker image inspect "$middleware_image" >/dev/null
+docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$middleware_image" \
+    | grep -Fx "$middleware_image" >/dev/null
+test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$middleware_image")" = "$middleware_source_sha"
 
 mkdir -p "$work_dir" "$final_dir"
 chmod 0700 "$work_dir" "$final_dir"
@@ -228,6 +290,36 @@ default_acl_mismatches=0
 cmp -s "$work_dir/expected-default-acl.txt" "$work_dir/restored-default-acl.txt" || default_acl_mismatches=1
 test "$default_acl_mismatches" -eq 0
 
+# Prove that the exact staged candidate can migrate the restored Middleware
+# database to the release head before production is touched.  The credential is
+# disposable and mounted as a file, never placed in image metadata or evidence.
+middleware_database_url_file="$work_dir/middleware-database-url"
+printf 'postgresql+asyncpg://postgres:%s@postgres:5432/codestra_middleware\n' \
+    "$(<"$rehearsal_password_file")" > "$middleware_database_url_file"
+chmod 0444 "$middleware_database_url_file"
+middleware_container_args=(
+    --network "$network"
+    --read-only
+    --cap-drop ALL
+    --security-opt no-new-privileges
+    --tmpfs /tmp:rw,noexec,nosuid,size=32m,uid=10001,gid=10001
+    -e DATABASE_URL_FILE=/run/secrets/database_url
+    -e ENVIRONMENT=test
+    -e SERVICE_NAME=middleware-isolated-migration
+    -v "$middleware_database_url_file:/run/secrets/database_url:ro"
+)
+docker run --rm --name "$middleware_migrate_container" \
+    "${middleware_container_args[@]}" "$middleware_image" \
+    alembic upgrade head > "$work_dir/middleware-alembic-upgrade.txt"
+docker run --rm --name "$middleware_current_container" \
+    "${middleware_container_args[@]}" "$middleware_image" \
+    alembic current > "$work_dir/middleware-alembic-current.txt"
+middleware_database_head=$(awk 'NF {value=$1} END {print value}' "$work_dir/middleware-alembic-current.txt")
+test "$middleware_database_head" = "$middleware_required_head"
+middleware_schema_table_count=$(docker exec "$container" psql -U postgres -d codestra_middleware -At -v ON_ERROR_STOP=1 \
+    -c "select count(*) from information_schema.tables where table_schema='public' and table_name in ('klyrow_delivery_event_inbox','klyrow_delivery_analytics')")
+test "$middleware_schema_table_count" -eq 2
+
 restored_filestore="$work_dir/restored-volumes/odoo/.local/share/Odoo/filestore"
 test -d "$restored_filestore/codestra_odoo"
 test ! -e "$restored_filestore/codestra_odoo_restore"
@@ -348,6 +440,7 @@ cp "$work_dir/production-keycloak-role-after.txt" "$final_dir/PRODUCTION-KEYCLOA
 
 cat > "$final_dir/RESTORE-RESULT.txt" <<EOF
 RESTORE_REHEARSAL_GATE=PASS
+RESTORE_BACKUP_STAMP=${backup_stamp}
 ISOLATED_ROLE_MODEL=PASS
 MIDDLEWARE_DATA_OWNER_NOLOGIN=PASS
 KEYCLOAK_DATA_OWNER_NOLOGIN=PASS
@@ -382,7 +475,17 @@ MEASURED_RTO_MS=${measured_rto_ms}
 CONFIGURATION_RESTORE_GATE=PASS
 LOCAL_RUNTIME_IMAGE_ARCHIVE_GATE=PASS
 EXACT_RUNTIME_IMAGE_ID_BINDING_GATE=PASS
+MIDDLEWARE_CANDIDATE_IMAGE=${middleware_image}
+MIDDLEWARE_CANDIDATE_SOURCE_SHA=${middleware_source_sha}
+MIDDLEWARE_MIGRATION_HEAD=${middleware_database_head}
+MIDDLEWARE_SCHEMA_TABLE_COUNT=${middleware_schema_table_count}
+MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS
 DISPOSABLE_CLEANUP_REQUIRED=YES
 EOF
 (cd "$final_dir" && sha256sum RESTORE-RESULT.txt ODOO-FILESTORE-VALIDATION.json PRODUCTION-*-ROLE-*.txt > SHA256SUMS && sha256sum -c SHA256SUMS)
+printf '%s\n' "$stamp" > "$evidence_root/.LAST_SUCCESS-${stamp}"
+chmod 0600 "$evidence_root/.LAST_SUCCESS-${stamp}"
+sync "$evidence_root/.LAST_SUCCESS-${stamp}"
+mv "$evidence_root/.LAST_SUCCESS-${stamp}" "$evidence_root/LAST_SUCCESS"
+sync -d "$evidence_root"
 printf '%s\n' "$final_dir"

@@ -47,14 +47,15 @@ remains superseded and denied.
 
 ## Required activation order
 
-`preflight` → `backup` → `validate-backup` → `restore-test` → `stage` →
+`preflight` → `backup` → `validate-backup` → `stage` → `restore-test` →
 `stage-control-plane` → `validate-control-plane` → `rollout-middleware` →
 `activate-control-plane` → `status` → `collect-evidence`.
 
 `rollout-middleware` is bounded to the integration API, scheduler, and
 notification worker. It requires exact-tuple backup/restore evidence whose
 tested backup stamp equals the currently selected backup, isolated image stage,
-and protected platform-stage evidence, migrates to
+exact-image isolated migration/readback through `0056_klyrow_delivery_events`,
+and protected platform-stage evidence, then migrates production to
 `0056_klyrow_delivery_events`, reads back the exact digest and schema head, and
 automatically calls `rollback-middleware` if the
 rollout or readback fails. No retained Klyrow event is replayed until a new
