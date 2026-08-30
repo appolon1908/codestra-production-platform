@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "source": "https://github.com/appolon1908-hue/Middleware-",
+  "revision": "24a86223d850a77cce3b72644e9fad7ff4f9acb0",
+  "image": "ghcr.io/appolon1908-hue/codestra-middleware@sha256:d9bbdda6b13983b429fdb063f500474421da9e14884c03415101a17a49e887f4",
+  "release_run": 33312550094,
+  "runtime_profile": "codestra-middleware-production-compose-v1",
+  "service": "appolon-middleware-integration-api",
+  "internal_alias": "middleware-integration-api",
+  "internal_port": 8080,
+  "entrypoint": "image-default-app.main:create_app",
+  "deployment_state": "REPOSITORY_ALIGNED_NOT_APPLIED",
+  "production_writes_enabled": false,
+  "rollback": {
+    "action": "remove_appolon_service_and_preserve_legacy_runtime",
+    "previous_image_digest": "sha256:09d4bd0f7b2376e0a06d3efae27a6642429389fa7e3277791ec0b36584e87175",
+    "previous_command": [
+      "/opt/venv/bin/python",
+      "-m",
+      "app.entrypoints.integration_api"
+    ],
+    "requires_separate_protected_apply": true
+  }
+}
