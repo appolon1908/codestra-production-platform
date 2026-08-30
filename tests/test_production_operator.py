@@ -761,6 +761,35 @@ def test_middleware_database_client_inventory_rejects_an_unclassified_service(
         OPERATOR.middleware_database_client_state()
 
 
+def test_middleware_database_client_inventory_includes_every_scaled_replica(
+    monkeypatch,
+):
+    containers = (
+        "codestra-middleware-sync-worker-1",
+        "codestra-middleware-sync-worker-2",
+        "codestra-middleware-sync-worker-10",
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_bytes",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command,
+            0,
+            ("\n".join(containers) + "\n").encode(),
+        ),
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "docker_inspect",
+        lambda container: {"State": {"Running": True}},
+    )
+
+    assert tuple(OPERATOR.middleware_database_client_state()) == containers
+    assert OPERATOR.middleware_database_client_canonical(containers[1]) == (
+        "codestra-middleware-sync-worker-1"
+    )
+
+
 def test_completed_rollback_forces_fresh_snapshot(monkeypatch, tmp_path):
     config = OPERATOR.load_release_config()
     stamp = "20260830T190000Z"

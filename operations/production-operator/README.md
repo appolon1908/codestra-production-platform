@@ -30,7 +30,7 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `7a8d7c9ccf8bdc00093b99c4ea487de5c4bf8a8955b62c721ea5d3c6d36339ea` |
+| `codestra-production-operator` | `3972d0b04cad691cbb96f03bbefbdb98d64b08b1f4116badfaeede6889952a13` |
 | `codestra-production-forced-command` | `d806b91ae6d9ddf962883487ffebaf3ac503ed3ef79b0d9a9bdedc222e64cf8c` |
 | `codestra-production-operator.sudoers` | `9023d679f923587eaaed3d0c27b5c388a136d112a9483777881b5aea002ed520` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |

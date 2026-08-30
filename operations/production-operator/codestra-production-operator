@@ -1262,8 +1262,18 @@ def reusable_middleware_snapshot(config: dict[str, str]) -> str | None:
     return previous_stamp
 
 
+def middleware_database_client_canonical(container: str) -> str | None:
+    match = re.fullmatch(
+        r"(codestra-middleware(?:-[a-z0-9-]+)?)-([1-9][0-9]*)",
+        container,
+    )
+    if match is None:
+        return None
+    return f"{match.group(1)}-1"
+
+
 def middleware_database_client_state() -> dict[str, bool]:
-    """Read every database-using service in the approved Middleware graph."""
+    """Read every replica of each database-using service in the approved graph."""
     output = run_bytes([
         "/usr/bin/docker",
         "ps",
@@ -1278,22 +1288,35 @@ def middleware_database_client_state() -> dict[str, bool]:
     ):
         raise OperatorError("Docker container inventory is malformed")
     observed_middleware = {
-        name
-        for name in names
-        if name == "codestra-middleware-1"
-        or (name.startswith("codestra-middleware-") and name.endswith("-1"))
+        name for name in names if name.startswith("codestra-middleware")
     }
-    unknown = observed_middleware - set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
+    known = set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
+    canonical = {
+        name: middleware_database_client_canonical(name)
+        for name in observed_middleware
+    }
+    unknown = {
+        name for name, service in canonical.items() if service not in known
+    }
     if unknown:
         raise OperatorError("Unclassified Middleware database client requires review")
     state: dict[str, bool] = {}
-    for container in MIDDLEWARE_DATABASE_CLIENT_CONTAINERS:
-        if container not in observed_middleware:
-            continue
-        running = docker_inspect(container).get("State", {}).get("Running")
-        if not isinstance(running, bool):
-            raise OperatorError(f"Middleware database client state unavailable: {container}")
-        state[container] = running
+    for service in MIDDLEWARE_DATABASE_CLIENT_CONTAINERS:
+        replicas = sorted(
+            (
+                name
+                for name, candidate in canonical.items()
+                if candidate == service
+            ),
+            key=lambda name: int(name.rsplit("-", 1)[1]),
+        )
+        for container in replicas:
+            running = docker_inspect(container).get("State", {}).get("Running")
+            if not isinstance(running, bool):
+                raise OperatorError(
+                    f"Middleware database client state unavailable: {container}"
+                )
+            state[container] = running
     return state
 
 
@@ -1341,7 +1364,12 @@ def clear_middleware_quiescence(stamp: str) -> None:
 
 
 def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) -> None:
-    unknown = set(containers) - set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
+    known = set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
+    unknown = {
+        container
+        for container in containers
+        if middleware_database_client_canonical(container) not in known
+    }
     if unknown or len(containers) != len(set(containers)):
         raise OperatorError("Middleware database client resume set is malformed")
     state = middleware_database_client_state()
