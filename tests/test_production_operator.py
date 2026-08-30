@@ -354,6 +354,69 @@ def test_middleware_rollback_marker_is_published_atomically(monkeypatch, tmp_pat
     assert "atomic_root_text(MIDDLEWARE_ROLLBACK_MARKER, stamp + \"\\n\", mode=0o600)" in snapshot_source
 
 
+def test_middleware_snapshot_flushes_bundle_before_marker(monkeypatch, tmp_path):
+    root = tmp_path / "middleware-backups"
+    root.mkdir(mode=0o755)
+    marker = root / "LAST_SUCCESS"
+    monkeypatch.setattr(OPERATOR, "MIDDLEWARE_BACKUP_ROOT", root)
+    monkeypatch.setattr(OPERATOR, "MIDDLEWARE_ROLLBACK_MARKER", marker)
+    image_ids = {
+        container: "sha256:" + str(index) * 64
+        for index, container in enumerate(OPERATOR.MIDDLEWARE_RUNTIME_CONTAINERS, 1)
+    }
+    monkeypatch.setattr(
+        OPERATOR,
+        "docker_inspect",
+        lambda container: {"Image": image_ids[container]},
+    )
+    monkeypatch.setattr(OPERATOR, "middleware_database_revision", lambda: "0054_previous")
+
+    def run(command, **kwargs):
+        if "psql" in command:
+            return subprocess.CompletedProcess(command, 0, b"middleware_data_owner\n")
+        if "pg_dump" in command:
+            return subprocess.CompletedProcess(command, 0, b"pre-change-dump")
+        return subprocess.CompletedProcess(command, 0, b"")
+
+    monkeypatch.setattr(OPERATOR, "run_bytes", run)
+    events = []
+    real_replace = OPERATOR.os.replace
+    real_fsync_directory = OPERATOR.fsync_directory
+
+    def replace(source, destination):
+        events.append(("replace", Path(destination)))
+        real_replace(source, destination)
+
+    def fsync_directory(path):
+        events.append(("fsync-directory", Path(path)))
+        real_fsync_directory(path)
+
+    monkeypatch.setattr(OPERATOR.os, "replace", replace)
+    monkeypatch.setattr(OPERATOR, "fsync_directory", fsync_directory)
+    stamp = OPERATOR.snapshot_middleware_runtime(
+        OPERATOR.load_release_config(),
+        "20260830T180000Z",
+    )
+    backup = root / stamp
+    expected_members = {
+        *(f"{service}.image-id" for service in OPERATOR.MIDDLEWARE_RUNTIME_SERVICES),
+        "database-owner",
+        "database-head",
+        "readiness-backup-stamp",
+        "middleware.dump",
+        "middleware.dump.sha256",
+        "rollback.override.yaml",
+        "rollout-target.json",
+    }
+
+    assert marker.read_text().strip() == stamp
+    assert expected_members <= {path.name for path in backup.iterdir()}
+    assert all((backup / name).stat().st_mode & 0o777 == 0o600 for name in expected_members)
+    marker_index = events.index(("replace", marker))
+    assert ("fsync-directory", backup) in events[:marker_index]
+    assert all(events.index(("replace", backup / name)) < marker_index for name in expected_members)
+
+
 def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch, tmp_path):
     config = OPERATOR.load_release_config()
     stamp = "20260830T190000Z"

@@ -1012,6 +1012,7 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup = MIDDLEWARE_BACKUP_ROOT / stamp
     backup.mkdir(mode=0o700, parents=True)
+    fsync_directory(MIDDLEWARE_BACKUP_ROOT)
     override = backup / "rollback.override.yaml"
     lines = ["services:"]
     for service, container in MIDDLEWARE_RUNTIME_SERVICES.items():
@@ -1022,9 +1023,7 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
         tag = f"codestra/middleware-{service}:rollback-{stamp}"
         run_bytes(["/usr/bin/docker", "tag", image_id, tag], timeout=60)
         lines.extend((f"  {service}:", f"    image: {tag}"))
-        record = backup / f"{service}.image-id"
-        record.write_text(image_id + "\n", encoding="ascii")
-        record.chmod(0o600)
+        atomic_root_text(backup / f"{service}.image-id", image_id + "\n", mode=0o600)
     database_owner = run_bytes([
         "/usr/bin/docker",
         "exec",
@@ -1052,21 +1051,27 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
     ], timeout=1800).stdout
     if not database_dump:
         raise OperatorError("Middleware pre-change database dump is empty")
-    for name, content in (
-        ("database-owner", database_owner.encode()),
-        ("database-head", database_head.encode()),
-        ("readiness-backup-stamp", readiness_backup_stamp.encode()),
-        ("middleware.dump", database_dump),
-        ("middleware.dump.sha256", hashlib.sha256(database_dump).hexdigest().encode()),
-    ):
-        record = backup / name
-        record.write_bytes(content + b"\n" if name != "middleware.dump" else content)
-        record.chmod(0o600)
-    override.write_text("\n".join(lines) + "\n", encoding="ascii")
-    override.chmod(0o600)
-    target = backup / "rollout-target.json"
-    target.write_text(json.dumps(config, sort_keys=True, separators=(",", ":")) + "\n", encoding="ascii")
-    target.chmod(0o600)
+    database_digest = hashlib.sha256(database_dump).hexdigest()
+    atomic_root_text(backup / "database-owner", database_owner + "\n", mode=0o600)
+    atomic_root_text(backup / "database-head", database_head + "\n", mode=0o600)
+    atomic_root_text(
+        backup / "readiness-backup-stamp",
+        readiness_backup_stamp + "\n",
+        mode=0o600,
+    )
+    atomic_root_bytes(backup / "middleware.dump", database_dump, mode=0o600)
+    atomic_root_text(
+        backup / "middleware.dump.sha256",
+        database_digest + "\n",
+        mode=0o600,
+    )
+    atomic_root_text(override, "\n".join(lines) + "\n", mode=0o600)
+    atomic_root_text(
+        backup / "rollout-target.json",
+        json.dumps(config, sort_keys=True, separators=(",", ":")) + "\n",
+        mode=0o600,
+    )
+    fsync_directory(backup)
     atomic_root_text(MIDDLEWARE_ROLLBACK_MARKER, stamp + "\n", mode=0o600)
     return stamp
 
