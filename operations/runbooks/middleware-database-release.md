@@ -24,6 +24,13 @@ approved production rollback. Stop writes, preserve the failed state, restore
 the pre-change backup, deploy the previous immutable image, and verify health,
 readiness, migration head, and public route contracts.
 
+The protected `rollout-middleware` operator captures a transaction-consistent
+custom-format dump, database owner, Alembic head, checksum, and validated
+readiness-backup stamp before migration. `rollback-middleware` stops the three
+Middleware writers, preserves a checksum-bound failed-state dump, restores the
+pre-change database before starting the captured images, and refuses PASS until
+the prior migration head, image IDs, health, and fail-closed flags read back.
+
 ## Authorization authority
 
 `VICIDIAL_AUTHORIZATION_URL` on the private 8443 listener is required and uses

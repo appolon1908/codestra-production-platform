@@ -8,7 +8,8 @@ The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
 `restore-test`, `stage`, `canary`, `status`, `rollback`, `collect-evidence`,
 `stage-control-plane`, `validate-control-plane`, `activate-control-plane`,
 `rollback-control-plane`, `enable-production-web-traffic`, or
-`disable-production-web-traffic`.
+`disable-production-web-traffic`, plus the bounded `rollout-middleware` and
+`rollback-middleware` pair.
 There is no shell, Docker-group membership, host/path input, arbitrary unit, or
 command argument. `preflight`, `status`, and `collect-evidence` are read-only.
 Every other action except emergency `rollback` requires
@@ -29,9 +30,9 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `0d218c880582ac21286b779309b0e7802a50809a6d14f4c3559e1c74ec03edc9` |
-| `codestra-production-forced-command` | `bcd05989b44a51828f3b3406e1cd7b9d128a587d68e084a36f2ffbbe26803f3b` |
-| `codestra-production-operator.sudoers` | `93e56b18fa54a61192a5a62fe972a74abec37816af8ca977c67cd1bdd75195b9` |
+| `codestra-production-operator` | `9e7270b72d7b0df032827ad5cc6ae5859287bd90abaa434aec602b8a0ffd5804` |
+| `codestra-production-forced-command` | `d806b91ae6d9ddf962883487ffebaf3ac503ed3ef79b0d9a9bdedc222e64cf8c` |
+| `codestra-production-operator.sudoers` | `9023d679f923587eaaed3d0c27b5c388a136d112a9483777881b5aea002ed520` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
 
@@ -133,8 +134,23 @@ rejects unsafe file type, ownership, mode, or nonzero validation status.
 
 `activate-control-plane` requires exact-tuple PASS evidence from both staging
 and validation, a validated encrypted backup, a rollback snapshot, healthy
-control-plane services, and exact middleware runtime digests before atomically
-committing the active-release pointer. Validation failure invokes the bounded
+control-plane services, an exact-tuple Middleware rollout, and exact middleware
+runtime digests before atomically committing the active-release pointer.
+`rollout-middleware` accepts no path or service argument. It verifies the ten
+captured production Compose layers by SHA-256, copies the verified bytes into
+an exact-release root-owned directory, and runs Compose only from those copies.
+It requires isolated image-stage, protected platform-stage, backup-validation,
+and restore-test evidence, migrates through the exact image, and recreates only
+the integration API, scheduler, and notification worker. A retry preserves the
+original exact-tuple rollback marker; rollback reads back every restored image
+ID and fail-closed environment before recording PASS. The bundle includes the
+pre-change Middleware database dump, checksum, owner, Alembic head, and the
+validated readiness-backup reference. Rollback stops the three writers,
+preserves a checksum-bound failed-state dump, restores the pre-change database,
+and verifies the prior database head before PASS.
+It then reads back health, the immutable digest, all delivery-disable flags,
+and database head `0056_klyrow_delivery_events`. A failure restores the three
+captured image IDs. Control-plane validation failure invokes the bounded
 control-plane rollback. The Web/API traffic actions update only a root-owned
 core traffic pointer after validating the active tuple and core dependencies;
 they always persist email, SMS, voice, and PSTN as disabled.

@@ -38,13 +38,27 @@ ALLOWED_ACTIONS = {
     "stage-control-plane",
     "validate-control-plane",
     "rollback-control-plane",
+    "rollout-middleware",
+    "rollback-middleware",
     "activate-control-plane",
     "enable-production-web-traffic",
     "disable-production-web-traffic",
 }
 READ_ONLY_ACTIONS = {"preflight", "status", "collect-evidence", "validate-control-plane"}
-RECOVERY_ACTIONS = {"rollback", "rollback-control-plane", "disable-production-web-traffic"}
-SAFETY_BYPASS_ACTIONS = {"status", "collect-evidence", "rollback", "rollback-control-plane", "disable-production-web-traffic"}
+RECOVERY_ACTIONS = {
+    "rollback",
+    "rollback-control-plane",
+    "rollback-middleware",
+    "disable-production-web-traffic",
+}
+SAFETY_BYPASS_ACTIONS = {
+    "status",
+    "collect-evidence",
+    "rollback",
+    "rollback-control-plane",
+    "rollback-middleware",
+    "disable-production-web-traffic",
+}
 CANONICAL_FALSE_FLAGS = {
     "SEND_EVENTS",
     "ENABLE_EXTERNAL_DELIVERY",
@@ -104,6 +118,31 @@ MIDDLEWARE_RUNTIME_CONTAINERS = (
     "codestra-middleware-integration-api-1",
     "codestra-middleware-scheduler-1",
     "codestra-middleware-notification-worker-1",
+)
+MIDDLEWARE_RUNTIME_SERVICES = {
+    "middleware-integration-api": "codestra-middleware-integration-api-1",
+    "middleware-scheduler": "codestra-middleware-scheduler-1",
+    "middleware-notification-worker": "codestra-middleware-notification-worker-1",
+}
+MIDDLEWARE_PROJECT = "codestra"
+MIDDLEWARE_PROJECT_DIRECTORY = Path("/opt/codestra/compose")
+MIDDLEWARE_COMPOSE_RELEASE_ROOT = Path("/opt/codestra/releases/middleware-compose")
+MIDDLEWARE_BACKUP_ROOT = Path("/opt/codestra/backups/middleware-protected-deploy")
+MIDDLEWARE_ROLLBACK_MARKER = MIDDLEWARE_BACKUP_ROOT / "LAST_SUCCESS"
+MIDDLEWARE_DB_CONTAINER = "codestra-postgres-1"
+MIDDLEWARE_DB = "codestra_middleware"
+MIDDLEWARE_REQUIRED_DATABASE_HEAD = "0056_klyrow_delivery_events"
+MIDDLEWARE_COMPOSE_LAYERS = (
+    (Path("/opt/codestra/compose/compose.yaml"), "4798c36ba65c2274b634b9b0997bfbf86bbccab53574cb3b64fd9897fa472dcb"),
+    (Path("/opt/codestra/compose/compose.middleware-runtime.yaml"), "d6e2ba0372ecc8f7bc6e7a2bc0fb124bb71159664ab6110cc7478aa63a6a2906"),
+    (Path("/opt/codestra/compose/compose.phase-n2-activation.yaml"), "b8923298d8cd8216a4129ac7b3ef9e9a9f6b32013bdc743bce531ab12411e390"),
+    (Path("/opt/codestra/compose/compose.final-production-trust.yaml"), "30d0ff29813d69d44ea185ca23d5222632058e253283fc1cfc2913f9ebd4e2db"),
+    (Path("/opt/codestra/compose/compose.scraper-ingress-disabled.yaml"), "1825a3aa2df125e750add89f60c1b660112f9003b8dd803cb0282bac24bf0190"),
+    (Path("/opt/codestra/compose/compose.health-contract-remediation.yaml"), "a254ee5df345dc0d3e15a3e4b229c7eeaeffb4ed08a6d26b164d1983d6658ed6"),
+    (Path("/opt/codestra/compose/compose.live-delivery-safety.yaml"), "447995f20b3443eca8c10d0110031dfe4e05394140a8a7b8f093419fe3c57d9a"),
+    (Path("/home/codestra-admin/releases/callback-production-ded863c289c4.override.yaml"), "b179fab8726c59f554aa4e3200003366d4f2f9e6ae887ec5daad9386ca8f52cb"),
+    (Path("/home/codestra-admin/releases/campaign-crm-middleware-d30babd.override.yaml"), "7d327f26e94b0eab2824393031bed82c18d0a6d48cb05e70c8480f141633820b"),
+    (Path("/home/codestra-admin/releases/contact-center-91e22ef4.override.yaml"), "976f53321a7802afb2ab4354aab79c2d5b41d7618d9d99a2185d17491f156d97"),
 )
 MIDDLEWARE_REQUIRED_FALSE_FLAGS = {
     "CALLBACK_DELIVERY_ENABLED",
@@ -756,6 +795,460 @@ def verify_middleware_runtime(config: dict[str, str]) -> dict[str, str]:
     return {"middleware_subject": expected, "middleware_runtime_digest": "PASS"}
 
 
+def verified_middleware_compose_layer(path: Path, expected: str) -> bytes:
+    """Read an approved layer once without following a replaceable pathname."""
+    allowed_owners = {0, pwd.getpwnam("codestra-admin").pw_uid}
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise OperatorError(f"middleware Compose layer unavailable: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid not in allowed_owners
+            or info.st_mode & 0o022
+        ):
+            raise OperatorError(f"middleware Compose layer is unsafe: {path}")
+        content = stream.read(2 * 1024 * 1024)
+        if stream.read(1):
+            raise OperatorError(f"middleware Compose layer is too large: {path}")
+    if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), expected):
+        raise OperatorError(f"middleware Compose layer checksum mismatch: {path}")
+    return content
+
+
+def checked_middleware_compose_layers(config: dict[str, str]) -> list[Path]:
+    """Copy verified layers to an immutable root-owned exact-release directory."""
+    trusted = MIDDLEWARE_COMPOSE_RELEASE_ROOT / config["protected_sha"]
+    names = [f"{index:02d}-{path.name}" for index, (path, _) in enumerate(MIDDLEWARE_COMPOSE_LAYERS, 1)]
+    if trusted.exists() or trusted.is_symlink():
+        info = trusted.lstat()
+        if (
+            trusted.is_symlink()
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) != 0o700
+        ):
+            raise OperatorError("trusted Middleware Compose directory is unsafe")
+        paths = [trusted / name for name in names]
+        for copied, (_, expected) in zip(paths, MIDDLEWARE_COMPOSE_LAYERS):
+            if not hmac.compare_digest(
+                hashlib.sha256(checked_root_bytes(copied)).hexdigest(), expected
+            ):
+                raise OperatorError("trusted Middleware Compose checksum mismatch")
+        return paths
+    MIDDLEWARE_COMPOSE_RELEASE_ROOT.mkdir(mode=0o755, parents=True, exist_ok=True)
+    root_info = MIDDLEWARE_COMPOSE_RELEASE_ROOT.lstat()
+    if (
+        MIDDLEWARE_COMPOSE_RELEASE_ROOT.is_symlink()
+        or not stat.S_ISDIR(root_info.st_mode)
+        or root_info.st_uid != 0
+        or root_info.st_gid != 0
+        or stat.S_IMODE(root_info.st_mode) != 0o755
+    ):
+        raise OperatorError("Middleware Compose release root is unsafe")
+    candidate = Path(tempfile.mkdtemp(prefix=f".{config['protected_sha']}.", dir=MIDDLEWARE_COMPOSE_RELEASE_ROOT))
+    try:
+        os.chmod(candidate, 0o700)
+        for name, (source, expected) in zip(names, MIDDLEWARE_COMPOSE_LAYERS):
+            content = verified_middleware_compose_layer(source, expected)
+            destination = candidate / name
+            descriptor = os.open(
+                destination,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+            )
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        candidate.rename(trusted)
+    except Exception:
+        shutil.rmtree(candidate, ignore_errors=True)
+        raise
+    return [trusted / name for name in names]
+
+
+def middleware_compose(config: dict[str, str], *, rollback_override: Path | None = None) -> list[str]:
+    layers = checked_middleware_compose_layers(config)
+    _, release = control_plane_paths(config)
+    approved = release / "deploy/middleware/compose.approved-release.yaml"
+    if rollback_override is None:
+        approved_text = checked_root_file(approved, expected_mode=0o644)
+        expected_subject = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
+        if approved_text.count(expected_subject) != 1:
+            raise OperatorError("approved Middleware override does not bind the exact digest")
+        layers.append(approved)
+    else:
+        checked_root_bytes(rollback_override)
+        layers.append(rollback_override)
+    command = [
+        "/usr/bin/docker",
+        "compose",
+        "--project-name",
+        MIDDLEWARE_PROJECT,
+        "--project-directory",
+        str(MIDDLEWARE_PROJECT_DIRECTORY),
+    ]
+    for layer in layers:
+        command.extend(("--file", str(layer)))
+    return command
+
+
+def validate_middleware_compose(config: dict[str, str], compose: list[str]) -> None:
+    try:
+        rendered = json.loads(run_bytes([*compose, "config", "--format", "json"], timeout=120).stdout)
+    except (json.JSONDecodeError, subprocess.CalledProcessError) as error:
+        raise OperatorError("Middleware Compose rendering failed") from error
+    services = rendered.get("services")
+    expected_subject = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
+    if not isinstance(services, dict):
+        raise OperatorError("Middleware Compose service graph is malformed")
+    for service in MIDDLEWARE_RUNTIME_SERVICES:
+        definition = services.get(service)
+        if not isinstance(definition, dict) or definition.get("image") != expected_subject:
+            raise OperatorError(f"Middleware Compose digest mismatch: {service}")
+        environment = definition.get("environment")
+        if not isinstance(environment, dict):
+            raise OperatorError(f"Middleware Compose environment unavailable: {service}")
+        if any(str(environment.get(name, "")).lower() != "false" for name in MIDDLEWARE_REQUIRED_FALSE_FLAGS):
+            raise OperatorError(f"Middleware Compose delivery flag unsafe: {service}")
+
+
+def wait_middleware_health(timeout_seconds: int = 180) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    pending = set(MIDDLEWARE_RUNTIME_CONTAINERS)
+    while pending and time.monotonic() < deadline:
+        for container in tuple(pending):
+            status_value = docker_inspect(container)["State"].get("Health", {}).get("Status")
+            if status_value == "healthy":
+                pending.remove(container)
+            elif status_value == "unhealthy":
+                raise OperatorError(f"Middleware runtime became unhealthy: {container}")
+        if pending:
+            time.sleep(2)
+    if pending:
+        raise OperatorError("Middleware runtime health check timed out")
+
+
+def middleware_rollback_target(stamp: str) -> dict[str, str]:
+    target = MIDDLEWARE_BACKUP_ROOT / stamp / "rollout-target.json"
+    try:
+        value = json.loads(checked_root_file(target))
+    except json.JSONDecodeError as error:
+        raise OperatorError("Middleware rollback target is malformed") from error
+    if not isinstance(value, dict) or set(value) != {
+        "protected_sha", "image_digest", "change_id", "maintenance_date"
+    }:
+        raise OperatorError("Middleware rollback target schema mismatch")
+    return value
+
+
+def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: str) -> str:
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", readiness_backup_stamp) is None:
+        raise OperatorError("readiness backup reference is malformed")
+    if MIDDLEWARE_ROLLBACK_MARKER.exists() or MIDDLEWARE_ROLLBACK_MARKER.is_symlink():
+        previous_stamp = checked_root_file(MIDDLEWARE_ROLLBACK_MARKER)
+        if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", previous_stamp) is None:
+            raise OperatorError("Middleware rollback marker malformed")
+        if middleware_rollback_target(previous_stamp) == config:
+            validate_middleware_rollback(config)
+            return previous_stamp
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    backup.mkdir(mode=0o700, parents=True)
+    override = backup / "rollback.override.yaml"
+    lines = ["services:"]
+    for service, container in MIDDLEWARE_RUNTIME_SERVICES.items():
+        current = docker_inspect(container)
+        image_id = str(current.get("Image", ""))
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
+            raise OperatorError(f"Middleware rollback image ID malformed: {container}")
+        tag = f"codestra/middleware-{service}:rollback-{stamp}"
+        run_bytes(["/usr/bin/docker", "tag", image_id, tag], timeout=60)
+        lines.extend((f"  {service}:", f"    image: {tag}"))
+        record = backup / f"{service}.image-id"
+        record.write_text(image_id + "\n", encoding="ascii")
+        record.chmod(0o600)
+    database_owner = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        f"select pg_get_userbyid(datdba) from pg_database where datname='{MIDDLEWARE_DB}'",
+    ], timeout=30).stdout.decode().strip()
+    if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
+        raise OperatorError("Middleware database owner readback failed")
+    database_head = middleware_database_revision()
+    database_dump = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "pg_dump",
+        "-U",
+        "postgres",
+        "-Fc",
+        MIDDLEWARE_DB,
+    ], timeout=1800).stdout
+    if not database_dump:
+        raise OperatorError("Middleware pre-change database dump is empty")
+    for name, content in (
+        ("database-owner", database_owner.encode()),
+        ("database-head", database_head.encode()),
+        ("readiness-backup-stamp", readiness_backup_stamp.encode()),
+        ("middleware.dump", database_dump),
+        ("middleware.dump.sha256", hashlib.sha256(database_dump).hexdigest().encode()),
+    ):
+        record = backup / name
+        record.write_bytes(content + b"\n" if name != "middleware.dump" else content)
+        record.chmod(0o600)
+    override.write_text("\n".join(lines) + "\n", encoding="ascii")
+    override.chmod(0o600)
+    target = backup / "rollout-target.json"
+    target.write_text(json.dumps(config, sort_keys=True, separators=(",", ":")) + "\n", encoding="ascii")
+    target.chmod(0o600)
+    MIDDLEWARE_ROLLBACK_MARKER.write_text(stamp + "\n", encoding="ascii")
+    MIDDLEWARE_ROLLBACK_MARKER.chmod(0o600)
+    return stamp
+
+
+def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
+    stamp = checked_root_file(MIDDLEWARE_ROLLBACK_MARKER)
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp) is None:
+        raise OperatorError("Middleware rollback marker malformed")
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    info = backup.lstat()
+    if (
+        backup.is_symlink()
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise OperatorError("Middleware rollback directory is unsafe")
+    if middleware_rollback_target(stamp) != config:
+        raise OperatorError("Middleware rollback target does not match the exact release")
+    image_ids: dict[str, str] = {}
+    for service in MIDDLEWARE_RUNTIME_SERVICES:
+        image_id = checked_root_file(backup / f"{service}.image-id")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
+            raise OperatorError("Middleware rollback image ID malformed")
+        tag = docker_inspect(f"codestra/middleware-{service}:rollback-{stamp}")
+        if tag.get("Id") != image_id:
+            raise OperatorError("Middleware rollback image tag mismatch")
+        image_ids[service] = image_id
+    override = backup / "rollback.override.yaml"
+    checked_root_bytes(override)
+    database_owner = checked_root_file(backup / "database-owner")
+    if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
+        raise OperatorError("Middleware rollback database owner is malformed")
+    database_head = checked_root_file(backup / "database-head")
+    if re.fullmatch(r"[0-9a-z_]{1,80}", database_head) is None:
+        raise OperatorError("Middleware rollback database head is malformed")
+    readiness_backup_stamp = checked_root_file(backup / "readiness-backup-stamp")
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", readiness_backup_stamp) is None:
+        raise OperatorError("Middleware readiness backup reference is malformed")
+    database_dump = checked_root_bytes(backup / "middleware.dump")
+    expected_dump_digest = checked_root_file(backup / "middleware.dump.sha256")
+    if (
+        not database_dump
+        or re.fullmatch(r"[0-9a-f]{64}", expected_dump_digest) is None
+        or not hmac.compare_digest(hashlib.sha256(database_dump).hexdigest(), expected_dump_digest)
+    ):
+        raise OperatorError("Middleware rollback database dump checksum mismatch")
+    return {
+        "stamp": stamp,
+        "override": override,
+        "image_ids": image_ids,
+        "database_owner": database_owner,
+        "database_head": database_head,
+        "database_dump": database_dump,
+        "readiness_backup_stamp": readiness_backup_stamp,
+    }
+
+
+def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
+    bundle = validate_middleware_rollback(config)
+    stamp = str(bundle["stamp"])
+    image_ids = bundle["image_ids"]
+    if not isinstance(image_ids, dict):
+        raise OperatorError("Middleware rollback image map is malformed")
+    compose = middleware_compose(config, rollback_override=bundle["override"])
+    run_bytes([
+        *compose,
+        "stop",
+        "--timeout",
+        "30",
+        *MIDDLEWARE_RUNTIME_SERVICES,
+    ], timeout=180)
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    failed_state = backup / f"failed-state-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}.dump"
+    failed_dump = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "pg_dump",
+        "-U",
+        "postgres",
+        "-Fc",
+        MIDDLEWARE_DB,
+    ], timeout=1800).stdout
+    if not failed_dump:
+        raise OperatorError("Middleware failed-state database dump is empty")
+    failed_state.write_bytes(failed_dump)
+    failed_state.chmod(0o600)
+    failed_checksum = failed_state.with_suffix(".dump.sha256")
+    failed_checksum.write_text(hashlib.sha256(failed_dump).hexdigest() + "\n", encoding="ascii")
+    failed_checksum.chmod(0o600)
+    run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{MIDDLEWARE_DB}' and pid<>pg_backend_pid()",
+    ], timeout=30)
+    run_bytes([
+        "/usr/bin/docker", "exec", MIDDLEWARE_DB_CONTAINER,
+        "dropdb", "-U", "postgres", "--if-exists", MIDDLEWARE_DB,
+    ], timeout=60)
+    run_bytes([
+        "/usr/bin/docker", "exec", MIDDLEWARE_DB_CONTAINER,
+        "createdb", "-U", "postgres", "-O", str(bundle["database_owner"]), MIDDLEWARE_DB,
+    ], timeout=60)
+    run_bytes([
+        "/usr/bin/docker", "exec", "-i", MIDDLEWARE_DB_CONTAINER,
+        "pg_restore", "-U", "postgres", "--exit-on-error", "-d", MIDDLEWARE_DB,
+    ], stdin=bundle["database_dump"], timeout=1800)
+    run_bytes([
+        *compose,
+        "up",
+        "--detach",
+        "--no-deps",
+        "--force-recreate",
+        *MIDDLEWARE_RUNTIME_SERVICES,
+    ], timeout=600)
+    wait_middleware_health()
+    for service, container in MIDDLEWARE_RUNTIME_SERVICES.items():
+        current = docker_inspect(container)
+        if current.get("Image") != image_ids[service]:
+            raise OperatorError(f"Middleware rollback image readback mismatch: {container}")
+        environment = dict(
+            item.split("=", 1) for item in current["Config"].get("Env", []) if "=" in item
+        )
+        if any(environment.get(name) != "false" for name in MIDDLEWARE_REQUIRED_FALSE_FLAGS):
+            raise OperatorError(f"Middleware rollback delivery flag unsafe: {container}")
+    restored_head = middleware_database_revision()
+    if restored_head != bundle["database_head"]:
+        raise OperatorError("Middleware rollback database head readback mismatch")
+    return {
+        "middleware_rollback_stamp": stamp,
+        "middleware_rollback": "PASS",
+        "middleware_database_head": restored_head,
+        "readiness_backup_stamp": bundle["readiness_backup_stamp"],
+        "failed_state_preserved": failed_state.name,
+    }
+
+
+def middleware_runtime_image_matches(config: dict[str, str]) -> list[bool]:
+    expected = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
+    return [
+        docker_inspect(container)["Config"].get("Image") == expected
+        for container in MIDDLEWARE_RUNTIME_CONTAINERS
+    ]
+
+
+def middleware_database_head() -> str:
+    return run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_RUNTIME_SERVICES["middleware-integration-api"],
+        "alembic",
+        "current",
+    ], timeout=60).stdout.decode()
+
+
+def middleware_database_revision() -> str:
+    output = middleware_database_head().strip()
+    revision = output.split(maxsplit=1)[0] if output else ""
+    if re.fullmatch(r"[0-9a-z_]{1,80}", revision) is None:
+        raise OperatorError("Middleware database revision readback failed")
+    return revision
+
+
+def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
+    """Migrate and replace only the three approved Middleware runtimes."""
+    require_action_evidence("stage", config)
+    require_action_evidence("stage-control-plane", config)
+    require_action_evidence("validate-backup", config)
+    require_action_evidence("restore-test", config)
+    backup_state = validate_backup_state()
+    certify_standby(config)
+    compose = middleware_compose(config)
+    validate_middleware_compose(config, compose)
+    image_matches = middleware_runtime_image_matches(config)
+    if any(image_matches):
+        stamp = str(validate_middleware_rollback(config)["stamp"])
+    else:
+        stamp = snapshot_middleware_runtime(config, str(backup_state["backup_stamp"]))
+    if all(image_matches):
+        runtime = verify_middleware_runtime(config)
+        if middleware_database_revision() != MIDDLEWARE_REQUIRED_DATABASE_HEAD:
+            raise OperatorError("Middleware database head readback mismatch")
+        return {
+            **runtime,
+            "middleware_backup_stamp": stamp,
+            "middleware_database_head": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
+            "middleware_rollout": "PASS",
+            "middleware_already_current": True,
+        }
+    try:
+        run_bytes([
+            *compose,
+            "run",
+            "--rm",
+            "--no-deps",
+            "middleware-integration-api",
+            "alembic",
+            "upgrade",
+            "head",
+        ], timeout=1800)
+        run_bytes([
+            *compose,
+            "up",
+            "--detach",
+            "--no-deps",
+            "--force-recreate",
+            *MIDDLEWARE_RUNTIME_SERVICES,
+        ], timeout=600)
+        wait_middleware_health()
+        runtime = verify_middleware_runtime(config)
+        if middleware_database_revision() != MIDDLEWARE_REQUIRED_DATABASE_HEAD:
+            raise OperatorError("Middleware database head readback mismatch")
+    except Exception:
+        rollback_middleware(config)
+        raise
+    return {
+        **runtime,
+        "middleware_backup_stamp": stamp,
+        "middleware_database_head": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
+        "middleware_rollout": "PASS",
+    }
+
+
 def load_pointer(path: Path) -> dict[str, object] | None:
     if not path.exists():
         return None
@@ -774,6 +1267,7 @@ def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
     stage_evidence = require_action_evidence("stage-control-plane", config)
     validation_evidence = require_action_evidence("validate-control-plane", config)
     restore_evidence = require_action_evidence("restore-test", config)
+    middleware_evidence = require_action_evidence("rollout-middleware", config)
     backup = validate_backup_state()
     rollback = validate_control_plane_rollback()
     previous = load_pointer(ACTIVE_RELEASE_POINTER)
@@ -790,6 +1284,7 @@ def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
             "stage_evidence": stage_evidence.name,
             "validation_evidence": validation_evidence.name,
             "restore_evidence": restore_evidence.name,
+            "middleware_evidence": middleware_evidence.name,
             "backup_stamp": backup["backup_stamp"],
             "rollback_stamp": rollback["rollback_stamp"],
         }
@@ -1055,6 +1550,10 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         result.update(validate_control_plane(config))
     elif action == "rollback-control-plane":
         result.update(rollback_control_plane(config))
+    elif action == "rollout-middleware":
+        result.update(rollout_middleware(config))
+    elif action == "rollback-middleware":
+        result.update(rollback_middleware(config))
     elif action == "activate-control-plane":
         result.update(activate_control_plane(config))
     elif action == "enable-production-web-traffic":

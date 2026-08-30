@@ -4,13 +4,13 @@
 CHANGE_ID=CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01
 PROTECTED_SHA=BOUND_BY_PROTECTED_RELEASE_AFTER_MERGE
 IMMUTABLE_RELEASE=BOUND_BY_PROTECTED_RELEASE_AFTER_MERGE
-MIDDLEWARE_SOURCE_SHA=35448ef85ae56db3651a72b61db8e242b7aacd2e
-IMAGE_DIGEST=sha256:09d4bd0f7b2376e0a06d3efae27a6642429389fa7e3277791ec0b36584e87175
-MIDDLEWARE_RELEASE_RUN=32612498385
-MIDDLEWARE_RELEASE_ARTIFACT=exact-main-production-35448ef85ae56db3651a72b61db8e242b7aacd2e-32612498385-1
-MIDDLEWARE_SBOM_SHA256=cc1eee1c253ad84be81c8fdccbdfe1fb35b146244256a66b3e7ec0c6aebb2433
-MIDDLEWARE_PROVENANCE_SHA256=da9c7aef9c2ce6e7fe5c1455cbee9a1c052faf0ac62e80a77d35b4196e525537
-MIDDLEWARE_OPENVEX_SHA256=49939dbe8783bc12e226d851cfd1ddece4af4c6f28b6ffa5c2ef54f5daca46b7
+MIDDLEWARE_SOURCE_SHA=f199b6c40f4e467979e9a8b255a0e686321a182d
+IMAGE_DIGEST=sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b
+MIDDLEWARE_RELEASE_RUN=32919188388
+MIDDLEWARE_RELEASE_ARTIFACT=exact-main-production-f199b6c40f4e467979e9a8b255a0e686321a182d-32919188388-1
+MIDDLEWARE_SBOM_SHA256=c4204cc274578cf282736c7ad440d36d6aa8b8f499bf6595665ba4356e7fefe8
+MIDDLEWARE_PROVENANCE_SHA256=2d429d6689dbd6b53d1201dd561c1fe31ccc60902578a8b90638e20d28f8a262
+MIDDLEWARE_OPENVEX_SHA256=1775dab6f324719b6ab5ea2abd4aa9ec017570702026c952017ba85e96c4c270
 DEPLOYMENT_MANIFEST=deployment-manifest.json
 ROLLBACK_MANIFEST=rollback-manifest.json
 MAINTENANCE_DATE=UNSET
@@ -37,9 +37,28 @@ SIGNATURE_STATUS=PENDING
 ACTIVATION_AUTHORIZATION=PENDING_PROTECTED_APPROVAL
 ```
 
-The former active target `sha256:f48206bbcbff7ad791de32a1026a95856489e6ee054ff13779facbf30ee8c28a`
-is superseded and denied for every new activation. It is retained only as
-historical/rollback evidence subject to schema-compatibility certification.
+The prior protected target
+`sha256:09d4bd0f7b2376e0a06d3efae27a6642429389fa7e3277791ec0b36584e87175`
+at source `35448ef85ae56db3651a72b61db8e242b7aacd2e` is retained only as the
+captured rollback image for this change. It is not an allowed new activation
+target. The still older target
+`sha256:f48206bbcbff7ad791de32a1026a95856489e6ee054ff13779facbf30ee8c28a`
+remains superseded and denied.
+
+## Required activation order
+
+`preflight` → `backup` → `validate-backup` → `restore-test` → `stage` →
+`stage-control-plane` → `validate-control-plane` → `rollout-middleware` →
+`activate-control-plane` → `status` → `collect-evidence`.
+
+`rollout-middleware` is bounded to the integration API, scheduler, and
+notification worker. It requires exact-tuple backup/restore, isolated image
+stage, and protected platform-stage evidence, migrates to
+`0056_klyrow_delivery_events`, reads back the exact digest and schema head, and
+automatically calls `rollback-middleware` if the
+rollout or readback fails. No retained Klyrow event is replayed until a new
+synthetic event and its exact replay produce one durable inbox row and the
+approved Odoo readback succeeds.
 
 ## Canary and soak
 
