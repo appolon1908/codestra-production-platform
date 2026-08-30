@@ -129,6 +129,10 @@ jobs:
           PY
           CONTROL_PLANE_ENV_FILE="$PWD/config/control-plane.env.example" \
             docker compose -f deploy/control-plane/compose.yaml config --quiet
+          python scripts/validate_appolon_middleware_manifest.py
+          docker compose \
+            -f deploy/middleware/compose.appolon-integration-api.yaml \
+            config --no-interpolate --no-env-resolution --quiet
           docker build -f deploy/control-plane/Dockerfile -t codestra-control-plane:ci .
 
       - name: Enforce integration constitution
