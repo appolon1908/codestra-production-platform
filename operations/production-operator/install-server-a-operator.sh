@@ -43,7 +43,7 @@ restore_source=$script_dir/../readiness/codestra-isolated-restore-rehearsal.sh
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
-acc40df9796282875ff7d91bcb5bacfb4365196044be473140aaa6599d823105  codestra-production-operator
+7a8d7c9ccf8bdc00093b99c4ea487de5c4bf8a8955b62c721ea5d3c6d36339ea  codestra-production-operator
 d806b91ae6d9ddf962883487ffebaf3ac503ed3ef79b0d9a9bdedc222e64cf8c  codestra-production-forced-command
 9023d679f923587eaaed3d0c27b5c388a136d112a9483777881b5aea002ed520  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
@@ -52,7 +52,7 @@ EOF
 verify_payload || fail
 [ ! -L "$restore_source" ] || fail
 [ -f "$restore_source" ] || fail
-[ "$(sha256sum "$restore_source" | awk '{print $1}')" = ac2490b5889522028d5afb408f3b6b9f8dfdf588cc695008bfb6287664700d57 ] || fail
+[ "$(sha256sum "$restore_source" | awk '{print $1}')" = 076bc8d33318561fff535f336300d072cd14beb9c756c253a8b1c6a30f3f34f4 ] || fail
 
 for payload in \
   codestra-production-operator \

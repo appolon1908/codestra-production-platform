@@ -16,6 +16,7 @@ container="codestra-readiness-restore-${suffix}"
 odoo_container="codestra-readiness-restore-odoo-${suffix}"
 middleware_migrate_container="codestra-readiness-restore-middleware-migrate-${suffix}"
 middleware_current_container="codestra-readiness-restore-middleware-current-${suffix}"
+middleware_candidate_container="codestra-readiness-restore-middleware-candidate-${suffix}"
 network="codestra-readiness-restore-${suffix}"
 volume="codestra_readiness_restore_${suffix}"
 rehearsal_started_ns=$(date +%s%N)
@@ -42,6 +43,7 @@ for candidate in \
 done
 
 cleanup() {
+    docker rm -f "$middleware_candidate_container" >/dev/null 2>&1 || true
     docker rm -f "$middleware_current_container" >/dev/null 2>&1 || true
     docker rm -f "$middleware_migrate_container" >/dev/null 2>&1 || true
     docker rm -f "$odoo_container" >/dev/null 2>&1 || true
@@ -139,11 +141,13 @@ chmod 0700 "$work_dir" "$final_dir"
 
 # Read-only production baselines prove the rehearsal cannot alter live roles.
 docker exec codestra-postgres-1 psql -U postgres -d postgres -At -v ON_ERROR_STOP=1 \
-    -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit from pg_roles r where r.rolname in ('middleware_app','middleware_data_owner') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname='middleware_app' order by 1" \
+    -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit||'|'||r.rolbypassrls from pg_roles r where r.rolname in ('middleware_app','middleware_data_owner','mw_integration_api') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname in ('middleware_app','mw_integration_api') order by 1; select 'mw_integration_api|public|CREATE|'||has_schema_privilege('mw_integration_api','public','CREATE')||'|USAGE|'||has_schema_privilege('mw_integration_api','public','USAGE')" \
     > "$work_dir/production-middleware-role-baseline.txt"
-grep -qx 'middleware_data_owner|false|false|true' "$work_dir/production-middleware-role-baseline.txt"
+grep -qx 'middleware_data_owner|false|false|true|false' "$work_dir/production-middleware-role-baseline.txt"
+grep -qx 'mw_integration_api|true|false|true|false' "$work_dir/production-middleware-role-baseline.txt"
 production_membership_count=$(grep -c '^middleware_app->middleware_data_owner$' "$work_dir/production-middleware-role-baseline.txt" || true)
 test "$production_membership_count" -eq 0
+test "$(grep -c '^mw_integration_api->' "$work_dir/production-middleware-role-baseline.txt" || true)" -eq 0
 docker exec codestra-identity-identity-db-1 psql -U keycloak -d keycloak -At -v ON_ERROR_STOP=1 \
     -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit from pg_roles r where r.rolname in ('keycloak','keycloak_data_owner') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname='keycloak' order by 1" \
     > "$work_dir/production-keycloak-role-baseline.txt"
@@ -214,7 +218,7 @@ CREATE ROLE middleware_data_owner;
 CREATE ROLE mw_event_gateway;
 CREATE ROLE mw_evidence_runner;
 CREATE ROLE mw_extension_allocator;
-CREATE ROLE mw_integration_api;
+CREATE ROLE mw_integration_api LOGIN PASSWORD :'rehearsal_password';
 CREATE ROLE mw_notification_worker;
 CREATE ROLE mw_pjsip_adapter;
 CREATE ROLE mw_policy_engine;
@@ -231,6 +235,7 @@ test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select rolca
 test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select rolcanlogin from pg_roles where rolname='keycloak_data_owner'")" = f
 test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select pg_has_role('middleware_app','middleware_data_owner','MEMBER')")" = f
 test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select pg_has_role('keycloak','keycloak_data_owner','MEMBER')")" = f
+test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select rolcanlogin||'|'||rolsuper||'|'||rolbypassrls from pg_roles where rolname='mw_integration_api'")" = 'true|false|false'
 docker exec "$container" createdb -U postgres -O odoo_app codestra_odoo_restore
 docker exec "$container" createdb -U postgres -O middleware_data_owner codestra_middleware
 docker exec "$container" createdb -U postgres -O n8n_app codestra_n8n
@@ -289,12 +294,16 @@ docker exec "$container" psql -U postgres -d codestra_middleware -At -v ON_ERROR
 default_acl_mismatches=0
 cmp -s "$work_dir/expected-default-acl.txt" "$work_dir/restored-default-acl.txt" || default_acl_mismatches=1
 test "$default_acl_mismatches" -eq 0
+docker exec "$container" psql -U postgres -d codestra_middleware -At -v ON_ERROR_STOP=1 \
+    -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit||'|'||r.rolbypassrls from pg_roles r where r.rolname in ('middleware_app','middleware_data_owner','mw_integration_api') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname in ('middleware_app','mw_integration_api') order by 1; select 'mw_integration_api|public|CREATE|'||has_schema_privilege('mw_integration_api','public','CREATE')||'|USAGE|'||has_schema_privilege('mw_integration_api','public','USAGE')" \
+    > "$work_dir/restored-middleware-migration-role.txt"
+cmp "$work_dir/production-middleware-role-baseline.txt" "$work_dir/restored-middleware-migration-role.txt"
 
 # Prove that the exact staged candidate can migrate the restored Middleware
 # database to the release head before production is touched.  The credential is
 # disposable and mounted as a file, never placed in image metadata or evidence.
 middleware_database_url_file="$work_dir/middleware-database-url"
-printf 'postgresql+asyncpg://postgres:%s@postgres:5432/codestra_middleware\n' \
+printf 'postgresql+asyncpg://mw_integration_api:%s@postgres:5432/codestra_middleware\n' \
     "$(<"$rehearsal_password_file")" > "$middleware_database_url_file"
 chmod 0444 "$middleware_database_url_file"
 middleware_container_args=(
@@ -305,7 +314,6 @@ middleware_container_args=(
     --tmpfs /tmp:rw,noexec,nosuid,size=32m,uid=10001,gid=10001
     -e DATABASE_URL_FILE=/run/secrets/database_url
     -e ENVIRONMENT=test
-    -e SERVICE_NAME=middleware-isolated-migration
     -v "$middleware_database_url_file:/run/secrets/database_url:ro"
 )
 docker run --rm --name "$middleware_migrate_container" \
@@ -319,6 +327,57 @@ test "$middleware_database_head" = "$middleware_required_head"
 middleware_schema_table_count=$(docker exec "$container" psql -U postgres -d codestra_middleware -At -v ON_ERROR_STOP=1 \
     -c "select count(*) from information_schema.tables where table_schema='public' and table_name in ('klyrow_delivery_event_inbox','klyrow_delivery_analytics')")
 test "$middleware_schema_table_count" -eq 2
+
+middleware_secret_file="$work_dir/middleware-secret"
+quarantine_encryption_file="$work_dir/quarantine-encryption-key"
+quarantine_fingerprint_file="$work_dir/quarantine-fingerprint-key"
+quarantine_reviewer_file="$work_dir/quarantine-reviewer-key"
+openssl rand -hex 32 > "$middleware_secret_file"
+for secret_file in \
+    "$quarantine_encryption_file" \
+    "$quarantine_fingerprint_file" \
+    "$quarantine_reviewer_file"; do
+    openssl rand -base64 32 | tr -d '\n' > "$secret_file"
+    printf '\n' >> "$secret_file"
+done
+chmod 0444 \
+    "$middleware_secret_file" \
+    "$quarantine_encryption_file" \
+    "$quarantine_fingerprint_file" \
+    "$quarantine_reviewer_file"
+docker run -d --name "$middleware_candidate_container" \
+    "${middleware_container_args[@]}" \
+    --network-alias middleware-candidate \
+    -e PORT=8095 \
+    -e SERVICE_NAME=middleware-integration-api \
+    -e HEALTH_REQUIRE_DATABASE=true \
+    -e MIDDLEWARE_SECRET_FILE=/run/secrets/middleware_secret \
+    -e QUARANTINE_ENCRYPTION_KEY_FILE=/run/secrets/quarantine_encryption_key \
+    -e QUARANTINE_FINGERPRINT_SECRET_FILE=/run/secrets/quarantine_fingerprint_key \
+    -e QUARANTINE_REVIEWER_SECRET_FILE=/run/secrets/quarantine_reviewer_key \
+    -v "$middleware_secret_file:/run/secrets/middleware_secret:ro" \
+    -v "$quarantine_encryption_file:/run/secrets/quarantine_encryption_key:ro" \
+    -v "$quarantine_fingerprint_file:/run/secrets/quarantine_fingerprint_key:ro" \
+    -v "$quarantine_reviewer_file:/run/secrets/quarantine_reviewer_key:ro" \
+    "$middleware_image" python -m app.entrypoints.integration_api >/dev/null
+middleware_candidate_health=failed
+for _ in $(seq 1 90); do
+    if docker run --rm --network "$network" "$middleware_image" python -c \
+        'import json,urllib.request; health=json.load(urllib.request.urlopen("http://middleware-candidate:8095/healthz",timeout=2)); ready=json.load(urllib.request.urlopen("http://middleware-candidate:8095/readyz",timeout=2)); assert health["status"]=="ok"; assert ready["status"]=="ready" and ready["database"]=="online" and ready["delivery"]=="disabled"' \
+        >/dev/null 2>&1; then
+        middleware_candidate_health=healthy
+        break
+    fi
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$middleware_candidate_container")" != true ]]; then
+        docker logs "$middleware_candidate_container" > "$final_dir/MIDDLEWARE-CANDIDATE-STARTUP.log" 2>&1 || true
+        echo "MIDDLEWARE_CANDIDATE_START=FAIL" >&2
+        exit 1
+    fi
+    sleep 2
+done
+test "$middleware_candidate_health" = healthy
+middleware_candidate_port_bindings=$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$middleware_candidate_container")
+[[ "$middleware_candidate_port_bindings" == null || "$middleware_candidate_port_bindings" == '{}' ]]
 
 restored_filestore="$work_dir/restored-volumes/odoo/.local/share/Odoo/filestore"
 test -d "$restored_filestore/codestra_odoo"
@@ -426,7 +485,7 @@ application_health_ms=$(( (application_health_finished_ns - application_health_s
 measured_rto_ms=$(( (application_health_finished_ns - rehearsal_started_ns) / 1000000 ))
 
 docker exec codestra-postgres-1 psql -U postgres -d postgres -At -v ON_ERROR_STOP=1 \
-    -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit from pg_roles r where r.rolname in ('middleware_app','middleware_data_owner') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname='middleware_app' order by 1" \
+    -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit||'|'||r.rolbypassrls from pg_roles r where r.rolname in ('middleware_app','middleware_data_owner','mw_integration_api') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname in ('middleware_app','mw_integration_api') order by 1; select 'mw_integration_api|public|CREATE|'||has_schema_privilege('mw_integration_api','public','CREATE')||'|USAGE|'||has_schema_privilege('mw_integration_api','public','USAGE')" \
     > "$work_dir/production-middleware-role-after.txt"
 docker exec codestra-identity-identity-db-1 psql -U keycloak -d keycloak -At -v ON_ERROR_STOP=1 \
     -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit from pg_roles r where r.rolname in ('keycloak','keycloak_data_owner') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname='keycloak' order by 1" \
@@ -435,6 +494,7 @@ cmp "$work_dir/production-middleware-role-baseline.txt" "$work_dir/production-mi
 cmp "$work_dir/production-keycloak-role-baseline.txt" "$work_dir/production-keycloak-role-after.txt"
 cp "$work_dir/production-middleware-role-baseline.txt" "$final_dir/PRODUCTION-MIDDLEWARE-ROLE-BASELINE.txt"
 cp "$work_dir/production-middleware-role-after.txt" "$final_dir/PRODUCTION-MIDDLEWARE-ROLE-AFTER.txt"
+cp "$work_dir/restored-middleware-migration-role.txt" "$final_dir/RESTORED-MIDDLEWARE-MIGRATION-ROLE.txt"
 cp "$work_dir/production-keycloak-role-baseline.txt" "$final_dir/PRODUCTION-KEYCLOAK-ROLE-BASELINE.txt"
 cp "$work_dir/production-keycloak-role-after.txt" "$final_dir/PRODUCTION-KEYCLOAK-ROLE-AFTER.txt"
 
@@ -480,9 +540,14 @@ MIDDLEWARE_CANDIDATE_SOURCE_SHA=${middleware_source_sha}
 MIDDLEWARE_MIGRATION_HEAD=${middleware_database_head}
 MIDDLEWARE_SCHEMA_TABLE_COUNT=${middleware_schema_table_count}
 MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS
+MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api
+MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS
+MIDDLEWARE_CANDIDATE_HEALTH_GATE=PASS
+MIDDLEWARE_CANDIDATE_READINESS_GATE=PASS
+MIDDLEWARE_CANDIDATE_DATABASE_READINESS=PASS
 DISPOSABLE_CLEANUP_REQUIRED=YES
 EOF
-(cd "$final_dir" && sha256sum RESTORE-RESULT.txt ODOO-FILESTORE-VALIDATION.json PRODUCTION-*-ROLE-*.txt > SHA256SUMS && sha256sum -c SHA256SUMS)
+(cd "$final_dir" && sha256sum RESTORE-RESULT.txt ODOO-FILESTORE-VALIDATION.json PRODUCTION-*-ROLE-*.txt RESTORED-MIDDLEWARE-MIGRATION-ROLE.txt > SHA256SUMS && sha256sum -c SHA256SUMS)
 printf '%s\n' "$stamp" > "$evidence_root/.LAST_SUCCESS-${stamp}"
 chmod 0600 "$evidence_root/.LAST_SUCCESS-${stamp}"
 sync "$evidence_root/.LAST_SUCCESS-${stamp}"

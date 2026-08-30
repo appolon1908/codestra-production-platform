@@ -5,6 +5,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import subprocess
 import sys
@@ -255,6 +256,11 @@ def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, 
                 f"MIDDLEWARE_MIGRATION_HEAD={OPERATOR.MIDDLEWARE_REQUIRED_DATABASE_HEAD}",
                 "MIDDLEWARE_SCHEMA_TABLE_COUNT=2",
                 "MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS",
+                "MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api",
+                "MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS",
+                "MIDDLEWARE_CANDIDATE_HEALTH_GATE=PASS",
+                "MIDDLEWARE_CANDIDATE_READINESS_GATE=PASS",
+                "MIDDLEWARE_CANDIDATE_DATABASE_READINESS=PASS",
             )
         )
         + "\n"
@@ -266,6 +272,7 @@ def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, 
         "PRODUCTION-MIDDLEWARE-ROLE-AFTER.txt",
         "PRODUCTION-KEYCLOAK-ROLE-BASELINE.txt",
         "PRODUCTION-KEYCLOAK-ROLE-AFTER.txt",
+        "RESTORED-MIDDLEWARE-MIGRATION-ROLE.txt",
     )
     records = []
     for name in names:
@@ -299,6 +306,7 @@ def test_restore_result_rejects_unadvertised_backup(monkeypatch, tmp_path):
         "PRODUCTION-MIDDLEWARE-ROLE-AFTER.txt",
         "PRODUCTION-KEYCLOAK-ROLE-BASELINE.txt",
         "PRODUCTION-KEYCLOAK-ROLE-AFTER.txt",
+        "RESTORED-MIDDLEWARE-MIGRATION-ROLE.txt",
     )
     config = OPERATOR.load_release_config()
     (evidence / "RESTORE-RESULT.txt").write_text(
@@ -309,6 +317,11 @@ def test_restore_result_rejects_unadvertised_backup(monkeypatch, tmp_path):
         f"MIDDLEWARE_MIGRATION_HEAD={OPERATOR.MIDDLEWARE_REQUIRED_DATABASE_HEAD}\n"
         "MIDDLEWARE_SCHEMA_TABLE_COUNT=2\n"
         "MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS\n"
+        "MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api\n"
+        "MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS\n"
+        "MIDDLEWARE_CANDIDATE_HEALTH_GATE=PASS\n"
+        "MIDDLEWARE_CANDIDATE_READINESS_GATE=PASS\n"
+        "MIDDLEWARE_CANDIDATE_DATABASE_READINESS=PASS\n"
     )
     records = []
     for name in names:
@@ -366,6 +379,24 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
         OPERATOR,
         "snapshot_middleware_runtime",
         lambda value, backup_stamp: "20260830T200000Z",
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_middleware_rollback",
+        lambda value: {
+            "stamp": "20260830T200000Z",
+            "database_clients_running": (),
+        },
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_quiescence_stamp",
+        lambda: "20260830T200000Z",
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "resume_middleware_database_clients",
+        lambda stamp, containers: None,
     )
     monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
     monkeypatch.setattr(
@@ -430,6 +461,19 @@ def test_middleware_rollout_failure_invokes_bounded_rollback(monkeypatch):
     )
     monkeypatch.setattr(
         OPERATOR,
+        "validate_middleware_rollback",
+        lambda value: {
+            "stamp": "20260830T200000Z",
+            "database_clients_running": (),
+        },
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_quiescence_stamp",
+        lambda: "20260830T200000Z",
+    )
+    monkeypatch.setattr(
+        OPERATOR,
         "run_bytes",
         lambda command, **kwargs: (_ for _ in ()).throw(subprocess.CalledProcessError(1, command)),
     )
@@ -456,7 +500,10 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
     monkeypatch.setattr(
         OPERATOR,
         "validate_middleware_rollback",
-        lambda value: {"stamp": "20260830T190000Z"},
+        lambda value: {
+            "stamp": "20260830T190000Z",
+            "database_clients_running": (),
+        },
     )
     monkeypatch.setattr(
         OPERATOR,
@@ -473,6 +520,7 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
         "middleware_database_revision",
         lambda: "0056_klyrow_delivery_events",
     )
+    monkeypatch.setattr(OPERATOR, "middleware_quiescence_stamp", lambda: None)
     result = OPERATOR.rollout_middleware(config)
     assert result["middleware_backup_stamp"] == "20260830T190000Z"
     assert result["middleware_already_current"] is True
@@ -541,27 +589,51 @@ def test_middleware_snapshot_flushes_bundle_before_marker(monkeypatch, tmp_path)
     root = tmp_path / "middleware-backups"
     root.mkdir(mode=0o755)
     marker = root / "LAST_SUCCESS"
+    quiesce_marker = root / "QUIESCED"
     monkeypatch.setattr(OPERATOR, "MIDDLEWARE_BACKUP_ROOT", root)
     monkeypatch.setattr(OPERATOR, "MIDDLEWARE_ROLLBACK_MARKER", marker)
+    monkeypatch.setattr(OPERATOR, "MIDDLEWARE_QUIESCE_MARKER", quiesce_marker)
     image_ids = {
         container: "sha256:" + str(index) * 64
         for index, container in enumerate(OPERATOR.MIDDLEWARE_RUNTIME_CONTAINERS, 1)
     }
-    monkeypatch.setattr(
-        OPERATOR,
-        "docker_inspect",
-        lambda container: {"Image": image_ids[container]},
-    )
+    client_state = {
+        container: True for container in OPERATOR.MIDDLEWARE_DATABASE_CLIENT_CONTAINERS
+    }
+
+    def inspect(container):
+        value = {"State": {"Running": client_state[container]}}
+        if container in image_ids:
+            value["Image"] = image_ids[container]
+        return value
+
+    monkeypatch.setattr(OPERATOR, "docker_inspect", inspect)
     monkeypatch.setattr(OPERATOR, "middleware_database_revision", lambda: "0054_previous")
 
     def run(command, **kwargs):
         statement = command[-1] if command else ""
+        if command[1:3] == ["ps", "--all"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                ("\n".join(OPERATOR.MIDDLEWARE_DATABASE_CLIENT_CONTAINERS) + "\n").encode(),
+            )
+        if command[1:3] == ["stop", "--time"]:
+            for container in command[4:]:
+                client_state[container] = False
+        if command[1] == "start":
+            for container in command[2:]:
+                client_state[container] = True
         if "datallowconn" in statement:
             return subprocess.CompletedProcess(command, 0, b"true\n")
         if "datconnlimit" in statement:
             return subprocess.CompletedProcess(command, 0, b"-1\n")
         if "pg_get_userbyid" in statement:
             return subprocess.CompletedProcess(command, 0, b"middleware_data_owner\n")
+        if "exists(select 1 from pg_database" in statement:
+            return subprocess.CompletedProcess(command, 0, b"true\n")
+        if "select count(*) from pg_stat_activity" in statement:
+            return subprocess.CompletedProcess(command, 0, b"0\n")
         return subprocess.CompletedProcess(command, 0, b"")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
@@ -598,6 +670,7 @@ def test_middleware_snapshot_flushes_bundle_before_marker(monkeypatch, tmp_path)
         "database-allows-connections",
         "database-connection-limit",
         "database-head",
+        "database-clients-running.json",
         "readiness-backup-stamp",
         "middleware.dump",
         "middleware.dump.sha256",
@@ -606,11 +679,86 @@ def test_middleware_snapshot_flushes_bundle_before_marker(monkeypatch, tmp_path)
     }
 
     assert marker.read_text().strip() == stamp
+    assert quiesce_marker.read_text().strip() == stamp
+    assert json.loads((backup / "database-clients-running.json").read_text()) == {
+        "containers": list(OPERATOR.MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
+    }
+    assert not any(client_state.values())
     assert expected_members <= {path.name for path in backup.iterdir()}
     assert all((backup / name).stat().st_mode & 0o777 == 0o600 for name in expected_members)
     marker_index = events.index(("replace", marker))
     assert ("fsync-directory", backup) in events[:marker_index]
     assert all(events.index(("replace", backup / name)) < marker_index for name in expected_members)
+
+
+def test_middleware_database_clients_quiesce_and_resume_exact_prior_set(
+    monkeypatch, tmp_path
+):
+    root = tmp_path / "middleware-backups"
+    root.mkdir(mode=0o700)
+    marker = root / "QUIESCED"
+    monkeypatch.setattr(OPERATOR, "MIDDLEWARE_BACKUP_ROOT", root)
+    monkeypatch.setattr(OPERATOR, "MIDDLEWARE_QUIESCE_MARKER", marker)
+    originally_running = tuple(OPERATOR.MIDDLEWARE_DATABASE_CLIENT_CONTAINERS[::2])
+    state = {
+        container: container in originally_running
+        for container in OPERATOR.MIDDLEWARE_DATABASE_CLIENT_CONTAINERS
+    }
+    monkeypatch.setattr(
+        OPERATOR,
+        "docker_inspect",
+        lambda container: {"State": {"Running": state[container]}},
+    )
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if command[1:3] == ["ps", "--all"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                ("\n".join(OPERATOR.MIDDLEWARE_DATABASE_CLIENT_CONTAINERS) + "\n").encode(),
+            )
+        if command[1] == "stop":
+            for container in command[4:]:
+                state[container] = False
+        elif command[1] == "start":
+            for container in command[2:]:
+                state[container] = True
+        return subprocess.CompletedProcess(command, 0, b"")
+
+    monkeypatch.setattr(OPERATOR, "run_bytes", run)
+    stamp = "20260830T200000Z"
+
+    assert OPERATOR.quiesce_middleware_database_clients(stamp) == originally_running
+    assert marker.read_text().strip() == stamp
+    assert not any(state.values())
+
+    OPERATOR.resume_middleware_database_clients(stamp, originally_running)
+
+    assert not marker.exists()
+    assert tuple(container for container, running in state.items() if running) == originally_running
+    stop = next(command for command in calls if command[1] == "stop")
+    start = next(command for command in calls if command[1] == "start")
+    assert stop[4:] == list(originally_running)
+    assert start[2:] == list(originally_running)
+
+
+def test_middleware_database_client_inventory_rejects_an_unclassified_service(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_bytes",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command,
+            0,
+            b"codestra-middleware-unreviewed-writer-1\n",
+        ),
+    )
+
+    with pytest.raises(OPERATOR.OperatorError, match="requires review"):
+        OPERATOR.middleware_database_client_state()
 
 
 def test_completed_rollback_forces_fresh_snapshot(monkeypatch, tmp_path):
@@ -690,6 +838,14 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
     backup = tmp_path / stamp
     backup.mkdir(mode=0o700)
     monkeypatch.setattr(OPERATOR, "MIDDLEWARE_BACKUP_ROOT", tmp_path)
+    monkeypatch.setattr(
+        OPERATOR, "quiesce_middleware_database_clients", lambda value: ()
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "resume_middleware_database_clients",
+        lambda stamp, containers: None,
+    )
     database_dump_path = backup / "middleware.dump"
     database_dump_digest = hashlib.sha256(b"pre-change-dump").hexdigest()
     image_ids = {
@@ -710,6 +866,7 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
             "database_dump_path": database_dump_path,
             "database_dump_sha256": database_dump_digest,
             "readiness_backup_stamp": "20260830T180000Z",
+            "database_clients_running": (),
         },
     )
     monkeypatch.setattr(OPERATOR, "middleware_compose", lambda value, rollback_override: ["docker", "compose"])
@@ -717,6 +874,8 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
+        if any("select count(*) from pg_stat_activity" in part for part in command):
+            return subprocess.CompletedProcess(command, 0, b"0\n")
         return subprocess.CompletedProcess(command, 0, b"")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
@@ -800,6 +959,14 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
     backup = tmp_path / stamp
     backup.mkdir(mode=0o700)
     monkeypatch.setattr(OPERATOR, "MIDDLEWARE_BACKUP_ROOT", tmp_path)
+    monkeypatch.setattr(
+        OPERATOR, "quiesce_middleware_database_clients", lambda value: ()
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "resume_middleware_database_clients",
+        lambda stamp, containers: None,
+    )
     database_dump_path = backup / "middleware.dump"
     database_dump_digest = hashlib.sha256(b"pre-change-dump").hexdigest()
     image_ids = {
@@ -820,6 +987,7 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
             "database_dump_path": database_dump_path,
             "database_dump_sha256": database_dump_digest,
             "readiness_backup_stamp": "20260830T180000Z",
+            "database_clients_running": (),
         },
     )
     monkeypatch.setattr(
@@ -842,6 +1010,8 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
             raise subprocess.CalledProcessError(1, command)
         if any("create database" in part for part in command):
             database_present = True
+        if any("select count(*) from pg_stat_activity" in part for part in command):
+            return subprocess.CompletedProcess(command, 0, b"0\n")
         return subprocess.CompletedProcess(command, 0, b"")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
@@ -905,6 +1075,79 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
     assert len(calls) == call_count
 
 
+def test_middleware_rollback_checkpoints_restored_database_while_still_fenced(
+    monkeypatch, tmp_path
+):
+    config = OPERATOR.load_release_config()
+    stamp = "20260830T191600Z"
+    backup = tmp_path / stamp
+    backup.mkdir(mode=0o700)
+    failed_state = "failed-state-20260830T191601Z-1.dump"
+    failed_digest = "1" * 64
+    progress = {
+        "phase": "FAILED_STATE_PRESERVED",
+        "failed_state": failed_state,
+        "failed_state_sha256": failed_digest,
+    }
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_middleware_rollback",
+        lambda value: {
+            "stamp": stamp,
+            "override": Path("/rollback.override.yaml"),
+            "image_ids": {},
+            "database_owner": "middleware_data_owner",
+            "database_allows_connections": "true",
+            "database_connection_limit": "-1",
+            "database_head": "0054_previous",
+            "database_clients_running": (),
+            "database_dump_path": backup / "middleware.dump",
+            "database_dump_sha256": "2" * 64,
+            "readiness_backup_stamp": "20260830T180000Z",
+        },
+    )
+    monkeypatch.setattr(OPERATOR, "middleware_rollback_progress", lambda value: progress)
+    monkeypatch.setattr(OPERATOR, "quiesce_middleware_database_clients", lambda value: ())
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_compose",
+        lambda value, rollback_override: ["docker", "compose"],
+    )
+    monkeypatch.setattr(OPERATOR, "fence_middleware_database_clients", lambda: True)
+    events = []
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_bytes",
+        lambda command, **kwargs: events.append(("command", command))
+        or subprocess.CompletedProcess(command, 0, b""),
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_with_verified_file_stdin",
+        lambda command, path, digest, **kwargs: events.append(("restore", command))
+        or subprocess.CompletedProcess(command, 0, b""),
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "set_middleware_database_connection_limit",
+        lambda value: events.append(("policy-restored", value)),
+    )
+
+    def checkpoint(path, phase, name, digest):
+        events.append(("checkpoint", phase))
+        if phase == "DATABASE_RESTORED_FENCED":
+            raise RuntimeError("simulated interruption after durable checkpoint")
+        return {"phase": phase, "failed_state": name, "failed_state_sha256": digest}
+
+    monkeypatch.setattr(OPERATOR, "record_middleware_rollback_progress", checkpoint)
+
+    with pytest.raises(RuntimeError, match="durable checkpoint"):
+        OPERATOR.rollback_middleware(config)
+
+    assert ("checkpoint", "DATABASE_RESTORED_FENCED") in events
+    assert not any(event[0] == "policy-restored" for event in events)
+
+
 @pytest.mark.parametrize(("output", "expected"), [(b"true\n", True), (b"false\n", False)])
 def test_middleware_database_existence_readback(monkeypatch, output, expected):
     monkeypatch.setattr(
@@ -933,6 +1176,14 @@ def test_middleware_rollback_rejects_wrong_restored_image(monkeypatch, tmp_path)
     backup = tmp_path / stamp
     backup.mkdir(mode=0o700)
     monkeypatch.setattr(OPERATOR, "MIDDLEWARE_BACKUP_ROOT", tmp_path)
+    monkeypatch.setattr(
+        OPERATOR, "quiesce_middleware_database_clients", lambda value: ()
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "resume_middleware_database_clients",
+        lambda stamp, containers: None,
+    )
     database_dump_path = backup / "middleware.dump"
     database_dump_digest = hashlib.sha256(b"pre-change-dump").hexdigest()
     image_ids = {service: "sha256:" + "1" * 64 for service in OPERATOR.MIDDLEWARE_RUNTIME_SERVICES}
@@ -950,6 +1201,7 @@ def test_middleware_rollback_rejects_wrong_restored_image(monkeypatch, tmp_path)
             "database_dump_path": database_dump_path,
             "database_dump_sha256": database_dump_digest,
             "readiness_backup_stamp": "20260830T180000Z",
+            "database_clients_running": (),
         },
     )
     monkeypatch.setattr(OPERATOR, "middleware_compose", lambda value, rollback_override: ["docker", "compose"])
@@ -971,6 +1223,7 @@ def test_middleware_rollback_rejects_wrong_restored_image(monkeypatch, tmp_path)
         lambda command, path, digest, **kwargs: subprocess.CompletedProcess(command, 0, b""),
     )
     monkeypatch.setattr(OPERATOR, "middleware_database_exists", lambda: True)
+    monkeypatch.setattr(OPERATOR, "fence_middleware_database_clients", lambda: True)
     monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
     monkeypatch.setattr(
         OPERATOR,

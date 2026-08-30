@@ -120,6 +120,29 @@ MIDDLEWARE_RUNTIME_CONTAINERS = (
     "codestra-middleware-scheduler-1",
     "codestra-middleware-notification-worker-1",
 )
+MIDDLEWARE_DATABASE_CLIENT_CONTAINERS = (
+    "codestra-middleware-1",
+    "codestra-middleware-breero-odoo-worker-1",
+    "codestra-middleware-event-gateway-1",
+    "codestra-middleware-integration-api-1",
+    "codestra-middleware-klyrow-mail-odoo-worker-1",
+    "codestra-middleware-scraper-odoo-delivery-worker-1",
+    "codestra-middleware-policy-engine-1",
+    "codestra-middleware-sync-worker-1",
+    "codestra-middleware-notification-worker-1",
+    "codestra-middleware-n8n-runtime-worker-1",
+    "codestra-middleware-social-n8n-delivery-worker-1",
+    "codestra-middleware-postly-polling-worker-1",
+    "codestra-middleware-reconciliation-worker-1",
+    "codestra-middleware-scheduler-1",
+    "codestra-middleware-odoo-result-worker-1",
+    "codestra-middleware-evidence-runner-1",
+    "codestra-middleware-extension-allocator-1",
+    "codestra-middleware-telephony-provisioning-1",
+    "codestra-middleware-vicidial-adapter-1",
+    "codestra-middleware-pjsip-adapter-1",
+    "codestra-middleware-webphone-session-issuer-1",
+)
 MIDDLEWARE_RUNTIME_SERVICES = {
     "middleware-integration-api": "codestra-middleware-integration-api-1",
     "middleware-scheduler": "codestra-middleware-scheduler-1",
@@ -130,6 +153,7 @@ MIDDLEWARE_PROJECT_DIRECTORY = Path("/opt/codestra/compose")
 MIDDLEWARE_COMPOSE_RELEASE_ROOT = Path("/opt/codestra/releases/middleware-compose")
 MIDDLEWARE_BACKUP_ROOT = Path("/opt/codestra/backups/middleware-protected-deploy")
 MIDDLEWARE_ROLLBACK_MARKER = MIDDLEWARE_BACKUP_ROOT / "LAST_SUCCESS"
+MIDDLEWARE_QUIESCE_MARKER = MIDDLEWARE_BACKUP_ROOT / "QUIESCED"
 MIDDLEWARE_ROLLBACK_PROGRESS = "rollback-progress.json"
 MIDDLEWARE_DB_CONTAINER = "codestra-postgres-1"
 MIDDLEWARE_DB = "codestra_middleware"
@@ -378,6 +402,7 @@ def validate_restore_result(
         "PRODUCTION-MIDDLEWARE-ROLE-AFTER.txt",
         "PRODUCTION-KEYCLOAK-ROLE-BASELINE.txt",
         "PRODUCTION-KEYCLOAK-ROLE-AFTER.txt",
+        "RESTORED-MIDDLEWARE-MIGRATION-ROLE.txt",
     }
     if set(records) != expected_files:
         raise OperatorError("readiness restore checksum manifest is incomplete")
@@ -405,6 +430,11 @@ def validate_restore_result(
         "MIDDLEWARE_MIGRATION_HEAD": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
         "MIDDLEWARE_SCHEMA_TABLE_COUNT": "2",
         "MIDDLEWARE_ISOLATED_MIGRATION_GATE": "PASS",
+        "MIDDLEWARE_MIGRATION_IDENTITY": "mw_integration_api",
+        "MIDDLEWARE_PRODUCTION_GRANTS_MATCH": "PASS",
+        "MIDDLEWARE_CANDIDATE_HEALTH_GATE": "PASS",
+        "MIDDLEWARE_CANDIDATE_READINESS_GATE": "PASS",
+        "MIDDLEWARE_CANDIDATE_DATABASE_READINESS": "PASS",
     }
     if any(values.get(key) != value for key, value in expected_values.items()):
         raise OperatorError("readiness restore result binding mismatch")
@@ -1232,12 +1262,133 @@ def reusable_middleware_snapshot(config: dict[str, str]) -> str | None:
     return previous_stamp
 
 
+def middleware_database_client_state() -> dict[str, bool]:
+    """Read every database-using service in the approved Middleware graph."""
+    output = run_bytes([
+        "/usr/bin/docker",
+        "ps",
+        "--all",
+        "--format",
+        "{{.Names}}",
+    ], timeout=30).stdout.decode().splitlines()
+    names = tuple(value.strip() for value in output if value.strip())
+    if (
+        len(names) != len(set(names))
+        or any(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", name) is None for name in names)
+    ):
+        raise OperatorError("Docker container inventory is malformed")
+    observed_middleware = {
+        name
+        for name in names
+        if name == "codestra-middleware-1"
+        or (name.startswith("codestra-middleware-") and name.endswith("-1"))
+    }
+    unknown = observed_middleware - set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
+    if unknown:
+        raise OperatorError("Unclassified Middleware database client requires review")
+    state: dict[str, bool] = {}
+    for container in MIDDLEWARE_DATABASE_CLIENT_CONTAINERS:
+        if container not in observed_middleware:
+            continue
+        running = docker_inspect(container).get("State", {}).get("Running")
+        if not isinstance(running, bool):
+            raise OperatorError(f"Middleware database client state unavailable: {container}")
+        state[container] = running
+    return state
+
+
+def middleware_quiescence_stamp() -> str | None:
+    if not (MIDDLEWARE_QUIESCE_MARKER.exists() or MIDDLEWARE_QUIESCE_MARKER.is_symlink()):
+        return None
+    stamp = checked_root_file(MIDDLEWARE_QUIESCE_MARKER)
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp) is None:
+        raise OperatorError("Middleware quiescence marker malformed")
+    return stamp
+
+
+def quiesce_middleware_database_clients(stamp: str) -> tuple[str, ...]:
+    """Stop the closed set of Middleware DB clients and publish crash state."""
+    current_stamp = middleware_quiescence_stamp()
+    if current_stamp is not None and current_stamp != stamp:
+        raise OperatorError("A different Middleware quiescence attempt is active")
+    if current_stamp is None:
+        atomic_root_text(MIDDLEWARE_QUIESCE_MARKER, stamp + "\n", mode=0o600)
+    state = middleware_database_client_state()
+    running = tuple(container for container, value in state.items() if value)
+    if running:
+        run_bytes([
+            "/usr/bin/docker",
+            "stop",
+            "--time",
+            "30",
+            *running,
+        ], timeout=900)
+    remaining = [
+        container
+        for container, value in middleware_database_client_state().items()
+        if value
+    ]
+    if remaining:
+        raise OperatorError("Middleware database clients did not quiesce")
+    return running
+
+
+def clear_middleware_quiescence(stamp: str) -> None:
+    if middleware_quiescence_stamp() != stamp:
+        raise OperatorError("Middleware quiescence marker does not match rollback point")
+    MIDDLEWARE_QUIESCE_MARKER.unlink()
+    fsync_directory(MIDDLEWARE_BACKUP_ROOT)
+
+
+def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) -> None:
+    unknown = set(containers) - set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
+    if unknown or len(containers) != len(set(containers)):
+        raise OperatorError("Middleware database client resume set is malformed")
+    state = middleware_database_client_state()
+    if any(container not in state for container in containers):
+        raise OperatorError("Captured Middleware database client is unavailable")
+    stopped = tuple(container for container in containers if not state[container])
+    if stopped:
+        run_bytes(["/usr/bin/docker", "start", *stopped], timeout=900)
+    readback = middleware_database_client_state()
+    if any(not readback[container] for container in containers):
+        raise OperatorError("Middleware database clients did not resume")
+    clear_middleware_quiescence(stamp)
+
+
+def recover_stale_middleware_quiescence() -> None:
+    """Recover a crash that occurred before a rollback bundle was published."""
+    stamp = middleware_quiescence_stamp()
+    if stamp is None:
+        return
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    clients_path = backup / "database-clients-running.json"
+    limit_path = backup / "database-connection-limit"
+    if not clients_path.exists() or not limit_path.exists():
+        raise OperatorError("Incomplete Middleware quiescence evidence requires operator review")
+    try:
+        clients_value = json.loads(checked_root_file(clients_path))
+    except json.JSONDecodeError as error:
+        raise OperatorError("Middleware database client state is malformed") from error
+    if not isinstance(clients_value, dict) or set(clients_value) != {"containers"}:
+        raise OperatorError("Middleware database client state schema mismatch")
+    containers = clients_value["containers"]
+    if not isinstance(containers, list) or any(not isinstance(item, str) for item in containers):
+        raise OperatorError("Middleware database client state is malformed")
+    connection_limit = checked_root_file(limit_path)
+    if re.fullmatch(r"-1|[0-9]{1,10}", connection_limit) is None:
+        raise OperatorError("Middleware rollback connection limit is malformed")
+    set_middleware_database_connection_limit(connection_limit)
+    resume_middleware_database_clients(stamp, tuple(containers))
+
+
 def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: str) -> str:
     if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", readiness_backup_stamp) is None:
         raise OperatorError("readiness backup reference is malformed")
     previous_stamp = reusable_middleware_snapshot(config)
     if previous_stamp is not None:
         return previous_stamp
+    recover_stale_middleware_quiescence()
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup = MIDDLEWARE_BACKUP_ROOT / stamp
     backup.mkdir(mode=0o700, parents=True)
@@ -1296,19 +1447,10 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
     if re.fullmatch(r"-1|[0-9]{1,10}", database_connection_limit) is None:
         raise OperatorError("Middleware database connection limit readback failed")
     database_head = middleware_database_revision()
-    database_digest, _ = stream_command_to_atomic_file(
-        [
-            "/usr/bin/docker",
-            "exec",
-            MIDDLEWARE_DB_CONTAINER,
-            "pg_dump",
-            "-U",
-            "postgres",
-            "-Fc",
-            MIDDLEWARE_DB,
-        ],
-        backup / "middleware.dump",
-        timeout=1800,
+    database_clients_running = tuple(
+        container
+        for container, running in middleware_database_client_state().items()
+        if running
     )
     atomic_root_text(backup / "database-owner", database_owner + "\n", mode=0o600)
     atomic_root_text(
@@ -1322,14 +1464,14 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
         mode=0o600,
     )
     atomic_root_text(backup / "database-head", database_head + "\n", mode=0o600)
-    atomic_root_text(
-        backup / "readiness-backup-stamp",
-        readiness_backup_stamp + "\n",
+    atomic_root_json(
+        backup / "database-clients-running.json",
+        {"containers": list(database_clients_running)},
         mode=0o600,
     )
     atomic_root_text(
-        backup / "middleware.dump.sha256",
-        database_digest + "\n",
+        backup / "readiness-backup-stamp",
+        readiness_backup_stamp + "\n",
         mode=0o600,
     )
     atomic_root_text(override, "\n".join(lines) + "\n", mode=0o600)
@@ -1339,7 +1481,38 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
         mode=0o600,
     )
     fsync_directory(backup)
-    atomic_root_text(MIDDLEWARE_ROLLBACK_MARKER, stamp + "\n", mode=0o600)
+    quiesced = True
+    try:
+        quiesce_middleware_database_clients(stamp)
+        if not fence_middleware_database_clients():
+            raise OperatorError("Middleware database missing before pre-change snapshot")
+        database_digest, _ = stream_command_to_atomic_file(
+            [
+                "/usr/bin/docker",
+                "exec",
+                MIDDLEWARE_DB_CONTAINER,
+                "pg_dump",
+                "-U",
+                "postgres",
+                "-Fc",
+                MIDDLEWARE_DB,
+            ],
+            backup / "middleware.dump",
+            timeout=1800,
+        )
+        atomic_root_text(
+            backup / "middleware.dump.sha256",
+            database_digest + "\n",
+            mode=0o600,
+        )
+        set_middleware_database_connection_limit(database_connection_limit)
+        fsync_directory(backup)
+        atomic_root_text(MIDDLEWARE_ROLLBACK_MARKER, stamp + "\n", mode=0o600)
+    except Exception:
+        if quiesced:
+            set_middleware_database_connection_limit(database_connection_limit)
+            resume_middleware_database_clients(stamp, database_clients_running)
+        raise
     return stamp
 
 
@@ -1382,6 +1555,25 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
     database_head = checked_root_file(backup / "database-head")
     if re.fullmatch(r"[0-9a-z_]{1,80}", database_head) is None:
         raise OperatorError("Middleware rollback database head is malformed")
+    try:
+        database_clients_value = json.loads(
+            checked_root_file(backup / "database-clients-running.json")
+        )
+    except json.JSONDecodeError as error:
+        raise OperatorError("Middleware database client state is malformed") from error
+    if (
+        not isinstance(database_clients_value, dict)
+        or set(database_clients_value) != {"containers"}
+        or not isinstance(database_clients_value["containers"], list)
+        or any(not isinstance(item, str) for item in database_clients_value["containers"])
+    ):
+        raise OperatorError("Middleware database client state schema mismatch")
+    database_clients_running = tuple(database_clients_value["containers"])
+    if (
+        len(database_clients_running) != len(set(database_clients_running))
+        or set(database_clients_running) - set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
+    ):
+        raise OperatorError("Middleware database client state is malformed")
     readiness_backup_stamp = checked_root_file(backup / "readiness-backup-stamp")
     if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", readiness_backup_stamp) is None:
         raise OperatorError("Middleware readiness backup reference is malformed")
@@ -1402,6 +1594,7 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
         "database_allows_connections": database_allows_connections,
         "database_connection_limit": database_connection_limit,
         "database_head": database_head,
+        "database_clients_running": database_clients_running,
         "database_dump_path": database_dump_path,
         "database_dump_sha256": expected_dump_digest,
         "readiness_backup_stamp": readiness_backup_stamp,
@@ -1423,7 +1616,12 @@ def middleware_rollback_progress(backup: Path) -> dict[str, str] | None:
     required = {"phase", "failed_state", "failed_state_sha256"}
     if not isinstance(progress, dict) or set(progress) != required:
         raise OperatorError("Middleware rollback progress schema mismatch")
-    if progress["phase"] not in {"FAILED_STATE_PRESERVED", "DATABASE_RESTORED", "COMPLETE"}:
+    if progress["phase"] not in {
+        "FAILED_STATE_PRESERVED",
+        "DATABASE_RESTORED_FENCED",
+        "CONNECTION_POLICY_RESTORED",
+        "COMPLETE",
+    }:
         raise OperatorError("Middleware rollback progress phase is invalid")
     failed_state = progress["failed_state"]
     failed_digest = progress["failed_state_sha256"]
@@ -1524,6 +1722,25 @@ def middleware_database_exists() -> bool:
     return result == "true"
 
 
+def set_middleware_database_connection_limit(connection_limit: str) -> None:
+    if re.fullmatch(r"-1|[0-9]{1,10}", connection_limit) is None:
+        raise OperatorError("Middleware database connection limit is malformed")
+    run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        f"alter database {MIDDLEWARE_DB} with connection limit {connection_limit}",
+    ], timeout=30)
+
+
 def fence_middleware_database_clients() -> bool:
     """Block non-superuser writers and terminate existing target sessions."""
     if not middleware_database_exists():
@@ -1556,6 +1773,20 @@ def fence_middleware_database_clients() -> bool:
         "-c",
         f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{MIDDLEWARE_DB}' and pid<>pg_backend_pid()",
     ], timeout=30)
+    remaining = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        f"select count(*) from pg_stat_activity where datname='{MIDDLEWARE_DB}'",
+    ], timeout=30).stdout.decode().strip()
+    if remaining != "0":
+        raise OperatorError("Middleware database sessions remain after fencing")
     return True
 
 
@@ -1574,6 +1805,10 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
             "failed_state_preserved": progress["failed_state"],
             "middleware_rollback_already_complete": True,
         }
+    database_clients_running = bundle["database_clients_running"]
+    if not isinstance(database_clients_running, tuple):
+        raise OperatorError("Middleware database client state is malformed")
+    quiesce_middleware_database_clients(stamp)
     compose = middleware_compose(config, rollback_override=bundle["override"])
     run_bytes([
         *compose,
@@ -1666,20 +1901,16 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
             database_dump_digest,
             timeout=1800,
         )
-        run_bytes([
-            "/usr/bin/docker",
-            "exec",
-            MIDDLEWARE_DB_CONTAINER,
-            "psql",
-            "-U",
-            "postgres",
-            "-d",
-            "postgres",
-            "-v",
-            "ON_ERROR_STOP=1",
-            "-c",
-            f"alter database {MIDDLEWARE_DB} with connection limit {bundle['database_connection_limit']}",
-        ], timeout=30)
+        progress = record_middleware_rollback_progress(
+            backup,
+            "DATABASE_RESTORED_FENCED",
+            progress["failed_state"],
+            progress["failed_state_sha256"],
+        )
+    if progress["phase"] == "DATABASE_RESTORED_FENCED":
+        set_middleware_database_connection_limit(
+            str(bundle["database_connection_limit"])
+        )
         run_bytes([
             "/usr/bin/docker",
             "exec",
@@ -1696,10 +1927,12 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
         ], timeout=30)
         progress = record_middleware_rollback_progress(
             backup,
-            "DATABASE_RESTORED",
+            "CONNECTION_POLICY_RESTORED",
             progress["failed_state"],
             progress["failed_state_sha256"],
         )
+    if progress["phase"] != "CONNECTION_POLICY_RESTORED":
+        raise OperatorError("Middleware rollback connection policy is not restored")
     run_bytes([
         *compose,
         "up",
@@ -1709,6 +1942,7 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
         *MIDDLEWARE_RUNTIME_SERVICES,
     ], timeout=600)
     restored_head = verify_middleware_rollback_readback(bundle)
+    resume_middleware_database_clients(stamp, database_clients_running)
     progress = record_middleware_rollback_progress(
         backup,
         "COMPLETE",
@@ -1777,13 +2011,20 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
     validate_middleware_compose(config, compose)
     image_matches = middleware_runtime_image_matches(config)
     if any(image_matches):
-        stamp = str(validate_middleware_rollback(config)["stamp"])
+        bundle = validate_middleware_rollback(config)
+        stamp = str(bundle["stamp"])
     else:
         stamp = snapshot_middleware_runtime(config, str(backup_state["backup_stamp"]))
+        bundle = validate_middleware_rollback(config)
+    database_clients_running = bundle["database_clients_running"]
+    if not isinstance(database_clients_running, tuple):
+        raise OperatorError("Middleware database client state is malformed")
     if all(image_matches):
         runtime = verify_middleware_runtime(config)
         if middleware_database_revision() != MIDDLEWARE_REQUIRED_DATABASE_HEAD:
             raise OperatorError("Middleware database head readback mismatch")
+        if middleware_quiescence_stamp() == stamp:
+            resume_middleware_database_clients(stamp, database_clients_running)
         return {
             **runtime,
             "middleware_backup_stamp": stamp,
@@ -1791,6 +2032,8 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
             "middleware_rollout": "PASS",
             "middleware_already_current": True,
         }
+    if middleware_quiescence_stamp() != stamp:
+        raise OperatorError("Middleware database clients are not quiesced for rollout")
     prepare_middleware_rollout(stamp)
     try:
         run_bytes([
@@ -1815,6 +2058,7 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
         runtime = verify_middleware_runtime(config)
         if middleware_database_revision() != MIDDLEWARE_REQUIRED_DATABASE_HEAD:
             raise OperatorError("Middleware database head readback mismatch")
+        resume_middleware_database_clients(stamp, database_clients_running)
     except Exception:
         rollback_middleware(config)
         raise

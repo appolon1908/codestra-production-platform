@@ -120,6 +120,16 @@ class BackupOperationsTests(unittest.TestCase):
         self.assertIn("alembic current", source)
         self.assertIn("MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS", source)
         self.assertIn("MIDDLEWARE_SCHEMA_TABLE_COUNT=${middleware_schema_table_count}", source)
+        self.assertIn(
+            "postgresql+asyncpg://mw_integration_api:%s@postgres:5432/codestra_middleware",
+            source,
+        )
+        self.assertIn("MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api", source)
+        self.assertIn("MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS", source)
+        self.assertIn("python -m app.entrypoints.integration_api", source)
+        self.assertIn('urlopen("http://middleware-candidate:8095/healthz"', source)
+        self.assertIn('urlopen("http://middleware-candidate:8095/readyz"', source)
+        self.assertIn("MIDDLEWARE_CANDIDATE_DATABASE_READINESS=PASS", source)
         self.assertIn('docker network create --internal', source)
         self.assertNotIn("--publish", source)
         self.assertNotIn("--publish-all", source)

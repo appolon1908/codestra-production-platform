@@ -30,11 +30,11 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `acc40df9796282875ff7d91bcb5bacfb4365196044be473140aaa6599d823105` |
+| `codestra-production-operator` | `7a8d7c9ccf8bdc00093b99c4ea487de5c4bf8a8955b62c721ea5d3c6d36339ea` |
 | `codestra-production-forced-command` | `d806b91ae6d9ddf962883487ffebaf3ac503ed3ef79b0d9a9bdedc222e64cf8c` |
 | `codestra-production-operator.sudoers` | `9023d679f923587eaaed3d0c27b5c388a136d112a9483777881b5aea002ed520` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
-| `codestra-isolated-restore-rehearsal.sh` | `ac2490b5889522028d5afb408f3b6b9f8dfdf588cc695008bfb6287664700d57` |
+| `codestra-isolated-restore-rehearsal.sh` | `076bc8d33318561fff535f336300d072cd14beb9c756c253a8b1c6a30f3f34f4` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
 
 The installer contains the five pinned digests and verifies them before
@@ -141,8 +141,11 @@ root-owned backup stamp published in `LAST_SUCCESS`, and publishes its own
 atomic `LAST_SUCCESS` marker after checksum validation. The operator validates
 that restore result and requires it to bind the same backup stamp, immutable
 image digest, Middleware source SHA, schema tables, and Alembic head
-`0056_klyrow_delivery_events`. The migration runs on an internal-only disposable
-network against the isolated restored database before production is touched.
+`0056_klyrow_delivery_events`. The migration runs as the production migration
+identity `mw_integration_api`, with the restored grant graph compared byte for
+byte to production, on an internal-only disposable network. The exact candidate
+then starts without a host port and must return healthy `/healthz` and
+database-online `/readyz` responses before production is touched.
 
 `activate-control-plane` requires exact-tuple PASS evidence from both staging
 and validation, a validated encrypted backup, a rollback snapshot, healthy
@@ -158,7 +161,13 @@ integration API, scheduler, and notification worker. A retry preserves the
 original exact-tuple rollback marker while that attempt is active. After a
 completed rollback, the next attempt verifies the restored runtime and captures
 a fresh pre-change database and image snapshot so intervening writes cannot be
-lost. Rollback reads back every restored image
+lost. Before that snapshot, the operator records and stops the complete,
+checksum-pinned Middleware database-client graph, fences new non-superuser
+connections, terminates existing sessions, and verifies zero target sessions.
+The prior running set remains stopped through migration and replacement, then is
+restored exactly after successful readback or rollback. A root-owned `QUIESCED`
+marker makes an interruption before bundle publication recoverable without
+silently leaving writers stopped. Rollback reads back every restored image
 ID and fail-closed environment before recording PASS. The bundle includes the
 pre-change Middleware database dump, checksum, owner, Alembic head, and the
 validated readiness-backup reference. Rollback stops the three replaced
@@ -166,10 +175,13 @@ writers, sets the target database connection limit to zero, terminates every
 remaining client session, and only then atomically preserves a checksum-bound
 failed-state dump and progress record. It disables all target-database
 connections before destructive restore and restores the pre-change database
-behind a connection-limit fence. The captured connection policy is restored only after `pg_restore`
-completes. A retry after `dropdb`, database recreation, or
-`pg_restore` resumes from that durable record without trying to dump a missing
-database; a completed retry is read back as an idempotent no-op. Rollback
+behind a connection-limit fence. A durable `DATABASE_RESTORED_FENCED` checkpoint
+is published immediately after `pg_restore`; only a later
+`CONNECTION_POLICY_RESTORED` phase can reopen the captured connection policy.
+A retry after `dropdb`, database recreation, `pg_restore`, or connection-policy
+restoration resumes from that durable phase without dropping a database that may
+have accepted writes or trying to dump a missing database; a completed retry is
+read back as an idempotent no-op. Rollback
 verifies the prior database head before PASS. The exact-tuple rollback pointer
 and phase records are fsynced, atomically replaced, and read back before use.
 Both pre-change and failed-state dumps stream directly to protected files and
