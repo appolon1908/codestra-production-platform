@@ -29,11 +29,20 @@ through the external private `codestra-kong_kong_backend` network and stable
 alias `middleware-integration-api`.
 
 The deployment candidate is source
-`24a86223d850a77cce3b72644e9fad7ff4f9acb0`, signed release run
-`33312550094`, and immutable image digest
-`sha256:d9bbdda6b13983b429fdb063f500474421da9e14884c03415101a17a49e887f4`.
+`f6748a58f8d2590520a4f28776770957061cdea1`, signed release run
+`33314094004`, and immutable image digest
+`sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820`.
 It selects the fail-closed `codestra-middleware-production-compose-v1`
 runtime profile added specifically for Server A's private Compose topology.
+
+The first protected start reached PostgreSQL but stopped before serving because
+the legacy `codestra_middleware` database reports unrelated Alembic revision
+`0054_campaign_actions`. The canonical migration tool refused to guess or stamp
+that lineage and applied no migration. The failed side-by-side container was
+removed; the legacy runtime remained healthy. The reviewed replacement profile
+therefore requires dedicated database `codestra_middleware_appolon` and role
+`appolon_middleware_api`. This isolates the canonical SQL migration ledger and
+prevents either runtime from changing the other's schema.
 
 The healthy legacy service remains in place on port `8095` for its 132-route
 contract. Existing callback, campaign, and control-plane health consumers keep
