@@ -63,7 +63,9 @@ directory before Docker Compose reads them. A retry preserves the original
 rollback point, and rollback must read back every captured image ID before it
 can record PASS. The rollback bundle also captures the pre-change Middleware
 database, owner, Alembic head, checksum, and validated readiness-backup
-reference. Rollback stops the three replaced Middleware writers, preserves the
+reference; the selected stamp must equal the stamp recorded by `restore-test`.
+Database dumps, validation, and restore input are streamed without buffering a
+full dump in operator memory. Rollback stops the three replaced Middleware writers, preserves the
 failed database state, disables new database connections before terminating all
 remaining client sessions, and recreates the database with connection limit
 zero. It restores the captured connection policy only after the pre-change dump

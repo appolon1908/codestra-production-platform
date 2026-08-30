@@ -52,8 +52,9 @@ remains superseded and denied.
 `activate-control-plane` → `status` → `collect-evidence`.
 
 `rollout-middleware` is bounded to the integration API, scheduler, and
-notification worker. It requires exact-tuple backup/restore, isolated image
-stage, and protected platform-stage evidence, migrates to
+notification worker. It requires exact-tuple backup/restore evidence whose
+tested backup stamp equals the currently selected backup, isolated image stage,
+and protected platform-stage evidence, migrates to
 `0056_klyrow_delivery_events`, reads back the exact digest and schema head, and
 automatically calls `rollback-middleware` if the
 rollout or readback fails. No retained Klyrow event is replayed until a new

@@ -30,7 +30,7 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `af268d6456207988407067ca9666d83591c824d3867512796b4f3623f0222a06` |
+| `codestra-production-operator` | `b32a0ccd3ff76b488633f70d08df46fb751ffba49b98c0921b34fa689b6d355e` |
 | `codestra-production-forced-command` | `d806b91ae6d9ddf962883487ffebaf3ac503ed3ef79b0d9a9bdedc222e64cf8c` |
 | `codestra-production-operator.sudoers` | `9023d679f923587eaaed3d0c27b5c388a136d112a9483777881b5aea002ed520` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
@@ -140,8 +140,9 @@ runtime digests before atomically committing the active-release pointer.
 captured production Compose layers by SHA-256, copies the verified bytes into
 an exact-release root-owned directory, and runs Compose only from those copies.
 It requires isolated image-stage, protected platform-stage, backup-validation,
-and restore-test evidence, migrates through the exact image, and recreates only
-the integration API, scheduler, and notification worker. A retry preserves the
+and restore-test evidence whose tested backup stamp exactly matches the selected
+readiness backup. It migrates through the exact image and recreates only the
+integration API, scheduler, and notification worker. A retry preserves the
 original exact-tuple rollback marker; rollback reads back every restored image
 ID and fail-closed environment before recording PASS. The bundle includes the
 pre-change Middleware database dump, checksum, owner, Alembic head, and the
@@ -155,7 +156,10 @@ completes. A retry after `dropdb`, database recreation, or
 database; a completed retry is read back as an idempotent no-op. Rollback
 verifies the prior database head before PASS. The exact-tuple rollback pointer
 and phase records are fsynced, atomically replaced, and read back before use.
-Every image record, database dump, checksum, owner/head record, Compose
+Both pre-change and failed-state dumps stream directly to protected files and
+are incrementally hashed; validation and `pg_restore` also stream from one
+verified descriptor, so dump size does not become operator memory use. Every
+image record, database dump, checksum, owner/head record, Compose
 override, and target manifest is also atomically written and read back; the
 bundle directory is fsynced before `LAST_SUCCESS` can advertise it.
 It then reads back health, the immutable digest, all delivery-disable flags,

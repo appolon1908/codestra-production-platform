@@ -7,6 +7,7 @@ import importlib.util
 import io
 import os
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -159,6 +160,7 @@ def test_activation_requires_exact_stage_and_validation_evidence(monkeypatch):
         lambda action, config: required.append(action) or Path(f"/{action}.json"),
     )
     monkeypatch.setattr(OPERATOR, "validate_backup_state", lambda: {"backup_stamp": "20260823T000000Z"})
+    monkeypatch.setattr(OPERATOR, "require_evidence_value", lambda path, key, value: None)
     monkeypatch.setattr(OPERATOR, "validate_control_plane_rollback", lambda: {"rollback_stamp": "20260823T000001Z"})
     monkeypatch.setattr(OPERATOR, "load_pointer", lambda path: None)
     monkeypatch.setattr(OPERATOR, "validate_control_plane", lambda config: {"control_plane": "PASS"})
@@ -170,6 +172,58 @@ def test_activation_requires_exact_stage_and_validation_evidence(monkeypatch):
     assert written["protected_sha"] == config["protected_sha"]
     assert result["rollback_ready"] == "PASS"
     assert "rollout-middleware" in required
+
+
+def test_restore_test_records_one_stable_backup_stamp(monkeypatch):
+    monkeypatch.setattr(
+        OPERATOR,
+        "require_maintenance_window",
+        lambda: {
+            "maintenance_date": "2026-08-22",
+            "maintenance_window": "PASS",
+            "owner_window_waiver_evidence": "NOT_REQUIRED",
+            "window_check": "APPROVED_WINDOW",
+        },
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "safety_state",
+        lambda: {
+            "telephony_probe_pass": True,
+            "active_calls_zero": True,
+            "active_channels_zero": True,
+            "required_runtime_flags_false": True,
+            "sip_registration_performed": False,
+        },
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_backup_state",
+        lambda: {"backup_stamp": "20260830T180000Z", "evidence_integrity": "PASS"},
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_fixed",
+        lambda command: subprocess.CompletedProcess(command, 0, ""),
+    )
+
+    _, result = OPERATOR.execute("restore-test")
+
+    assert result["tested_backup_stamp"] == "20260830T180000Z"
+    assert result["tested_backup_evidence_integrity"] == "PASS"
+
+
+def test_restore_evidence_rejects_a_different_backup_stamp(tmp_path):
+    evidence = tmp_path / "restore-test.json"
+    evidence.write_text('{"tested_backup_stamp":"20260830T170000Z"}\n')
+    evidence.chmod(0o600)
+
+    with pytest.raises(OPERATOR.OperatorError, match="tested_backup_stamp mismatch"):
+        OPERATOR.require_evidence_value(
+            evidence,
+            "tested_backup_stamp",
+            "20260830T180000Z",
+        )
 
 
 def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypatch):
@@ -185,6 +239,12 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
         OPERATOR,
         "validate_backup_state",
         lambda: {"backup_stamp": "20260830T180000Z"},
+    )
+    restore_bindings = []
+    monkeypatch.setattr(
+        OPERATOR,
+        "require_evidence_value",
+        lambda path, key, value: restore_bindings.append((path, key, value)),
     )
     monkeypatch.setattr(OPERATOR, "certify_standby", lambda value: {"subject": "ok"})
     monkeypatch.setattr(OPERATOR, "middleware_compose", lambda value: ["docker", "compose"])
@@ -214,6 +274,9 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
         "validate-backup",
         "restore-test",
     ]
+    assert restore_bindings == [
+        (Path("/restore-test.json"), "tested_backup_stamp", "20260830T180000Z")
+    ]
     assert result["middleware_rollout"] == "PASS"
     assert result["middleware_database_head"] == "0056_klyrow_delivery_events"
     assert calls[0][-6:] == [
@@ -237,6 +300,7 @@ def test_middleware_rollout_failure_invokes_bounded_rollback(monkeypatch):
         "validate_backup_state",
         lambda: {"backup_stamp": "20260830T180000Z"},
     )
+    monkeypatch.setattr(OPERATOR, "require_evidence_value", lambda path, key, value: None)
     monkeypatch.setattr(OPERATOR, "certify_standby", lambda value: {})
     monkeypatch.setattr(OPERATOR, "middleware_compose", lambda value: ["docker", "compose"])
     monkeypatch.setattr(OPERATOR, "validate_middleware_compose", lambda value, command: None)
@@ -266,6 +330,7 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
         "validate_backup_state",
         lambda: {"backup_stamp": "20260830T180000Z"},
     )
+    monkeypatch.setattr(OPERATOR, "require_evidence_value", lambda path, key, value: None)
     monkeypatch.setattr(OPERATOR, "certify_standby", lambda value: {})
     monkeypatch.setattr(OPERATOR, "middleware_compose", lambda value: ["docker", "compose"])
     monkeypatch.setattr(OPERATOR, "validate_middleware_compose", lambda value, command: None)
@@ -379,11 +444,17 @@ def test_middleware_snapshot_flushes_bundle_before_marker(monkeypatch, tmp_path)
             return subprocess.CompletedProcess(command, 0, b"-1\n")
         if "pg_get_userbyid" in statement:
             return subprocess.CompletedProcess(command, 0, b"middleware_data_owner\n")
-        if "pg_dump" in command:
-            return subprocess.CompletedProcess(command, 0, b"pre-change-dump")
         return subprocess.CompletedProcess(command, 0, b"")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
+    database_dump = b"pre-change-dump"
+
+    def stream_dump(command, path, **kwargs):
+        assert "pg_dump" in command
+        OPERATOR.atomic_root_bytes(path, database_dump, mode=0o600)
+        return hashlib.sha256(database_dump).hexdigest(), len(database_dump)
+
+    monkeypatch.setattr(OPERATOR, "stream_command_to_atomic_file", stream_dump)
     events = []
     real_replace = OPERATOR.os.replace
     real_fsync_directory = OPERATOR.fsync_directory
@@ -424,12 +495,31 @@ def test_middleware_snapshot_flushes_bundle_before_marker(monkeypatch, tmp_path)
     assert all(events.index(("replace", backup / name)) < marker_index for name in expected_members)
 
 
+def test_database_dump_streams_to_disk_and_hashes_incrementally(tmp_path):
+    target = tmp_path / "database.dump"
+    size = 3 * 1024 * 1024
+    command = [
+        sys.executable,
+        "-c",
+        f"import sys; sys.stdout.buffer.write(b'x' * {size})",
+    ]
+
+    digest, written = OPERATOR.stream_command_to_atomic_file(command, target)
+
+    assert written == size
+    assert digest == hashlib.sha256(b"x" * size).hexdigest()
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert OPERATOR.hash_operator_file(target) == (digest, size)
+
+
 def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch, tmp_path):
     config = OPERATOR.load_release_config()
     stamp = "20260830T190000Z"
     backup = tmp_path / stamp
     backup.mkdir(mode=0o700)
     monkeypatch.setattr(OPERATOR, "MIDDLEWARE_BACKUP_ROOT", tmp_path)
+    database_dump_path = backup / "middleware.dump"
+    database_dump_digest = hashlib.sha256(b"pre-change-dump").hexdigest()
     image_ids = {
         service: "sha256:" + str(index) * 64
         for index, service in enumerate(OPERATOR.MIDDLEWARE_RUNTIME_SERVICES, 1)
@@ -445,7 +535,8 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
             "database_allows_connections": "true",
             "database_connection_limit": "-1",
             "database_head": "0054_previous",
-            "database_dump": b"pre-change-dump",
+            "database_dump_path": database_dump_path,
+            "database_dump_sha256": database_dump_digest,
             "readiness_backup_stamp": "20260830T180000Z",
         },
     )
@@ -454,10 +545,22 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        output = b"failed-state-dump" if "pg_dump" in command else b""
-        return subprocess.CompletedProcess(command, 0, output)
+        return subprocess.CompletedProcess(command, 0, b"")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
+    failed_dump = b"failed-state-dump"
+
+    def stream_dump(command, path, **kwargs):
+        calls.append((command, {"stream_path": path}))
+        OPERATOR.atomic_root_bytes(path, failed_dump, mode=0o600)
+        return hashlib.sha256(failed_dump).hexdigest(), len(failed_dump)
+
+    def restore(command, path, digest, **kwargs):
+        calls.append((command, {"stdin_path": path, "stdin_sha256": digest}))
+        return subprocess.CompletedProcess(command, 0, b"")
+
+    monkeypatch.setattr(OPERATOR, "stream_command_to_atomic_file", stream_dump)
+    monkeypatch.setattr(OPERATOR, "run_with_verified_file_stdin", restore)
     monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
     monkeypatch.setattr(OPERATOR, "middleware_database_revision", lambda: "0054_previous")
 
@@ -506,7 +609,8 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
     assert any("connection limit 0" in part for part in commands[create_index])
     assert restore_index < limit_restore_index < connection_restore_index < start_index
     assert restore_index < start_index
-    assert calls[restore_index][1]["stdin"] == b"pre-change-dump"
+    assert calls[restore_index][1]["stdin_path"] == database_dump_path
+    assert calls[restore_index][1]["stdin_sha256"] == database_dump_digest
     assert (backup / result["failed_state_preserved"]).read_bytes() == b"failed-state-dump"
 
 
@@ -516,6 +620,8 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
     backup = tmp_path / stamp
     backup.mkdir(mode=0o700)
     monkeypatch.setattr(OPERATOR, "MIDDLEWARE_BACKUP_ROOT", tmp_path)
+    database_dump_path = backup / "middleware.dump"
+    database_dump_digest = hashlib.sha256(b"pre-change-dump").hexdigest()
     image_ids = {
         service: "sha256:" + str(index) * 64
         for index, service in enumerate(OPERATOR.MIDDLEWARE_RUNTIME_SERVICES, 1)
@@ -531,7 +637,8 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
             "database_allows_connections": "true",
             "database_connection_limit": "-1",
             "database_head": "0054_previous",
-            "database_dump": b"pre-change-dump",
+            "database_dump_path": database_dump_path,
+            "database_dump_sha256": database_dump_digest,
             "readiness_backup_stamp": "20260830T180000Z",
         },
     )
@@ -549,10 +656,22 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
         if any("create database" in part for part in command) and fail_create_once:
             fail_create_once = False
             raise subprocess.CalledProcessError(1, command)
-        output = b"failed-state-dump" if "pg_dump" in command else b""
-        return subprocess.CompletedProcess(command, 0, output)
+        return subprocess.CompletedProcess(command, 0, b"")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
+    failed_dump = b"failed-state-dump"
+
+    def stream_dump(command, path, **kwargs):
+        calls.append((command, {"stream_path": path}))
+        OPERATOR.atomic_root_bytes(path, failed_dump, mode=0o600)
+        return hashlib.sha256(failed_dump).hexdigest(), len(failed_dump)
+
+    def restore(command, path, digest, **kwargs):
+        calls.append((command, {"stdin_path": path, "stdin_sha256": digest}))
+        return subprocess.CompletedProcess(command, 0, b"")
+
+    monkeypatch.setattr(OPERATOR, "stream_command_to_atomic_file", stream_dump)
+    monkeypatch.setattr(OPERATOR, "run_with_verified_file_stdin", restore)
     monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
     monkeypatch.setattr(OPERATOR, "middleware_database_revision", lambda: "0054_previous")
 
@@ -592,8 +711,11 @@ def test_middleware_rollback_resumes_after_database_drop(monkeypatch, tmp_path):
 def test_middleware_rollback_rejects_wrong_restored_image(monkeypatch, tmp_path):
     config = OPERATOR.load_release_config()
     stamp = "20260830T190000Z"
-    (tmp_path / stamp).mkdir(mode=0o700)
+    backup = tmp_path / stamp
+    backup.mkdir(mode=0o700)
     monkeypatch.setattr(OPERATOR, "MIDDLEWARE_BACKUP_ROOT", tmp_path)
+    database_dump_path = backup / "middleware.dump"
+    database_dump_digest = hashlib.sha256(b"pre-change-dump").hexdigest()
     image_ids = {service: "sha256:" + "1" * 64 for service in OPERATOR.MIDDLEWARE_RUNTIME_SERVICES}
     monkeypatch.setattr(
         OPERATOR,
@@ -606,7 +728,8 @@ def test_middleware_rollback_rejects_wrong_restored_image(monkeypatch, tmp_path)
             "database_allows_connections": "true",
             "database_connection_limit": "-1",
             "database_head": "0054_previous",
-            "database_dump": b"pre-change-dump",
+            "database_dump_path": database_dump_path,
+            "database_dump_sha256": database_dump_digest,
             "readiness_backup_stamp": "20260830T180000Z",
         },
     )
@@ -614,9 +737,19 @@ def test_middleware_rollback_rejects_wrong_restored_image(monkeypatch, tmp_path)
     monkeypatch.setattr(
         OPERATOR,
         "run_bytes",
-        lambda command, **kwargs: subprocess.CompletedProcess(
-            command, 0, b"failed-state-dump" if "pg_dump" in command else b""
-        ),
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, b""),
+    )
+    failed_dump = b"failed-state-dump"
+
+    def stream_dump(command, path, **kwargs):
+        OPERATOR.atomic_root_bytes(path, failed_dump, mode=0o600)
+        return hashlib.sha256(failed_dump).hexdigest(), len(failed_dump)
+
+    monkeypatch.setattr(OPERATOR, "stream_command_to_atomic_file", stream_dump)
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_with_verified_file_stdin",
+        lambda command, path, digest, **kwargs: subprocess.CompletedProcess(command, 0, b""),
     )
     monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
     monkeypatch.setattr(

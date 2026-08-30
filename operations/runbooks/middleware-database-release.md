@@ -26,7 +26,9 @@ readiness, migration head, and public route contracts.
 
 The protected `rollout-middleware` operator captures a transaction-consistent
 custom-format dump, database owner, Alembic head, checksum, and validated
-readiness-backup stamp before migration. `rollback-middleware` stops the three
+readiness-backup stamp before migration. The accepted `restore-test` evidence
+must name that exact backup stamp. Dumps, checksum validation, and restore input
+are streamed rather than buffered in operator memory. `rollback-middleware` stops the three
 replaced Middleware writers, preserves a checksum-bound failed-state dump,
 disables new database connections before terminating all remaining sessions,
 and recreates the database with connection limit zero. It restores the

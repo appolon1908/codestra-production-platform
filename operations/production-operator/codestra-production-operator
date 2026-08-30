@@ -352,6 +352,131 @@ def run_bytes(command: list[str], *, stdin: bytes | None = None, timeout: int = 
     )
 
 
+def hash_operator_file(path: Path, *, expected_mode: int = 0o600) -> tuple[str, int]:
+    """Hash a protected file incrementally without buffering it in memory."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise OperatorError(f"operator stream unavailable: {path}") from error
+    digest = hashlib.sha256()
+    size = 0
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or info.st_gid != os.getegid()
+            or stat.S_IMODE(info.st_mode) != expected_mode
+        ):
+            raise OperatorError(f"operator stream metadata unsafe: {path}")
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def stream_command_to_atomic_file(
+    command: list[str],
+    path: Path,
+    *,
+    timeout: int = 1800,
+    mode: int = 0o600,
+) -> tuple[str, int]:
+    """Stream command stdout to an atomic protected file and hash it incrementally."""
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        mode,
+    )
+    try:
+        with tempfile.TemporaryFile() as errors:
+            with os.fdopen(descriptor, "wb") as stream:
+                os.fchmod(stream.fileno(), mode)
+                completed = subprocess.run(
+                    command,
+                    check=False,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stream,
+                    stderr=errors,
+                    timeout=timeout,
+                    env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+                )
+                stream.flush()
+                os.fsync(stream.fileno())
+            if completed.returncode != 0:
+                errors.seek(0, os.SEEK_END)
+                error_size = errors.tell()
+                errors.seek(max(0, error_size - 4096))
+                raise subprocess.CalledProcessError(
+                    completed.returncode,
+                    command,
+                    stderr=errors.read(),
+                )
+        digest, size = hash_operator_file(temporary, expected_mode=mode)
+        if size == 0:
+            raise OperatorError("streamed command output is empty")
+        os.replace(temporary, path)
+        fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+    readback_digest, readback_size = hash_operator_file(path, expected_mode=mode)
+    if not hmac.compare_digest(readback_digest, digest) or readback_size != size:
+        raise OperatorError(f"operator stream readback mismatch: {path}")
+    return digest, size
+
+
+def run_with_verified_file_stdin(
+    command: list[str],
+    path: Path,
+    expected_digest: str,
+    *,
+    timeout: int = 1800,
+) -> subprocess.CompletedProcess[bytes]:
+    """Verify a protected file through one descriptor, then stream it to stdin."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise OperatorError(f"operator stream unavailable: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or info.st_gid != os.getegid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+        ):
+            raise OperatorError(f"operator stream metadata unsafe: {path}")
+        digest = hashlib.sha256()
+        size = 0
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            size += len(chunk)
+        if (
+            size == 0
+            or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
+            or not hmac.compare_digest(digest.hexdigest(), expected_digest)
+        ):
+            raise OperatorError("operator input stream checksum mismatch")
+        stream.seek(0)
+        return subprocess.run(
+            command,
+            stdin=stream,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout,
+            env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+        )
+
+
 def docker_inspect(name: str) -> dict[str, object]:
     result = run_bytes(["/usr/bin/docker", "inspect", name], timeout=30)
     return json.loads(result.stdout)[0]
@@ -823,12 +948,25 @@ def require_action_evidence(action: str, config: dict[str, str]) -> Path:
                 or stat.S_IMODE(info.st_mode) != 0o600
             ):
                 continue
-            payload = json.loads(candidate.read_text(encoding="utf-8"))
+            payload = json.loads(
+                checked_operator_bytes(candidate, expected_mode=0o600).decode("utf-8")
+            )
         except (OSError, UnicodeError, json.JSONDecodeError):
             continue
         if payload.get("status") == "PASS" and payload.get("release") == config:
             return candidate
     raise OperatorError(f"exact-tuple {action} evidence unavailable")
+
+
+def require_evidence_value(path: Path, key: str, expected: object) -> None:
+    try:
+        payload = json.loads(
+            checked_operator_bytes(path, expected_mode=0o600).decode("utf-8")
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OperatorError("operator evidence is malformed") from error
+    if payload.get(key) != expected:
+        raise OperatorError(f"operator evidence {key} mismatch")
 
 
 def verify_middleware_runtime(config: dict[str, str]) -> dict[str, str]:
@@ -1067,19 +1205,20 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
     if re.fullmatch(r"-1|[0-9]{1,10}", database_connection_limit) is None:
         raise OperatorError("Middleware database connection limit readback failed")
     database_head = middleware_database_revision()
-    database_dump = run_bytes([
-        "/usr/bin/docker",
-        "exec",
-        MIDDLEWARE_DB_CONTAINER,
-        "pg_dump",
-        "-U",
-        "postgres",
-        "-Fc",
-        MIDDLEWARE_DB,
-    ], timeout=1800).stdout
-    if not database_dump:
-        raise OperatorError("Middleware pre-change database dump is empty")
-    database_digest = hashlib.sha256(database_dump).hexdigest()
+    database_digest, _ = stream_command_to_atomic_file(
+        [
+            "/usr/bin/docker",
+            "exec",
+            MIDDLEWARE_DB_CONTAINER,
+            "pg_dump",
+            "-U",
+            "postgres",
+            "-Fc",
+            MIDDLEWARE_DB,
+        ],
+        backup / "middleware.dump",
+        timeout=1800,
+    )
     atomic_root_text(backup / "database-owner", database_owner + "\n", mode=0o600)
     atomic_root_text(
         backup / "database-allows-connections",
@@ -1097,7 +1236,6 @@ def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: 
         readiness_backup_stamp + "\n",
         mode=0o600,
     )
-    atomic_root_bytes(backup / "middleware.dump", database_dump, mode=0o600)
     atomic_root_text(
         backup / "middleware.dump.sha256",
         database_digest + "\n",
@@ -1156,12 +1294,13 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
     readiness_backup_stamp = checked_root_file(backup / "readiness-backup-stamp")
     if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", readiness_backup_stamp) is None:
         raise OperatorError("Middleware readiness backup reference is malformed")
-    database_dump = checked_root_bytes(backup / "middleware.dump")
+    database_dump_path = backup / "middleware.dump"
+    database_dump_digest, database_dump_size = hash_operator_file(database_dump_path)
     expected_dump_digest = checked_root_file(backup / "middleware.dump.sha256")
     if (
-        not database_dump
+        database_dump_size == 0
         or re.fullmatch(r"[0-9a-f]{64}", expected_dump_digest) is None
-        or not hmac.compare_digest(hashlib.sha256(database_dump).hexdigest(), expected_dump_digest)
+        or not hmac.compare_digest(database_dump_digest, expected_dump_digest)
     ):
         raise OperatorError("Middleware rollback database dump checksum mismatch")
     return {
@@ -1172,7 +1311,8 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
         "database_allows_connections": database_allows_connections,
         "database_connection_limit": database_connection_limit,
         "database_head": database_head,
-        "database_dump": database_dump,
+        "database_dump_path": database_dump_path,
+        "database_dump_sha256": expected_dump_digest,
         "readiness_backup_stamp": readiness_backup_stamp,
     }
 
@@ -1203,13 +1343,13 @@ def middleware_rollback_progress(backup: Path) -> dict[str, str] | None:
         or re.fullmatch(r"[0-9a-f]{64}", failed_digest) is None
     ):
         raise OperatorError("Middleware rollback failed-state reference is malformed")
-    failed_bytes = checked_operator_bytes(backup / failed_state, expected_mode=0o600)
+    actual_failed_digest, failed_size = hash_operator_file(backup / failed_state)
     checksum = checked_operator_bytes(
         backup / f"{failed_state}.sha256", expected_mode=0o600
     ).decode("ascii").strip()
     if (
-        not failed_bytes
-        or not hmac.compare_digest(hashlib.sha256(failed_bytes).hexdigest(), failed_digest)
+        failed_size == 0
+        or not hmac.compare_digest(actual_failed_digest, failed_digest)
         or not hmac.compare_digest(checksum, failed_digest)
     ):
         raise OperatorError("Middleware rollback failed-state checksum mismatch")
@@ -1303,20 +1443,20 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
             f"failed-state-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
             f"-{os.getpid()}.dump"
         )
-        failed_dump = run_bytes([
-            "/usr/bin/docker",
-            "exec",
-            MIDDLEWARE_DB_CONTAINER,
-            "pg_dump",
-            "-U",
-            "postgres",
-            "-Fc",
-            MIDDLEWARE_DB,
-        ], timeout=1800).stdout
-        if not failed_dump:
-            raise OperatorError("Middleware failed-state database dump is empty")
-        failed_digest = hashlib.sha256(failed_dump).hexdigest()
-        atomic_root_bytes(backup / failed_state_name, failed_dump, mode=0o600)
+        failed_digest, _ = stream_command_to_atomic_file(
+            [
+                "/usr/bin/docker",
+                "exec",
+                MIDDLEWARE_DB_CONTAINER,
+                "pg_dump",
+                "-U",
+                "postgres",
+                "-Fc",
+                MIDDLEWARE_DB,
+            ],
+            backup / failed_state_name,
+            timeout=1800,
+        )
         atomic_root_text(
             backup / f"{failed_state_name}.sha256",
             failed_digest + "\n",
@@ -1375,10 +1515,19 @@ def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
             "-c",
             f"create database {MIDDLEWARE_DB} with owner {bundle['database_owner']} connection limit 0",
         ], timeout=60)
-        run_bytes([
-            "/usr/bin/docker", "exec", "-i", MIDDLEWARE_DB_CONTAINER,
-            "pg_restore", "-U", "postgres", "--exit-on-error", "-d", MIDDLEWARE_DB,
-        ], stdin=bundle["database_dump"], timeout=1800)
+        database_dump_path = bundle["database_dump_path"]
+        database_dump_digest = bundle["database_dump_sha256"]
+        if not isinstance(database_dump_path, Path) or not isinstance(database_dump_digest, str):
+            raise OperatorError("Middleware rollback database stream is malformed")
+        run_with_verified_file_stdin(
+            [
+                "/usr/bin/docker", "exec", "-i", MIDDLEWARE_DB_CONTAINER,
+                "pg_restore", "-U", "postgres", "--exit-on-error", "-d", MIDDLEWARE_DB,
+            ],
+            database_dump_path,
+            database_dump_digest,
+            timeout=1800,
+        )
         run_bytes([
             "/usr/bin/docker",
             "exec",
@@ -1468,8 +1617,13 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
     require_action_evidence("stage", config)
     require_action_evidence("stage-control-plane", config)
     require_action_evidence("validate-backup", config)
-    require_action_evidence("restore-test", config)
+    restore_evidence = require_action_evidence("restore-test", config)
     backup_state = validate_backup_state()
+    require_evidence_value(
+        restore_evidence,
+        "tested_backup_stamp",
+        backup_state["backup_stamp"],
+    )
     certify_standby(config)
     compose = middleware_compose(config)
     validate_middleware_compose(config, compose)
@@ -1544,6 +1698,11 @@ def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
     restore_evidence = require_action_evidence("restore-test", config)
     middleware_evidence = require_action_evidence("rollout-middleware", config)
     backup = validate_backup_state()
+    require_evidence_value(
+        restore_evidence,
+        "tested_backup_stamp",
+        backup["backup_stamp"],
+    )
     rollback = validate_control_plane_rollback()
     previous = load_pointer(ACTIVE_RELEASE_POINTER)
     if previous is not None:
@@ -1807,10 +1966,19 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
     }
     if action in SYSTEMD_ACTIONS:
         unit = SYSTEMD_ACTIONS[action]
+        restore_backup_before = validate_backup_state() if action == "restore-test" else None
         invocation = run_fixed(["/usr/bin/systemctl", "start", "--wait", unit])
         result.update({"unit": unit, "returncode": invocation.returncode})
         if invocation.returncode != 0:
             raise OperatorError(f"fixed unit failed: {unit}")
+        if restore_backup_before is not None:
+            restore_backup_after = validate_backup_state()
+            if restore_backup_after["backup_stamp"] != restore_backup_before["backup_stamp"]:
+                raise OperatorError("readiness backup changed during restore test")
+            result.update({
+                "tested_backup_stamp": restore_backup_before["backup_stamp"],
+                "tested_backup_evidence_integrity": "PASS",
+            })
     elif action == "validate-backup":
         result.update(validate_backup_state())
     elif action == "stage":
