@@ -788,6 +788,21 @@ def test_middleware_database_client_inventory_includes_every_scaled_replica(
     assert OPERATOR.middleware_database_client_canonical(containers[1]) == (
         "codestra-middleware-sync-worker-1"
     )
+    OPERATOR.validate_middleware_database_client_names(containers)
+
+
+def test_middleware_database_client_bundle_validation_rejects_bad_replica_sets():
+    with pytest.raises(OPERATOR.OperatorError, match="client set is malformed"):
+        OPERATOR.validate_middleware_database_client_names(
+            (
+                "codestra-middleware-sync-worker-2",
+                "codestra-middleware-sync-worker-2",
+            )
+        )
+    with pytest.raises(OPERATOR.OperatorError, match="client set is malformed"):
+        OPERATOR.validate_middleware_database_client_names(
+            ("codestra-middleware-unreviewed-writer-2",)
+        )
 
 
 def test_completed_rollback_forces_fresh_snapshot(monkeypatch, tmp_path):

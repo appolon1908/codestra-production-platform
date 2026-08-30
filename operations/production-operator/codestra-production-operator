@@ -1363,7 +1363,7 @@ def clear_middleware_quiescence(stamp: str) -> None:
     fsync_directory(MIDDLEWARE_BACKUP_ROOT)
 
 
-def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) -> None:
+def validate_middleware_database_client_names(containers: tuple[str, ...]) -> None:
     known = set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
     unknown = {
         container
@@ -1371,7 +1371,11 @@ def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) 
         if middleware_database_client_canonical(container) not in known
     }
     if unknown or len(containers) != len(set(containers)):
-        raise OperatorError("Middleware database client resume set is malformed")
+        raise OperatorError("Middleware database client set is malformed")
+
+
+def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) -> None:
+    validate_middleware_database_client_names(containers)
     state = middleware_database_client_state()
     if any(container not in state for container in containers):
         raise OperatorError("Captured Middleware database client is unavailable")
@@ -1597,11 +1601,7 @@ def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
     ):
         raise OperatorError("Middleware database client state schema mismatch")
     database_clients_running = tuple(database_clients_value["containers"])
-    if (
-        len(database_clients_running) != len(set(database_clients_running))
-        or set(database_clients_running) - set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
-    ):
-        raise OperatorError("Middleware database client state is malformed")
+    validate_middleware_database_client_names(database_clients_running)
     readiness_backup_stamp = checked_root_file(backup / "readiness-backup-stamp")
     if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", readiness_backup_stamp) is None:
         raise OperatorError("Middleware readiness backup reference is malformed")
