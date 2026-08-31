@@ -10,7 +10,11 @@ import re
 import shutil
 from pathlib import Path
 
-from install_klyrow_production_validator_compat import mapped, restore_backups
+from install_klyrow_production_validator_compat import (
+    mapped,
+    restore_backups,
+    validate_directory_chain,
+)
 
 
 def main() -> int:
@@ -33,6 +37,7 @@ def main() -> int:
         return 2
     try:
         installation_path = mapped(simulator, "/etc/codestra/klyrow-production-validator/installation.json")
+        validate_directory_chain(installation_path.parent)
         if installation_path.is_symlink() or not installation_path.is_file():
             raise ValueError("installation evidence missing")
         installation = json.loads(installation_path.read_text(encoding="utf-8"))
@@ -42,11 +47,13 @@ def main() -> int:
         state = mapped(simulator, "/var/lib/codestra/klyrow-production-validator/install-backups")
         if backup.parent != state or backup.is_symlink() or not backup.is_dir():
             raise ValueError("backup directory rejected")
+        validate_directory_chain(backup)
         records = installation.get("backups")
         if not isinstance(records, list):
             raise ValueError("rollback manifest rejected")
         restore_backups(records, backup)
         version = mapped(simulator, f"/opt/codestra/operators/klyrow-production-validator/{args.expected_source_sha}")
+        validate_directory_chain(version.parent)
         if version.is_symlink():
             raise ValueError("version path rejected")
         if version.is_dir():

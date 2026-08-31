@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import secrets
 import sys
@@ -31,6 +32,22 @@ ACTION_RUNNER = Path("/usr/local/libexec/codestra/klyrow-production-validator-ac
 LOCK_PATH = Path("/run/lock/klyrow-production-validator.lock")
 AUDIT_PATH = Path("/var/lib/codestra/klyrow-production-validator/audit/audit.jsonl")
 EVIDENCE_ROOT = Path("/var/lib/codestra/klyrow-production-validator/evidence")
+
+
+def bounded_readback(value: str) -> dict[str, object]:
+    encoded = value.encode("utf-8", errors="replace")
+    result: dict[str, object] = {
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "bytes": len(encoded),
+        "structured": False,
+    }
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return result
+    result["structured"] = True
+    result["value"] = redact_object(parsed)
+    return result
 
 
 def load_contract() -> dict[str, object]:
@@ -93,6 +110,11 @@ def main(argv: list[str]) -> int:
     rc = 2
     result = "FAIL"
     command_result: dict[str, object] = {}
+    readback: dict[str, object] = {
+        "sha256": hashlib.sha256(b"").hexdigest(),
+        "bytes": 0,
+        "structured": False,
+    }
     try:
         action = validate_invocation(argv)
         correlation_id = read_correlation_id()
@@ -115,20 +137,23 @@ def main(argv: list[str]) -> int:
             "elapsed_ms": completed.elapsed_ms,
             "truncated": completed.truncated,
             "timed_out": completed.timed_out,
+            "stdout_sha256": hashlib.sha256(completed.stdout.encode("utf-8")).hexdigest(),
+            "stdout_bytes": len(completed.stdout.encode("utf-8")),
         }
+        readback = bounded_readback(completed.stdout)
         if completed.stdout:
             sys.stdout.write(completed.stdout)
         if completed.stderr:
             sys.stderr.write(completed.stderr)
         if completed.truncated:
             sys.stderr.write("OUTPUT_TRUNCATED=YES\n")
-        rc = completed.returncode
+        rc = 3 if completed.truncated and completed.returncode == 0 else completed.returncode
         result = "PASS" if rc == 0 else "FAIL"
     except PolicyError as exc:
         sys.stderr.write(f"OPERATOR_RESULT=DENY\nREASON={str(exc).split(':', 1)[0]}\n")
     finally:
         finished = datetime.now(timezone.utc)
-        record = {
+        audit_record = {
             "timestamp": finished.isoformat(),
             "started_at": started.isoformat(),
             "finished_at": finished.isoformat(),
@@ -140,9 +165,10 @@ def main(argv: list[str]) -> int:
             "mutation_classification": "read_only_no_effect",
             **command_result,
         }
+        evidence_record = {**audit_record, "authoritative_readback": readback}
         try:
-            append_audit(AUDIT_PATH, record)
-            write_evidence(correlation_id, record)
+            append_audit(AUDIT_PATH, audit_record)
+            write_evidence(correlation_id, evidence_record)
         except (OSError, PolicyError):
             rc = 2
             sys.stderr.write("AUDIT_WRITE=FAIL\n")

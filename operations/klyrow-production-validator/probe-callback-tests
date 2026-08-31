@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from kpv_probe_core import emit, request_status
 
@@ -22,12 +23,13 @@ BODY = json.dumps(
 
 
 def main() -> int:
+    current_timestamp = str(int(time.time()))
     cases = (
         (
             "invalid_signature",
             {
                 "Content-Type": "application/json",
-                "X-Klyrow-Timestamp": "0",
+                "X-Klyrow-Timestamp": current_timestamp,
                 "X-Klyrow-Event-Id": "00000000-0000-0000-0000-000000000000",
                 "X-Klyrow-Signature": "invalid",
             },
@@ -36,7 +38,7 @@ def main() -> int:
             "missing_event_id",
             {
                 "Content-Type": "application/json",
-                "X-Klyrow-Timestamp": "0",
+                "X-Klyrow-Timestamp": current_timestamp,
                 "X-Klyrow-Signature": "invalid",
             },
         ),
@@ -46,16 +48,17 @@ def main() -> int:
         result = request_status("POST", "/v1/webhooks/postal", headers=headers, body=BODY)
         result.update({"test_id": test_id, "denied": result.get("status") in {400, 401, 403, 422}})
         results.append(result)
-    passed = all(result["denied"] for result in results)
+    negative_tests_passed = all(result["denied"] for result in results)
     emit(
         {
             "rejected_callback_tests": results,
-            "passed": passed,
+            "negative_tests_passed": negative_tests_passed,
+            "complete": False,
             "valid_signature_test": "NOT_RUN_REQUIRES_SEPARATE_SIGNING_AUTHORITY",
             "durable_state_expected": False,
         }
     )
-    return 0 if passed else 3
+    return 3
 
 
 if __name__ == "__main__":

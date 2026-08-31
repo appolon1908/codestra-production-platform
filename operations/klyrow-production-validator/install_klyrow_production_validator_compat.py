@@ -9,11 +9,26 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import stat
 from pathlib import Path
 
 
 class InstallError(RuntimeError):
     pass
+
+
+def validate_directory_chain(path: Path) -> None:
+    if not path.is_absolute():
+        raise InstallError("directory path must be absolute")
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
+        current /= component
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            break
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise InstallError(f"unsafe directory ancestor: {current}")
 
 
 def mapped(root: Path | None, absolute: str) -> Path:
@@ -34,6 +49,7 @@ def sha256(path: Path) -> str:
 def restore_backups(records: list[dict[str, object]], backup_dir: Path) -> None:
     for record in reversed(records):
         target = Path(str(record["target"]))
+        validate_directory_chain(target.parent)
         if target.is_symlink() or (target.exists() and not target.is_file()):
             raise InstallError(f"unsafe rollback target: {target}")
         target.unlink(missing_ok=True)

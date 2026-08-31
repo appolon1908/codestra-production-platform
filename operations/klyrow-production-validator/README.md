@@ -47,6 +47,11 @@ it never substitutes the unsafe smoke script or guesses credentials. Operator
 `READY` certifies the command boundary and installed probe digests, not the
 outcome of later application tests.
 
+Negative authorization and callback probes also remain incomplete (nonzero)
+until separately reviewed positive synthetic-identity and signing authorities
+exist. The invalid-signature callback case uses a current in-window timestamp
+so timestamp expiry cannot mask missing signature enforcement.
+
 The no-effect capability readback is recursively projected before any value is
 emitted. Its adapter name and SHA-256 use fixed scalar formats, its authority
 flags are strict booleans, and its UTC expiry must be valid and unexpired.
@@ -71,6 +76,8 @@ The installer requires all of the following:
 - a valid SSH signature over `SHA256SUMS` in the
   `codestra-klyrow-validator` namespace;
 - the approved release signer identity;
+- checksum-bound installation manifest, SPDX SBOM, SLSA provenance, and
+  passing vulnerability report whose source and artifact identities agree;
 - one Ed25519 operator public key;
 - an explicit source CIDR, expiry, approver, and change ID.
 
@@ -85,6 +92,11 @@ Post-install validation parses the forced-key entry as one exact grammar and
 binds its Ed25519 fingerprint, source restriction, expiry, full option set, and
 complete `authorized_keys` checksum back to the root-owned installation and
 operator-identity records. Drift fails closed.
+
+The signed release evidence and allowed public signer are copied read-only
+into the immutable version directory. Host validation rechecks their digests,
+source/artifact binding, and detached signature without contacting application
+services.
 
 The installer records a private rollback set before changing operator files.
 `remove-klyrow-production-validator.py` restores those exact files and removes
@@ -101,7 +113,9 @@ for CI integration tests and cannot redirect a production operator action.
 
 Every privileged action is serialized by a nonblocking lock. The root helper
 writes bounded, redacted JSON audit records under the root-owned validator
-state directory and evidence records under its fixed evidence root. The forced-command
+state directory and evidence records under its fixed evidence root. Each
+evidence record includes the bounded structured authoritative read-back and
+its digest; audit records retain the digest and size. The forced-command
 dispatcher emits a correlated journal record that includes the installed key
 fingerprint and SSH source address. Output has per-action time and size limits;
 secret-shaped fields, bearer values, and private-key blocks are redacted.

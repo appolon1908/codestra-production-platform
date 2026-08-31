@@ -31,16 +31,17 @@ def main() -> int:
     admin = request_status("GET", "/v1/admin/tenants")
     admin.update({"test_id": "admin_without_identity", "denied": admin.get("status") in {401, 403}})
     results.append(admin)
-    passed = all(result["denied"] for result in results)
+    negative_tests_passed = all(result["denied"] for result in results)
     emit(
         {
             "authorization_negative_tests": results,
-            "passed": passed,
+            "negative_tests_passed": negative_tests_passed,
+            "complete": False,
             "valid_identity_tests": "NOT_RUN_REQUIRES_SEPARATE_SYNTHETIC_IDENTITY_AUTHORITY",
             "provider_submission_possible": False,
         }
     )
-    return 0 if passed else 3
+    return 3
 
 
 if __name__ == "__main__":

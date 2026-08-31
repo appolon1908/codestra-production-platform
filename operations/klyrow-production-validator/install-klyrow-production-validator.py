@@ -74,9 +74,194 @@ def mapped(root: Path | None, absolute: str) -> Path:
     return path if root is None else root / path.relative_to("/")
 
 
-def verify_release(archive: Path, sums: Path, signature: Path, signers: Path) -> str:
-    for path in (archive, sums, signature, signers):
+def validate_directory_chain(path: Path) -> None:
+    if not path.is_absolute():
+        raise InstallError("directory path must be absolute")
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
+        current /= component
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            break
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise InstallError(f"unsafe directory ancestor: {current}")
+
+
+def prepare_directory(path: Path, *, mode: int, uid: int, gid: int) -> None:
+    validate_directory_chain(path.parent)
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        path.mkdir(mode=mode, parents=True, exist_ok=False)
+        os.chown(path, uid, gid)
+        os.chmod(path, mode)
+        metadata = path.lstat()
+    validate_directory_chain(path)
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != uid
+        or metadata.st_mode & 0o022
+    ):
+        raise InstallError(f"unsafe installation directory: {path}")
+
+
+def json_object(path: Path, *, maximum_bytes: int = 2 * 1024 * 1024) -> dict[str, object]:
+    regular(path)
+    if path.stat().st_size > maximum_bytes:
+        raise InstallError(f"release evidence too large: {path.name}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InstallError(f"invalid release evidence: {path.name}") from exc
+    if not isinstance(value, dict):
+        raise InstallError(f"invalid release evidence: {path.name}")
+    return value
+
+
+def validate_release_evidence(
+    *,
+    source_sha: str,
+    archive: Path,
+    release_manifest_path: Path,
+    sbom_path: Path,
+    provenance_path: Path,
+    vulnerability_path: Path,
+) -> dict[str, object]:
+    artifact_sha = sha256(archive)
+    release_manifest = json_object(release_manifest_path)
+    if (
+        release_manifest.get("schema_version") != "1.0.0"
+        or release_manifest.get("source_repository")
+        != "appolon1908-hue/codestra-production-platform"
+        or release_manifest.get("source_sha") != source_sha
+        or release_manifest.get("artifact") != archive.name
+        or release_manifest.get("artifact_sha256") != artifact_sha
+        or release_manifest.get("application_runtime_mutations") != 0
+    ):
+        raise InstallError("release manifest authority mismatch")
+    payload_hashes = release_manifest.get("payload_sha256")
+    if (
+        not isinstance(payload_hashes, dict)
+        or set(payload_hashes) != EXPECTED_MEMBERS
+        or not all(
+            isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+            for value in payload_hashes.values()
+        )
+    ):
+        raise InstallError("release payload manifest rejected")
+
+    sbom = json_object(sbom_path)
+    packages = sbom.get("packages")
+    files = sbom.get("files")
+    if (
+        sbom.get("spdxVersion") != "SPDX-2.3"
+        or sbom.get("name") != f"klyrow-production-validator-{source_sha}"
+        or not isinstance(packages, list)
+        or len(packages) != 1
+        or not isinstance(packages[0], dict)
+        or packages[0].get("versionInfo") != source_sha
+        or {item.get("checksumValue") for item in packages[0].get("checksums", []) if isinstance(item, dict)}
+        != {artifact_sha}
+        or not isinstance(files, list)
+    ):
+        raise InstallError("SBOM authority mismatch")
+    sbom_files: dict[str, str] = {}
+    for item in files:
+        if not isinstance(item, dict) or not isinstance(item.get("fileName"), str):
+            raise InstallError("SBOM file entry rejected")
+        checksums = item.get("checksums")
+        if not isinstance(checksums, list) or len(checksums) != 1 or not isinstance(checksums[0], dict):
+            raise InstallError("SBOM checksum entry rejected")
+        if checksums[0].get("algorithm") != "SHA256" or not isinstance(
+            checksums[0].get("checksumValue"), str
+        ):
+            raise InstallError("SBOM checksum entry rejected")
+        sbom_files[item["fileName"]] = checksums[0]["checksumValue"]
+    if sbom_files != payload_hashes:
+        raise InstallError("SBOM payload binding mismatch")
+
+    provenance = json_object(provenance_path)
+    try:
+        predicate = provenance["predicate"]
+        build = predicate["buildDefinition"]
+        run_details = predicate["runDetails"]
+    except (KeyError, TypeError) as exc:
+        raise InstallError("provenance schema rejected") from exc
+    expected_subject = [{"name": archive.name, "digest": {"sha256": artifact_sha}}]
+    expected_dependency = {
+        "uri": "git+https://github.com/appolon1908-hue/codestra-production-platform",
+        "digest": {"gitCommit": source_sha},
+    }
+    if (
+        provenance.get("_type") != "https://in-toto.io/Statement/v1"
+        or provenance.get("predicateType") != "https://slsa.dev/provenance/v1"
+        or provenance.get("subject") != expected_subject
+        or not isinstance(build, dict)
+        or build.get("buildType")
+        != "https://codestra.co/build/klyrow-production-validator/v1"
+        or build.get("externalParameters") != {"source_sha": source_sha}
+        or build.get("resolvedDependencies") != [expected_dependency]
+        or not isinstance(run_details, dict)
+        or run_details.get("builder")
+        != {"id": ".github/workflows/klyrow-production-validator.yml"}
+        or not isinstance(run_details.get("metadata"), dict)
+        or not isinstance(run_details["metadata"].get("invocationId"), str)
+        or not run_details["metadata"]["invocationId"]
+    ):
+        raise InstallError("provenance authority mismatch")
+
+    vulnerability = json_object(vulnerability_path)
+    if (
+        vulnerability.get("schema_version") != "1.0.0"
+        or vulnerability.get("dependency_lock") != "requirements.lock"
+        or vulnerability.get("runtime_dependencies") != 0
+        or vulnerability.get("critical") != 0
+        or vulnerability.get("high") != 0
+        or vulnerability.get("gate") != "PASS"
+    ):
+        raise InstallError("vulnerability gate rejected")
+    return release_manifest
+
+
+def verify_release(
+    archive: Path,
+    sums: Path,
+    signature: Path,
+    signers: Path,
+    release_manifest_path: Path,
+    sbom_path: Path,
+    provenance_path: Path,
+    vulnerability_path: Path,
+) -> tuple[str, dict[str, object]]:
+    evidence_paths = (
+        archive,
+        release_manifest_path,
+        sbom_path,
+        provenance_path,
+        vulnerability_path,
+    )
+    for path in (*evidence_paths, sums, signature, signers):
         regular(path, private=path == signers)
+    if sums.stat().st_size > 65536 or signature.stat().st_size > 65536 or signers.stat().st_size > 65536:
+        raise InstallError("release signature authority too large")
+    expected_names = {
+        archive.name,
+        "installation-manifest.json",
+        "sbom.spdx.json",
+        "provenance.json",
+        "vulnerability-report.json",
+    }
+    if (
+        release_manifest_path.name != "installation-manifest.json"
+        or sbom_path.name != "sbom.spdx.json"
+        or provenance_path.name != "provenance.json"
+        or vulnerability_path.name != "vulnerability-report.json"
+        or sums.name != "SHA256SUMS"
+        or signature.name != "SHA256SUMS.sig"
+    ):
+        raise InstallError("release evidence filenames rejected")
     lines = sums.read_text(encoding="utf-8").splitlines()
     parsed: dict[str, str] = {}
     for line in lines:
@@ -84,8 +269,8 @@ def verify_release(archive: Path, sums: Path, signature: Path, signers: Path) ->
         if match is None or match.group(2) in parsed:
             raise InstallError("invalid checksum manifest")
         parsed[match.group(2)] = match.group(1)
-    if parsed.get(archive.name) != sha256(archive):
-        raise InstallError("artifact checksum mismatch")
+    if set(parsed) != expected_names:
+        raise InstallError("checksum manifest members rejected")
     verified = subprocess.run(
         [
             "/usr/bin/ssh-keygen",
@@ -108,15 +293,28 @@ def verify_release(archive: Path, sums: Path, signature: Path, signers: Path) ->
     )
     if verified.returncode != 0:
         raise InstallError("release signature invalid")
+    for path in evidence_paths:
+        if parsed.get(path.name) != sha256(path):
+            raise InstallError(f"release checksum mismatch: {path.name}")
     match = ARTIFACT_RE.fullmatch(archive.name)
     if match is None:
         raise InstallError("artifact name invalid")
-    return match.group(1)
+    source_sha = match.group(1)
+    release_manifest = validate_release_evidence(
+        source_sha=source_sha,
+        archive=archive,
+        release_manifest_path=release_manifest_path,
+        sbom_path=sbom_path,
+        provenance_path=provenance_path,
+        vulnerability_path=vulnerability_path,
+    )
+    return source_sha, release_manifest
 
 
 def safe_extract(archive: Path, destination: Path, source_sha: str) -> Path:
     prefix = f"klyrow-production-validator-{source_sha}"
     seen: set[str] = set()
+    total_size = 0
     with tarfile.open(archive, "r:gz") as bundle:
         for member in bundle.getmembers():
             pure = PurePosixPath(member.name)
@@ -126,6 +324,11 @@ def safe_extract(archive: Path, destination: Path, source_sha: str) -> Path:
                 raise InstallError("unexpected archive member")
             if not member.isfile() or member.issym() or member.islnk() or member.isdev():
                 raise InstallError("unsafe archive member type")
+            if member.size > 2 * 1024 * 1024:
+                raise InstallError("archive member too large")
+            total_size += member.size
+            if total_size > 16 * 1024 * 1024:
+                raise InstallError("archive payload too large")
             if pure.parts[1] in seen:
                 raise InstallError("duplicate archive member")
             seen.add(pure.parts[1])
@@ -176,6 +379,7 @@ def validate_authority(
 
 
 def backup_file(target: Path, backup_dir: Path, label: str) -> dict[str, object]:
+    validate_directory_chain(target.parent)
     record: dict[str, object] = {"target": str(target), "label": label, "present": False}
     if target.exists() or target.is_symlink():
         if target.is_symlink() or not target.is_file():
@@ -213,7 +417,12 @@ def restore_backups(records: list[dict[str, object]], backup_dir: Path) -> None:
 
 
 def atomic_install(source: Path, target: Path, mode: int, uid: int, gid: int) -> None:
-    target.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    prepare_directory(
+        target.parent,
+        mode=0o755 if uid == 0 else 0o700,
+        uid=uid,
+        gid=gid,
+    )
     if target.is_symlink() or (target.exists() and not target.is_file()):
         raise InstallError(f"unsafe install target: {target}")
     fd, temporary = tempfile.mkstemp(prefix=".kpv.", dir=target.parent)
@@ -234,6 +443,10 @@ def main() -> int:
     parser.add_argument("--sha256s", required=True, type=Path)
     parser.add_argument("--signature", required=True, type=Path)
     parser.add_argument("--allowed-signers", required=True, type=Path)
+    parser.add_argument("--installation-manifest", required=True, type=Path)
+    parser.add_argument("--sbom", required=True, type=Path)
+    parser.add_argument("--provenance", required=True, type=Path)
+    parser.add_argument("--vulnerability-report", required=True, type=Path)
     parser.add_argument("--public-key", required=True, type=Path)
     parser.add_argument("--source-cidr", required=True)
     parser.add_argument("--expiry", required=True)
@@ -255,7 +468,16 @@ def main() -> int:
     backup: Path | None = None
     version_root: Path | None = None
     try:
-        source_sha = verify_release(args.archive, args.sha256s, args.signature, args.allowed_signers)
+        source_sha, release_manifest = verify_release(
+            args.archive,
+            args.sha256s,
+            args.signature,
+            args.allowed_signers,
+            args.installation_manifest,
+            args.sbom,
+            args.provenance,
+            args.vulnerability_report,
+        )
         validate_authority(
             args.source_cidr,
             args.expiry,
@@ -267,12 +489,21 @@ def main() -> int:
         codestra = pwd.getpwuid(os.geteuid()) if simulator is not None else pwd.getpwnam("codestra-admin")
         with tempfile.TemporaryDirectory(prefix="kpv-extract-") as temporary:
             payload = safe_extract(args.archive, Path(temporary), source_sha)
+            payload_hashes = release_manifest["payload_sha256"]
+            if not isinstance(payload_hashes, dict) or any(
+                sha256(payload / name) != payload_hashes.get(name) for name in EXPECTED_MEMBERS
+            ):
+                raise InstallError("extracted payload digest mismatch")
             manifest = json.loads((payload / "command-contract.json").read_text(encoding="utf-8"))
             if manifest.get("allowed_user") != "codestra-admin" or manifest.get("default") != "deny":
                 raise InstallError("command contract invalid")
             state = mapped(simulator, "/var/lib/codestra/klyrow-production-validator")
-            backup = state / "install-backups" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            backup.mkdir(mode=0o700, parents=True, exist_ok=False)
+            prepare_directory(state, mode=0o700, uid=install_uid, gid=install_gid)
+            backup_root = state / "install-backups"
+            prepare_directory(backup_root, mode=0o700, uid=install_uid, gid=install_gid)
+            backup = backup_root / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            backup.mkdir(mode=0o700, exist_ok=False)
+            os.chown(backup, install_uid, install_gid)
             targets = {
                 "dispatcher": mapped(simulator, "/usr/local/libexec/codestra/klyrow-production-validator"),
                 "root-helper": mapped(simulator, "/usr/local/libexec/codestra/klyrow-production-validator-root"),
@@ -294,9 +525,23 @@ def main() -> int:
             version_root = mapped(simulator, f"/opt/codestra/operators/klyrow-production-validator/{source_sha}")
             if version_root.exists() or version_root.is_symlink():
                 raise InstallError("immutable version already exists")
-            version_root.mkdir(mode=0o755, parents=True)
+            prepare_directory(
+                version_root.parent, mode=0o755, uid=install_uid, gid=install_gid
+            )
+            version_root.mkdir(mode=0o755)
+            os.chown(version_root, install_uid, install_gid)
             for name in EXPECTED_MEMBERS:
                 atomic_install(payload / name, version_root / name, 0o755 if name.startswith(("klyrow-", "install-", "remove-", "validate-")) or name.endswith(".py") else 0o444, install_uid, install_gid)
+            for source, name in (
+                (args.installation_manifest, "release-installation-manifest.json"),
+                (args.sbom, "release-sbom.spdx.json"),
+                (args.provenance, "release-provenance.json"),
+                (args.vulnerability_report, "release-vulnerability-report.json"),
+                (args.sha256s, "release-SHA256SUMS"),
+                (args.signature, "release-SHA256SUMS.sig"),
+                (args.allowed_signers, "release-allowed-signers"),
+            ):
+                atomic_install(source, version_root / name, 0o444, install_uid, install_gid)
             atomic_install(payload / "klyrow-production-validator", targets["dispatcher"], 0o755, install_uid, install_gid)
             atomic_install(payload / "klyrow-production-validator-root", targets["root-helper"], 0o755, install_uid, install_gid)
             atomic_install(payload / "klyrow-production-validator-actions", targets["actions"], 0o755, install_uid, install_gid)
@@ -352,7 +597,9 @@ def main() -> int:
             identity_tmp.write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             atomic_install(identity_tmp, targets["identity"], 0o444, install_uid, install_gid)
             authorized = targets["authorized_keys"]
-            authorized.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            prepare_directory(
+                authorized.parent, mode=0o700, uid=codestra.pw_uid, gid=codestra.pw_gid
+            )
             existing = authorized.read_text(encoding="utf-8").splitlines() if authorized.exists() else []
             key_blob = public_key.split()[1]
             retained = [line for line in existing if key_blob not in line.split()]
@@ -369,6 +616,14 @@ def main() -> int:
                 "schema_version": "1.0.0",
                 "source_sha": source_sha,
                 "artifact_sha256": sha256(args.archive),
+                "release_manifest_sha256": sha256(args.installation_manifest),
+                "sbom_sha256": sha256(args.sbom),
+                "provenance_sha256": sha256(args.provenance),
+                "vulnerability_report_sha256": sha256(args.vulnerability_report),
+                "checksum_manifest_sha256": sha256(args.sha256s),
+                "signature_sha256": sha256(args.signature),
+                "allowed_signers_sha256": sha256(args.allowed_signers),
+                "release_signature_verification": "PASS",
                 "installed_at_utc": datetime.now(timezone.utc).isoformat(),
                 "change_id": args.change_id,
                 "approver": args.approver,

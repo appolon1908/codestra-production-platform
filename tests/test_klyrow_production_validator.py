@@ -273,6 +273,19 @@ def test_root_audit_path_avoids_mutable_log_ancestors() -> None:
     assert contract["audit_log"] == expected
 
 
+def test_root_evidence_preserves_bounded_redacted_structured_readback() -> None:
+    helper = load_source_script("klyrow-production-validator-root", "kpv_root_helper")
+    readback = helper.bounded_readback(
+        '{"status":"PASS","nested":{"database_url":"postgres://secret"}}'
+    )
+    assert readback["structured"] is True
+    assert readback["value"]["status"] == "PASS"
+    assert readback["value"]["nested"]["database_url"] == "[REDACTED]"
+    assert "secret" not in json.dumps(readback)
+    source = (SOURCE / "klyrow-production-validator-root").read_text(encoding="utf-8")
+    assert "3 if completed.truncated and completed.returncode == 0" in source
+
+
 def test_health_output_never_selects_health_log_output() -> None:
     actions = (SOURCE / "klyrow-production-validator-actions").read_text(encoding="utf-8")
     assert "{{json .State.Health.Status}}" in actions
@@ -418,6 +431,41 @@ def test_forced_key_parser_requires_exact_options_and_binds_fingerprint(tmp_path
     assert validator.forced_key_details(line.replace("192.0.2.0/24", "0.0.0.0/0")) is None
 
 
+def test_sudo_listing_rejects_unrestricted_and_generic_grants() -> None:
+    validator = load_source_script(
+        "validate-klyrow-production-validator.py", "kpv_sudo_boundary_validator"
+    )
+    bounded = (
+        "User codestra-admin may run the following commands:\n"
+        "    (root) NOPASSWD: "
+        + ", ".join(
+            f"{validator.ROOT_HELPER} {action}"
+            for action in validator.APPROVED_SUDO_ACTIONS
+        )
+        + "\n"
+    )
+    assert validator.sudo_listing_is_bounded(0, bounded)
+    assert not validator.sudo_listing_is_bounded(
+        0, "    (ALL : ALL) NOPASSWD: ALL\n"
+    )
+    assert not validator.sudo_listing_is_bounded(0, "    (root) SETENV: ALL\n")
+    assert not validator.sudo_listing_is_bounded(
+        0, "    (root) NOPASSWD: /usr/bin/docker ps\n"
+    )
+    assert not validator.sudo_listing_is_bounded(
+        0, bounded.rstrip() + ", /usr/bin/id\n"
+    )
+    assert not validator.sudo_listing_is_bounded(1, bounded)
+
+
+def test_callback_invalid_signature_uses_current_timestamp_and_stays_incomplete() -> None:
+    callback = (SOURCE / "probe-callback-tests").read_text(encoding="utf-8")
+    assert "current_timestamp = str(int(time.time()))" in callback
+    assert '"X-Klyrow-Timestamp": current_timestamp' in callback
+    assert '"complete": False' in callback
+    assert "return 3" in callback
+
+
 def test_pull_request_validation_token_is_read_only() -> None:
     workflow = (SOURCE.parents[1] / ".github/workflows/klyrow-production-validator.yml").read_text(
         encoding="utf-8"
@@ -456,6 +504,50 @@ def test_installer_never_grants_host_groups_or_generic_privilege() -> None:
     installer = (SOURCE / "install-klyrow-production-validator.py").read_text(encoding="utf-8")
     for forbidden in ("groupadd", "groupmod", "usermod", "chmod 666", "docker.sock"):
         assert forbidden not in installer
+
+
+def test_installer_and_rollback_reject_symlinked_directory_ancestors(tmp_path: Path) -> None:
+    installer = load_source_script(
+        "install-klyrow-production-validator.py", "kpv_installer"
+    )
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "linked-parent"
+    link.symlink_to(real, target_is_directory=True)
+    with pytest.raises(installer.InstallError, match="unsafe directory ancestor"):
+        installer.validate_directory_chain(link / "nested")
+
+
+def test_release_evidence_rejects_failed_vulnerability_gate(tmp_path: Path) -> None:
+    installer = load_source_script(
+        "install-klyrow-production-validator.py", "kpv_installer_release_gate"
+    )
+    source_sha = "c" * 40
+    run_checked(
+        [
+            "/usr/bin/python3",
+            str(SOURCE / "build-operator-artifact.py"),
+            "--source-sha",
+            source_sha,
+            "--output",
+            str(tmp_path),
+            "--workflow-run",
+            "pytest",
+        ]
+    )
+    vulnerability = tmp_path / "vulnerability-report.json"
+    value = json.loads(vulnerability.read_text(encoding="utf-8"))
+    value["gate"] = "FAIL"
+    vulnerability.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(installer.InstallError, match="vulnerability gate rejected"):
+        installer.validate_release_evidence(
+            source_sha=source_sha,
+            archive=tmp_path / f"klyrow-production-validator-{source_sha}.tar.gz",
+            release_manifest_path=tmp_path / "installation-manifest.json",
+            sbom_path=tmp_path / "sbom.spdx.json",
+            provenance_path=tmp_path / "provenance.json",
+            vulnerability_path=vulnerability,
+        )
 
 
 def run_checked(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -518,6 +610,14 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
                 str(sums) + ".sig",
                 "--allowed-signers",
                 str(signers),
+                "--installation-manifest",
+                str(release / "installation-manifest.json"),
+                "--sbom",
+                str(release / "sbom.spdx.json"),
+                "--provenance",
+                str(release / "provenance.json"),
+                "--vulnerability-report",
+                str(release / "vulnerability-report.json"),
                 "--public-key",
                 str(operator_key) + ".pub",
                 "--source-cidr",
@@ -579,6 +679,27 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             ]
         )
         assert '"validation_result": "PASS"' in restored_validation.stdout
+        identity = simulator / "etc/codestra/klyrow-production-validator/operator-identity.json"
+        identity_real = identity.with_name("operator-identity.real.json")
+        identity.rename(identity_real)
+        identity.symlink_to(identity_real.name)
+        symlinked_validation = subprocess.run(
+            [
+                "/usr/bin/python3",
+                str(SOURCE / "validate-klyrow-production-validator.py"),
+                "--expected-source-sha",
+                source_sha,
+                "--simulator-root",
+                str(simulator),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert symlinked_validation.returncode == 2
+        assert "VALIDATION_RESULT=FAIL" in symlinked_validation.stdout
+        identity.unlink()
+        identity_real.rename(identity)
         probe_manifest = simulator / "etc/codestra/klyrow-production-validator/probe-manifest.json"
         installed_probes = json.loads(probe_manifest.read_text(encoding="utf-8"))
         assert set(installed_probes["probes"]) == {
