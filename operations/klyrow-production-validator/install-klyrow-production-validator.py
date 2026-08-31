@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
+import errno
 import hashlib
 import ipaddress
 import json
@@ -533,11 +535,39 @@ def backup_file(
     return record, data, metadata
 
 
+def rename_exchange(directory: int, left: str, right: str) -> None:
+    try:
+        function = ctypes.CDLL(None, use_errno=True).renameat2
+    except AttributeError as exc:
+        raise InstallError("atomic exchange unavailable") from exc
+    function.argtypes = (
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    function.restype = ctypes.c_int
+    result = function(
+        directory,
+        os.fsencode(left),
+        directory,
+        os.fsencode(right),
+        2,  # RENAME_EXCHANGE
+    )
+    if result != 0:
+        error = ctypes.get_errno()
+        if error in {errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP}:
+            raise InstallError("atomic exchange unsupported")
+        raise OSError(error, os.strerror(error))
+
+
 def atomic_replace_bytes(
     target: Path,
     content: bytes,
     expected_target: os.stat_result,
     *,
+    expected_sha256: str,
     mode: int,
     uid: int,
     gid: int,
@@ -545,6 +575,8 @@ def atomic_replace_bytes(
 ) -> os.stat_result:
     if not re.fullmatch(r"[a-z0-9-]{3,32}", label):
         raise InstallError("temporary label rejected")
+    if re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+        raise InstallError("expected target digest rejected")
     validate_directory_chain(target.parent)
     directory = os.open(
         target.parent,
@@ -552,6 +584,8 @@ def atomic_replace_bytes(
     )
     descriptor: int | None = None
     temporary: str | None = None
+    exchanged = False
+    preserve_temporary = False
     try:
         parent = os.fstat(directory)
         current_parent = target.parent.lstat()
@@ -600,29 +634,96 @@ def atomic_replace_bytes(
             for field in stable_target
         ):
             raise InstallError("target changed before replace")
-        os.replace(
-            temporary,
-            target.name,
-            src_dir_fd=directory,
-            dst_dir_fd=directory,
-        )
+        rename_exchange(directory, temporary, target.name)
+        exchanged = True
+        displaced = os.stat(temporary, dir_fd=directory, follow_symlinks=False)
         installed = os.stat(target.name, dir_fd=directory, follow_symlinks=False)
-        if (
-            not stat.S_ISREG(installed.st_mode)
-            or installed.st_dev != created.st_dev
-            or installed.st_ino != created.st_ino
-        ):
-            raise InstallError("target replacement rejected")
-        os.fsync(directory)
+        displaced_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns")
+        displacement_matches = all(
+            getattr(displaced, field) == getattr(expected_target, field)
+            for field in displaced_fields
+        )
+        displaced_descriptor = os.open(
+            temporary,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=directory,
+        )
+        try:
+            displaced_before = os.fstat(displaced_descriptor)
+            displaced_digest = hashlib.sha256()
+            displaced_size = 0
+            while True:
+                chunk = os.read(displaced_descriptor, 65536)
+                if not chunk:
+                    break
+                displaced_size += len(chunk)
+                if displaced_size > 8 * 1024 * 1024:
+                    raise InstallError("displaced target too large")
+                displaced_digest.update(chunk)
+            displaced_after = os.fstat(displaced_descriptor)
+        finally:
+            os.close(displaced_descriptor)
+        displacement_matches = displacement_matches and all(
+            getattr(displaced_before, field) == getattr(displaced_after, field)
+            for field in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        )
+        displacement_matches = (
+            displacement_matches
+            and displaced_before.st_dev == displaced.st_dev
+            and displaced_before.st_ino == displaced.st_ino
+            and displaced_digest.hexdigest() == expected_sha256
+        )
+        replacement_matches = (
+            stat.S_ISREG(installed.st_mode)
+            and installed.st_dev == created.st_dev
+            and installed.st_ino == created.st_ino
+        )
         canonical = target.lstat()
-        if canonical.st_dev != installed.st_dev or canonical.st_ino != installed.st_ino:
-            raise InstallError("target directory changed during replace")
+        canonical_matches = (
+            canonical.st_dev == installed.st_dev and canonical.st_ino == installed.st_ino
+        )
+        if not displacement_matches or not replacement_matches or not canonical_matches:
+            rename_exchange(directory, temporary, target.name)
+            exchanged = False
+            restored_temporary = os.stat(
+                temporary, dir_fd=directory, follow_symlinks=False
+            )
+            if (
+                restored_temporary.st_dev != created.st_dev
+                or restored_temporary.st_ino != created.st_ino
+            ):
+                preserve_temporary = True
+            raise InstallError("atomic target comparison failed")
+        os.fsync(directory)
+        final_displaced = os.stat(temporary, dir_fd=directory, follow_symlinks=False)
+        if (
+            final_displaced.st_dev != displaced.st_dev
+            or final_displaced.st_ino != displaced.st_ino
+        ):
+            preserve_temporary = True
+            raise InstallError("displaced target changed before cleanup")
+        os.unlink(temporary, dir_fd=directory)
         temporary = None
+        exchanged = False
         return installed
     finally:
         if descriptor is not None:
             os.close(descriptor)
-        if temporary is not None:
+        if exchanged and temporary is not None:
+            try:
+                rename_exchange(directory, temporary, target.name)
+                exchanged = False
+                restored_temporary = os.stat(
+                    temporary, dir_fd=directory, follow_symlinks=False
+                )
+                if (
+                    restored_temporary.st_dev != created.st_dev
+                    or restored_temporary.st_ino != created.st_ino
+                ):
+                    preserve_temporary = True
+            except (InstallError, OSError):
+                preserve_temporary = True
+        if temporary is not None and not preserve_temporary:
             try:
                 os.unlink(temporary, dir_fd=directory)
             except FileNotFoundError:
@@ -979,6 +1080,7 @@ def main() -> int:
                 authorized,
                 authorized_content,
                 authorized_original_metadata,
+                expected_sha256=hashlib.sha256(authorized_original).hexdigest(),
                 mode=0o600,
                 uid=codestra.pw_uid,
                 gid=codestra.pw_gid,
@@ -1036,6 +1138,7 @@ def main() -> int:
                         ))),
                         authorized_original,
                         authorized_installed_metadata,
+                        expected_sha256=hashlib.sha256(authorized_content).hexdigest(),
                         mode=authorized_original_metadata.st_mode & 0o777,
                         uid=authorized_original_metadata.st_uid,
                         gid=authorized_original_metadata.st_gid,

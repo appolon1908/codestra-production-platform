@@ -707,6 +707,44 @@ def test_backup_rejects_authorized_keys_symlink_swap(tmp_path: Path, monkeypatch
     assert not (backup / "authorized_keys").exists()
 
 
+def test_authorized_keys_atomic_exchange_preserves_concurrent_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    installer = load_source_script(
+        "install-klyrow-production-validator.py", "kpv_installer_atomic_exchange"
+    )
+    target = tmp_path / "authorized_keys"
+    target.write_text("original\n", encoding="utf-8")
+    target.chmod(0o600)
+    expected = target.stat(follow_symlinks=False)
+    real_exchange = installer.rename_exchange
+    raced = False
+
+    def racing_exchange(directory, left, right):
+        nonlocal raced
+        if not raced:
+            raced = True
+            target.write_text("concurrent-key-rotation\n", encoding="utf-8")
+            target.chmod(0o600)
+        return real_exchange(directory, left, right)
+
+    monkeypatch.setattr(installer, "rename_exchange", racing_exchange)
+    with pytest.raises(installer.InstallError, match="atomic target comparison failed"):
+        installer.atomic_replace_bytes(
+            target,
+            b"operator-forced-command\n",
+            expected,
+            expected_sha256=hashlib.sha256(b"original\n").hexdigest(),
+            mode=0o600,
+            uid=os.getuid(),
+            gid=os.getgid(),
+            label="install",
+        )
+    assert raced
+    assert target.read_text(encoding="utf-8") == "concurrent-key-rotation\n"
+    assert list(tmp_path.glob(".authorized_keys.kpv-install.*")) == []
+
+
 def test_pinned_probes_are_bundled_and_structurally_no_data() -> None:
     required = (
         "kpv_probe_core.py",
