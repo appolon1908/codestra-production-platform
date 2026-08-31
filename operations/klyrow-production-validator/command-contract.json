@@ -80,7 +80,7 @@
       ],
       "timeout_seconds": 10,
       "maximum_output_bytes": 32768,
-      "redaction_policy": "approved_boolean_fields_only",
+      "redaction_policy": "approved_boolean_fields_and_live_image_identity_only",
       "audit_event": "production.configuration_readback",
       "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
       "mutation_classification": "read_only_no_effect",

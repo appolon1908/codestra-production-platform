@@ -377,6 +377,74 @@ def release_readback(actions) -> dict[str, object]:
     }
 
 
+def configuration_view(actions) -> dict[str, object]:
+    return {
+        "values": {field: False for field in actions.BOOLEAN_FIELDS},
+        "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "containers": {
+            name: {
+                "image_reference": f"ghcr.io/codestra/{name}@sha256:" + "a" * 64,
+                "source_revision": "b" * 40,
+            }
+            for name in actions.CONFIGURATION_CONTAINERS
+        },
+    }
+
+
+def test_configuration_readback_requires_fresh_live_bindings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actions = load_actions_module()
+    baseline = configuration_view(actions)
+    stale = json.loads(json.dumps(baseline))
+    stale["generated_at_utc"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=actions.MAXIMUM_READBACK_AGE_SECONDS + 1)
+    ).isoformat().replace("+00:00", "Z")
+    with pytest.raises(PolicyError, match="CONFIGURATION_TIMESTAMP_STALE"):
+        actions.projected_configuration_view(stale)
+
+    views = {
+        name: json.loads(json.dumps(baseline))
+        for name in ("rendered", "running", "gateway-api")
+    }
+    live_values = {field: False for field in actions.BOOLEAN_FIELDS}
+
+    def fake_safe_json(path: Path, **_kwargs: object) -> dict[str, object]:
+        name = path.stem.removeprefix("configuration-")
+        return json.loads(json.dumps(views[name]))
+
+    def fake_run(argv: list[str], **_kwargs: object) -> dict[str, object]:
+        asserted = baseline["containers"][argv[-1]]
+        if ".Config.Env" in argv[3]:
+            stdout = "".join(
+                f"{field}={'true' if live_values[field] else 'false'}\n"
+                for field in sorted(actions.BOOLEAN_FIELDS)
+            )
+        else:
+            stdout = "|".join(
+                json.dumps(value)
+                for value in (asserted["image_reference"], asserted["source_revision"])
+            )
+        return {
+            "argv_id": "docker",
+            "exit_code": 0,
+            "stdout": stdout,
+            "stderr": "",
+            "elapsed_ms": 1,
+            "truncated": False,
+            "timed_out": False,
+        }
+
+    monkeypatch.setattr(actions, "safe_json_file", fake_safe_json)
+    monkeypatch.setattr(actions, "run", fake_run)
+    assert actions.configuration_readback() == 0
+    views["gateway-api"]["values"]["LIVE_EMAIL_DELIVERY"] = True
+    assert actions.configuration_readback() == 3
+    views["gateway-api"]["values"]["LIVE_EMAIL_DELIVERY"] = False
+    live_values["LIVE_EMAIL_DELIVERY"] = True
+    assert actions.configuration_readback() == 3
+
+
 def test_release_identity_projects_only_exact_recursive_schema() -> None:
     actions = load_actions_module()
     value = release_readback(actions)
@@ -551,6 +619,27 @@ def test_pull_request_validation_token_is_read_only() -> None:
     assert "persist-credentials: false" in validate_job
     assert "ref: ${{ env.OPERATOR_SOURCE_SHA }}" in validate_job
     assert 'test "$(git rev-parse HEAD)" = "${OPERATOR_SOURCE_SHA}"' in validate_job
+    assert workflow.count(
+        "python -I operations/klyrow-production-validator/build-operator-artifact.py"
+    ) == 3
+
+
+def test_protected_release_publication_is_retry_safe() -> None:
+    workflow = (SOURCE.parents[1] / ".github/workflows/klyrow-production-validator.yml").read_text(
+        encoding="utf-8"
+    )
+    publication = workflow.split("      - name: Publish immutable release", 1)[1]
+    for required in (
+        "gh release view",
+        "--draft",
+        "gh release upload",
+        'cmp "${asset}"',
+        ".target_commitish",
+        ".object.sha",
+        "-F draft=false",
+    ):
+        assert required in publication
+    assert "gh release create \"klyrow-validator-${OPERATOR_SOURCE_SHA}\" dist/*" not in publication
 
 
 def test_pinned_probes_are_bundled_and_structurally_no_data() -> None:
@@ -599,6 +688,7 @@ def test_release_evidence_rejects_failed_vulnerability_gate(tmp_path: Path) -> N
     run_checked(
         [
             sys.executable,
+            "-I",
             str(SOURCE / "build-operator-artifact.py"),
             "--source-sha",
             source_sha,
@@ -680,6 +770,7 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
         run_checked(
             [
                 sys.executable,
+                "-I",
                 str(SOURCE / "build-operator-artifact.py"),
                 "--source-sha",
                 source_sha,
@@ -880,6 +971,9 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             "smtp-no-data",
         }
         fingerprint = run_checked(["/usr/bin/ssh-keygen", "-lf", str(operator_key) + ".pub"]).stdout.split()[1]
+        revoke_trap = release / "revoke-symlink-trap"
+        revoke_trap.write_text("must-not-change\n", encoding="utf-8")
+        (authorized.parent / ".authorized_keys.kpv-revoke").symlink_to(revoke_trap)
         revoked = run_checked(
             [
                 "/usr/bin/python3",
@@ -891,6 +985,7 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             ]
         )
         assert "REVOCATION_RESULT=PASS" in revoked.stdout
+        assert revoke_trap.read_text(encoding="utf-8") == "must-not-change\n"
         assert 'command="/usr/local/libexec/codestra/klyrow-production-validator ssh-dispatch"' not in authorized.read_text(encoding="utf-8")
         unrelated_key = release / "unrelated-key"
         run_checked(
@@ -902,6 +997,9 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             encoding="utf-8",
         )
         authorized.chmod(0o600)
+        rollback_trap = release / "rollback-symlink-trap"
+        rollback_trap.write_text("must-not-change\n", encoding="utf-8")
+        (authorized.parent / ".authorized_keys.kpv-rollback").symlink_to(rollback_trap)
         rollback = run_checked(
             [
                 "/usr/bin/python3",
@@ -913,6 +1011,7 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             ]
         )
         assert "ROLLBACK_RESULT=PASS" in rollback.stdout
+        assert rollback_trap.read_text(encoding="utf-8") == "must-not-change\n"
         assert unrelated_public in authorized.read_text(encoding="utf-8")
         assert restricted_same_key in authorized.read_text(encoding="utf-8")
         assert old_dispatcher.read_text(encoding="utf-8") == "previous-validator\n"
@@ -927,6 +1026,7 @@ def test_artifact_build_is_deterministic(tmp_path: Path) -> None:
         run_checked(
             [
                 sys.executable,
+                "-I",
                 str(SOURCE / "build-operator-artifact.py"),
                 "--source-sha",
                 source_sha,

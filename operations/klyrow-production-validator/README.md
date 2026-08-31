@@ -24,10 +24,17 @@ inventory is limited to the fixed application and SMTP ports in the contract;
 neither action enumerates unrelated host workloads. Container health passes
 only when every fixed container explicitly reports `healthy`. The
 configuration action reads only three root-owned, non-symlink JSON readbacks
-whose schema consists of the nine approved boolean fields. Release identity is
-recursively validated and projected to an exact immutable-release schema for
-the four fixed containers. Nested or extra fields are rejected. This avoids
-reading or materializing complete container environments.
+whose values schema consists of the nine approved boolean fields. Each view
+also carries a bounded UTC generation timestamp and exact image/revision
+bindings for the three fixed services. All views must be fresh, mutually
+consistent, and match fresh fixed-field Docker inspection before PASS. A
+fixed template projects only the nine approved booleans from each live
+container, so same-image container recreation or runtime flag drift cannot be
+masked by stale readback files and no unrelated environment value is emitted.
+Release identity is recursively validated and projected to an exact
+immutable-release schema for the four fixed containers. Nested or extra fields
+are rejected. This avoids reading or materializing complete container
+environments.
 
 Release identity read-back is valid for at most five minutes and is compared
 with fresh fixed-field Docker inspection for every approved container. The
@@ -67,13 +74,19 @@ flags are strict booleans, and its UTC expiry must be valid and unexpired.
 
 `build-operator-artifact.py` creates a deterministic archive, installation
 manifest, SPDX SBOM, SLSA-shaped provenance statement, and checksum manifest.
-Every build invokes the exactly pinned Bandit source scanner over the complete
+Every workflow invokes the artifact builder itself with Python isolated mode;
+every build then invokes the exactly pinned Bandit source scanner over the complete
 Python operator/build surface and derives the vulnerability report and PASS
 gate from the actual result; the report retains all high, medium, and low
 counts. The protected-branch workflow runs the tests and dependency and source
 vulnerability gates, builds at the exact merge SHA, signs
 `SHA256SUMS` with the Codestra release signing identity, verifies that
 signature, and publishes an immutable SHA-addressed GitHub release.
+Publication is retry-safe: it creates a draft, accepts only the exact target
+commit and fixed asset set, compares already uploaded assets byte for byte,
+uploads only missing assets, re-verifies the complete set, and publishes only
+after the assets are complete; the final gate proves the published tag resolves
+to the protected source SHA.
 
 Unsigned local bundles are development evidence only and are rejected by the
 installer.
@@ -132,6 +145,9 @@ revocation already removed it) and preserves unrelated key additions or
 rotations; an unexpected validator entry fails closed.
 All backup records, checksums, target types, the validator key plan, and the
 immutable version path are preflighted before the first rollback mutation.
+Revocation and rollback write replacement key files only through randomized,
+exclusive, no-follow descriptors and verify the opened inode before the atomic
+rename; deterministic attacker-created temporary symlinks are never opened.
 
 The `--simulator-root` option is accepted only for a root under
 `/tmp/kpv-simulator-*` containing `.kpv-disposable-simulator`. It exists solely

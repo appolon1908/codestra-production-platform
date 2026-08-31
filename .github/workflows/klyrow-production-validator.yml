@@ -63,9 +63,9 @@ jobs:
 
       - name: Build deterministic candidate twice
         run: |
-          python operations/klyrow-production-validator/build-operator-artifact.py \
+          python -I operations/klyrow-production-validator/build-operator-artifact.py \
             --source-sha "${OPERATOR_SOURCE_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist-a
-          python operations/klyrow-production-validator/build-operator-artifact.py \
+          python -I operations/klyrow-production-validator/build-operator-artifact.py \
             --source-sha "${OPERATOR_SOURCE_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist-b
           cmp "dist-a/klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz" \
             "dist-b/klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz"
@@ -102,7 +102,7 @@ jobs:
 
       - name: Build protected artifact
         run: |
-          python operations/klyrow-production-validator/build-operator-artifact.py \
+          python -I operations/klyrow-production-validator/build-operator-artifact.py \
             --source-sha "${OPERATOR_SOURCE_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist
           (cd dist && sha256sum --check --strict SHA256SUMS)
 
@@ -135,7 +135,75 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "klyrow-validator-${OPERATOR_SOURCE_SHA}" dist/* \
-            --target "${OPERATOR_SOURCE_SHA}" \
-            --title "Klyrow production validator ${OPERATOR_SOURCE_SHA}" \
-            --notes "Checksum- and signature-gated bounded operator. No deployment action."
+          set -Eeuo pipefail
+          tag="klyrow-validator-${OPERATOR_SOURCE_SHA}"
+          title="Klyrow production validator ${OPERATOR_SOURCE_SHA}"
+          assets=(
+            "dist/klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz"
+            "dist/installation-manifest.json"
+            "dist/provenance.json"
+            "dist/sbom.spdx.json"
+            "dist/vulnerability-report.json"
+            "dist/SHA256SUMS"
+            "dist/SHA256SUMS.sig"
+          )
+          for asset in "${assets[@]}"; do
+            test -f "${asset}"
+          done
+          if ! gh release view "${tag}" >/dev/null 2>&1; then
+            gh release create "${tag}" \
+              --target "${OPERATOR_SOURCE_SHA}" \
+              --title "${title}" \
+              --notes "Checksum- and signature-gated bounded operator. No deployment action." \
+              --draft
+          fi
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)" = "${OPERATOR_SOURCE_SHA}"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .name)" = "${title}"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .prerelease)" = "false"
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)"
+          test "${release_id}" -gt 0
+          mapfile -t remote_assets < <(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+              --paginate --jq '.[].name'
+          )
+          for remote_asset in "${remote_assets[@]}"; do
+            expected=false
+            for asset in "${assets[@]}"; do
+              if test "${remote_asset}" = "$(basename "${asset}")"; then
+                expected=true
+              fi
+            done
+            test "${expected}" = "true"
+          done
+          verification_root="$(mktemp -d)"
+          final_root="$(mktemp -d)"
+          trap 'rm -rf -- "${verification_root}" "${final_root}"' EXIT
+          for asset in "${assets[@]}"; do
+            name="$(basename "${asset}")"
+            present=false
+            for remote_asset in "${remote_assets[@]}"; do
+              if test "${remote_asset}" = "${name}"; then
+                present=true
+              fi
+            done
+            if test "${present}" = "true"; then
+              gh release download "${tag}" --pattern "${name}" --dir "${verification_root}"
+              cmp "${asset}" "${verification_root}/${name}"
+            else
+              gh release upload "${tag}" "${asset}"
+            fi
+          done
+          remote_count="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+            --paginate --jq '.[].name' | wc -l)"
+          test "${remote_count}" -eq "${#assets[@]}"
+          gh release download "${tag}" --dir "${final_root}"
+          for asset in "${assets[@]}"; do
+            cmp "${asset}" "${final_root}/$(basename "${asset}")"
+          done
+          if test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .draft)" = "true"; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              -F draft=false --jq .id >/dev/null
+          fi
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .draft)" = "false"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq .object.type)" = "commit"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq .object.sha)" = "${OPERATOR_SOURCE_SHA}"

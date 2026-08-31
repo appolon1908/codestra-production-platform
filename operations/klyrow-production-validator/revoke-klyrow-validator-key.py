@@ -10,6 +10,12 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from install_klyrow_production_validator_compat import (
+    InstallError,
+    atomic_replace_text,
+    read_private_text,
+)
+
 
 FORCED = 'command="/usr/local/libexec/codestra/klyrow-production-validator ssh-dispatch"'
 
@@ -42,11 +48,10 @@ def main() -> int:
         return 2
     target = Path("/home/codestra-admin/.ssh/authorized_keys") if root is None else root / "home/codestra-admin/.ssh/authorized_keys"
     try:
-        if target.is_symlink() or not target.is_file():
-            raise ValueError("authorized_keys rejected")
+        text, metadata = read_private_text(target)
         retained: list[str] = []
         removed = 0
-        for line in target.read_text(encoding="utf-8").splitlines():
+        for line in text.splitlines():
             fields = line.split()
             matched = False
             if FORCED in line:
@@ -60,17 +65,16 @@ def main() -> int:
                 retained.append(line)
         if removed != 1:
             raise ValueError("expected exactly one key")
-        temporary = target.with_name(".authorized_keys.kpv-revoke")
-        if temporary.exists() or temporary.is_symlink():
-            raise ValueError("temporary target rejected")
-        temporary.write_text("\n".join(retained) + ("\n" if retained else ""), encoding="utf-8")
-        os.chmod(temporary, 0o600)
-        os.chown(temporary, target.stat().st_uid, target.stat().st_gid)
-        os.replace(temporary, target)
+        atomic_replace_text(
+            target,
+            "\n".join(retained) + ("\n" if retained else ""),
+            metadata,
+            label="revoke",
+        )
         print("REVOCATION_RESULT=PASS")
         print("UNRELATED_KEYS_CHANGED=NO")
         return 0
-    except (OSError, ValueError):
+    except (InstallError, OSError, ValueError):
         print("REVOCATION_RESULT=FAIL")
         return 2
 
