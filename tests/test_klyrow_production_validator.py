@@ -676,6 +676,54 @@ def test_signing_secrets_are_isolated_from_repository_code() -> None:
     assert "Validate isolated signing payload" in signing
 
 
+def test_no_checkout_publisher_has_explicit_repository_context() -> None:
+    workflow = (SOURCE.parents[1] / ".github/workflows/klyrow-production-validator.yml").read_text(
+        encoding="utf-8"
+    )
+    publisher = workflow.split("  publish-protected-artifact:", 1)[1]
+    publication = publisher.split("      - name: Publish immutable release", 1)[1]
+
+    assert "actions/checkout@" not in publisher
+    assert "GH_TOKEN: ${{ github.token }}" in publication
+    assert "GH_REPO: ${{ github.repository }}" in publication
+    for command in (
+        "gh release view",
+        "gh release create",
+        "gh release download",
+        "gh release upload",
+    ):
+        assert command in publication
+    assert "GITHUB_REPOSITORY" in publication
+    assert 'repos/${GITHUB_REPOSITORY}/' in publication
+
+    assert "/usr/bin/ssh-keygen -Y sign" in publisher
+    assert "/usr/bin/ssh-keygen -Y verify" in publisher
+    after_signing_credentials = publisher.split("SIGNING_KEY:", 1)[1]
+    assert "python " not in after_signing_credentials
+    assert "python3 " not in after_signing_credentials
+
+    publish = publication.index("-F draft=false")
+    assert publication.index("expected_tag_binding") < publish
+    assert publication.rindex("require_draft", 0, publish) < publish
+    assert publication.count("require_draft") >= 4
+    delete_asset = publication.index("releases/assets/${remote_id}")
+    upload_asset = publication.index('gh release upload "${tag}" "${asset}"')
+    assert publication.rindex("require_draft", 0, delete_asset) < delete_asset
+    assert publication.rindex("require_draft", 0, upload_asset) < upload_asset
+
+    forbidden = (
+        "ssh ",
+        "scp ",
+        "docker ",
+        "systemctl ",
+        "compose up",
+        "compose restart",
+        "sendmail",
+        "canary",
+    )
+    assert not any(value in publisher.lower() for value in forbidden)
+
+
 def test_backup_rejects_authorized_keys_symlink_swap(tmp_path: Path, monkeypatch) -> None:
     installer = load_source_script(
         "install-klyrow-production-validator.py", "kpv_installer_backup_race"

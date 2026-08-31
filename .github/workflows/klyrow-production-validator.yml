@@ -249,6 +249,7 @@ jobs:
       - name: Publish immutable release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -Eeuo pipefail
           tag="klyrow-validator-${OPERATOR_SOURCE_SHA}"
