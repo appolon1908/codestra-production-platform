@@ -28,7 +28,7 @@ def main() -> int:
     parser.add_argument("--simulator-root", type=Path)
     args = parser.parse_args()
     os.umask(0o077)
-    if os.geteuid() != 0 or not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{20,60}", args.expected_fingerprint):
+    if not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{20,60}", args.expected_fingerprint):
         print("REVOCATION_RESULT=FAIL")
         return 2
     root = args.simulator_root.resolve() if args.simulator_root else None
@@ -37,6 +37,9 @@ def main() -> int:
         if not str(root).startswith("/tmp/kpv-simulator-") or not marker.is_file() or marker.is_symlink():
             print("REVOCATION_RESULT=FAIL")
             return 2
+    elif os.geteuid() != 0:
+        print("REVOCATION_RESULT=FAIL")
+        return 2
     target = Path("/home/codestra-admin/.ssh/authorized_keys") if root is None else root / "home/codestra-admin/.ssh/authorized_keys"
     try:
         if target.is_symlink() or not target.is_file():

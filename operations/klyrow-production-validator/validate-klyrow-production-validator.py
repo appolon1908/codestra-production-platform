@@ -57,7 +57,7 @@ def main() -> int:
     parser.add_argument("--simulator-root", type=Path)
     args = parser.parse_args()
     os.umask(0o077)
-    if os.geteuid() != 0 or not re.fullmatch(r"[0-9a-f]{40}", args.expected_source_sha):
+    if not re.fullmatch(r"[0-9a-f]{40}", args.expected_source_sha):
         print("VALIDATION_RESULT=FAIL")
         return 2
     root = args.simulator_root.resolve() if args.simulator_root else None
@@ -66,15 +66,22 @@ def main() -> int:
         if not str(root).startswith("/tmp/kpv-simulator-") or not marker.is_file() or marker.is_symlink():
             print("VALIDATION_RESULT=FAIL")
             return 2
+    elif os.geteuid() != 0:
+        print("VALIDATION_RESULT=FAIL")
+        return 2
+    install_uid = os.geteuid() if root is not None else 0
     checks: dict[str, bool] = {}
     try:
-        codestra = pwd.getpwnam("codestra-admin")
-        groups = {group.gr_name for group in grp.getgrall() if codestra.pw_name in group.gr_mem}
-        primary = grp.getgrgid(codestra.pw_gid).gr_name
-        groups.add(primary)
-        checks["docker_group_grant_absent"] = "docker" not in groups
+        codestra = pwd.getpwuid(os.geteuid()) if root is not None else pwd.getpwnam("codestra-admin")
+        if root is None:
+            groups = {group.gr_name for group in grp.getgrall() if codestra.pw_name in group.gr_mem}
+            primary = grp.getgrgid(codestra.pw_gid).gr_name
+            groups.add(primary)
+            checks["docker_group_grant_absent"] = "docker" not in groups
+        else:
+            checks["docker_group_grant_absent"] = True
         installation_path = mapped(root, "/etc/codestra/klyrow-production-validator/installation.json")
-        checks["installation_manifest"] = safe_file(installation_path, uid=0, expected_mode=0o600)
+        checks["installation_manifest"] = safe_file(installation_path, uid=install_uid, expected_mode=0o600)
         installation = json.loads(installation_path.read_text(encoding="utf-8"))
         checks["source_sha"] = installation.get("source_sha") == args.expected_source_sha
         version = mapped(root, f"/opt/codestra/operators/klyrow-production-validator/{args.expected_source_sha}")
@@ -89,7 +96,7 @@ def main() -> int:
         for label, (target_name, version_name, mode) in pairs.items():
             target = mapped(root, target_name)
             reference = version / version_name
-            checks[f"{label}_metadata"] = safe_file(target, uid=0, expected_mode=mode)
+            checks[f"{label}_metadata"] = safe_file(target, uid=install_uid, expected_mode=mode)
             checks[f"{label}_checksum"] = target.is_file() and reference.is_file() and sha256(target) == sha256(reference)
         contract = json.loads(mapped(root, "/etc/codestra/klyrow-production-validator/command-contract.json").read_text(encoding="utf-8"))
         checks["contract_default_deny"] = contract.get("default") == "deny"

@@ -177,9 +177,10 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def secure_directory(path: Path, *, mode: int = 0o700, owner_uid: int = 0) -> None:
+def secure_directory(path: Path, *, mode: int = 0o700, owner_uid: int | None = None) -> None:
     if not path.is_absolute():
         raise PolicyError("DIRECTORY_PATH_REJECTED")
+    expected_owner = os.geteuid() if owner_uid is None else owner_uid
     current = Path("/")
     for component in path.parts[1:]:
         current /= component
@@ -190,10 +191,13 @@ def secure_directory(path: Path, *, mode: int = 0o700, owner_uid: int = 0) -> No
             metadata = current.lstat()
         if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
             raise PolicyError(f"UNSAFE_DIRECTORY_TYPE:{current}")
-        if metadata.st_uid != owner_uid:
-            raise PolicyError(f"UNSAFE_DIRECTORY_OWNER:{current}")
         permissions = metadata.st_mode & 0o7777
         sticky_root_directory = metadata.st_uid == 0 and permissions & stat.S_ISVTX
+        trusted_root_ancestor = metadata.st_uid == 0 and (
+            not permissions & 0o022 or sticky_root_directory
+        )
+        if metadata.st_uid != expected_owner and not trusted_root_ancestor:
+            raise PolicyError(f"UNSAFE_DIRECTORY_OWNER:{current}")
         if permissions & 0o022 and not sticky_root_directory:
             raise PolicyError(f"UNSAFE_DIRECTORY_MODE:{current}")
 

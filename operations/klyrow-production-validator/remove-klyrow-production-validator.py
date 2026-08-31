@@ -19,7 +19,7 @@ def main() -> int:
     parser.add_argument("--simulator-root", type=Path)
     args = parser.parse_args()
     os.umask(0o077)
-    if os.geteuid() != 0 or not re.fullmatch(r"[0-9a-f]{40}", args.expected_source_sha):
+    if not re.fullmatch(r"[0-9a-f]{40}", args.expected_source_sha):
         print("ROLLBACK_RESULT=FAIL")
         return 2
     simulator = args.simulator_root.resolve() if args.simulator_root else None
@@ -28,6 +28,9 @@ def main() -> int:
         if not str(simulator).startswith("/tmp/kpv-simulator-") or not marker.is_file() or marker.is_symlink():
             print("ROLLBACK_RESULT=FAIL")
             return 2
+    elif os.geteuid() != 0:
+        print("ROLLBACK_RESULT=FAIL")
+        return 2
     try:
         installation_path = mapped(simulator, "/etc/codestra/klyrow-production-validator/installation.json")
         if installation_path.is_symlink() or not installation_path.is_file():

@@ -237,13 +237,15 @@ def main() -> int:
     parser.add_argument("--simulator-root", type=Path)
     args = parser.parse_args()
     os.umask(0o077)
-    if os.geteuid() != 0:
-        raise SystemExit("INSTALL_RESULT=FAIL")
     simulator = args.simulator_root.resolve() if args.simulator_root else None
     if simulator is not None:
         marker = simulator / ".kpv-disposable-simulator"
         if not str(simulator).startswith("/tmp/kpv-simulator-") or not marker.is_file() or marker.is_symlink():
             raise SystemExit("INSTALL_RESULT=FAIL")
+    elif os.geteuid() != 0:
+        raise SystemExit("INSTALL_RESULT=FAIL")
+    install_uid = os.geteuid() if simulator is not None else 0
+    install_gid = os.getegid() if simulator is not None else 0
     backups: list[dict[str, object]] = []
     backup: Path | None = None
     version_root: Path | None = None
@@ -257,7 +259,7 @@ def main() -> int:
             simulator=simulator is not None,
         )
         public_key, fingerprint = public_key_details(args.public_key)
-        codestra = pwd.getpwnam("codestra-admin")
+        codestra = pwd.getpwuid(os.geteuid()) if simulator is not None else pwd.getpwnam("codestra-admin")
         with tempfile.TemporaryDirectory(prefix="kpv-extract-") as temporary:
             payload = safe_extract(args.archive, Path(temporary), source_sha)
             manifest = json.loads((payload / "command-contract.json").read_text(encoding="utf-8"))
@@ -283,13 +285,13 @@ def main() -> int:
                 raise InstallError("immutable version already exists")
             version_root.mkdir(mode=0o755, parents=True)
             for name in EXPECTED_MEMBERS:
-                atomic_install(payload / name, version_root / name, 0o755 if name.startswith(("klyrow-", "install-", "remove-", "validate-")) or name.endswith(".py") else 0o444, 0, 0)
-            atomic_install(payload / "klyrow-production-validator", targets["dispatcher"], 0o755, 0, 0)
-            atomic_install(payload / "klyrow-production-validator-root", targets["root-helper"], 0o755, 0, 0)
-            atomic_install(payload / "klyrow-production-validator-actions", targets["actions"], 0o755, 0, 0)
-            atomic_install(payload / "klyrow_validator_core.py", targets["core"], 0o644, 0, 0)
-            atomic_install(payload / "command-contract.json", targets["contract"], 0o444, 0, 0)
-            atomic_install(payload / "klyrow-production-validator.sudoers", targets["sudoers"], 0o440, 0, 0)
+                atomic_install(payload / name, version_root / name, 0o755 if name.startswith(("klyrow-", "install-", "remove-", "validate-")) or name.endswith(".py") else 0o444, install_uid, install_gid)
+            atomic_install(payload / "klyrow-production-validator", targets["dispatcher"], 0o755, install_uid, install_gid)
+            atomic_install(payload / "klyrow-production-validator-root", targets["root-helper"], 0o755, install_uid, install_gid)
+            atomic_install(payload / "klyrow-production-validator-actions", targets["actions"], 0o755, install_uid, install_gid)
+            atomic_install(payload / "klyrow_validator_core.py", targets["core"], 0o644, install_uid, install_gid)
+            atomic_install(payload / "command-contract.json", targets["contract"], 0o444, install_uid, install_gid)
+            atomic_install(payload / "klyrow-production-validator.sudoers", targets["sudoers"], 0o440, install_uid, install_gid)
             if simulator is None:
                 checked = subprocess.run(["/usr/sbin/visudo", "-cf", str(targets["sudoers"])], check=False)
                 if checked.returncode != 0:
@@ -303,7 +305,7 @@ def main() -> int:
             }
             identity_tmp = backup / "identity.new"
             identity_tmp.write_text(json.dumps(identity, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            atomic_install(identity_tmp, targets["identity"], 0o444, 0, 0)
+            atomic_install(identity_tmp, targets["identity"], 0o444, install_uid, install_gid)
             authorized = targets["authorized_keys"]
             authorized.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             existing = authorized.read_text(encoding="utf-8").splitlines() if authorized.exists() else []
@@ -333,7 +335,7 @@ def main() -> int:
             }
             installation_tmp = backup / "installation.new"
             installation_tmp.write_text(json.dumps(installation, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            atomic_install(installation_tmp, targets["installation"], 0o600, 0, 0)
+            atomic_install(installation_tmp, targets["installation"], 0o600, install_uid, install_gid)
         print("INSTALL_RESULT=PASS")
         print(f"SOURCE_SHA={source_sha}")
         print(f"ARTIFACT_SHA256={sha256(args.archive)}")
