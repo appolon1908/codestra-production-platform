@@ -437,6 +437,87 @@ def atomic_install(source: Path, target: Path, mode: int, uid: int, gid: int) ->
         temp_path.unlink(missing_ok=True)
 
 
+def existing_installation_matches(
+    *,
+    simulator: Path | None,
+    version_root: Path,
+    source_sha: str,
+    archive: Path,
+    release_manifest_path: Path,
+    sbom_path: Path,
+    provenance_path: Path,
+    vulnerability_path: Path,
+    sums_path: Path,
+    signature_path: Path,
+    signers_path: Path,
+    fingerprint: str,
+    source_cidr: str,
+    expiry: str,
+    approver: str,
+    change_id: str,
+) -> bool:
+    if version_root.is_symlink() or not version_root.is_dir():
+        return False
+    installation_path = mapped(
+        simulator, "/etc/codestra/klyrow-production-validator/installation.json"
+    )
+    try:
+        regular(installation_path, private=True)
+        installation = json.loads(installation_path.read_text(encoding="utf-8"))
+    except (InstallError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    expected = {
+        "source_sha": source_sha,
+        "artifact_sha256": sha256(archive),
+        "release_manifest_sha256": sha256(release_manifest_path),
+        "sbom_sha256": sha256(sbom_path),
+        "provenance_sha256": sha256(provenance_path),
+        "vulnerability_report_sha256": sha256(vulnerability_path),
+        "checksum_manifest_sha256": sha256(sums_path),
+        "signature_sha256": sha256(signature_path),
+        "allowed_signers_sha256": sha256(signers_path),
+        "release_signature_verification": "PASS",
+        "change_id": change_id,
+        "approver": approver,
+        "key_fingerprint": fingerprint,
+        "source_restriction": source_cidr,
+        "expires_at": expiry,
+        "application_runtime_changed": False,
+    }
+    if not isinstance(installation, dict) or any(
+        installation.get(key) != value for key, value in expected.items()
+    ):
+        return False
+    validator = version_root / "validate-klyrow-production-validator.py"
+    try:
+        regular(validator)
+    except (InstallError, OSError):
+        return False
+    command = [
+        "/usr/bin/python3",
+        str(validator),
+        "--expected-source-sha",
+        source_sha,
+    ]
+    if simulator is not None:
+        command.extend(["--simulator-root", str(simulator)])
+    result = subprocess.run(
+        command,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=30,
+        check=False,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"},
+    )
+    return result.returncode == 0 and '"validation_result": "PASS"' in result.stdout
+
+
+def unrestricted_public_key_line(line: str, key_type: str, key_blob: str) -> bool:
+    fields = line.split()
+    return len(fields) >= 2 and fields[0] == key_type and fields[1] == key_blob
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive", required=True, type=Path)
@@ -497,6 +578,34 @@ def main() -> int:
             manifest = json.loads((payload / "command-contract.json").read_text(encoding="utf-8"))
             if manifest.get("allowed_user") != "codestra-admin" or manifest.get("default") != "deny":
                 raise InstallError("command contract invalid")
+            version_root = mapped(simulator, f"/opt/codestra/operators/klyrow-production-validator/{source_sha}")
+            if version_root.exists() or version_root.is_symlink():
+                if existing_installation_matches(
+                    simulator=simulator,
+                    version_root=version_root,
+                    source_sha=source_sha,
+                    archive=args.archive,
+                    release_manifest_path=args.installation_manifest,
+                    sbom_path=args.sbom,
+                    provenance_path=args.provenance,
+                    vulnerability_path=args.vulnerability_report,
+                    sums_path=args.sha256s,
+                    signature_path=args.signature,
+                    signers_path=args.allowed_signers,
+                    fingerprint=fingerprint,
+                    source_cidr=args.source_cidr,
+                    expiry=args.expiry,
+                    approver=args.approver,
+                    change_id=args.change_id,
+                ):
+                    print("INSTALL_RESULT=PASS")
+                    print("INSTALL_IDEMPOTENT=YES")
+                    print(f"SOURCE_SHA={source_sha}")
+                    print(f"ARTIFACT_SHA256={sha256(args.archive)}")
+                    print(f"KEY_FINGERPRINT={fingerprint}")
+                    print("APPLICATION_RUNTIME_CHANGED=NO")
+                    return 0
+                raise InstallError("immutable version conflicts with requested installation")
             state = mapped(simulator, "/var/lib/codestra/klyrow-production-validator")
             prepare_directory(state, mode=0o700, uid=install_uid, gid=install_gid)
             backup_root = state / "install-backups"
@@ -522,9 +631,6 @@ def main() -> int:
                 "probe-manifest": mapped(simulator, "/etc/codestra/klyrow-production-validator/probe-manifest.json"),
             }
             backups = [backup_file(path, backup, label) for label, path in targets.items()]
-            version_root = mapped(simulator, f"/opt/codestra/operators/klyrow-production-validator/{source_sha}")
-            if version_root.exists() or version_root.is_symlink():
-                raise InstallError("immutable version already exists")
             prepare_directory(
                 version_root.parent, mode=0o755, uid=install_uid, gid=install_gid
             )
@@ -601,8 +707,12 @@ def main() -> int:
                 authorized.parent, mode=0o700, uid=codestra.pw_uid, gid=codestra.pw_gid
             )
             existing = authorized.read_text(encoding="utf-8").splitlines() if authorized.exists() else []
-            key_blob = public_key.split()[1]
-            retained = [line for line in existing if key_blob not in line.split()]
+            key_type, key_blob = public_key.split()
+            retained = [
+                line
+                for line in existing
+                if not unrestricted_public_key_line(line, key_type, key_blob)
+            ]
             forced = (
                 f'from="{args.source_cidr}",expiry-time="{args.expiry}",'
                 'command="/usr/local/libexec/codestra/klyrow-production-validator ssh-dispatch",'

@@ -24,6 +24,7 @@ from klyrow_validator_core import (
     regular_nonsymlink,
     sanitized_environment,
     secure_directory,
+    write_all,
 )
 
 
@@ -96,7 +97,7 @@ def write_evidence(correlation_id: str, record: dict[str, object]) -> None:
     payload = json.dumps(redact_object(record), indent=2, sort_keys=True) + "\n"
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     try:
-        os.write(fd, payload.encode("utf-8"))
+        write_all(fd, payload.encode("utf-8"))
         os.fsync(fd)
     finally:
         os.close(fd)

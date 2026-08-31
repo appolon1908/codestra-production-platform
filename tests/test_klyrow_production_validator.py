@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ import pytest
 SOURCE = Path(__file__).resolve().parents[1] / "operations" / "klyrow-production-validator"
 sys.path.insert(0, str(SOURCE))
 
+import klyrow_validator_core as validator_core  # noqa: E402
 from klyrow_validator_core import (  # noqa: E402
     APPROVED_ACTIONS,
     ExclusiveLock,
@@ -130,6 +132,21 @@ def test_output_is_bounded_and_safely_truncated() -> None:
     assert result.returncode == 0
     assert result.truncated is True
     assert len(result.stdout.encode()) <= 1024
+
+
+def test_write_all_completes_partial_regular_file_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed = bytearray()
+
+    def partial_write(_fd: int, value: memoryview) -> int:
+        chunk = bytes(value[:2])
+        observed.extend(chunk)
+        return len(chunk)
+
+    monkeypatch.setattr(validator_core.os, "write", partial_write)
+    validator_core.write_all(99, b"complete")
+    assert bytes(observed) == b"complete"
 
 
 def test_timeout_terminates_the_child_process() -> None:
@@ -335,7 +352,7 @@ def release_container(actions, name: str) -> dict[str, object]:
         "image_repository": "ghcr.io/codestra/klyrow",
         "image_digest": "sha256:" + "a" * 64,
         "oci_source_revision": "b" * 40,
-        "source_repository": "appolon1908-hue/klyrow.com",
+        "source_repository": "https://github.com/appolon1908-hue/klyrow.com",
         "source_commit_sha": "b" * 40,
         "release_change_id": "KLYROW-20260831-01",
         "build_workflow_run": "github:123456",
@@ -355,7 +372,7 @@ def release_readback(actions) -> dict[str, object]:
         "source_provenance_match": "YES",
         "signature_verification": "PASS",
         "vulnerability_gate": "PASS",
-        "generated_at_utc": "2026-08-31T15:00:00Z",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
 
@@ -382,6 +399,45 @@ def test_release_identity_rejects_nested_top_level_status_values() -> None:
     value["signature_verification"] = {"client_secret": "hidden"}
     with pytest.raises(PolicyError, match="RELEASE_SIGNATURE_VERIFICATION_REJECTED"):
         actions.projected_release_identity(value)
+
+
+def test_release_identity_rejects_stale_readback_and_binds_live_containers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actions = load_actions_module()
+    stale = release_readback(actions)
+    stale["generated_at_utc"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=actions.MAXIMUM_READBACK_AGE_SECONDS + 1)
+    ).isoformat().replace("+00:00", "Z")
+    with pytest.raises(PolicyError, match="RELEASE_TIMESTAMP_STALE"):
+        actions.projected_release_identity(stale)
+    current = release_readback(actions)
+    containers = current["containers"]
+
+    def fake_run(argv: list[str], **_kwargs: object) -> dict[str, object]:
+        asserted = next(item for item in containers if item["name"] == argv[-1])
+        stdout = "|".join(
+            json.dumps(value)
+            for value in (
+                f'{asserted["image_repository"]}@{asserted["image_digest"]}',
+                asserted["oci_source_revision"],
+                asserted["source_repository"],
+            )
+        )
+        return {
+            "argv_id": "docker",
+            "exit_code": 0,
+            "stdout": stdout,
+            "stderr": "",
+            "elapsed_ms": 1,
+            "truncated": False,
+            "timed_out": False,
+        }
+
+    monkeypatch.setattr(actions, "run", fake_run)
+    bindings, matched = actions.live_release_bindings(containers)
+    assert matched is True
+    assert all(binding["matched"] for binding in bindings)
 
 
 def test_inventory_commands_are_scoped_to_approved_workloads_and_ports() -> None:
@@ -585,6 +641,26 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
         operator_key = release / "operator-key"
         run_checked(["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(release_key)])
         run_checked(["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(operator_key)])
+        operator_key_type, operator_key_blob, *_ = operator_key.with_suffix(".pub").read_text(
+            encoding="ascii"
+        ).split()
+        restricted_same_key = (
+            'command="/bin/false",no-pty '
+            f"{operator_key_type} {operator_key_blob} same-key-restricted"
+        )
+        unrestricted_same_key = (
+            f"{operator_key_type} {operator_key_blob} same-key-unrestricted"
+        )
+        authorized = simulator / "home/codestra-admin/.ssh/authorized_keys"
+        authorized.parent.mkdir(mode=0o700, parents=True)
+        authorized.write_text(
+            restricted_same_key + "\n" + unrestricted_same_key + "\n", encoding="utf-8"
+        )
+        authorized.chmod(0o600)
+        old_dispatcher = simulator / "usr/local/libexec/codestra/klyrow-production-validator"
+        old_dispatcher.parent.mkdir(mode=0o755, parents=True)
+        old_dispatcher.write_text("previous-validator\n", encoding="utf-8")
+        old_dispatcher.chmod(0o755)
         signers = release / "allowed_signers"
         public_release = (release_key.with_suffix(".pub")).read_text(encoding="ascii").strip()
         signers.write_text(f"codestra-release {public_release}\n", encoding="ascii")
@@ -639,6 +715,11 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             ]
         )
         assert "INSTALL_RESULT=PASS" in install.stdout
+        assert restricted_same_key in authorized.read_text(encoding="utf-8")
+        assert unrestricted_same_key not in authorized.read_text(encoding="utf-8")
+        retry = run_checked(list(install.args))
+        assert "INSTALL_RESULT=PASS" in retry.stdout
+        assert "INSTALL_IDEMPOTENT=YES" in retry.stdout
         validation = run_checked(
             [
                 "/usr/bin/python3",
@@ -650,7 +731,6 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             ]
         )
         assert '"validation_result": "PASS"' in validation.stdout
-        authorized = simulator / "home/codestra-admin/.ssh/authorized_keys"
         authorized_original = authorized.read_text(encoding="utf-8")
         authorized.write_text(
             authorized_original.replace('from="192.0.2.0/24"', 'from="0.0.0.0/0"'),
@@ -706,6 +786,39 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
         assert "VALIDATION_RESULT=FAIL" in symlinked_validation.stdout
         identity.unlink()
         identity_real.rename(identity)
+        installation_path = simulator / "etc/codestra/klyrow-production-validator/installation.json"
+        installation_record = json.loads(installation_path.read_text(encoding="utf-8"))
+        dispatcher_backup_record = next(
+            record
+            for record in installation_record["backups"]
+            if record["label"] == "dispatcher"
+        )
+        assert dispatcher_backup_record["present"] is True
+        dispatcher_backup = (
+            Path(installation_record["backup_directory"]) / dispatcher_backup_record["label"]
+        )
+        dispatcher_backup_bytes = dispatcher_backup.read_bytes()
+        dispatcher_backup.write_bytes(b"corrupt-backup\n")
+        dispatcher_backup.chmod(0o600)
+        rejected_rollback = subprocess.run(
+            [
+                "/usr/bin/python3",
+                str(SOURCE / "remove-klyrow-production-validator.py"),
+                "--expected-source-sha",
+                source_sha,
+                "--simulator-root",
+                str(simulator),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert rejected_rollback.returncode == 2
+        assert "ROLLBACK_RESULT=FAIL" in rejected_rollback.stdout
+        assert 'command="/usr/local/libexec/codestra/klyrow-production-validator ssh-dispatch"' in authorized.read_text(encoding="utf-8")
+        assert (simulator / f"opt/codestra/operators/klyrow-production-validator/{source_sha}").is_dir()
+        dispatcher_backup.write_bytes(dispatcher_backup_bytes)
+        dispatcher_backup.chmod(0o600)
         probe_manifest = simulator / "etc/codestra/klyrow-production-validator/probe-manifest.json"
         installed_probes = json.loads(probe_manifest.read_text(encoding="utf-8"))
         assert set(installed_probes["probes"]) == {
@@ -732,7 +845,10 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             ["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(unrelated_key)]
         )
         unrelated_public = unrelated_key.with_suffix(".pub").read_text(encoding="ascii").strip()
-        authorized.write_text(unrelated_public + "\n", encoding="utf-8")
+        authorized.write_text(
+            authorized.read_text(encoding="utf-8") + unrelated_public + "\n",
+            encoding="utf-8",
+        )
         authorized.chmod(0o600)
         rollback = run_checked(
             [
@@ -746,7 +862,8 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
         )
         assert "ROLLBACK_RESULT=PASS" in rollback.stdout
         assert unrelated_public in authorized.read_text(encoding="utf-8")
-        assert not (simulator / "usr/local/libexec/codestra/klyrow-production-validator").exists()
+        assert restricted_same_key in authorized.read_text(encoding="utf-8")
+        assert old_dispatcher.read_text(encoding="utf-8") == "previous-validator\n"
         assert not (simulator / f"opt/codestra/operators/klyrow-production-validator/{source_sha}").exists()
 
 

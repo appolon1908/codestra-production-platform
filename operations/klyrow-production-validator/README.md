@@ -29,6 +29,11 @@ recursively validated and projected to an exact immutable-release schema for
 the four fixed containers. Nested or extra fields are rejected. This avoids
 reading or materializing complete container environments.
 
+Release identity read-back is valid for at most five minutes and is compared
+with fresh fixed-field Docker inspection for every approved container. The
+running digest-qualified image reference and OCI source/revision labels must
+match the asserted release before PASS.
+
 Authorization, no-effect, callback, and SMTP no-DATA actions require reviewed
 companion probes under
 `/opt/codestra/operators/klyrow-production-validator/probes`. Every probe is
@@ -98,6 +103,11 @@ into the immutable version directory. Host validation rechecks their digests,
 source/artifact binding, and detached signature without contacting application
 services.
 
+An exact retry of a successfully installed source SHA is idempotent only when
+the root-owned installation record, requested authority inputs, immutable
+version, stable entrypoints, forced key, sudo boundary, and signed release
+evidence all revalidate. Drift or a different artifact fails closed.
+
 The installer records a private rollback set before changing operator files.
 `remove-klyrow-production-validator.py` restores those exact files and removes
 only the selected immutable version. `revoke-klyrow-validator-key.py` removes
@@ -109,6 +119,8 @@ Rollback never restores a whole stale `authorized_keys` snapshot. It removes
 only the matching validator entry (or accepts that the separately tested
 revocation already removed it) and preserves unrelated key additions or
 rotations; an unexpected validator entry fails closed.
+All backup records, checksums, target types, the validator key plan, and the
+immutable version path are preflighted before the first rollback mutation.
 
 The `--simulator-root` option is accepted only for a root under
 `/tmp/kpv-simulator-*` containing `.kpv-disposable-simulator`. It exists solely

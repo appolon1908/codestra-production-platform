@@ -75,6 +75,8 @@ READBACK_ROOT = Path("/var/lib/codestra/klyrow-production-validator/readback")
 PROBE_ROOT = Path("/opt/codestra/operators/klyrow-production-validator/probes")
 PROBE_MANIFEST = Path("/etc/codestra/klyrow-production-validator/probe-manifest.json")
 EVIDENCE_ROOT = Path("/var/lib/codestra/klyrow-production-validator/evidence")
+MAXIMUM_READBACK_AGE_SECONDS = 300
+MAXIMUM_FUTURE_SKEW_SECONDS = 30
 
 
 def emit(value: object) -> None:
@@ -279,6 +281,9 @@ def projected_release_identity(value: dict[str, object]) -> dict[str, object]:
         raise PolicyError("RELEASE_TIMESTAMP_REJECTED") from exc
     if parsed_timestamp.tzinfo is None or parsed_timestamp.utcoffset() != timezone.utc.utcoffset(None):
         raise PolicyError("RELEASE_TIMESTAMP_REJECTED")
+    readback_age = (datetime.now(timezone.utc) - parsed_timestamp).total_seconds()
+    if not -MAXIMUM_FUTURE_SKEW_SECONDS <= readback_age <= MAXIMUM_READBACK_AGE_SECONDS:
+        raise PolicyError("RELEASE_TIMESTAMP_STALE")
     enum_fields = {
         "contract_compatibility": {"PASS", "FAIL", "BLOCKED"},
         "source_provenance_match": {"YES", "NO", "UNKNOWN"},
@@ -307,6 +312,46 @@ def projected_release_identity(value: dict[str, object]) -> dict[str, object]:
     return projected
 
 
+def live_release_bindings(containers: list[dict[str, object]]) -> tuple[list[dict[str, object]], bool]:
+    expected = {str(container["name"]): container for container in containers}
+    bindings = []
+    all_match = True
+    template = (
+        '{{json .Config.Image}}|{{json (index .Config.Labels "org.opencontainers.image.revision")}}|'
+        '{{json (index .Config.Labels "org.opencontainers.image.source")}}'
+    )
+    for name in CONTAINERS:
+        result = run(["/usr/bin/docker", "inspect", "--format", template, name])
+        image_reference = revision = source_repository = None
+        if result["exit_code"] == 0 and not result["timed_out"] and not result["truncated"]:
+            parts = str(result["stdout"]).strip().split("|")
+            if len(parts) == 3:
+                try:
+                    parsed = [json.loads(part) for part in parts]
+                except json.JSONDecodeError:
+                    parsed = [None, None, None]
+                if all(isinstance(item, str) for item in parsed):
+                    image_reference, revision, source_repository = parsed
+        asserted = expected[name]
+        expected_reference = f'{asserted["image_repository"]}@{asserted["image_digest"]}'
+        matched = (
+            image_reference == expected_reference
+            and revision == asserted["oci_source_revision"]
+            and source_repository == asserted["source_repository"]
+        )
+        all_match = all_match and matched
+        bindings.append(
+            {
+                "container": name,
+                "image_reference_matches": image_reference == expected_reference,
+                "source_revision_matches": revision == asserted["oci_source_revision"],
+                "source_repository_matches": source_repository == asserted["source_repository"],
+                "matched": matched,
+            }
+        )
+    return bindings, all_match
+
+
 def release_identity() -> int:
     allowed = {
         "containers",
@@ -319,6 +364,7 @@ def release_identity() -> int:
     }
     raw_value = safe_json_file(READBACK_ROOT / "release-identity.json", allowed_keys=allowed)
     value = projected_release_identity(raw_value)
+    bindings, live_match = live_release_bindings(value["containers"])
     required = {
         "contract_compatibility": "PASS",
         "mutable_image_references": 0,
@@ -326,8 +372,8 @@ def release_identity() -> int:
         "signature_verification": "PASS",
         "vulnerability_gate": "PASS",
     }
-    passed = all(value.get(key) == expected for key, expected in required.items())
-    emit({"release_identity": value, "passed": passed})
+    passed = live_match and all(value.get(key) == expected for key, expected in required.items())
+    emit({"release_identity": value, "live_bindings": bindings, "passed": passed})
     return 0 if passed else 3
 
 

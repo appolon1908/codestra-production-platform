@@ -343,7 +343,16 @@ def append_audit(path: Path, record: Mapping[str, object]) -> None:
         0o600,
     )
     try:
-        os.write(fd, payload.encode("utf-8") + b"\n")
+        write_all(fd, payload.encode("utf-8") + b"\n")
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def write_all(fd: int, payload: bytes) -> None:
+    remaining = memoryview(payload)
+    while remaining:
+        written = os.write(fd, remaining)
+        if written <= 0:
+            raise OSError("short write")
+        remaining = remaining[written:]

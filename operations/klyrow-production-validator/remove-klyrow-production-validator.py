@@ -11,10 +11,13 @@ import shutil
 from pathlib import Path
 
 from install_klyrow_production_validator_compat import (
+    InstallError,
     mapped,
+    preflight_backups,
     remove_validator_key,
     restore_backups,
     validate_directory_chain,
+    validator_key_plan,
 )
 
 
@@ -42,6 +45,8 @@ def main() -> int:
         if installation_path.is_symlink() or not installation_path.is_file():
             raise ValueError("installation evidence missing")
         installation = json.loads(installation_path.read_text(encoding="utf-8"))
+        if not isinstance(installation, dict):
+            raise ValueError("installation evidence invalid")
         if installation.get("source_sha") != args.expected_source_sha:
             raise ValueError("source SHA mismatch")
         backup = Path(str(installation["backup_directory"]))
@@ -50,8 +55,27 @@ def main() -> int:
             raise ValueError("backup directory rejected")
         validate_directory_chain(backup)
         records = installation.get("backups")
-        if not isinstance(records, list):
+        if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
             raise ValueError("rollback manifest rejected")
+        labels = [record.get("label") for record in records]
+        if not all(isinstance(label, str) for label in labels) or set(labels) != {
+            "dispatcher",
+            "root-helper",
+            "actions",
+            "core",
+            "contract",
+            "sudoers",
+            "identity",
+            "authorized_keys",
+            "installation",
+            "probe-core",
+            "probe-authorization",
+            "probe-no-effect",
+            "probe-callback",
+            "probe-smtp",
+            "probe-manifest",
+        }:
+            raise ValueError("rollback manifest labels rejected")
         authorized_records = [
             record
             for record in records
@@ -60,25 +84,23 @@ def main() -> int:
         if len(authorized_records) != 1:
             raise ValueError("authorized key rollback record rejected")
         authorized = mapped(simulator, "/home/codestra-admin/.ssh/authorized_keys")
-        remove_validator_key(authorized, str(installation.get("key_fingerprint", "")))
-        restore_backups(
-            [
-                record
-                for record in records
-                if isinstance(record, dict) and record.get("label") != "authorized_keys"
-            ],
-            backup,
-        )
+        fingerprint = str(installation.get("key_fingerprint", ""))
+        non_authorized_records = [
+            record for record in records if record.get("label") != "authorized_keys"
+        ]
+        preflight_backups(non_authorized_records, backup)
+        validator_key_plan(authorized, fingerprint)
         version = mapped(simulator, f"/opt/codestra/operators/klyrow-production-validator/{args.expected_source_sha}")
         validate_directory_chain(version.parent)
-        if version.is_symlink():
+        if version.is_symlink() or not version.is_dir():
             raise ValueError("version path rejected")
-        if version.is_dir():
-            shutil.rmtree(version)
+        remove_validator_key(authorized, fingerprint)
+        restore_backups(non_authorized_records, backup)
+        shutil.rmtree(version)
         print("ROLLBACK_RESULT=PASS")
         print("APPLICATION_RUNTIME_CHANGED=NO")
         return 0
-    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+    except (InstallError, OSError, ValueError, KeyError, json.JSONDecodeError):
         print("ROLLBACK_RESULT=FAIL")
         print("APPLICATION_RUNTIME_CHANGED=NO")
         return 2
