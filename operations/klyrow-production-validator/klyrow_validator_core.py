@@ -151,6 +151,17 @@ def redact_object(value: object) -> object:
     return value
 
 
+def contains_secret_key(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(
+            SECRET_KEY_RE.search(str(key)) is not None or contains_secret_key(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(contains_secret_key(item) for item in value)
+    return False
+
+
 def regular_nonsymlink(path: Path, *, allowed_owners: Iterable[int] = (0,)) -> os.stat_result:
     try:
         metadata = path.lstat()
@@ -225,7 +236,7 @@ def safe_json_file(
         raise PolicyError(f"INVALID_JSON:{path}") from exc
     if not isinstance(value, dict) or not set(value).issubset(allowed_keys):
         raise PolicyError(f"JSON_SCHEMA_REJECTED:{path}")
-    if any(SECRET_KEY_RE.search(str(key)) for key in value):
+    if contains_secret_key(value):
         raise PolicyError(f"SECRET_FIELD_REJECTED:{path}")
     return value
 

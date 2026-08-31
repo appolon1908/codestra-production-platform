@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import urllib.error
 import urllib.request
@@ -13,6 +14,21 @@ from typing import Mapping
 
 
 GATEWAY = "http://127.0.0.1:18000"
+SECRET_KEY_RE = re.compile(
+    r"(?i)(authorization|cookie|password|passwd|token|api[_-]?key|client[_-]?secret|"
+    r"smtp[_-]?(password|credential)|private[_-]?key|database[_-]?(url|dsn))"
+)
+
+
+def contains_secret_key(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(
+            SECRET_KEY_RE.search(str(key)) is not None or contains_secret_key(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(contains_secret_key(item) for item in value)
+    return False
 
 
 def request_status(
@@ -71,4 +87,6 @@ def safe_json_file(path: Path, allowed_keys: set[str]) -> dict[str, object]:
     value = json.loads(raw.decode("utf-8"))
     if not isinstance(value, dict) or set(value) != allowed_keys:
         raise ValueError("readback schema rejected")
+    if contains_secret_key(value):
+        raise ValueError("secret field rejected")
     return value

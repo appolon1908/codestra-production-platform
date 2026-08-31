@@ -169,6 +169,9 @@ def test_json_readback_rejects_secret_and_unknown_fields(tmp_path: Path) -> None
     path.write_text('{"unexpected":true}', encoding="utf-8")
     with pytest.raises(PolicyError):
         safe_json_file(path, allowed_keys={"safe"}, allowed_owners=(os.getuid(),))
+    path.write_text('{"safe":{"database_url":"postgres://secret"}}', encoding="utf-8")
+    with pytest.raises(PolicyError, match="SECRET_FIELD_REJECTED"):
+        safe_json_file(path, allowed_keys={"safe"}, allowed_owners=(os.getuid(),))
 
 
 def test_audit_records_are_created_and_redacted(tmp_path: Path) -> None:
@@ -239,6 +242,35 @@ def test_dispatcher_and_root_helper_share_one_validated_correlation_id() -> None
     assert 'input=correlation_id + "\\n"' in dispatcher
     assert "correlation_id = read_correlation_id()" in helper
     assert "CORRELATION_RE.fullmatch(correlation_id)" in helper
+
+
+def test_dispatcher_journal_uses_one_bounded_stdin_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    dispatcher = load_source_script("klyrow-production-validator", "kpv_dispatcher")
+    calls = []
+
+    def fake_run(argv: list[str], **kwargs: object):
+        calls.append((argv, kwargs))
+        return object()
+
+    monkeypatch.setattr(dispatcher.subprocess, "run", fake_run)
+    dispatcher.journal({"action": "status", "result": "PASS"})
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv == [
+        "/usr/bin/systemd-cat",
+        "--identifier=klyrow-production-validator",
+        "--priority=notice",
+    ]
+    assert "input" in kwargs
+    assert "stdin" not in kwargs
+
+
+def test_root_audit_path_avoids_mutable_log_ancestors() -> None:
+    helper = (SOURCE / "klyrow-production-validator-root").read_text(encoding="utf-8")
+    contract = json.loads((SOURCE / "command-contract.json").read_text(encoding="utf-8"))
+    expected = "/var/lib/codestra/klyrow-production-validator/audit/audit.jsonl"
+    assert f'AUDIT_PATH = Path("{expected}")' in helper
+    assert contract["audit_log"] == expected
 
 
 def test_health_output_never_selects_health_log_output() -> None:

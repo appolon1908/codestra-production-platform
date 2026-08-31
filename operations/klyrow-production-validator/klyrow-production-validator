@@ -67,7 +67,6 @@ def journal(record: dict[str, object]) -> None:
             ["/usr/bin/systemd-cat", "--identifier=klyrow-production-validator", "--priority=notice"],
             input=payload + "\n",
             text=True,
-            stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=2,

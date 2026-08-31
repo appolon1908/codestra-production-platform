@@ -100,7 +100,8 @@ for CI integration tests and cannot redirect a production operator action.
 ## Audit and output safety
 
 Every privileged action is serialized by a nonblocking lock. The root helper
-writes bounded, redacted JSON audit and evidence records. The forced-command
+writes bounded, redacted JSON audit records under the root-owned validator
+state directory and evidence records under its fixed evidence root. The forced-command
 dispatcher emits a correlated journal record that includes the installed key
 fingerprint and SSH source address. Output has per-action time and size limits;
 secret-shaped fields, bearer values, and private-key blocks are redacted.

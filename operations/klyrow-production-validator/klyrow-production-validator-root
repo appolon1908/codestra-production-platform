@@ -29,7 +29,7 @@ from klyrow_validator_core import (
 CONTRACT_PATH = Path("/etc/codestra/klyrow-production-validator/command-contract.json")
 ACTION_RUNNER = Path("/usr/local/libexec/codestra/klyrow-production-validator-actions")
 LOCK_PATH = Path("/run/lock/klyrow-production-validator.lock")
-AUDIT_PATH = Path("/var/log/codestra/klyrow-production-validator/audit.jsonl")
+AUDIT_PATH = Path("/var/lib/codestra/klyrow-production-validator/audit/audit.jsonl")
 EVIDENCE_ROOT = Path("/var/lib/codestra/klyrow-production-validator/evidence")
 
 

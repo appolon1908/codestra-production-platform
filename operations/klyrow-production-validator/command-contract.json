@@ -7,7 +7,7 @@
   "fixed_root_helper": "/usr/local/libexec/codestra/klyrow-production-validator-root",
   "safe_path": "/usr/sbin:/usr/bin:/sbin:/bin",
   "evidence_root": "/var/lib/codestra/klyrow-production-validator/evidence",
-  "audit_log": "/var/log/codestra/klyrow-production-validator/audit.jsonl",
+  "audit_log": "/var/lib/codestra/klyrow-production-validator/audit/audit.jsonl",
   "lock": "/run/lock/klyrow-production-validator.lock",
   "prohibited_actions": [
     "shell",
