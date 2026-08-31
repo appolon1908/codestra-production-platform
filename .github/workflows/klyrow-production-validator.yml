@@ -162,11 +162,9 @@ jobs:
           test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .prerelease)" = "false"
           release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)"
           test "${release_id}" -gt 0
-          mapfile -t remote_assets < <(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
-              --paginate --jq '.[].name'
-          )
-          for remote_asset in "${remote_assets[@]}"; do
+          remote_assets=()
+          while IFS=$'\t' read -r remote_id remote_asset remote_state; do
+            test "${remote_id}" -gt 0
             expected=false
             for asset in "${assets[@]}"; do
               if test "${remote_asset}" = "$(basename "${asset}")"; then
@@ -174,7 +172,16 @@ jobs:
               fi
             done
             test "${expected}" = "true"
-          done
+            if test "${remote_state}" = "uploaded"; then
+              remote_assets+=("${remote_asset}")
+            else
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${remote_id}"
+            fi
+          done < <(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+              --paginate --jq '.[] | [.id, .name, .state] | @tsv'
+          )
           verification_root="$(mktemp -d)"
           final_root="$(mktemp -d)"
           trap 'rm -rf -- "${verification_root}" "${final_root}"' EXIT

@@ -633,6 +633,7 @@ def test_protected_release_publication_is_retry_safe() -> None:
         "gh release view",
         "--draft",
         "gh release upload",
+        "releases/assets/${remote_id}",
         'cmp "${asset}"',
         ".target_commitish",
         ".object.sha",
