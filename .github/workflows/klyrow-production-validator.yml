@@ -274,16 +274,18 @@ jobs:
             -I codestra-release -n codestra-klyrow-validator \
             -s dist/SHA256SUMS.sig < dist/SHA256SUMS
 
+          release_inventory="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | [.id, .tag_name] | @tsv')"
           release_ids=()
-          while IFS=$'\t' read -r candidate_id candidate_tag; do
-            if test "${candidate_tag}" = "${tag}"; then
-              test "${candidate_id}" -gt 0
-              release_ids+=("${candidate_id}")
-            fi
-          done < <(
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-              --jq '.[] | [.id, .tag_name] | @tsv'
-          )
+          if test -n "${release_inventory}"; then
+            while IFS=$'\t' read -r candidate_id candidate_tag; do
+              if test "${candidate_tag}" = "${tag}"; then
+                test "${candidate_id}" -gt 0
+                release_ids+=("${candidate_id}")
+              fi
+            done <<< "${release_inventory}"
+          fi
           if test "${#release_ids[@]}" -gt 1; then
             echo "duplicate release identity rejected" >&2
             exit 1
@@ -314,15 +316,17 @@ jobs:
           fi
           test "${release_id}" -gt 0
 
+          matched_inventory="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | [.id, .tag_name] | @tsv')"
           matched_ids=()
-          while IFS=$'\t' read -r candidate_id candidate_tag; do
-            if test "${candidate_tag}" = "${tag}"; then
-              matched_ids+=("${candidate_id}")
-            fi
-          done < <(
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-              --jq '.[] | [.id, .tag_name] | @tsv'
-          )
+          if test -n "${matched_inventory}"; then
+            while IFS=$'\t' read -r candidate_id candidate_tag; do
+              if test "${candidate_tag}" = "${tag}"; then
+                matched_ids+=("${candidate_id}")
+              fi
+            done <<< "${matched_inventory}"
+          fi
           test "${#matched_ids[@]}" -eq 1
           test "${matched_ids[0]}" = "${release_id}"
 
@@ -374,24 +378,26 @@ jobs:
           declare -A remote_states=()
           declare -A remote_sizes=()
           declare -A remote_digests=()
-          while IFS=$'\t' read -r remote_id remote_name remote_state remote_size remote_digest; do
-            test "${remote_id}" -gt 0
-            expected=false
-            for asset in "${assets[@]}"; do
-              if test "${remote_name}" = "$(/usr/bin/basename "${asset}")"; then
-                expected=true
-              fi
-            done
-            test "${expected}" = "true"
-            test -z "${remote_ids[${remote_name}]+x}"
-            remote_ids["${remote_name}"]="${remote_id}"
-            remote_states["${remote_name}"]="${remote_state}"
-            remote_sizes["${remote_name}"]="${remote_size}"
-            remote_digests["${remote_name}"]="${remote_digest}"
-          done < <(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
-              --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv'
-          )
+          remote_asset_inventory="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+            --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv')"
+          if test -n "${remote_asset_inventory}"; then
+            while IFS=$'\t' read -r remote_id remote_name remote_state remote_size remote_digest; do
+              test "${remote_id}" -gt 0
+              expected=false
+              for asset in "${assets[@]}"; do
+                if test "${remote_name}" = "$(/usr/bin/basename "${asset}")"; then
+                  expected=true
+                fi
+              done
+              test "${expected}" = "true"
+              test -z "${remote_ids[${remote_name}]+x}"
+              remote_ids["${remote_name}"]="${remote_id}"
+              remote_states["${remote_name}"]="${remote_state}"
+              remote_sizes["${remote_name}"]="${remote_size}"
+              remote_digests["${remote_name}"]="${remote_digest}"
+            done <<< "${remote_asset_inventory}"
+          fi
 
           for asset in "${assets[@]}"; do
             name="$(/usr/bin/basename "${asset}")"
@@ -448,6 +454,9 @@ jobs:
 
           final_count=0
           declare -A final_names=()
+          final_asset_inventory="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+            --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv')"
           while IFS=$'\t' read -r remote_id remote_name remote_state remote_size remote_digest; do
             final_count="$((final_count + 1))"
             expected_asset=""
@@ -462,10 +471,7 @@ jobs:
             test "${remote_state}" = "uploaded"
             verify_uploaded_asset "${expected_asset}" "${remote_id}" "${remote_name}" \
               "${remote_size}" "${remote_digest}"
-          done < <(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
-              --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv'
-          )
+          done <<< "${final_asset_inventory}"
           test "${final_count}" -eq "${#assets[@]}"
           for asset in "${assets[@]}"; do
             name="$(/usr/bin/basename "${asset}")"
@@ -511,6 +517,9 @@ jobs:
 
           published_count=0
           declare -A published_names=()
+          published_asset_inventory="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+            --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv')"
           while IFS=$'\t' read -r remote_id remote_name remote_state remote_size remote_digest; do
             published_count="$((published_count + 1))"
             expected_asset=""
@@ -525,10 +534,7 @@ jobs:
             test "${remote_state}" = "uploaded"
             verify_uploaded_asset "${expected_asset}" "${remote_id}" "${remote_name}" \
               "${remote_size}" "${remote_digest}"
-          done < <(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
-              --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv'
-          )
+          done <<< "${published_asset_inventory}"
           test "${published_count}" -eq "${#assets[@]}"
           for asset in "${assets[@]}"; do
             name="$(/usr/bin/basename "${asset}")"

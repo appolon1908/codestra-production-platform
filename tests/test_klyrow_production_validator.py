@@ -737,7 +737,8 @@ def test_no_checkout_publisher_has_explicit_repository_context() -> None:
 
 def test_draft_release_is_addressed_by_numeric_id() -> None:
     _, publication = release_publication_source()
-    assert 'gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100"' in publication
+    assert 'release_inventory="$(gh api --paginate' in publication
+    assert 'repos/${GITHUB_REPOSITORY}/releases?per_page=100' in publication
     assert 'release_id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases"' in publication
     assert 'release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"' in publication
     assert 'repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets' in publication
@@ -749,6 +750,23 @@ def test_draft_release_is_addressed_by_numeric_id() -> None:
     assert '"${GH_TOKEN}"' in publication
     assert "Authorization: Bearer ${GH_TOKEN}" not in publication
     assert "gh release " not in publication
+
+
+def test_release_inventory_failure_is_not_hidden_by_process_substitution() -> None:
+    _, publication = release_publication_source()
+    for inventory in (
+        "release_inventory",
+        "matched_inventory",
+        "remote_asset_inventory",
+        "final_asset_inventory",
+        "published_asset_inventory",
+    ):
+        assert f'{inventory}="$(gh api' in publication
+    assert "done < <(" not in publication
+    discovery = publication.index('release_inventory="$(gh api --paginate')
+    iteration = publication.index('done <<< "${release_inventory}"')
+    duplicate_check = publication.index('if test "${#release_ids[@]}" -gt 1')
+    assert discovery < iteration < duplicate_check
 
 
 def test_published_tag_endpoint_is_not_used_while_draft() -> None:
