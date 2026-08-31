@@ -18,6 +18,9 @@ on:
 permissions:
   contents: read
 
+env:
+  OPERATOR_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 concurrency:
   group: klyrow-production-validator-${{ github.ref }}
   cancel-in-progress: false
@@ -32,6 +35,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          ref: ${{ env.OPERATOR_SOURCE_SHA }}
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -42,6 +46,7 @@ jobs:
 
       - name: Compile and validate static contracts
         run: |
+          test "$(git rev-parse HEAD)" = "${OPERATOR_SOURCE_SHA}"
           python -m py_compile operations/klyrow-production-validator/*.py \
             operations/klyrow-production-validator/klyrow-production-validator \
             operations/klyrow-production-validator/klyrow-production-validator-root \
@@ -59,18 +64,18 @@ jobs:
       - name: Build deterministic candidate twice
         run: |
           python operations/klyrow-production-validator/build-operator-artifact.py \
-            --source-sha "${GITHUB_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist-a
+            --source-sha "${OPERATOR_SOURCE_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist-a
           python operations/klyrow-production-validator/build-operator-artifact.py \
-            --source-sha "${GITHUB_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist-b
-          cmp "dist-a/klyrow-production-validator-${GITHUB_SHA}.tar.gz" \
-            "dist-b/klyrow-production-validator-${GITHUB_SHA}.tar.gz"
+            --source-sha "${OPERATOR_SOURCE_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist-b
+          cmp "dist-a/klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz" \
+            "dist-b/klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz"
           cmp dist-a/SHA256SUMS dist-b/SHA256SUMS
           (cd dist-a && sha256sum --check --strict SHA256SUMS)
           test "$(python -c 'import json; print(json.load(open("dist-a/vulnerability-report.json"))["gate"])')" = PASS
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: klyrow-validator-candidate-${{ github.sha }}
+          name: klyrow-validator-candidate-${{ env.OPERATOR_SOURCE_SHA }}
           path: dist-a/
           if-no-files-found: error
           retention-days: 30
@@ -86,12 +91,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Require protected exact SHA
-        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+        run: test "$(git rev-parse HEAD)" = "${OPERATOR_SOURCE_SHA}"
 
       - name: Build protected artifact
         run: |
           python operations/klyrow-production-validator/build-operator-artifact.py \
-            --source-sha "${GITHUB_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist
+            --source-sha "${OPERATOR_SOURCE_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist
           (cd dist && sha256sum --check --strict SHA256SUMS)
 
       - name: Sign and verify checksum authority
@@ -114,7 +119,7 @@ jobs:
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: klyrow-validator-protected-${{ github.sha }}
+          name: klyrow-validator-protected-${{ env.OPERATOR_SOURCE_SHA }}
           path: dist/
           if-no-files-found: error
           retention-days: 90
@@ -123,7 +128,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "klyrow-validator-${GITHUB_SHA}" dist/* \
-            --target "${GITHUB_SHA}" \
-            --title "Klyrow production validator ${GITHUB_SHA}" \
+          gh release create "klyrow-validator-${OPERATOR_SOURCE_SHA}" dist/* \
+            --target "${OPERATOR_SOURCE_SHA}" \
+            --title "Klyrow production validator ${OPERATOR_SOURCE_SHA}" \
             --notes "Checksum- and signature-gated bounded operator. No deployment action."

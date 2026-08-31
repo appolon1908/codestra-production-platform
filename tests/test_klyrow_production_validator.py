@@ -239,6 +239,8 @@ def test_pull_request_validation_token_is_read_only() -> None:
     )[0]
     assert "contents: write" not in validate_job
     assert "persist-credentials: false" in validate_job
+    assert "ref: ${{ env.OPERATOR_SOURCE_SHA }}" in validate_job
+    assert 'test "$(git rev-parse HEAD)" = "${OPERATOR_SOURCE_SHA}"' in validate_job
 
 
 def test_pinned_probes_are_bundled_and_structurally_no_data() -> None:
