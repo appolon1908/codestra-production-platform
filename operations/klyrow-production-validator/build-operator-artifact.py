@@ -80,7 +80,7 @@ def source_vulnerability_report(source: Path, source_sha: str) -> dict[str, obje
     if any(not path.is_file() or path.is_symlink() for path in targets):
         raise SystemExit("unsafe or missing source-scan target")
     result = subprocess.run(
-        [sys.executable, "-m", "bandit", "-f", "json", *(str(path) for path in targets)],
+        [sys.executable, "-I", "-m", "bandit", "-f", "json", *(str(path) for path in targets)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         timeout=120,

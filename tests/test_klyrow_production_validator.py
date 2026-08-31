@@ -615,6 +615,8 @@ def test_release_evidence_rejects_failed_vulnerability_gate(tmp_path: Path) -> N
     assert value["source_scan"]["scanner_version"] == "1.9.4"
     assert value["source_scan"]["errors"] == 0
     assert value["source_scan"]["files_scanned"]
+    builder = (SOURCE / "build-operator-artifact.py").read_text(encoding="utf-8")
+    assert '[sys.executable, "-I", "-m", "bandit"' in builder
     value["gate"] = "FAIL"
     vulnerability.write_text(json.dumps(value), encoding="utf-8")
     with pytest.raises(installer.InstallError, match="vulnerability gate rejected"):
