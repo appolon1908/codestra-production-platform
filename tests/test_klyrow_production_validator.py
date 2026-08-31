@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import shutil
@@ -29,6 +31,17 @@ from klyrow_validator_core import (  # noqa: E402
     reject_dangerous_environment,
     safe_json_file,
 )
+
+
+def load_actions_module():
+    path = SOURCE / "klyrow-production-validator-actions"
+    name = "klyrow_production_validator_actions"
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 NEGATIVE_COMMANDS = (
@@ -178,6 +191,7 @@ def test_command_contract_is_default_deny_and_complete() -> None:
     assert set(contract["actions"]) == set(APPROVED_ACTIONS)
     assert "canary" in contract["prohibited_actions"]
     assert "docker" in contract["prohibited_actions"]
+    assert contract["fixed_targets"]["listener_ports"] == [25, 587, 2525, 18000]
     for action, entry in contract["actions"].items():
         assert entry["fixed_arguments"] == [action]
         assert entry["fixed_executable"].startswith("/usr/local/libexec/")
@@ -227,6 +241,101 @@ def test_health_output_never_selects_health_log_output() -> None:
     assert "{{json .State.Health.Status}}" in actions
     assert "{{json .State.Health}}" not in actions
     assert ".State.Health.Log" not in actions
+
+
+def test_health_requires_every_container_to_report_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    actions = load_actions_module()
+    statuses = iter(('"healthy"\n', '"unhealthy"\n', '"starting"\n', 'null\n'))
+
+    def fake_run(argv: list[str], **_kwargs: object) -> dict[str, object]:
+        assert argv[:3] == ["/usr/bin/docker", "inspect", "--format"]
+        return {
+            "argv_id": "docker",
+            "exit_code": 0,
+            "stdout": next(statuses),
+            "stderr": "",
+            "elapsed_ms": 1,
+            "truncated": False,
+            "timed_out": False,
+        }
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _maximum: int) -> bytes:
+            return b'{}'
+
+    monkeypatch.setattr(actions, "run", fake_run)
+    monkeypatch.setattr(actions.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    assert actions.health() == 3
+
+
+def release_container(actions, name: str) -> dict[str, object]:
+    return {
+        "name": name,
+        "image_repository": "ghcr.io/codestra/klyrow",
+        "image_digest": "sha256:" + "a" * 64,
+        "oci_source_revision": "b" * 40,
+        "source_repository": "appolon1908-hue/klyrow.com",
+        "source_commit_sha": "b" * 40,
+        "release_change_id": "KLYROW-20260831-01",
+        "build_workflow_run": "github:123456",
+        "sbom_digest": "sha256:" + "c" * 64,
+        "provenance_reference": "github:attestation/123456",
+        "signature_verification": "PASS",
+        "vulnerability_scan_result": "PASS",
+        "configuration_checksum": "sha256:" + "d" * 64,
+    }
+
+
+def release_readback(actions) -> dict[str, object]:
+    return {
+        "containers": [release_container(actions, name) for name in actions.CONTAINERS],
+        "contract_compatibility": "PASS",
+        "mutable_image_references": 0,
+        "source_provenance_match": "YES",
+        "signature_verification": "PASS",
+        "vulnerability_gate": "PASS",
+        "generated_at_utc": "2026-08-31T15:00:00Z",
+    }
+
+
+def test_release_identity_projects_only_exact_recursive_schema() -> None:
+    actions = load_actions_module()
+    value = release_readback(actions)
+    assert actions.projected_release_identity(value) == value
+    value["containers"][0]["environment"] = {"DATABASE_URL": "secret"}
+    with pytest.raises(PolicyError, match="RELEASE_CONTAINER_SCHEMA_REJECTED"):
+        actions.projected_release_identity(value)
+
+
+def test_release_identity_rejects_secret_shaped_nested_replacement() -> None:
+    actions = load_actions_module()
+    value = release_readback(actions)
+    value["containers"][0]["provenance_reference"] = "https://user:password@example.invalid"
+    with pytest.raises(PolicyError, match="RELEASE_PROVENANCE_REFERENCE_REJECTED"):
+        actions.projected_release_identity(value)
+
+
+def test_release_identity_rejects_nested_top_level_status_values() -> None:
+    actions = load_actions_module()
+    value = release_readback(actions)
+    value["signature_verification"] = {"client_secret": "hidden"}
+    with pytest.raises(PolicyError, match="RELEASE_SIGNATURE_VERIFICATION_REJECTED"):
+        actions.projected_release_identity(value)
+
+
+def test_inventory_commands_are_scoped_to_approved_workloads_and_ports() -> None:
+    actions = (SOURCE / "klyrow-production-validator-actions").read_text(encoding="utf-8")
+    assert 'f"name=^/{container}$"' in actions
+    assert '["/usr/bin/ss", "-H", "-lntp"]' not in actions
+    assert 'f":{port}"' in actions
 
 
 def test_pull_request_validation_token_is_read_only() -> None:

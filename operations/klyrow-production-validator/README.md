@@ -18,11 +18,16 @@ by this operator.
 
 ## Read-only data contract
 
-Inventory and health use fixed argv vectors and fixed container names. The
+Inventory and health use fixed argv vectors and fixed container names. Docker
+inventory is filtered separately to each approved container, and listener
+inventory is limited to the fixed application and SMTP ports in the contract;
+neither action enumerates unrelated host workloads. Container health passes
+only when every fixed container explicitly reports `healthy`. The
 configuration action reads only three root-owned, non-symlink JSON readbacks
 whose schema consists of the nine approved boolean fields. Release identity is
-similarly limited to an approved immutable-release schema. This avoids reading
-or materializing complete container environments.
+recursively validated and projected to an exact immutable-release schema for
+the four fixed containers. Nested or extra fields are rejected. This avoids
+reading or materializing complete container environments.
 
 Authorization, no-effect, callback, and SMTP no-DATA actions require reviewed
 companion probes under

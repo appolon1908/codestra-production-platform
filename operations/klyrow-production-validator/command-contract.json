@@ -34,6 +34,7 @@
       "klyrow-worker-1",
       "klyrow-postal-smtp-1"
     ],
+    "listener_ports": [25, 587, 2525, 18000],
     "compose_files": [
       "/opt/klyrow/klyrow-mail-engine-release-381ac4d.compose.yaml",
       "/opt/klyrow/klyrow-smtp-hotfix-20260826.override.yaml"

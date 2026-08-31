@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import ssl
 import sys
@@ -37,6 +38,28 @@ CONTAINERS = (
     "klyrow-worker-1",
     "klyrow-postal-smtp-1",
 )
+LISTENER_PORTS = (25, 587, 2525, 18000)
+RELEASE_CONTAINER_FIELDS = {
+    "name",
+    "image_repository",
+    "image_digest",
+    "oci_source_revision",
+    "source_repository",
+    "source_commit_sha",
+    "release_change_id",
+    "build_workflow_run",
+    "sbom_digest",
+    "provenance_reference",
+    "signature_verification",
+    "vulnerability_scan_result",
+    "configuration_checksum",
+}
+SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
+COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
+REPOSITORY_RE = re.compile(
+    r"(?:https://github\.com/)?[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?\Z"
+)
+SAFE_REFERENCE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}\Z")
 BOOLEAN_FIELDS = {
     "KLYROW_PLATFORM_EMERGENCY_STOP",
     "KLYROW_SAFE_MODE",
@@ -162,18 +185,25 @@ def status() -> int:
 def inventory() -> int:
     commands = [
         ["/usr/bin/uname", "-srvmo"],
-        ["/usr/bin/docker", "version", "--format", "{{json .Server}}"],
-        [
-            "/usr/bin/docker",
-            "ps",
-            "--no-trunc",
-            "--format",
-            "{{.Names}}|{{.Image}}|{{.ID}}|{{.Status}}|{{.Ports}}|{{.Networks}}",
-        ],
+        ["/usr/bin/docker", "version", "--format", "{{json .Server.Version}}"],
+        ["/usr/bin/docker", "compose", "version", "--short"],
         ["/usr/bin/df", "-P", "/", "/opt", "/var/lib/docker"],
         ["/usr/bin/df", "-Pi", "/", "/opt", "/var/lib/docker"],
-        ["/usr/bin/ss", "-H", "-lntp"],
     ]
+    for container in CONTAINERS:
+        commands.append(
+            [
+                "/usr/bin/docker",
+                "ps",
+                "--no-trunc",
+                "--filter",
+                f"name=^/{container}$",
+                "--format",
+                "{{.Names}}|{{.Image}}|{{.ID}}|{{.Status}}|{{.Ports}}|{{.Networks}}",
+            ]
+        )
+    for port in LISTENER_PORTS:
+        commands.append(["/usr/bin/ss", "-H", "-lntp", "sport", "=", f":{port}"])
     results = [run(command) for command in commands]
     emit({"inventory": results, "mutation": False})
     return 0 if all(item["exit_code"] == 0 for item in results) else 3
@@ -191,6 +221,92 @@ def configuration_readback() -> int:
     return 0 if consistent else 3
 
 
+def projected_release_identity(value: dict[str, object]) -> dict[str, object]:
+    top_level_fields = {
+        "containers",
+        "contract_compatibility",
+        "mutable_image_references",
+        "source_provenance_match",
+        "signature_verification",
+        "vulnerability_gate",
+        "generated_at_utc",
+    }
+    if set(value) != top_level_fields:
+        raise PolicyError("RELEASE_IDENTITY_SCHEMA_REJECTED")
+    containers = value.get("containers")
+    if not isinstance(containers, list) or len(containers) != len(CONTAINERS):
+        raise PolicyError("RELEASE_CONTAINER_SET_REJECTED")
+    projected_containers = []
+    observed_names = []
+    for container in containers:
+        if not isinstance(container, dict) or set(container) != RELEASE_CONTAINER_FIELDS:
+            raise PolicyError("RELEASE_CONTAINER_SCHEMA_REJECTED")
+        if not all(isinstance(container[field], str) for field in RELEASE_CONTAINER_FIELDS):
+            raise PolicyError("RELEASE_CONTAINER_TYPE_REJECTED")
+        name = container["name"]
+        observed_names.append(name)
+        if name not in CONTAINERS:
+            raise PolicyError("RELEASE_CONTAINER_NAME_REJECTED")
+        for field in ("image_digest", "sbom_digest", "configuration_checksum"):
+            if not SHA256_RE.fullmatch(container[field]):
+                raise PolicyError(f"RELEASE_{field.upper()}_REJECTED")
+        for field in ("oci_source_revision", "source_commit_sha"):
+            if not COMMIT_RE.fullmatch(container[field]):
+                raise PolicyError(f"RELEASE_{field.upper()}_REJECTED")
+        if not REPOSITORY_RE.fullmatch(container["source_repository"]):
+            raise PolicyError("RELEASE_SOURCE_REPOSITORY_REJECTED")
+        for field in (
+            "image_repository",
+            "release_change_id",
+            "build_workflow_run",
+            "provenance_reference",
+        ):
+            if not SAFE_REFERENCE_RE.fullmatch(container[field]):
+                raise PolicyError(f"RELEASE_{field.upper()}_REJECTED")
+        if container["signature_verification"] != "PASS":
+            raise PolicyError("RELEASE_SIGNATURE_REJECTED")
+        if container["vulnerability_scan_result"] != "PASS":
+            raise PolicyError("RELEASE_VULNERABILITY_RESULT_REJECTED")
+        projected_containers.append({field: container[field] for field in sorted(RELEASE_CONTAINER_FIELDS)})
+    if len(set(observed_names)) != len(observed_names) or set(observed_names) != set(CONTAINERS):
+        raise PolicyError("RELEASE_CONTAINER_SET_REJECTED")
+    generated_at = value.get("generated_at_utc")
+    if not isinstance(generated_at, str) or len(generated_at) > 40:
+        raise PolicyError("RELEASE_TIMESTAMP_REJECTED")
+    try:
+        parsed_timestamp = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise PolicyError("RELEASE_TIMESTAMP_REJECTED") from exc
+    if parsed_timestamp.tzinfo is None or parsed_timestamp.utcoffset() != timezone.utc.utcoffset(None):
+        raise PolicyError("RELEASE_TIMESTAMP_REJECTED")
+    enum_fields = {
+        "contract_compatibility": {"PASS", "FAIL", "BLOCKED"},
+        "source_provenance_match": {"YES", "NO", "UNKNOWN"},
+        "signature_verification": {"PASS", "FAIL", "BLOCKED"},
+        "vulnerability_gate": {"PASS", "FAIL", "BLOCKED"},
+    }
+    for field, allowed_values in enum_fields.items():
+        if not isinstance(value.get(field), str) or value[field] not in allowed_values:
+            raise PolicyError(f"RELEASE_{field.upper()}_REJECTED")
+    mutable_references = value.get("mutable_image_references")
+    if (
+        isinstance(mutable_references, bool)
+        or not isinstance(mutable_references, int)
+        or not 0 <= mutable_references <= len(CONTAINERS)
+    ):
+        raise PolicyError("RELEASE_MUTABLE_IMAGE_REFERENCES_REJECTED")
+    projected = {
+        "containers": projected_containers,
+        "contract_compatibility": value.get("contract_compatibility"),
+        "mutable_image_references": value.get("mutable_image_references"),
+        "source_provenance_match": value.get("source_provenance_match"),
+        "signature_verification": value.get("signature_verification"),
+        "vulnerability_gate": value.get("vulnerability_gate"),
+        "generated_at_utc": generated_at,
+    }
+    return projected
+
+
 def release_identity() -> int:
     allowed = {
         "containers",
@@ -201,7 +317,8 @@ def release_identity() -> int:
         "vulnerability_gate",
         "generated_at_utc",
     }
-    value = safe_json_file(READBACK_ROOT / "release-identity.json", allowed_keys=allowed)
+    raw_value = safe_json_file(READBACK_ROOT / "release-identity.json", allowed_keys=allowed)
+    value = projected_release_identity(raw_value)
     required = {
         "contract_compatibility": "PASS",
         "mutable_image_references": 0,
@@ -215,18 +332,38 @@ def release_identity() -> int:
 
 
 def health() -> int:
-    results = []
+    results: list[dict[str, object]] = []
+    passed = True
     for container in CONTAINERS:
+        raw = run(
+            [
+                "/usr/bin/docker",
+                "inspect",
+                "--format",
+                "{{json .State.Health.Status}}",
+                container,
+            ]
+        )
+        health_status = None
+        if raw["exit_code"] == 0 and not raw["timed_out"] and not raw["truncated"]:
+            try:
+                candidate = json.loads(str(raw["stdout"]).strip())
+                if isinstance(candidate, str) and candidate in {"healthy", "unhealthy", "starting"}:
+                    health_status = candidate
+            except json.JSONDecodeError:
+                health_status = None
+        container_passed = health_status == "healthy"
+        passed = passed and container_passed
         results.append(
-            run(
-                [
-                    "/usr/bin/docker",
-                    "inspect",
-                    "--format",
-                    "{{json .State.Health.Status}}",
-                    container,
-                ]
-            )
+            {
+                "container": container,
+                "status": health_status or "invalid-or-missing",
+                "exit_code": raw["exit_code"],
+                "elapsed_ms": raw["elapsed_ms"],
+                "timed_out": raw["timed_out"],
+                "truncated": raw["truncated"],
+                "passed": container_passed,
+            }
         )
     for url in ("http://127.0.0.1:18000/v1/health", "http://127.0.0.1:18000/healthz"):
         started = datetime.now(timezone.utc)
@@ -242,9 +379,10 @@ def health() -> int:
                         "elapsed_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
                     }
                 )
+                passed = passed and response.status == 200 and len(body) <= 8192
         except (OSError, urllib.error.URLError) as exc:
             results.append({"endpoint": url, "status": 0, "error": type(exc).__name__})
-    passed = all(item.get("exit_code", 0) == 0 and item.get("status", 200) == 200 for item in results)
+            passed = False
     emit({"health": results, "passed": passed})
     return 0 if passed else 3
 
