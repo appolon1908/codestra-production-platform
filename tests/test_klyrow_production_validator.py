@@ -644,7 +644,7 @@ def test_protected_release_publication_is_retry_safe() -> None:
         "releases/assets/${remote_id}",
         "Accept: application/octet-stream",
         "upload_url",
-        "/usr/bin/curl --config -",
+        'gh api --method POST "${upload_endpoint}"',
         '${upload_endpoint}',
         "remote_digest",
         "require_draft",
@@ -664,14 +664,14 @@ def test_protected_release_publication_is_retry_safe() -> None:
     assert publication.index("expected_tag_binding") < publish
     assert publication.rindex("require_draft", 0, publish) < publish
     delete_asset = publication.index("releases/assets/${remote_ids[${name}]}")
-    upload_asset = publication.index("/usr/bin/curl --config -")
+    upload_asset = publication.index('gh api --method POST "${upload_endpoint}"')
     assert publication.rindex("require_draft", 0, delete_asset) < delete_asset
     assert publication.rindex("require_draft", 0, upload_asset) < upload_asset
     assert delete_asset < publish
     assert upload_asset < publish
     after_publication = publication[publish:]
     assert "--method DELETE" not in after_publication
-    assert "/usr/bin/curl --config -" not in after_publication
+    assert 'gh api --method POST "${upload_endpoint}"' not in after_publication
 
 
 def test_signing_secrets_are_isolated_from_repository_code() -> None:
@@ -718,7 +718,7 @@ def test_no_checkout_publisher_has_explicit_repository_context() -> None:
     assert publication.index("expected_tag_binding") < publish
     assert publication.rindex("require_draft", 0, publish) < publish
     delete_asset = publication.index("releases/assets/${remote_ids[${name}]}")
-    upload_asset = publication.index("/usr/bin/curl --config -")
+    upload_asset = publication.index('gh api --method POST "${upload_endpoint}"')
     assert publication.rindex("require_draft", 0, delete_asset) < delete_asset
     assert publication.rindex("require_draft", 0, upload_asset) < upload_asset
 
@@ -745,10 +745,13 @@ def test_draft_release_is_addressed_by_numeric_id() -> None:
     assert 'repos/${GITHUB_REPOSITORY}/releases/assets/${remote_id}' in publication
     assert 'upload_url="$(printf' in publication
     assert "https://uploads.github.com/" in publication
-    assert "/usr/bin/curl --config -" in publication
-    assert 'header = "Authorization: Bearer %s"' in publication
-    assert '"${GH_TOKEN}"' in publication
-    assert "Authorization: Bearer ${GH_TOKEN}" not in publication
+    assert 'gh api --method POST "${upload_endpoint}"' in publication
+    assert '-f name="${name}"' in publication
+    assert '--input "${asset}"' in publication
+    assert 'Content-Type: ${content_type}' in publication
+    assert "--hostname uploads.github.com" not in publication
+    assert "/usr/bin/curl" not in publication
+    assert "${GH_TOKEN}" not in publication
     assert "gh release " not in publication
 
 
@@ -769,6 +772,20 @@ def test_release_inventory_failure_is_not_hidden_by_process_substitution() -> No
     assert discovery < iteration < duplicate_check
 
 
+def test_absolute_upload_url_uses_authenticated_gh_api() -> None:
+    _, publication = release_publication_source()
+    assert 'upload_url="$(printf' in publication
+    assert 'expected_upload_url="https://uploads.github.com/' in publication
+    assert 'upload_endpoint="${upload_url%%\\{*}"' in publication
+    assert 'gh api --method POST "${upload_endpoint}"' in publication
+    assert '-f name="${name}"' in publication
+    assert '--header "Content-Type: ${content_type}"' in publication
+    assert '--input "${asset}"' in publication
+    assert "--hostname uploads.github.com" not in publication
+    assert "/usr/bin/curl" not in publication
+    assert "${GH_TOKEN}" not in publication
+
+
 def test_published_tag_endpoint_is_not_used_while_draft() -> None:
     _, publication = release_publication_source()
     published_tag_endpoint = 'repos/${GITHUB_REPOSITORY}/releases/tags/${tag}'
@@ -787,21 +804,21 @@ def test_exact_draft_release_resume_is_idempotent() -> None:
     assert 'if test "${remote_states[${name}]}" = "uploaded"' in publication
     assert 'verify_uploaded_asset "${asset}"' in publication
     assert 'if test -z "${remote_ids[${name}]+x}"' in publication
-    assert "/usr/bin/curl --config -" in publication
+    assert 'gh api --method POST "${upload_endpoint}"' in publication
     assert 'test "${final_count}" -eq "${#assets[@]}"' in publication
 
 
 def test_published_release_assets_are_never_repaired() -> None:
     _, publication = release_publication_source()
     delete_asset = publication.index("--method DELETE")
-    upload_asset = publication.index("/usr/bin/curl --config -")
+    upload_asset = publication.index('gh api --method POST "${upload_endpoint}"')
     publish = publication.index("-F draft=false")
     assert publication.rindex("require_draft", 0, delete_asset) < delete_asset
     assert publication.rindex("require_draft", 0, upload_asset) < upload_asset
     assert delete_asset < publish
     assert upload_asset < publish
     assert "--method DELETE" not in publication[publish:]
-    assert "/usr/bin/curl --config -" not in publication[publish:]
+    assert 'gh api --method POST "${upload_endpoint}"' not in publication[publish:]
 
 
 def test_duplicate_draft_release_identity_fails_closed() -> None:
@@ -863,7 +880,7 @@ def test_draft_release_interruption_matrix_contract() -> None:
         ),
         "incomplete published rejection": (
             "require_draft",
-            "/usr/bin/curl --config -",
+            'gh api --method POST "${upload_endpoint}"',
         ),
         "published digest mismatch rejection": (
             'test "${remote_digest}" = "sha256:${local_digest}"',
