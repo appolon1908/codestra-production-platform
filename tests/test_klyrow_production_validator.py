@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -597,7 +598,7 @@ def test_release_evidence_rejects_failed_vulnerability_gate(tmp_path: Path) -> N
     source_sha = "c" * 40
     run_checked(
         [
-            "/usr/bin/python3",
+            sys.executable,
             str(SOURCE / "build-operator-artifact.py"),
             "--source-sha",
             source_sha,
@@ -609,6 +610,11 @@ def test_release_evidence_rejects_failed_vulnerability_gate(tmp_path: Path) -> N
     )
     vulnerability = tmp_path / "vulnerability-report.json"
     value = json.loads(vulnerability.read_text(encoding="utf-8"))
+    assert value["source_sha"] == source_sha
+    assert value["source_scan"]["scanner"] == "bandit"
+    assert value["source_scan"]["scanner_version"] == "1.9.4"
+    assert value["source_scan"]["errors"] == 0
+    assert value["source_scan"]["files_scanned"]
     value["gate"] = "FAIL"
     vulnerability.write_text(json.dumps(value), encoding="utf-8")
     with pytest.raises(installer.InstallError, match="vulnerability gate rejected"):
@@ -626,6 +632,40 @@ def run_checked(argv: list[str], **kwargs: object) -> subprocess.CompletedProces
     return subprocess.run(argv, text=True, capture_output=True, check=True, **kwargs)
 
 
+def test_release_inputs_are_snapshotted_once_into_private_staging(tmp_path: Path) -> None:
+    installer = load_source_script(
+        "install-klyrow-production-validator.py", "kpv_installer_staging"
+    )
+    source_sha = "f" * 40
+    source = tmp_path / "source"
+    source.mkdir(mode=0o700)
+    paths = {
+        "archive": source / f"klyrow-production-validator-{source_sha}.tar.gz",
+        "sha256s": source / "SHA256SUMS",
+        "signature": source / "SHA256SUMS.sig",
+        "allowed_signers": source / "allowed_signers",
+        "installation_manifest": source / "installation-manifest.json",
+        "sbom": source / "sbom.spdx.json",
+        "provenance": source / "provenance.json",
+        "vulnerability_report": source / "vulnerability-report.json",
+        "public_key": source / "operator-key.pub",
+    }
+    original = {}
+    for index, (name, path) in enumerate(paths.items()):
+        original[name] = f"original-{index}\n".encode()
+        path.write_bytes(original[name])
+        path.chmod(0o600)
+    destination = tmp_path / "private-stage"
+    destination.mkdir(mode=0o700)
+    staged = installer.stage_install_inputs(argparse.Namespace(**paths), destination)
+    for path in paths.values():
+        path.write_bytes(b"replaced-after-snapshot\n")
+    for name, expected in original.items():
+        staged_path = getattr(staged, name)
+        assert staged_path.read_bytes() == expected
+        assert staged_path.stat().st_mode & 0o777 == 0o600
+
+
 @pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="OpenSSH tooling unavailable")
 def test_disposable_install_revocation_validation_and_rollback() -> None:
     source_sha = "a" * 40
@@ -637,7 +677,7 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
         (simulator / ".kpv-disposable-simulator").write_text("disposable\n", encoding="utf-8")
         run_checked(
             [
-                "/usr/bin/python3",
+                sys.executable,
                 str(SOURCE / "build-operator-artifact.py"),
                 "--source-sha",
                 source_sha,
@@ -692,7 +732,7 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
         archive = release / f"klyrow-production-validator-{source_sha}.tar.gz"
         install = run_checked(
             [
-                "/usr/bin/python3",
+                sys.executable,
                 str(SOURCE / "install-klyrow-production-validator.py"),
                 "--archive",
                 str(archive),
@@ -884,7 +924,7 @@ def test_artifact_build_is_deterministic(tmp_path: Path) -> None:
     for destination in (first, second):
         run_checked(
             [
-                "/usr/bin/python3",
+                sys.executable,
                 str(SOURCE / "build-operator-artifact.py"),
                 "--source-sha",
                 source_sha,

@@ -32,7 +32,8 @@ reading or materializing complete container environments.
 Release identity read-back is valid for at most five minutes and is compared
 with fresh fixed-field Docker inspection for every approved container. The
 running digest-qualified image reference and OCI source/revision labels must
-match the asserted release before PASS.
+match the asserted release before PASS. Each asserted source commit must equal
+its OCI source revision, and both values are bound to that live label.
 
 Authorization, no-effect, callback, and SMTP no-DATA actions require reviewed
 companion probes under
@@ -55,7 +56,8 @@ outcome of later application tests.
 Negative authorization and callback probes also remain incomplete (nonzero)
 until separately reviewed positive synthetic-identity and signing authorities
 exist. The invalid-signature callback case uses a current in-window timestamp
-so timestamp expiry cannot mask missing signature enforcement.
+and a format-valid, non-matching SHA-256 signature so timestamp expiry or
+header-format rejection cannot mask missing cryptographic enforcement.
 
 The no-effect capability readback is recursively projected before any value is
 emitted. Its adapter name and SHA-256 use fixed scalar formats, its authority
@@ -64,9 +66,12 @@ flags are strict booleans, and its UTC expiry must be valid and unexpired.
 ## Build and release
 
 `build-operator-artifact.py` creates a deterministic archive, installation
-manifest, SPDX SBOM, SLSA-shaped provenance statement, zero-dependency
-vulnerability report, and checksum manifest. The protected-branch workflow
-runs the tests and vulnerability gate, builds at the exact merge SHA, signs
+manifest, SPDX SBOM, SLSA-shaped provenance statement, and checksum manifest.
+Every build invokes the exactly pinned Bandit source scanner over the complete
+Python operator/build surface and derives the vulnerability report and PASS
+gate from the actual result; the report retains all high, medium, and low
+counts. The protected-branch workflow runs the tests and dependency and source
+vulnerability gates, builds at the exact merge SHA, signs
 `SHA256SUMS` with the Codestra release signing identity, verifies that
 signature, and publishes an immutable SHA-addressed GitHub release.
 
@@ -85,6 +90,12 @@ The installer requires all of the following:
   passing vulnerability report whose source and artifact identities agree;
 - one Ed25519 operator public key;
 - an explicit source CIDR, expiry, approver, and change ID.
+
+Before verification, every release input and the operator public key are read
+once through a no-follow descriptor into a private mode-0700 staging directory.
+The installer verifies, extracts, copies, and records digests only from that
+mode-0600 snapshot, so changes to owner-writable handoff paths cannot replace
+evidence or signer authority between verification and installation.
 
 It installs a root-owned version directory under
 `/opt/codestra/operators/klyrow-production-validator/<source-sha>/`, verifies

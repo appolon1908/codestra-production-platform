@@ -45,6 +45,33 @@ EXPECTED_MEMBERS = {
     "validate-klyrow-production-validator.py",
     "README.md",
 }
+EXPECTED_SOURCE_SCAN_FILES = [
+    "build-operator-artifact.py",
+    "klyrow-production-validator",
+    "klyrow-production-validator-root",
+    "klyrow-production-validator-actions",
+    "klyrow_validator_core.py",
+    "kpv_probe_core.py",
+    "probe-authorization-tests",
+    "probe-no-effect-tests",
+    "probe-callback-tests",
+    "probe-smtp-no-data",
+    "install-klyrow-production-validator.py",
+    "install_klyrow_production_validator_compat.py",
+    "remove-klyrow-production-validator.py",
+    "revoke-klyrow-validator-key.py",
+    "validate-klyrow-production-validator.py",
+]
+STAGED_INPUTS = {
+    "sha256s": ("SHA256SUMS", False, 65536),
+    "signature": ("SHA256SUMS.sig", False, 65536),
+    "allowed_signers": ("allowed_signers", True, 65536),
+    "installation_manifest": ("installation-manifest.json", False, 2 * 1024 * 1024),
+    "sbom": ("sbom.spdx.json", False, 2 * 1024 * 1024),
+    "provenance": ("provenance.json", False, 2 * 1024 * 1024),
+    "vulnerability_report": ("vulnerability-report.json", False, 2 * 1024 * 1024),
+    "public_key": ("operator-key.pub", False, 65536),
+}
 
 
 class InstallError(RuntimeError):
@@ -65,6 +92,77 @@ def regular(path: Path, *, private: bool = False) -> None:
         raise InstallError(f"unsafe file: {path}")
     if metadata.st_mode & (0o077 if private else 0o022):
         raise InstallError(f"unsafe mode: {path}")
+
+
+def snapshot_file(
+    source: Path, destination: Path, *, private: bool, maximum_bytes: int
+) -> None:
+    descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise InstallError(f"unsafe file: {source}")
+        if before.st_mode & (0o077 if private else 0o022):
+            raise InstallError(f"unsafe mode: {source}")
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(131072, maximum_bytes + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > maximum_bytes:
+                raise InstallError(f"release input too large: {source.name}")
+        after = os.fstat(descriptor)
+        stable_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(getattr(before, field) != getattr(after, field) for field in stable_fields):
+            raise InstallError(f"release input changed during snapshot: {source.name}")
+    finally:
+        os.close(descriptor)
+    output = os.open(
+        destination,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+        0o600,
+    )
+    try:
+        data = b"".join(chunks)
+        written = 0
+        while written < len(data):
+            count = os.write(output, data[written:])
+            if count <= 0:
+                raise InstallError("release snapshot write failed")
+            written += count
+        os.fsync(output)
+    finally:
+        os.close(output)
+
+
+def stage_install_inputs(args: argparse.Namespace, destination: Path) -> argparse.Namespace:
+    metadata = destination.lstat()
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or metadata.st_mode & 0o077
+    ):
+        raise InstallError("unsafe release staging directory")
+    if ARTIFACT_RE.fullmatch(args.archive.name) is None:
+        raise InstallError("artifact name invalid")
+    staged = argparse.Namespace(**vars(args))
+    archive = destination / args.archive.name
+    snapshot_file(args.archive, archive, private=False, maximum_bytes=32 * 1024 * 1024)
+    staged.archive = archive
+    for attribute, (name, private, maximum_bytes) in STAGED_INPUTS.items():
+        target = destination / name
+        snapshot_file(
+            getattr(args, attribute),
+            target,
+            private=private,
+            maximum_bytes=maximum_bytes,
+        )
+        setattr(staged, attribute, target)
+    return staged
 
 
 def mapped(root: Path | None, absolute: str) -> Path:
@@ -213,12 +311,35 @@ def validate_release_evidence(
         raise InstallError("provenance authority mismatch")
 
     vulnerability = json_object(vulnerability_path)
+    source_scan = vulnerability.get("source_scan")
+    findings = source_scan.get("findings") if isinstance(source_scan, dict) else None
     if (
-        vulnerability.get("schema_version") != "1.0.0"
+        vulnerability.get("schema_version") != "2.0.0"
+        or vulnerability.get("source_sha") != source_sha
         or vulnerability.get("dependency_lock") != "requirements.lock"
+        or vulnerability.get("dependency_lock_sha256") != payload_hashes["requirements.lock"]
         or vulnerability.get("runtime_dependencies") != 0
-        or vulnerability.get("critical") != 0
+        or not isinstance(source_scan, dict)
+        or set(source_scan) != {
+            "scanner",
+            "scanner_version",
+            "files_scanned",
+            "errors",
+            "findings",
+        }
+        or source_scan.get("scanner") != "bandit"
+        or source_scan.get("scanner_version") != "1.9.4"
+        or source_scan.get("files_scanned") != EXPECTED_SOURCE_SCAN_FILES
+        or source_scan.get("errors") != 0
+        or not isinstance(findings, dict)
+        or set(findings) != {"high", "medium", "low"}
+        or any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in findings.values()
+        )
+        or vulnerability.get("critical") != "NOT_APPLICABLE_BANDIT_SEVERITY_MODEL"
         or vulnerability.get("high") != 0
+        or findings.get("high") != vulnerability.get("high")
         or vulnerability.get("gate") != "PASS"
     ):
         raise InstallError("vulnerability gate rejected")
@@ -548,7 +669,11 @@ def main() -> int:
     backups: list[dict[str, object]] = []
     backup: Path | None = None
     version_root: Path | None = None
+    staging_root: Path | None = None
     try:
+        staging_root = Path(tempfile.mkdtemp(prefix="kpv-release-"))
+        os.chmod(staging_root, 0o700)
+        args = stage_install_inputs(args, staging_root)
         source_sha, release_manifest = verify_release(
             args.archive,
             args.sha256s,
@@ -765,6 +890,9 @@ def main() -> int:
         print("INSTALL_RESULT=FAIL")
         print("APPLICATION_RUNTIME_CHANGED=NO")
         return 2
+    finally:
+        if staging_root is not None:
+            shutil.rmtree(staging_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

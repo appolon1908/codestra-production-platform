@@ -1,14 +1,17 @@
 #!/usr/bin/python3
-"""Build a deterministic, dependency-free Klyrow validator release bundle."""
+"""Build a deterministic, runtime-dependency-free Klyrow validator bundle."""
 
 from __future__ import annotations
 
 import argparse
 import gzip
 import hashlib
+import importlib.metadata
 import io
 import json
 import os
+import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -34,6 +37,24 @@ PAYLOAD_FILES = (
     "validate-klyrow-production-validator.py",
     "README.md",
 )
+BANDIT_VERSION = "1.9.4"
+SOURCE_SCAN_FILES = (
+    "build-operator-artifact.py",
+    "klyrow-production-validator",
+    "klyrow-production-validator-root",
+    "klyrow-production-validator-actions",
+    "klyrow_validator_core.py",
+    "kpv_probe_core.py",
+    "probe-authorization-tests",
+    "probe-no-effect-tests",
+    "probe-callback-tests",
+    "probe-smtp-no-data",
+    "install-klyrow-production-validator.py",
+    "install_klyrow_production_validator_compat.py",
+    "remove-klyrow-production-validator.py",
+    "revoke-klyrow-validator-key.py",
+    "validate-klyrow-production-validator.py",
+)
 
 
 def digest(path: Path) -> str:
@@ -46,6 +67,70 @@ def digest(path: Path) -> str:
 
 def canonical_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def source_vulnerability_report(source: Path, source_sha: str) -> dict[str, object]:
+    try:
+        installed_version = importlib.metadata.version("bandit")
+    except importlib.metadata.PackageNotFoundError as exc:
+        raise SystemExit("pinned Bandit source scanner is required") from exc
+    if installed_version != BANDIT_VERSION:
+        raise SystemExit("unexpected Bandit source scanner version")
+    targets = [source / name for name in SOURCE_SCAN_FILES]
+    if any(not path.is_file() or path.is_symlink() for path in targets):
+        raise SystemExit("unsafe or missing source-scan target")
+    result = subprocess.run(
+        [sys.executable, "-m", "bandit", "-f", "json", *(str(path) for path in targets)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=120,
+        check=False,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"},
+    )
+    if result.returncode not in {0, 1} or len(result.stdout) > 8 * 1024 * 1024:
+        raise SystemExit("Bandit source scan failed")
+    try:
+        raw = json.loads(result.stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("Bandit source report invalid") from exc
+    if not isinstance(raw, dict) or raw.get("errors") != []:
+        raise SystemExit("Bandit source scan errors present")
+    findings = raw.get("results")
+    metrics = raw.get("metrics")
+    if not isinstance(findings, list) or not isinstance(metrics, dict):
+        raise SystemExit("Bandit source report schema rejected")
+    expected_metric_paths = {str(path) for path in targets}
+    if set(metrics) - {"_totals"} != expected_metric_paths:
+        raise SystemExit("Bandit source scan coverage mismatch")
+    severities = {"LOW": 0, "MEDIUM": 0, "HIGH": 0}
+    for finding in findings:
+        if not isinstance(finding, dict) or finding.get("issue_severity") not in severities:
+            raise SystemExit("Bandit finding schema rejected")
+        severities[str(finding["issue_severity"])] += 1
+    report = {
+        "schema_version": "2.0.0",
+        "source_sha": source_sha,
+        "dependency_lock": "requirements.lock",
+        "dependency_lock_sha256": digest(source / "requirements.lock"),
+        "runtime_dependencies": 0,
+        "source_scan": {
+            "scanner": "bandit",
+            "scanner_version": installed_version,
+            "files_scanned": list(SOURCE_SCAN_FILES),
+            "errors": 0,
+            "findings": {
+                "high": severities["HIGH"],
+                "medium": severities["MEDIUM"],
+                "low": severities["LOW"],
+            },
+        },
+        "critical": "NOT_APPLICABLE_BANDIT_SEVERITY_MODEL",
+        "high": severities["HIGH"],
+        "gate": "PASS" if severities["HIGH"] == 0 else "FAIL",
+    }
+    if report["gate"] != "PASS":
+        raise SystemExit("source vulnerability gate failed")
+    return report
 
 
 def build_archive(source: Path, destination: Path, source_sha: str) -> None:
@@ -81,6 +166,7 @@ def main() -> int:
     source = Path(__file__).resolve().parent
     output = args.output.resolve()
     output.mkdir(mode=0o700, parents=True, exist_ok=True)
+    vulnerability_report = source_vulnerability_report(source, args.source_sha)
     archive = output / f"klyrow-production-validator-{args.source_sha}.tar.gz"
     build_archive(source, archive, args.source_sha)
     payload_hashes = {name: digest(source / name) for name in PAYLOAD_FILES}
@@ -167,15 +253,7 @@ def main() -> int:
     )
     canonical_json(
         output / "vulnerability-report.json",
-        {
-            "schema_version": "1.0.0",
-            "dependency_lock": "requirements.lock",
-            "runtime_dependencies": 0,
-            "critical": 0,
-            "high": 0,
-            "gate": "PASS",
-            "note": "Python standard library runtime only; source scanning remains mandatory in CI."
-        },
+        vulnerability_report,
     )
     checksummed = [archive, output / "installation-manifest.json", output / "sbom.spdx.json", output / "provenance.json", output / "vulnerability-report.json"]
     (output / "SHA256SUMS").write_text(
