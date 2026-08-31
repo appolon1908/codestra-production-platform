@@ -1,0 +1,193 @@
+{
+  "schema_version": "1.0.0",
+  "operator": "klyrow-production-validator",
+  "allowed_user": "codestra-admin",
+  "default": "deny",
+  "fixed_dispatcher": "/usr/local/libexec/codestra/klyrow-production-validator",
+  "fixed_root_helper": "/usr/local/libexec/codestra/klyrow-production-validator-root",
+  "safe_path": "/usr/sbin:/usr/bin:/sbin:/bin",
+  "evidence_root": "/var/lib/codestra/klyrow-production-validator/evidence",
+  "audit_log": "/var/log/codestra/klyrow-production-validator/audit.jsonl",
+  "lock": "/run/lock/klyrow-production-validator.lock",
+  "prohibited_actions": [
+    "shell",
+    "exec",
+    "bash",
+    "sh",
+    "docker",
+    "docker-exec",
+    "compose-up",
+    "compose-down",
+    "restart",
+    "recreate",
+    "deploy",
+    "send",
+    "canary",
+    "arbitrary-read",
+    "arbitrary-write"
+  ],
+  "fixed_targets": {
+    "services": ["gateway", "smtp-relay", "worker", "postal-smtp"],
+    "containers": [
+      "klyrow-gateway-1",
+      "klyrow-smtp-relay-1",
+      "klyrow-worker-1",
+      "klyrow-postal-smtp-1"
+    ],
+    "compose_files": [
+      "/opt/klyrow/klyrow-mail-engine-release-381ac4d.compose.yaml",
+      "/opt/klyrow/klyrow-smtp-hotfix-20260826.override.yaml"
+    ],
+    "runbook": "/root/STAGE6-STAGE8-BLOCKER-REMEDIATION-20260831-authenticated-bb00db22.md",
+    "runbook_sha256": "bb00db22a331aac10510f4e07ad7b31b590960b4501f705297a5b286d195b9ae"
+  },
+  "actions": {
+    "authenticate-runbook": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["authenticate-runbook"],
+      "fixed_target_services": [],
+      "fixed_target_files": ["/root/STAGE6-STAGE8-BLOCKER-REMEDIATION-20260831-authenticated-bb00db22.md"],
+      "timeout_seconds": 10,
+      "maximum_output_bytes": 16384,
+      "redaction_policy": "structured_metadata_only",
+      "audit_event": "runbook.authenticate",
+      "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    },
+    "inventory": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["inventory"],
+      "fixed_target_services": ["gateway", "smtp-relay", "worker", "postal-smtp"],
+      "fixed_target_files": [],
+      "timeout_seconds": 30,
+      "maximum_output_bytes": 262144,
+      "redaction_policy": "fixed_docker_format_no_environment",
+      "audit_event": "production.inventory",
+      "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    },
+    "configuration-readback": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["configuration-readback"],
+      "fixed_target_services": ["gateway", "smtp-relay", "worker"],
+      "fixed_target_files": [
+        "/var/lib/codestra/klyrow-production-validator/readback/configuration-rendered.json",
+        "/var/lib/codestra/klyrow-production-validator/readback/configuration-running.json",
+        "/var/lib/codestra/klyrow-production-validator/readback/configuration-gateway-api.json"
+      ],
+      "timeout_seconds": 10,
+      "maximum_output_bytes": 32768,
+      "redaction_policy": "approved_boolean_fields_only",
+      "audit_event": "production.configuration_readback",
+      "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    },
+    "release-identity": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["release-identity"],
+      "fixed_target_services": ["gateway", "smtp-relay", "worker"],
+      "fixed_target_files": ["/var/lib/codestra/klyrow-production-validator/readback/release-identity.json"],
+      "timeout_seconds": 10,
+      "maximum_output_bytes": 131072,
+      "redaction_policy": "immutable_release_fields_only",
+      "audit_event": "production.release_identity",
+      "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    },
+    "health": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["health"],
+      "fixed_target_services": ["gateway", "smtp-relay", "worker", "postal-smtp"],
+      "fixed_target_files": [],
+      "timeout_seconds": 40,
+      "maximum_output_bytes": 131072,
+      "redaction_policy": "status_latency_and_fixed_health_output_only",
+      "audit_event": "production.health",
+      "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    },
+    "authorization-tests": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["authorization-tests"],
+      "fixed_target_services": ["gateway"],
+      "fixed_target_files": ["/opt/codestra/operators/klyrow-production-validator/probes/authorization-tests"],
+      "timeout_seconds": 60,
+      "maximum_output_bytes": 131072,
+      "redaction_policy": "status_and_test_ids_only",
+      "audit_event": "production.authorization_tests",
+      "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    },
+    "no-effect-tests": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["no-effect-tests"],
+      "fixed_target_services": ["gateway", "worker"],
+      "fixed_target_files": ["/opt/codestra/operators/klyrow-production-validator/probes/no-effect-tests"],
+      "timeout_seconds": 60,
+      "maximum_output_bytes": 131072,
+      "redaction_policy": "synthetic_ids_and_counts_only",
+      "audit_event": "production.no_effect_tests",
+      "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    },
+    "callback-tests": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["callback-tests"],
+      "fixed_target_services": ["gateway"],
+      "fixed_target_files": ["/opt/codestra/operators/klyrow-production-validator/probes/callback-tests"],
+      "timeout_seconds": 60,
+      "maximum_output_bytes": 131072,
+      "redaction_policy": "synthetic_event_ids_and_status_only",
+      "audit_event": "production.callback_tests",
+      "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    },
+    "smtp-no-data": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["smtp-no-data"],
+      "fixed_target_services": ["postal-smtp", "smtp-relay"],
+      "fixed_target_files": ["/opt/codestra/operators/klyrow-production-validator/probes/smtp-no-data"],
+      "timeout_seconds": 120,
+      "maximum_output_bytes": 131072,
+      "redaction_policy": "banner_tls_relay_status_and_queue_delta_only",
+      "audit_event": "production.smtp_no_data",
+      "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    },
+    "collect-evidence": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["collect-evidence"],
+      "fixed_target_services": [],
+      "fixed_target_files": ["/var/lib/codestra/klyrow-production-validator/evidence"],
+      "timeout_seconds": 20,
+      "maximum_output_bytes": 131072,
+      "redaction_policy": "filenames_sizes_and_hashes_only",
+      "audit_event": "production.collect_evidence",
+      "exit_codes": {"0": "pass", "2": "denied", "3": "failed", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    },
+    "status": {
+      "fixed_executable": "/usr/local/libexec/codestra/klyrow-production-validator-actions",
+      "fixed_arguments": ["status"],
+      "fixed_target_services": [],
+      "fixed_target_files": ["/root/STAGE6-STAGE8-BLOCKER-REMEDIATION-20260831-authenticated-bb00db22.md"],
+      "timeout_seconds": 10,
+      "maximum_output_bytes": 16384,
+      "redaction_policy": "operator_metadata_only",
+      "audit_event": "operator.status",
+      "exit_codes": {"0": "ready", "2": "denied", "3": "not_ready", "124": "timeout"},
+      "mutation_classification": "read_only_no_effect",
+      "rollback_requirement": "none"
+    }
+  }
+}

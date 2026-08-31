@@ -1,0 +1,274 @@
+#!/usr/bin/python3
+"""Fixed, read-only action implementations for Klyrow validation.
+
+Complex synthetic tests are delegated only to hash-pinned, reviewed companion
+probes. A missing probe is a hard failure, never an invitation to accept a path
+or command from the caller.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import ssl
+import sys
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+from klyrow_validator_core import (
+    APPROVED_ACTIONS,
+    EXPECTED_RUNBOOK_SHA256,
+    PolicyError,
+    RUNBOOK_PATH,
+    limited_command,
+    parse_direct,
+    regular_nonsymlink,
+    safe_json_file,
+    sha256_file,
+)
+
+
+CONTAINERS = (
+    "klyrow-gateway-1",
+    "klyrow-smtp-relay-1",
+    "klyrow-worker-1",
+    "klyrow-postal-smtp-1",
+)
+BOOLEAN_FIELDS = {
+    "KLYROW_PLATFORM_EMERGENCY_STOP",
+    "KLYROW_SAFE_MODE",
+    "KLYROW_PRODUCTION_GATE_APPROVED",
+    "LIVE_EMAIL_DELIVERY",
+    "EXTERNAL_EMAIL_DELIVERY",
+    "PRODUCTION_PROVIDER_ROUTING",
+    "KLYROW_BULK_DELIVERY_ENABLED",
+    "KLYROW_CAMPAIGN_DELIVERY_ENABLED",
+    "MARKETING_DELIVERY",
+}
+READBACK_ROOT = Path("/var/lib/codestra/klyrow-production-validator/readback")
+PROBE_ROOT = Path("/opt/codestra/operators/klyrow-production-validator/probes")
+PROBE_MANIFEST = Path("/etc/codestra/klyrow-production-validator/probe-manifest.json")
+EVIDENCE_ROOT = Path("/var/lib/codestra/klyrow-production-validator/evidence")
+
+
+def emit(value: object) -> None:
+    print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+
+
+def run(argv: list[str], *, timeout: int = 20, maximum: int = 131072) -> dict[str, object]:
+    result = limited_command(argv, timeout_seconds=timeout, maximum_output_bytes=maximum)
+    return {
+        "argv_id": Path(argv[0]).name,
+        "exit_code": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "elapsed_ms": result.elapsed_ms,
+        "truncated": result.truncated,
+        "timed_out": result.timed_out,
+    }
+
+
+def authenticate_runbook() -> int:
+    metadata = regular_nonsymlink(RUNBOOK_PATH)
+    actual = sha256_file(RUNBOOK_PATH)
+    emit(
+        {
+            "runbook_authentication": "PASS" if actual == EXPECTED_RUNBOOK_SHA256 else "FAIL",
+            "sha256": actual,
+            "regular_file": True,
+            "symlink": False,
+            "owner_uid": metadata.st_uid,
+            "group_gid": metadata.st_gid,
+            "mode": oct(metadata.st_mode & 0o777),
+            "size": metadata.st_size,
+            "mtime_ns": metadata.st_mtime_ns,
+        }
+    )
+    return 0 if actual == EXPECTED_RUNBOOK_SHA256 else 3
+
+
+def status() -> int:
+    checks: dict[str, object] = {}
+    try:
+        regular_nonsymlink(RUNBOOK_PATH)
+        checks["runbook"] = sha256_file(RUNBOOK_PATH) == EXPECTED_RUNBOOK_SHA256
+    except PolicyError:
+        checks["runbook"] = False
+    checks["docker_cli_present"] = Path("/usr/bin/docker").is_file()
+    checks["sudo_present"] = Path("/usr/bin/sudo").is_file()
+    checks["evidence_root_nonsymlink"] = not EVIDENCE_ROOT.is_symlink()
+    emit(
+        {
+            "operator_status": "READY" if all(checks.values()) else "NOT_READY",
+            "checks": checks,
+            "application_runtime_inspected": False,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    return 0 if all(checks.values()) else 3
+
+
+def inventory() -> int:
+    commands = [
+        ["/usr/bin/uname", "-srvmo"],
+        ["/usr/bin/docker", "version", "--format", "{{json .Server}}"],
+        [
+            "/usr/bin/docker",
+            "ps",
+            "--no-trunc",
+            "--format",
+            "{{json .}}",
+        ],
+        ["/usr/bin/df", "-P", "/", "/opt", "/var/lib/docker"],
+        ["/usr/bin/df", "-Pi", "/", "/opt", "/var/lib/docker"],
+        ["/usr/bin/ss", "-H", "-lntp"],
+    ]
+    results = [run(command) for command in commands]
+    emit({"inventory": results, "mutation": False})
+    return 0 if all(item["exit_code"] == 0 for item in results) else 3
+
+
+def configuration_readback() -> int:
+    views: dict[str, dict[str, object]] = {}
+    for name in ("rendered", "running", "gateway-api"):
+        value = safe_json_file(READBACK_ROOT / f"configuration-{name}.json", allowed_keys=BOOLEAN_FIELDS)
+        if set(value) != BOOLEAN_FIELDS or not all(isinstance(item, bool) for item in value.values()):
+            raise PolicyError("CONFIGURATION_SCHEMA_REJECTED")
+        views[name] = value
+    consistent = views["rendered"] == views["running"] == views["gateway-api"]
+    emit({"views": views, "consistent": consistent, "secret_fields_read": False})
+    return 0 if consistent else 3
+
+
+def release_identity() -> int:
+    allowed = {
+        "containers",
+        "contract_compatibility",
+        "mutable_image_references",
+        "source_provenance_match",
+        "signature_verification",
+        "vulnerability_gate",
+        "generated_at_utc",
+    }
+    value = safe_json_file(READBACK_ROOT / "release-identity.json", allowed_keys=allowed)
+    required = {
+        "contract_compatibility": "PASS",
+        "mutable_image_references": 0,
+        "source_provenance_match": "YES",
+        "signature_verification": "PASS",
+        "vulnerability_gate": "PASS",
+    }
+    passed = all(value.get(key) == expected for key, expected in required.items())
+    emit({"release_identity": value, "passed": passed})
+    return 0 if passed else 3
+
+
+def health() -> int:
+    results = []
+    for container in CONTAINERS:
+        results.append(
+            run(
+                [
+                    "/usr/bin/docker",
+                    "inspect",
+                    "--format",
+                    "{{json .State.Health}}",
+                    container,
+                ]
+            )
+        )
+    for url in ("http://127.0.0.1:18000/v1/health", "http://127.0.0.1:18000/healthz"):
+        started = datetime.now(timezone.utc)
+        try:
+            request = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                body = response.read(8193)
+                results.append(
+                    {
+                        "endpoint": url,
+                        "status": response.status,
+                        "body_too_large": len(body) > 8192,
+                        "elapsed_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
+                    }
+                )
+        except (OSError, urllib.error.URLError) as exc:
+            results.append({"endpoint": url, "status": 0, "error": type(exc).__name__})
+    passed = all(item.get("exit_code", 0) == 0 and item.get("status", 200) == 200 for item in results)
+    emit({"health": results, "passed": passed})
+    return 0 if passed else 3
+
+
+def pinned_probe(action: str) -> int:
+    allowed = {"schema_version", "probes"}
+    manifest = safe_json_file(PROBE_MANIFEST, allowed_keys=allowed)
+    probes = manifest.get("probes")
+    if not isinstance(probes, dict) or set(probes) != {
+        "authorization-tests",
+        "no-effect-tests",
+        "callback-tests",
+        "smtp-no-data",
+    }:
+        raise PolicyError("PROBE_MANIFEST_REJECTED")
+    expected = probes.get(action)
+    if not isinstance(expected, dict) or set(expected) != {"path", "sha256"}:
+        raise PolicyError("PROBE_MANIFEST_REJECTED")
+    fixed_path = PROBE_ROOT / action
+    if expected.get("path") != str(fixed_path):
+        raise PolicyError("PROBE_PATH_REJECTED")
+    digest = expected.get("sha256")
+    if not isinstance(digest, str) or len(digest) != 64:
+        raise PolicyError("PROBE_DIGEST_REJECTED")
+    regular_nonsymlink(fixed_path)
+    if sha256_file(fixed_path) != digest:
+        raise PolicyError("PROBE_DIGEST_MISMATCH")
+    result = run([str(fixed_path)], timeout=120 if action == "smtp-no-data" else 60)
+    emit({"probe": action, "result": result})
+    return int(result["exit_code"])
+
+
+def collect_evidence() -> int:
+    if not EVIDENCE_ROOT.is_dir() or EVIDENCE_ROOT.is_symlink():
+        raise PolicyError("EVIDENCE_ROOT_REJECTED")
+    entries = []
+    for path in sorted(EVIDENCE_ROOT.iterdir()):
+        metadata = path.lstat()
+        if path.is_symlink() or not path.is_file():
+            raise PolicyError("EVIDENCE_ENTRY_REJECTED")
+        if metadata.st_size > 1024 * 1024:
+            raise PolicyError("EVIDENCE_ENTRY_TOO_LARGE")
+        entries.append({"name": path.name, "size": metadata.st_size, "sha256": sha256_file(path)})
+    emit({"evidence": entries, "count": len(entries), "content_returned": False})
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    os.umask(0o077)
+    try:
+        action = parse_direct(argv)
+        if action == "authenticate-runbook":
+            return authenticate_runbook()
+        if action == "status":
+            return status()
+        if action == "inventory":
+            return inventory()
+        if action == "configuration-readback":
+            return configuration_readback()
+        if action == "release-identity":
+            return release_identity()
+        if action == "health":
+            return health()
+        if action in {"authorization-tests", "no-effect-tests", "callback-tests", "smtp-no-data"}:
+            return pinned_probe(action)
+        if action == "collect-evidence":
+            return collect_evidence()
+        raise PolicyError("ACTION_REJECTED")
+    except (OSError, PolicyError) as exc:
+        emit({"result": "FAIL", "reason": str(exc).split(":", 1)[0]})
+        return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

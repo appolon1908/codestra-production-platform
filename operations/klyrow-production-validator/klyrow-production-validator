@@ -1,0 +1,146 @@
+#!/usr/bin/python3
+"""Unprivileged forced-command dispatcher for codestra-admin."""
+
+from __future__ import annotations
+
+import json
+import os
+import pwd
+import secrets
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+from klyrow_validator_core import (
+    APPROVED_ACTIONS,
+    PolicyError,
+    parse_direct,
+    parse_ssh_original_command,
+    redact_object,
+    reject_dangerous_environment,
+    safe_json_file,
+    sanitized_environment,
+)
+
+
+ROOT_HELPER = "/usr/local/libexec/codestra/klyrow-production-validator-root"
+IDENTITY_PATH = Path("/etc/codestra/klyrow-production-validator/operator-identity.json")
+MAXIMUM_OUTPUT_BYTES = 262144
+
+
+def actor() -> str:
+    return pwd.getpwuid(os.getuid()).pw_name
+
+
+def source_address() -> str:
+    value = os.environ.get("SSH_CONNECTION", "")
+    parts = value.split()
+    if len(parts) == 4 and len(parts[0]) <= 45:
+        return parts[0]
+    return "local"
+
+
+def load_public_identity() -> dict[str, str]:
+    try:
+        value = safe_json_file(
+            IDENTITY_PATH,
+            allowed_keys={"key_fingerprint", "source_restriction", "expires_at", "owner", "approver"},
+            maximum_bytes=8192,
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PolicyError("IDENTITY_FILE_REJECTED") from exc
+    allowed = {"key_fingerprint", "source_restriction", "expires_at", "owner", "approver"}
+    if not isinstance(value, dict) or set(value) != allowed:
+        raise PolicyError("IDENTITY_FILE_REJECTED")
+    if not all(isinstance(item, str) and item for item in value.values()):
+        raise PolicyError("IDENTITY_FILE_REJECTED")
+    return value
+
+
+def journal(record: dict[str, object]) -> None:
+    payload = json.dumps(redact_object(record), sort_keys=True, separators=(",", ":"))
+    if len(payload.encode()) > 8192:
+        payload = '{"result":"AUDIT_RECORD_REJECTED"}'
+    try:
+        subprocess.run(
+            ["/usr/bin/systemd-cat", "--identifier=klyrow-production-validator", "--priority=notice"],
+            input=payload + "\n",
+            text=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+            env=sanitized_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def main(argv: list[str]) -> int:
+    os.umask(0o077)
+    correlation_id = "kpv-" + secrets.token_hex(16)
+    started = datetime.now(timezone.utc).isoformat()
+    action = "rejected"
+    result = "FAIL"
+    rc = 2
+    identity: dict[str, str] = {
+        "key_fingerprint": "unavailable",
+        "source_restriction": "unavailable",
+        "expires_at": "unavailable",
+        "owner": "unavailable",
+        "approver": "unavailable",
+    }
+    try:
+        reject_dangerous_environment(os.environ)
+        if actor() != "codestra-admin":
+            raise PolicyError("ACTOR_REJECTED")
+        identity = load_public_identity()
+        if argv == ["ssh-dispatch"]:
+            action = parse_ssh_original_command(os.environ.get("SSH_ORIGINAL_COMMAND"))
+        else:
+            action = parse_direct(argv)
+        timeout = 125 if action == "smtp-no-data" else 65
+        completed = subprocess.run(
+            ["/usr/bin/sudo", "-n", ROOT_HELPER, action],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=sanitized_environment(),
+        )
+        combined = completed.stdout
+        if completed.stderr:
+            combined += ("\n" if combined else "") + completed.stderr
+        encoded = combined.encode("utf-8", errors="replace")
+        if len(encoded) > MAXIMUM_OUTPUT_BYTES:
+            encoded = encoded[:MAXIMUM_OUTPUT_BYTES]
+            combined = encoded.decode("utf-8", errors="replace") + "\nOUTPUT_TRUNCATED=YES\n"
+        sys.stdout.write(combined)
+        rc = completed.returncode
+        result = "PASS" if rc == 0 else "FAIL"
+    except (PolicyError, OSError, subprocess.TimeoutExpired) as exc:
+        sys.stderr.write(f"COMMAND_DENIED={type(exc).__name__}\n")
+        rc = 124 if isinstance(exc, subprocess.TimeoutExpired) else 2
+    finally:
+        journal(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "started_at": started,
+                "actor": actor() if os.getuid() != 0 else "root-rejected",
+                "action": action,
+                "result": result,
+                "exit_code": rc,
+                "correlation_id": correlation_id,
+                "source_address": source_address(),
+                "key_fingerprint": identity["key_fingerprint"],
+            }
+        )
+    return rc
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
