@@ -254,6 +254,7 @@ jobs:
           set -Eeuo pipefail
           tag="klyrow-validator-${OPERATOR_SOURCE_SHA}"
           title="Klyrow production validator ${OPERATOR_SOURCE_SHA}"
+          body="Checksum- and signature-gated bounded operator. No deployment action."
           assets=(
             "dist/klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz"
             "dist/installation-manifest.json"
@@ -266,88 +267,272 @@ jobs:
           for asset in "${assets[@]}"; do
             test -f "${asset}"
           done
-          if ! gh release view "${tag}" >/dev/null 2>&1; then
-            gh release create "${tag}" \
-              --target "${OPERATOR_SOURCE_SHA}" \
-              --title "${title}" \
-              --notes "Checksum- and signature-gated bounded operator. No deployment action." \
-              --draft
+          (cd dist && /usr/bin/sha256sum --check --strict SHA256SUMS)
+          test -f "${RUNNER_TEMP}/kpv-signing/allowed_signers"
+          /usr/bin/ssh-keygen -Y verify -q \
+            -f "${RUNNER_TEMP}/kpv-signing/allowed_signers" \
+            -I codestra-release -n codestra-klyrow-validator \
+            -s dist/SHA256SUMS.sig < dist/SHA256SUMS
+
+          release_ids=()
+          while IFS=$'\t' read -r candidate_id candidate_tag; do
+            if test "${candidate_tag}" = "${tag}"; then
+              test "${candidate_id}" -gt 0
+              release_ids+=("${candidate_id}")
+            fi
+          done < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | [.id, .tag_name] | @tsv'
+          )
+          if test "${#release_ids[@]}" -gt 1; then
+            echo "duplicate release identity rejected" >&2
+            exit 1
           fi
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)" = "${OPERATOR_SOURCE_SHA}"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .name)" = "${title}"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .prerelease)" = "false"
-          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)"
-          test "${release_id}" -gt 0
-          release_draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq .draft)"
-          test "${release_draft}" = "true" || test "${release_draft}" = "false"
-          require_draft() {
-            test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq .draft)" = "true"
-          }
+
           expected_tag_binding="$(printf 'commit\t%s' "${OPERATOR_SOURCE_SHA}")"
           if tag_binding="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
             --jq '[.object.type, .object.sha] | @tsv' 2>/dev/null)"; then
             test "${tag_binding}" = "${expected_tag_binding}"
           else
-            require_draft
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
               -f ref="refs/tags/${tag}" -f sha="${OPERATOR_SOURCE_SHA}" --jq .ref >/dev/null
           fi
           test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
             --jq '[.object.type, .object.sha] | @tsv')" = "${expected_tag_binding}"
-          remote_assets=()
-          while IFS=$'\t' read -r remote_id remote_asset remote_state; do
+
+          if test "${#release_ids[@]}" -eq 0; then
+            release_id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="${tag}" \
+              -f target_commitish="${OPERATOR_SOURCE_SHA}" \
+              -f name="${title}" \
+              -f body="${body}" \
+              -F draft=true \
+              -F prerelease=false \
+              --jq .id)"
+          else
+            release_id="${release_ids[0]}"
+          fi
+          test "${release_id}" -gt 0
+
+          matched_ids=()
+          while IFS=$'\t' read -r candidate_id candidate_tag; do
+            if test "${candidate_tag}" = "${tag}"; then
+              matched_ids+=("${candidate_id}")
+            fi
+          done < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | [.id, .tag_name] | @tsv'
+          )
+          test "${#matched_ids[@]}" -eq 1
+          test "${matched_ids[0]}" = "${release_id}"
+
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .id)" = "${release_id}"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .tag_name)" = "${tag}"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .target_commitish)" = "${OPERATOR_SOURCE_SHA}"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .name)" = "${title}"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .body)" = "${body}"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .prerelease)" = "false"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .author.login)" = "github-actions[bot]"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .author.id)" = "41898282"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .author.type)" = "Bot"
+          release_draft="$(printf '%s' "${release_json}" | /usr/bin/jq -r .draft)"
+          test "${release_draft}" = "true" || test "${release_draft}" = "false"
+          upload_url="$(printf '%s' "${release_json}" | /usr/bin/jq -r .upload_url)"
+          expected_upload_url="https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets{?name,label}"
+          test "${upload_url}" = "${expected_upload_url}"
+          upload_endpoint="${upload_url%%\{*}"
+
+          require_draft() {
+            test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq .draft)" = "true"
+          }
+
+          verification_root="$(mktemp -d)"
+          trap 'rm -rf -- "${verification_root}"' EXIT
+          verify_uploaded_asset() {
+            local local_asset="$1"
+            local remote_id="$2"
+            local remote_name="$3"
+            local remote_size="$4"
+            local remote_digest="$5"
+            local local_size local_digest downloaded
+            local_size="$(/usr/bin/stat -c %s "${local_asset}")"
+            local_digest="$(/usr/bin/sha256sum "${local_asset}" | /usr/bin/cut -d' ' -f1)"
+            test "${remote_id}" -gt 0
+            test "${remote_name}" = "$(/usr/bin/basename "${local_asset}")"
+            test "${remote_size}" = "${local_size}"
+            if test -n "${remote_digest}"; then
+              test "${remote_digest}" = "sha256:${local_digest}"
+            fi
+            downloaded="${verification_root}/${remote_id}"
+            gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${remote_id}" \
+              --header "Accept: application/octet-stream" > "${downloaded}"
+            /usr/bin/cmp "${local_asset}" "${downloaded}"
+          }
+
+          declare -A remote_ids=()
+          declare -A remote_states=()
+          declare -A remote_sizes=()
+          declare -A remote_digests=()
+          while IFS=$'\t' read -r remote_id remote_name remote_state remote_size remote_digest; do
             test "${remote_id}" -gt 0
             expected=false
             for asset in "${assets[@]}"; do
-              if test "${remote_asset}" = "$(basename "${asset}")"; then
+              if test "${remote_name}" = "$(/usr/bin/basename "${asset}")"; then
                 expected=true
               fi
             done
             test "${expected}" = "true"
-            if test "${remote_state}" = "uploaded"; then
-              remote_assets+=("${remote_asset}")
-            else
-              require_draft
-              gh api --method DELETE \
-                "repos/${GITHUB_REPOSITORY}/releases/assets/${remote_id}"
-            fi
+            test -z "${remote_ids[${remote_name}]+x}"
+            remote_ids["${remote_name}"]="${remote_id}"
+            remote_states["${remote_name}"]="${remote_state}"
+            remote_sizes["${remote_name}"]="${remote_size}"
+            remote_digests["${remote_name}"]="${remote_digest}"
           done < <(
             gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
-              --paginate --jq '.[] | [.id, .name, .state] | @tsv'
+              --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv'
           )
-          verification_root="$(mktemp -d)"
-          final_root="$(mktemp -d)"
-          trap 'rm -rf -- "${verification_root}" "${final_root}"' EXIT
+
           for asset in "${assets[@]}"; do
-            name="$(basename "${asset}")"
-            present=false
-            for remote_asset in "${remote_assets[@]}"; do
-              if test "${remote_asset}" = "${name}"; then
-                present=true
+            name="$(/usr/bin/basename "${asset}")"
+            if test -n "${remote_ids[${name}]+x}"; then
+              if test "${remote_states[${name}]}" = "uploaded"; then
+                verify_uploaded_asset "${asset}" "${remote_ids[${name}]}" "${name}" \
+                  "${remote_sizes[${name}]}" "${remote_digests[${name}]}"
+              else
+                require_draft
+                gh api --method DELETE \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${remote_ids[${name}]}" \
+                  --silent
+                unset "remote_ids[${name}]"
+                unset "remote_states[${name}]"
+                unset "remote_sizes[${name}]"
+                unset "remote_digests[${name}]"
               fi
-            done
-            if test "${present}" = "true"; then
-              gh release download "${tag}" --pattern "${name}" --dir "${verification_root}"
-              cmp "${asset}" "${verification_root}/${name}"
-            else
+            fi
+            if test -z "${remote_ids[${name}]+x}"; then
               require_draft
-              gh release upload "${tag}" "${asset}"
+              case "${name}" in
+                *.tar.gz) content_type="application/gzip" ;;
+                *.json) content_type="application/json" ;;
+                SHA256SUMS) content_type="text/plain" ;;
+                *) content_type="application/octet-stream" ;;
+              esac
+              upload_record="$(
+                {
+                  /usr/bin/printf 'url = "%s?name=%s"\n' "${upload_endpoint}" "${name}"
+                  /usr/bin/printf 'request = "POST"\n'
+                  /usr/bin/printf 'fail-with-body\n'
+                  /usr/bin/printf 'silent\n'
+                  /usr/bin/printf 'show-error\n'
+                  /usr/bin/printf 'proto = "=https"\n'
+                  /usr/bin/printf 'tlsv1.2\n'
+                  /usr/bin/printf 'header = "Accept: application/vnd.github+json"\n'
+                  /usr/bin/printf 'header = "X-GitHub-Api-Version: 2022-11-28"\n'
+                  /usr/bin/printf 'header = "Authorization: Bearer %s"\n' "${GH_TOKEN}"
+                  /usr/bin/printf 'header = "Content-Type: %s"\n' "${content_type}"
+                  /usr/bin/printf 'data-binary = "@%s"\n' "${asset}"
+                } |
+                  /usr/bin/curl --config - |
+                  /usr/bin/jq -r '[.id, .name, .state, .size, (.digest // "")] | @tsv'
+              )"
+              IFS=$'\t' read -r uploaded_id uploaded_name uploaded_state uploaded_size uploaded_digest \
+                <<< "${upload_record}"
+              test "${uploaded_id}" -gt 0
+              test "${uploaded_name}" = "${name}"
+              test "${uploaded_state}" = "uploaded"
+              verify_uploaded_asset "${asset}" "${uploaded_id}" "${uploaded_name}" \
+                "${uploaded_size}" "${uploaded_digest}"
             fi
           done
-          remote_count="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
-            --paginate --jq '.[].name' | wc -l)"
-          test "${remote_count}" -eq "${#assets[@]}"
-          gh release download "${tag}" --dir "${final_root}"
+
+          final_count=0
+          declare -A final_names=()
+          while IFS=$'\t' read -r remote_id remote_name remote_state remote_size remote_digest; do
+            final_count="$((final_count + 1))"
+            expected_asset=""
+            for asset in "${assets[@]}"; do
+              if test "${remote_name}" = "$(/usr/bin/basename "${asset}")"; then
+                expected_asset="${asset}"
+              fi
+            done
+            test -n "${expected_asset}"
+            test -z "${final_names[${remote_name}]+x}"
+            final_names["${remote_name}"]=true
+            test "${remote_state}" = "uploaded"
+            verify_uploaded_asset "${expected_asset}" "${remote_id}" "${remote_name}" \
+              "${remote_size}" "${remote_digest}"
+          done < <(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+              --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv'
+          )
+          test "${final_count}" -eq "${#assets[@]}"
           for asset in "${assets[@]}"; do
-            cmp "${asset}" "${final_root}/$(basename "${asset}")"
+            name="$(/usr/bin/basename "${asset}")"
+            test -n "${final_names[${name}]+x}"
           done
+
           test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
             --jq '[.object.type, .object.sha] | @tsv')" = "${expected_tag_binding}"
+          (cd dist && /usr/bin/sha256sum --check --strict SHA256SUMS)
+          /usr/bin/ssh-keygen -Y verify -q \
+            -f "${RUNNER_TEMP}/kpv-signing/allowed_signers" \
+            -I codestra-release -n codestra-klyrow-validator \
+            -s dist/SHA256SUMS.sig < dist/SHA256SUMS
+
           if test "${release_draft}" = "true"; then
             require_draft
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
               -F draft=false --jq .id >/dev/null
           fi
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .draft)" = "false"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq .object.type)" = "commit"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq .object.sha)" = "${OPERATOR_SOURCE_SHA}"
+
+          published_by_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .draft)" = "false"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .published_at)" != "null"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .tag_name)" = "${tag}"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .target_commitish)" = "${OPERATOR_SOURCE_SHA}"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .name)" = "${title}"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .body)" = "${body}"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .prerelease)" = "false"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .author.login)" = "github-actions[bot]"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .author.id)" = "41898282"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .author.type)" = "Bot"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r '.assets | length')" -eq "${#assets[@]}"
+
+          published_by_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .id)" = "${release_id}"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .draft)" = "false"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .tag_name)" = "${tag}"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .target_commitish)" = "${OPERATOR_SOURCE_SHA}"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .name)" = "${title}"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .body)" = "${body}"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .prerelease)" = "false"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r '.assets | length')" -eq "${#assets[@]}"
+
+          published_count=0
+          declare -A published_names=()
+          while IFS=$'\t' read -r remote_id remote_name remote_state remote_size remote_digest; do
+            published_count="$((published_count + 1))"
+            expected_asset=""
+            for asset in "${assets[@]}"; do
+              if test "${remote_name}" = "$(/usr/bin/basename "${asset}")"; then
+                expected_asset="${asset}"
+              fi
+            done
+            test -n "${expected_asset}"
+            test -z "${published_names[${remote_name}]+x}"
+            published_names["${remote_name}"]=true
+            test "${remote_state}" = "uploaded"
+            verify_uploaded_asset "${expected_asset}" "${remote_id}" "${remote_name}" \
+              "${remote_size}" "${remote_digest}"
+          done < <(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+              --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv'
+          )
+          test "${published_count}" -eq "${#assets[@]}"
+          for asset in "${assets[@]}"; do
+            name="$(/usr/bin/basename "${asset}")"
+            test -n "${published_names[${name}]+x}"
+          done
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '[.object.type, .object.sha] | @tsv')" = "${expected_tag_binding}"
