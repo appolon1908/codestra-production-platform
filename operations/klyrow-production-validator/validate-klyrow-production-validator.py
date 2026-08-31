@@ -4,14 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import grp
 import hashlib
+import ipaddress
 import json
 import os
 import pwd
 import re
 import stat
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -25,6 +28,13 @@ REQUIRED_OPTIONS = (
     "no-user-rc",
     "from=",
     "expiry-time=",
+)
+FORCED_KEY_RE = re.compile(
+    r'\Afrom="(?P<source>[^"\r\n]+)",'
+    r'expiry-time="(?P<expiry>20[0-9]{12}Z)",'
+    r'command="/usr/local/libexec/codestra/klyrow-production-validator ssh-dispatch",'
+    r'restrict,no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty,no-user-rc '
+    r'(?P<key_type>ssh-ed25519) (?P<key_blob>[A-Za-z0-9+/]+={0,3})\Z'
 )
 
 
@@ -49,6 +59,31 @@ def safe_file(path: Path, *, uid: int, expected_mode: int) -> bool:
         and (value.st_mode & 0o777) == expected_mode
         and not value.st_mode & 0o022
     )
+
+
+def forced_key_details(line: str) -> dict[str, str] | None:
+    match = FORCED_KEY_RE.fullmatch(line)
+    if match is None:
+        return None
+    try:
+        decoded = base64.b64decode(match.group("key_blob"), validate=True)
+        network = ipaddress.ip_network(match.group("source"), strict=False)
+        expiry = datetime.strptime(match.group("expiry"), "%Y%m%d%H%M%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except (ValueError, TypeError):
+        return None
+    minimum_prefix = 24 if network.version == 4 else 64
+    if network.prefixlen < minimum_prefix or expiry <= datetime.now(timezone.utc):
+        return None
+    fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(decoded).digest()).decode(
+        "ascii"
+    ).rstrip("=")
+    return {
+        "source_restriction": match.group("source"),
+        "expires_at": match.group("expiry"),
+        "key_fingerprint": fingerprint,
+    }
 
 
 def main() -> int:
@@ -83,7 +118,29 @@ def main() -> int:
         installation_path = mapped(root, "/etc/codestra/klyrow-production-validator/installation.json")
         checks["installation_manifest"] = safe_file(installation_path, uid=install_uid, expected_mode=0o600)
         installation = json.loads(installation_path.read_text(encoding="utf-8"))
+        if not isinstance(installation, dict):
+            raise ValueError("installation schema rejected")
         checks["source_sha"] = installation.get("source_sha") == args.expected_source_sha
+        identity_path = mapped(root, "/etc/codestra/klyrow-production-validator/operator-identity.json")
+        checks["identity_metadata"] = safe_file(
+            identity_path, uid=install_uid, expected_mode=0o444
+        )
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        if not isinstance(identity, dict):
+            raise ValueError("identity schema rejected")
+        identity_fields = {
+            "key_fingerprint",
+            "source_restriction",
+            "expires_at",
+            "owner",
+            "approver",
+        }
+        checks["identity_schema"] = set(identity) == identity_fields
+        checks["identity_owner"] = identity.get("owner") == "codestra-admin"
+        checks["identity_installation_binding"] = all(
+            identity.get(field) == installation.get(field)
+            for field in ("key_fingerprint", "source_restriction", "expires_at", "approver")
+        )
         version = mapped(root, f"/opt/codestra/operators/klyrow-production-validator/{args.expected_source_sha}")
         pairs = {
             "dispatcher": ("/usr/local/libexec/codestra/klyrow-production-validator", "klyrow-production-validator", 0o755),
@@ -121,7 +178,15 @@ def main() -> int:
         lines = authorized.read_text(encoding="utf-8").splitlines()
         forced = [line for line in lines if REQUIRED_OPTIONS[0] in line]
         checks["one_forced_key"] = len(forced) == 1
-        checks["forced_key_restrictions"] = len(forced) == 1 and all(option in forced[0] for option in REQUIRED_OPTIONS)
+        forced_details = forced_key_details(forced[0]) if len(forced) == 1 else None
+        checks["forced_key_restrictions"] = forced_details is not None
+        checks["forced_key_identity"] = forced_details is not None and all(
+            forced_details.get(field) == identity.get(field)
+            for field in ("key_fingerprint", "source_restriction", "expires_at")
+        )
+        checks["authorized_keys_checksum"] = (
+            installation.get("authorized_keys_sha256") == sha256(authorized)
+        )
         if root is None:
             checks["sudoers_syntax"] = subprocess.run(
                 ["/usr/sbin/visudo", "-cf", str(mapped(root, "/etc/sudoers.d/klyrow-production-validator"))],
@@ -145,7 +210,15 @@ def main() -> int:
         print(json.dumps({"validation_result": "PASS" if passed else "FAIL", "checks": checks}, sort_keys=True))
         print("APPLICATION_RUNTIME_CHANGED=NO")
         return 0 if passed else 3
-    except (OSError, KeyError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
+    except (
+        OSError,
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.TimeoutExpired,
+    ):
         print("VALIDATION_RESULT=FAIL")
         print("APPLICATION_RUNTIME_CHANGED=NO")
         return 2

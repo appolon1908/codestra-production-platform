@@ -33,15 +33,20 @@ from klyrow_validator_core import (  # noqa: E402
 )
 
 
-def load_actions_module():
-    path = SOURCE / "klyrow-production-validator-actions"
-    name = "klyrow_production_validator_actions"
+def load_source_script(filename: str, name: str):
+    path = SOURCE / filename
     loader = importlib.machinery.SourceFileLoader(name, str(path))
     spec = importlib.util.spec_from_loader(name, loader)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def load_actions_module():
+    return load_source_script(
+        "klyrow-production-validator-actions", "klyrow_production_validator_actions"
+    )
 
 
 NEGATIVE_COMMANDS = (
@@ -338,6 +343,49 @@ def test_inventory_commands_are_scoped_to_approved_workloads_and_ports() -> None
     assert 'f":{port}"' in actions
 
 
+def test_no_effect_authority_rejects_nested_or_unsafe_emitted_values() -> None:
+    probe = load_source_script("probe-no-effect-tests", "kpv_probe_no_effect")
+    authority = {
+        "adapter": "codestra:no-effect-adapter/v1",
+        "adapter_sha256": "a" * 64,
+        "suppressed_synthetic_recipient_authorized": True,
+        "denied_consent_synthetic_recipient_authorized": True,
+        "provider_submission_impossible": True,
+        "approved_by": "independent-reviewer",
+        "expires_at_utc": "2099-12-31T23:59:59Z",
+    }
+    assert probe.project_authority(authority)["adapter"] == authority["adapter"]
+    authority["adapter"] = {"database_url": "postgres://secret"}
+    with pytest.raises(ValueError, match="adapter rejected"):
+        probe.project_authority(authority)
+
+
+def test_forced_key_parser_requires_exact_options_and_binds_fingerprint(tmp_path: Path) -> None:
+    validator = load_source_script(
+        "validate-klyrow-production-validator.py", "kpv_installation_validator"
+    )
+    key = tmp_path / "operator-key"
+    run_checked(["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)])
+    key_type, key_blob, *_ = key.with_suffix(".pub").read_text(encoding="ascii").split()
+    line = (
+        'from="192.0.2.0/24",expiry-time="20991231235959Z",'
+        'command="/usr/local/libexec/codestra/klyrow-production-validator ssh-dispatch",'
+        "restrict,no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty,no-user-rc "
+        f"{key_type} {key_blob}"
+    )
+    details = validator.forced_key_details(line)
+    expected_fingerprint = run_checked(
+        ["/usr/bin/ssh-keygen", "-lf", str(key.with_suffix(".pub"))]
+    ).stdout.split()[1]
+    assert details == {
+        "source_restriction": "192.0.2.0/24",
+        "expires_at": "20991231235959Z",
+        "key_fingerprint": expected_fingerprint,
+    }
+    assert validator.forced_key_details(line.replace("no-port-forwarding,", "")) is None
+    assert validator.forced_key_details(line.replace("192.0.2.0/24", "0.0.0.0/0")) is None
+
+
 def test_pull_request_validation_token_is_read_only() -> None:
     workflow = (SOURCE.parents[1] / ".github/workflows/klyrow-production-validator.yml").read_text(
         encoding="utf-8"
@@ -464,6 +512,41 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             ]
         )
         assert '"validation_result": "PASS"' in validation.stdout
+        authorized = simulator / "home/codestra-admin/.ssh/authorized_keys"
+        authorized_original = authorized.read_text(encoding="utf-8")
+        authorized.write_text(
+            authorized_original.replace('from="192.0.2.0/24"', 'from="0.0.0.0/0"'),
+            encoding="utf-8",
+        )
+        authorized.chmod(0o600)
+        tampered_validation = subprocess.run(
+            [
+                "/usr/bin/python3",
+                str(SOURCE / "validate-klyrow-production-validator.py"),
+                "--expected-source-sha",
+                source_sha,
+                "--simulator-root",
+                str(simulator),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert tampered_validation.returncode == 3
+        assert '"validation_result": "FAIL"' in tampered_validation.stdout
+        authorized.write_text(authorized_original, encoding="utf-8")
+        authorized.chmod(0o600)
+        restored_validation = run_checked(
+            [
+                "/usr/bin/python3",
+                str(SOURCE / "validate-klyrow-production-validator.py"),
+                "--expected-source-sha",
+                source_sha,
+                "--simulator-root",
+                str(simulator),
+            ]
+        )
+        assert '"validation_result": "PASS"' in restored_validation.stdout
         probe_manifest = simulator / "etc/codestra/klyrow-production-validator/probe-manifest.json"
         installed_probes = json.loads(probe_manifest.read_text(encoding="utf-8"))
         assert set(installed_probes["probes"]) == {
@@ -484,7 +567,6 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             ]
         )
         assert "REVOCATION_RESULT=PASS" in revoked.stdout
-        authorized = simulator / "home/codestra-admin/.ssh/authorized_keys"
         assert 'command="/usr/local/libexec/codestra/klyrow-production-validator ssh-dispatch"' not in authorized.read_text(encoding="utf-8")
         rollback = run_checked(
             [

@@ -373,6 +373,8 @@ def main() -> int:
                 "change_id": args.change_id,
                 "approver": args.approver,
                 "key_fingerprint": fingerprint,
+                "source_restriction": args.source_cidr,
+                "expires_at": args.expiry,
                 "authorized_keys_sha256": sha256(authorized),
                 "backup_directory": str(backup),
                 "backups": backups,

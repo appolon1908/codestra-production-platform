@@ -47,6 +47,10 @@ it never substitutes the unsafe smoke script or guesses credentials. Operator
 `READY` certifies the command boundary and installed probe digests, not the
 outcome of later application tests.
 
+The no-effect capability readback is recursively projected before any value is
+emitted. Its adapter name and SHA-256 use fixed scalar formats, its authority
+flags are strict booleans, and its UTC expiry must be valid and unexpired.
+
 ## Build and release
 
 `build-operator-artifact.py` creates a deterministic archive, installation
@@ -76,6 +80,11 @@ stable entrypoint copies, installs exact sudoers entries, and replaces only a
 matching unrestricted occurrence of the approved key with a forced-command
 entry. The key entry enforces source restriction, expiry, `restrict`, no agent
 or port forwarding, no X11 forwarding, no PTY, and no user rc.
+
+Post-install validation parses the forced-key entry as one exact grammar and
+binds its Ed25519 fingerprint, source restriction, expiry, full option set, and
+complete `authorized_keys` checksum back to the root-owned installation and
+operator-identity records. Drift fails closed.
 
 The installer records a private rollback set before changing operator files.
 `remove-klyrow-production-validator.py` restores those exact files and removes
