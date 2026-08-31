@@ -58,6 +58,49 @@ def emit(value: object) -> None:
     print(json.dumps(value, sort_keys=True, separators=(",", ":")))
 
 
+def verified_probe_manifest() -> dict[str, object]:
+    manifest = safe_json_file(
+        PROBE_MANIFEST, allowed_keys={"schema_version", "probes", "probe_core"}
+    )
+    if manifest.get("schema_version") != "1.0.0":
+        raise PolicyError("PROBE_MANIFEST_REJECTED")
+    core = manifest.get("probe_core")
+    fixed_core = PROBE_ROOT / "kpv_probe_core.py"
+    if not isinstance(core, dict) or set(core) != {"path", "sha256"}:
+        raise PolicyError("PROBE_MANIFEST_REJECTED")
+    if core.get("path") != str(fixed_core):
+        raise PolicyError("PROBE_PATH_REJECTED")
+    core_digest = core.get("sha256")
+    if not isinstance(core_digest, str) or len(core_digest) != 64:
+        raise PolicyError("PROBE_DIGEST_REJECTED")
+    regular_nonsymlink(fixed_core)
+    if sha256_file(fixed_core) != core_digest:
+        raise PolicyError("PROBE_DIGEST_MISMATCH")
+    probes = manifest.get("probes")
+    expected_actions = {
+        "authorization-tests",
+        "no-effect-tests",
+        "callback-tests",
+        "smtp-no-data",
+    }
+    if not isinstance(probes, dict) or set(probes) != expected_actions:
+        raise PolicyError("PROBE_MANIFEST_REJECTED")
+    for action in expected_actions:
+        expected = probes.get(action)
+        fixed_path = PROBE_ROOT / action
+        if not isinstance(expected, dict) or set(expected) != {"path", "sha256"}:
+            raise PolicyError("PROBE_MANIFEST_REJECTED")
+        if expected.get("path") != str(fixed_path):
+            raise PolicyError("PROBE_PATH_REJECTED")
+        digest = expected.get("sha256")
+        if not isinstance(digest, str) or len(digest) != 64:
+            raise PolicyError("PROBE_DIGEST_REJECTED")
+        regular_nonsymlink(fixed_path)
+        if sha256_file(fixed_path) != digest:
+            raise PolicyError("PROBE_DIGEST_MISMATCH")
+    return manifest
+
+
 def run(argv: list[str], *, timeout: int = 20, maximum: int = 131072) -> dict[str, object]:
     result = limited_command(argv, timeout_seconds=timeout, maximum_output_bytes=maximum)
     return {
@@ -100,6 +143,11 @@ def status() -> int:
     checks["docker_cli_present"] = Path("/usr/bin/docker").is_file()
     checks["sudo_present"] = Path("/usr/bin/sudo").is_file()
     checks["evidence_root_nonsymlink"] = not EVIDENCE_ROOT.is_symlink()
+    try:
+        verified_probe_manifest()
+        checks["pinned_probes"] = True
+    except (OSError, PolicyError):
+        checks["pinned_probes"] = False
     emit(
         {
             "operator_status": "READY" if all(checks.values()) else "NOT_READY",
@@ -120,7 +168,7 @@ def inventory() -> int:
             "ps",
             "--no-trunc",
             "--format",
-            "{{json .}}",
+            "{{.Names}}|{{.Image}}|{{.ID}}|{{.Status}}|{{.Ports}}|{{.Networks}}",
         ],
         ["/usr/bin/df", "-P", "/", "/opt", "/var/lib/docker"],
         ["/usr/bin/df", "-Pi", "/", "/opt", "/var/lib/docker"],
@@ -175,7 +223,7 @@ def health() -> int:
                     "/usr/bin/docker",
                     "inspect",
                     "--format",
-                    "{{json .State.Health}}",
+                    "{{json .State.Health.Status}}",
                     container,
                 ]
             )
@@ -202,15 +250,9 @@ def health() -> int:
 
 
 def pinned_probe(action: str) -> int:
-    allowed = {"schema_version", "probes"}
-    manifest = safe_json_file(PROBE_MANIFEST, allowed_keys=allowed)
+    manifest = verified_probe_manifest()
     probes = manifest.get("probes")
-    if not isinstance(probes, dict) or set(probes) != {
-        "authorization-tests",
-        "no-effect-tests",
-        "callback-tests",
-        "smtp-no-data",
-    }:
+    if not isinstance(probes, dict):
         raise PolicyError("PROBE_MANIFEST_REJECTED")
     expected = probes.get(action)
     if not isinstance(expected, dict) or set(expected) != {"path", "sha256"}:
@@ -221,9 +263,6 @@ def pinned_probe(action: str) -> int:
     digest = expected.get("sha256")
     if not isinstance(digest, str) or len(digest) != 64:
         raise PolicyError("PROBE_DIGEST_REJECTED")
-    regular_nonsymlink(fixed_path)
-    if sha256_file(fixed_path) != digest:
-        raise PolicyError("PROBE_DIGEST_MISMATCH")
     result = run([str(fixed_path)], timeout=120 if action == "smtp-no-data" else 60)
     emit({"probe": action, "result": result})
     return int(result["exit_code"])

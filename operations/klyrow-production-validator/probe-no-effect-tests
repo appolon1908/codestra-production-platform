@@ -1,0 +1,58 @@
+#!/usr/bin/python3
+"""Fail-closed no-effect gate; does not fabricate a production-safe harness."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from kpv_probe_core import emit, safe_json_file
+
+
+READBACK = Path("/var/lib/codestra/klyrow-production-validator/readback/no-effect-capability.json")
+ALLOWED = {
+    "adapter",
+    "adapter_sha256",
+    "suppressed_synthetic_recipient_authorized",
+    "denied_consent_synthetic_recipient_authorized",
+    "provider_submission_impossible",
+    "approved_by",
+    "expires_at_utc",
+}
+
+
+def main() -> int:
+    try:
+        authority = safe_json_file(READBACK, ALLOWED)
+        complete = set(authority) == ALLOWED
+        safe = (
+            complete
+            and authority.get("suppressed_synthetic_recipient_authorized") is True
+            and authority.get("denied_consent_synthetic_recipient_authorized") is True
+            and authority.get("provider_submission_impossible") is True
+        )
+        emit(
+            {
+                "no_effect_authority": "PASS" if safe else "FAIL",
+                "adapter": authority.get("adapter", "unavailable"),
+                "adapter_sha256": authority.get("adapter_sha256", "unavailable"),
+                "tests_executed": False,
+                "provider_submissions": 0,
+                "reason": "ADAPTER_EXECUTION_REQUIRES_SEPARATE_REVIEWED_SOURCE",
+            }
+        )
+        return 3
+    except (OSError, ValueError, json.JSONDecodeError):
+        emit(
+            {
+                "no_effect_authority": "BLOCKED",
+                "tests_executed": False,
+                "provider_submissions": 0,
+                "reason": "NO_AUTHENTICATED_NO_EFFECT_ADAPTER",
+            }
+        )
+        return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

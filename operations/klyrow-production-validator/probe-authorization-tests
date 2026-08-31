@@ -1,0 +1,47 @@
+#!/usr/bin/python3
+"""Fixed negative authorization requests; never obtains or accepts a valid token."""
+
+from __future__ import annotations
+
+from kpv_probe_core import emit, request_status
+
+
+CASES = (
+    ("no_token", {}),
+    ("malformed_token", {"Authorization": "Bearer not-a-jwt"}),
+    (
+        "untrusted_claims",
+        {
+            "Authorization": (
+                "Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0."
+                "eyJpc3MiOiJ3cm9uZyIsImF1ZCI6Indyb25nIiwiYXpwIjoid3JvbmciLCJ0ZW5hbnQiOiJ3cm9uZyJ9."
+            )
+        },
+    ),
+)
+
+
+def main() -> int:
+    results = []
+    for test_id, headers in CASES:
+        result = request_status("GET", "/v1/me", headers=headers)
+        result["test_id"] = test_id
+        result["denied"] = result.get("status") in {401, 403}
+        results.append(result)
+    admin = request_status("GET", "/v1/admin/tenants")
+    admin.update({"test_id": "admin_without_identity", "denied": admin.get("status") in {401, 403}})
+    results.append(admin)
+    passed = all(result["denied"] for result in results)
+    emit(
+        {
+            "authorization_negative_tests": results,
+            "passed": passed,
+            "valid_identity_tests": "NOT_RUN_REQUIRES_SEPARATE_SYNTHETIC_IDENTITY_AUTHORITY",
+            "provider_submission_possible": False,
+        }
+    )
+    return 0 if passed else 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

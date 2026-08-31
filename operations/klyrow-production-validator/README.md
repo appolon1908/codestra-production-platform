@@ -33,6 +33,15 @@ missing probe, or digest mismatch fails closed. The pre-existing
 `tests/production_safe_smoke.py` in Klyrow is not used because it performs
 database writes and therefore is not production-safe for this contract.
 
+The protected artifact includes the probe core and all four fixed entrypoints.
+Negative authorization and rejected-callback probes use only deliberately
+invalid identities. The SMTP probe issues EHLO, STARTTLS, MAIL, RCPT, and QUIT
+but has no DATA operation. The no-effect probe intentionally returns blocked
+until a separately reviewed synthetic-identity adapter authority is present;
+it never substitutes the unsafe smoke script or guesses credentials. Operator
+`READY` certifies the command boundary and installed probe digests, not the
+outcome of later application tests.
+
 ## Build and release
 
 `build-operator-artifact.py` creates a deterministic archive, installation

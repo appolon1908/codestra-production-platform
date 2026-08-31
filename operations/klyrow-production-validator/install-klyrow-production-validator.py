@@ -29,6 +29,11 @@ EXPECTED_MEMBERS = {
     "klyrow-production-validator-root",
     "klyrow-production-validator-actions",
     "klyrow_validator_core.py",
+    "kpv_probe_core.py",
+    "probe-authorization-tests",
+    "probe-no-effect-tests",
+    "probe-callback-tests",
+    "probe-smtp-no-data",
     "command-contract.json",
     "klyrow-production-validator.sudoers",
     "authorized_keys.template",
@@ -278,6 +283,12 @@ def main() -> int:
                 "identity": mapped(simulator, "/etc/codestra/klyrow-production-validator/operator-identity.json"),
                 "authorized_keys": mapped(simulator, "/home/codestra-admin/.ssh/authorized_keys"),
                 "installation": mapped(simulator, "/etc/codestra/klyrow-production-validator/installation.json"),
+                "probe-core": mapped(simulator, "/opt/codestra/operators/klyrow-production-validator/probes/kpv_probe_core.py"),
+                "probe-authorization": mapped(simulator, "/opt/codestra/operators/klyrow-production-validator/probes/authorization-tests"),
+                "probe-no-effect": mapped(simulator, "/opt/codestra/operators/klyrow-production-validator/probes/no-effect-tests"),
+                "probe-callback": mapped(simulator, "/opt/codestra/operators/klyrow-production-validator/probes/callback-tests"),
+                "probe-smtp": mapped(simulator, "/opt/codestra/operators/klyrow-production-validator/probes/smtp-no-data"),
+                "probe-manifest": mapped(simulator, "/etc/codestra/klyrow-production-validator/probe-manifest.json"),
             }
             backups = [backup_file(path, backup, label) for label, path in targets.items()]
             version_root = mapped(simulator, f"/opt/codestra/operators/klyrow-production-validator/{source_sha}")
@@ -292,6 +303,40 @@ def main() -> int:
             atomic_install(payload / "klyrow_validator_core.py", targets["core"], 0o644, install_uid, install_gid)
             atomic_install(payload / "command-contract.json", targets["contract"], 0o444, install_uid, install_gid)
             atomic_install(payload / "klyrow-production-validator.sudoers", targets["sudoers"], 0o440, install_uid, install_gid)
+            atomic_install(payload / "kpv_probe_core.py", targets["probe-core"], 0o444, install_uid, install_gid)
+            for action, target_label in (
+                ("authorization-tests", "probe-authorization"),
+                ("no-effect-tests", "probe-no-effect"),
+                ("callback-tests", "probe-callback"),
+                ("smtp-no-data", "probe-smtp"),
+            ):
+                atomic_install(payload / f"probe-{action}", targets[target_label], 0o555, install_uid, install_gid)
+            probe_manifest = {
+                "schema_version": "1.0.0",
+                "probe_core": {
+                    "path": "/opt/codestra/operators/klyrow-production-validator/probes/kpv_probe_core.py",
+                    "sha256": sha256(payload / "kpv_probe_core.py"),
+                },
+                "probes": {
+                    action: {
+                        "path": f"/opt/codestra/operators/klyrow-production-validator/probes/{action}",
+                        "sha256": sha256(payload / f"probe-{action}"),
+                    }
+                    for action in (
+                        "authorization-tests",
+                        "no-effect-tests",
+                        "callback-tests",
+                        "smtp-no-data",
+                    )
+                },
+            }
+            probe_manifest_tmp = backup / "probe-manifest.new"
+            probe_manifest_tmp.write_text(
+                json.dumps(probe_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            atomic_install(
+                probe_manifest_tmp, targets["probe-manifest"], 0o444, install_uid, install_gid
+            )
             if simulator is None:
                 checked = subprocess.run(["/usr/sbin/visudo", "-cf", str(targets["sudoers"])], check=False)
                 if checked.returncode != 0:

@@ -92,6 +92,11 @@ def main() -> int:
             "core": ("/usr/local/libexec/codestra/klyrow_validator_core.py", "klyrow_validator_core.py", 0o644),
             "contract": ("/etc/codestra/klyrow-production-validator/command-contract.json", "command-contract.json", 0o444),
             "sudoers": ("/etc/sudoers.d/klyrow-production-validator", "klyrow-production-validator.sudoers", 0o440),
+            "probe_core": ("/opt/codestra/operators/klyrow-production-validator/probes/kpv_probe_core.py", "kpv_probe_core.py", 0o444),
+            "probe_authorization": ("/opt/codestra/operators/klyrow-production-validator/probes/authorization-tests", "probe-authorization-tests", 0o555),
+            "probe_no_effect": ("/opt/codestra/operators/klyrow-production-validator/probes/no-effect-tests", "probe-no-effect-tests", 0o555),
+            "probe_callback": ("/opt/codestra/operators/klyrow-production-validator/probes/callback-tests", "probe-callback-tests", 0o555),
+            "probe_smtp": ("/opt/codestra/operators/klyrow-production-validator/probes/smtp-no-data", "probe-smtp-no-data", 0o555),
         }
         for label, (target_name, version_name, mode) in pairs.items():
             target = mapped(root, target_name)
@@ -101,6 +106,16 @@ def main() -> int:
         contract = json.loads(mapped(root, "/etc/codestra/klyrow-production-validator/command-contract.json").read_text(encoding="utf-8"))
         checks["contract_default_deny"] = contract.get("default") == "deny"
         checks["contract_user"] = contract.get("allowed_user") == "codestra-admin"
+        probe_manifest_path = mapped(root, "/etc/codestra/klyrow-production-validator/probe-manifest.json")
+        checks["probe_manifest_metadata"] = safe_file(
+            probe_manifest_path, uid=install_uid, expected_mode=0o444
+        )
+        probe_manifest = json.loads(probe_manifest_path.read_text(encoding="utf-8"))
+        checks["probe_manifest_schema"] = (
+            probe_manifest.get("schema_version") == "1.0.0"
+            and set(probe_manifest.get("probes", {}))
+            == {"authorization-tests", "no-effect-tests", "callback-tests", "smtp-no-data"}
+        )
         authorized = mapped(root, "/home/codestra-admin/.ssh/authorized_keys")
         checks["authorized_keys_metadata"] = safe_file(authorized, uid=codestra.pw_uid, expected_mode=0o600)
         lines = authorized.read_text(encoding="utf-8").splitlines()

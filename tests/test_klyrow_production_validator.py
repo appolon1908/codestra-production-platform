@@ -214,6 +214,59 @@ def test_authorized_keys_template_enforces_ssh_boundaries() -> None:
         assert fragment in value
 
 
+def test_dispatcher_and_root_helper_share_one_validated_correlation_id() -> None:
+    dispatcher = (SOURCE / "klyrow-production-validator").read_text(encoding="utf-8")
+    helper = (SOURCE / "klyrow-production-validator-root").read_text(encoding="utf-8")
+    assert 'input=correlation_id + "\\n"' in dispatcher
+    assert "correlation_id = read_correlation_id()" in helper
+    assert "CORRELATION_RE.fullmatch(correlation_id)" in helper
+
+
+def test_health_output_never_selects_health_log_output() -> None:
+    actions = (SOURCE / "klyrow-production-validator-actions").read_text(encoding="utf-8")
+    assert "{{json .State.Health.Status}}" in actions
+    assert "{{json .State.Health}}" not in actions
+    assert ".State.Health.Log" not in actions
+
+
+def test_pull_request_validation_token_is_read_only() -> None:
+    workflow = (SOURCE.parents[1] / ".github/workflows/klyrow-production-validator.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "permissions:\n  contents: read" in workflow
+    validate_job = workflow.split("  validate-operator:", 1)[1].split(
+        "  publish-protected-artifact:", 1
+    )[0]
+    assert "contents: write" not in validate_job
+    assert "persist-credentials: false" in validate_job
+
+
+def test_pinned_probes_are_bundled_and_structurally_no_data() -> None:
+    required = (
+        "kpv_probe_core.py",
+        "probe-authorization-tests",
+        "probe-no-effect-tests",
+        "probe-callback-tests",
+        "probe-smtp-no-data",
+    )
+    for name in required:
+        assert (SOURCE / name).is_file()
+    smtp = (SOURCE / "probe-smtp-no-data").read_text(encoding="utf-8").lower()
+    assert ".data(" not in smtp
+    assert "sendmail" not in smtp
+    assert 'docmd("mail"' in smtp
+    assert 'docmd("rcpt"' in smtp
+    no_effect = (SOURCE / "probe-no-effect-tests").read_text(encoding="utf-8")
+    assert "tests_executed\": False" in no_effect
+    assert "provider_submissions\": 0" in no_effect
+
+
+def test_installer_never_grants_host_groups_or_generic_privilege() -> None:
+    installer = (SOURCE / "install-klyrow-production-validator.py").read_text(encoding="utf-8")
+    for forbidden in ("groupadd", "groupmod", "usermod", "chmod 666", "docker.sock"):
+        assert forbidden not in installer
+
+
 def run_checked(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, text=True, capture_output=True, check=True, **kwargs)
 
@@ -300,6 +353,14 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             ]
         )
         assert '"validation_result": "PASS"' in validation.stdout
+        probe_manifest = simulator / "etc/codestra/klyrow-production-validator/probe-manifest.json"
+        installed_probes = json.loads(probe_manifest.read_text(encoding="utf-8"))
+        assert set(installed_probes["probes"]) == {
+            "authorization-tests",
+            "no-effect-tests",
+            "callback-tests",
+            "smtp-no-data",
+        }
         fingerprint = run_checked(["/usr/bin/ssh-keygen", "-lf", str(operator_key) + ".pub"]).stdout.split()[1]
         revoked = run_checked(
             [

@@ -1,0 +1,65 @@
+#!/usr/bin/python3
+"""SMTP envelope probe with a structural prohibition on DATA."""
+
+from __future__ import annotations
+
+import json
+import smtplib
+import ssl
+
+
+TARGETS = (
+    ("public_postal", "mail.klyrow.com", 25),
+    ("private_submission", "10.40.0.4", 587),
+)
+
+
+def probe(name: str, host: str, port: int) -> dict[str, object]:
+    result: dict[str, object] = {"target": name, "host": host, "port": port, "data_issued": False}
+    client = smtplib.SMTP(timeout=10)
+    try:
+        connect_code, _ = client.connect(host, port)
+        ehlo_code, _ = client.ehlo("validator.invalid")
+        result.update({"connect_code": connect_code, "ehlo_code": ehlo_code, "starttls_offered": client.has_extn("starttls")})
+        if client.has_extn("starttls"):
+            context = ssl.create_default_context()
+            client._host = host
+            tls_code, _ = client.starttls(context=context)
+            result["starttls_code"] = tls_code
+            result["certificate_hostname_verified"] = True
+            client.ehlo("validator.invalid")
+        mail_code, _ = client.docmd("MAIL", "FROM:<validator@invalid>")
+        rcpt_code, _ = client.docmd("RCPT", "TO:<validator@invalid>")
+        result.update(
+            {
+                "mail_code": mail_code,
+                "rcpt_code": rcpt_code,
+                "relay_denied": rcpt_code >= 400 or mail_code >= 400,
+                "messages_queued": 0,
+            }
+        )
+    except (OSError, smtplib.SMTPException, ssl.SSLError) as exc:
+        result.update({"error": type(exc).__name__, "relay_denied": False, "messages_queued": 0})
+    finally:
+        try:
+            client.quit()
+        except (OSError, smtplib.SMTPException):
+            client.close()
+    return result
+
+
+def main() -> int:
+    results = [probe(*target) for target in TARGETS]
+    passed = all(
+        item.get("relay_denied") is True
+        and item.get("messages_queued") == 0
+        and item.get("starttls_offered") is True
+        and item.get("certificate_hostname_verified") is True
+        for item in results
+    )
+    print(json.dumps({"smtp_no_data": results, "passed": passed}, sort_keys=True, separators=(",", ":")))
+    return 0 if passed else 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

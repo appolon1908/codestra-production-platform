@@ -15,6 +15,7 @@ from klyrow_validator_core import (
     ExclusiveLock,
     PolicyError,
     append_audit,
+    CORRELATION_RE,
     limited_command,
     parse_direct,
     redact_object,
@@ -58,6 +59,20 @@ def validate_invocation(argv: list[str]) -> str:
     return parse_direct(argv)
 
 
+def read_correlation_id() -> str:
+    raw = sys.stdin.buffer.read(128)
+    try:
+        value = raw.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise PolicyError("CORRELATION_ID_REJECTED") from exc
+    if not value.endswith("\n") or value.count("\n") != 1:
+        raise PolicyError("CORRELATION_ID_REJECTED")
+    correlation_id = value[:-1]
+    if not CORRELATION_RE.fullmatch(correlation_id):
+        raise PolicyError("CORRELATION_ID_REJECTED")
+    return correlation_id
+
+
 def write_evidence(correlation_id: str, record: dict[str, object]) -> None:
     secure_directory(EVIDENCE_ROOT)
     path = EVIDENCE_ROOT / f"{correlation_id}.json"
@@ -80,6 +95,7 @@ def main(argv: list[str]) -> int:
     command_result: dict[str, object] = {}
     try:
         action = validate_invocation(argv)
+        correlation_id = read_correlation_id()
         contract = load_contract()
         regular_nonsymlink(ACTION_RUNNER)
         action_contract = contract["actions"][action]  # type: ignore[index]
