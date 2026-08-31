@@ -105,6 +105,11 @@ exactly one forced-command entry matching an expected fingerprint and leaves
 unrelated keys untouched. None of these programs invoke Docker, Compose, or an
 application service manager.
 
+Rollback never restores a whole stale `authorized_keys` snapshot. It removes
+only the matching validator entry (or accepts that the separately tested
+revocation already removed it) and preserves unrelated key additions or
+rotations; an unexpected validator entry fails closed.
+
 The `--simulator-root` option is accepted only for a root under
 `/tmp/kpv-simulator-*` containing `.kpv-disposable-simulator`. It exists solely
 for CI integration tests and cannot redirect a production operator action.
@@ -119,6 +124,8 @@ its digest; audit records retain the digest and size. The forced-command
 dispatcher emits a correlated journal record that includes the installed key
 fingerprint and SSH source address. Output has per-action time and size limits;
 secret-shaped fields, bearer values, and private-key blocks are redacted.
+Evidence is created before a PASS audit row is appended, so the audit log cannot
+claim a successful action whose required evidence record is absent.
 
 ## Administrative procedure
 

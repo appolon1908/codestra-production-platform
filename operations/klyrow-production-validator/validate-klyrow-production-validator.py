@@ -47,6 +47,7 @@ FORBIDDEN_PRIVILEGED_EXECUTABLE_RE = re.compile(
     r"(?:\s|,|$)",
     re.MULTILINE,
 )
+FORBIDDEN_SUDO_TAG_RE = re.compile(r"(?:^|[\s,])SETENV:\s*")
 ROOT_HELPER = "/usr/local/libexec/codestra/klyrow-production-validator-root"
 APPROVED_SUDO_ACTIONS = (
     "authenticate-runbook",
@@ -136,6 +137,7 @@ def sudo_listing_is_bounded(returncode: int, value: str) -> bool:
         or "may run the following commands" not in value
         or UNRESTRICTED_COMMAND_RE.search(value) is not None
         or FORBIDDEN_PRIVILEGED_EXECUTABLE_RE.search(value) is not None
+        or FORBIDDEN_SUDO_TAG_RE.search(value) is not None
     ):
         return False
     grants = " ".join(value.split("may run the following commands", 1)[1].split())

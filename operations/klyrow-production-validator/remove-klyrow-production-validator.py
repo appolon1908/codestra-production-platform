@@ -12,6 +12,7 @@ from pathlib import Path
 
 from install_klyrow_production_validator_compat import (
     mapped,
+    remove_validator_key,
     restore_backups,
     validate_directory_chain,
 )
@@ -51,7 +52,23 @@ def main() -> int:
         records = installation.get("backups")
         if not isinstance(records, list):
             raise ValueError("rollback manifest rejected")
-        restore_backups(records, backup)
+        authorized_records = [
+            record
+            for record in records
+            if isinstance(record, dict) and record.get("label") == "authorized_keys"
+        ]
+        if len(authorized_records) != 1:
+            raise ValueError("authorized key rollback record rejected")
+        authorized = mapped(simulator, "/home/codestra-admin/.ssh/authorized_keys")
+        remove_validator_key(authorized, str(installation.get("key_fingerprint", "")))
+        restore_backups(
+            [
+                record
+                for record in records
+                if isinstance(record, dict) and record.get("label") != "authorized_keys"
+            ],
+            backup,
+        )
         version = mapped(simulator, f"/opt/codestra/operators/klyrow-production-validator/{args.expected_source_sha}")
         validate_directory_chain(version.parent)
         if version.is_symlink():

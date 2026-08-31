@@ -284,6 +284,9 @@ def test_root_evidence_preserves_bounded_redacted_structured_readback() -> None:
     assert "secret" not in json.dumps(readback)
     source = (SOURCE / "klyrow-production-validator-root").read_text(encoding="utf-8")
     assert "3 if completed.truncated and completed.returncode == 0" in source
+    assert source.index("write_evidence(correlation_id, evidence_record)") < source.index(
+        "append_audit(AUDIT_PATH, audit_record)"
+    )
 
 
 def test_health_output_never_selects_health_log_output() -> None:
@@ -454,6 +457,9 @@ def test_sudo_listing_rejects_unrestricted_and_generic_grants() -> None:
     )
     assert not validator.sudo_listing_is_bounded(
         0, bounded.rstrip() + ", /usr/bin/id\n"
+    )
+    assert not validator.sudo_listing_is_bounded(
+        0, bounded.replace("NOPASSWD:", "NOPASSWD: SETENV:", 1)
     )
     assert not validator.sudo_listing_is_bounded(1, bounded)
 
@@ -721,6 +727,13 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
         )
         assert "REVOCATION_RESULT=PASS" in revoked.stdout
         assert 'command="/usr/local/libexec/codestra/klyrow-production-validator ssh-dispatch"' not in authorized.read_text(encoding="utf-8")
+        unrelated_key = release / "unrelated-key"
+        run_checked(
+            ["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(unrelated_key)]
+        )
+        unrelated_public = unrelated_key.with_suffix(".pub").read_text(encoding="ascii").strip()
+        authorized.write_text(unrelated_public + "\n", encoding="utf-8")
+        authorized.chmod(0o600)
         rollback = run_checked(
             [
                 "/usr/bin/python3",
@@ -732,6 +745,7 @@ def test_disposable_install_revocation_validation_and_rollback() -> None:
             ]
         )
         assert "ROLLBACK_RESULT=PASS" in rollback.stdout
+        assert unrelated_public in authorized.read_text(encoding="utf-8")
         assert not (simulator / "usr/local/libexec/codestra/klyrow-production-validator").exists()
         assert not (simulator / f"opt/codestra/operators/klyrow-production-validator/{source_sha}").exists()
 

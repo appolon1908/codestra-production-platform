@@ -167,8 +167,8 @@ def main(argv: list[str]) -> int:
         }
         evidence_record = {**audit_record, "authoritative_readback": readback}
         try:
-            append_audit(AUDIT_PATH, audit_record)
             write_evidence(correlation_id, evidence_record)
+            append_audit(AUDIT_PATH, audit_record)
         except (OSError, PolicyError):
             rc = 2
             sys.stderr.write("AUDIT_WRITE=FAIL\n")
