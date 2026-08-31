@@ -562,6 +562,65 @@ def rename_exchange(directory: int, left: str, right: str) -> None:
         raise OSError(error, os.strerror(error))
 
 
+def same_inode(left: os.stat_result, right: os.stat_result) -> bool:
+    return left.st_dev == right.st_dev and left.st_ino == right.st_ino
+
+
+def recover_exchange_if_unchanged(
+    directory: int,
+    temporary: str,
+    target_name: str,
+    displaced: os.stat_result,
+    created: os.stat_result,
+) -> tuple[bool, bool]:
+    """Restore the displaced target without hiding a later concurrent rotation."""
+    if not stat.S_ISREG(displaced.st_mode):
+        return False, True
+    try:
+        before_temporary = os.stat(
+            temporary, dir_fd=directory, follow_symlinks=False
+        )
+        before_target = os.stat(
+            target_name, dir_fd=directory, follow_symlinks=False
+        )
+    except FileNotFoundError:
+        return False, True
+    if not same_inode(before_temporary, displaced) or not same_inode(
+        before_target, created
+    ):
+        return False, True
+    rename_exchange(directory, temporary, target_name)
+    after_temporary = os.stat(temporary, dir_fd=directory, follow_symlinks=False)
+    after_target = os.stat(target_name, dir_fd=directory, follow_symlinks=False)
+    if same_inode(after_target, displaced) and same_inode(after_temporary, created):
+        return True, False
+    if same_inode(after_target, displaced):
+        newer = after_temporary
+        if not stat.S_ISREG(newer.st_mode):
+            return False, True
+        current_temporary = os.stat(
+            temporary, dir_fd=directory, follow_symlinks=False
+        )
+        current_target = os.stat(
+            target_name, dir_fd=directory, follow_symlinks=False
+        )
+        if same_inode(current_temporary, newer) and same_inode(
+            current_target, displaced
+        ):
+            rename_exchange(directory, temporary, target_name)
+            final_temporary = os.stat(
+                temporary, dir_fd=directory, follow_symlinks=False
+            )
+            final_target = os.stat(
+                target_name, dir_fd=directory, follow_symlinks=False
+            )
+            if same_inode(final_target, newer) and same_inode(
+                final_temporary, displaced
+            ):
+                return False, True
+    return False, True
+
+
 def atomic_replace_bytes(
     target: Path,
     content: bytes,
@@ -645,21 +704,26 @@ def atomic_replace_bytes(
         )
         displaced_descriptor = os.open(
             temporary,
-            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
             dir_fd=directory,
         )
         try:
             displaced_before = os.fstat(displaced_descriptor)
             displaced_digest = hashlib.sha256()
             displaced_size = 0
-            while True:
-                chunk = os.read(displaced_descriptor, 65536)
-                if not chunk:
-                    break
-                displaced_size += len(chunk)
-                if displaced_size > 8 * 1024 * 1024:
-                    raise InstallError("displaced target too large")
-                displaced_digest.update(chunk)
+            descriptor_matches = (
+                stat.S_ISREG(displaced_before.st_mode)
+                and same_inode(displaced_before, displaced)
+            )
+            if descriptor_matches:
+                while True:
+                    chunk = os.read(displaced_descriptor, 65536)
+                    if not chunk:
+                        break
+                    displaced_size += len(chunk)
+                    if displaced_size > 8 * 1024 * 1024:
+                        raise InstallError("displaced target too large")
+                    displaced_digest.update(chunk)
             displaced_after = os.fstat(displaced_descriptor)
         finally:
             os.close(displaced_descriptor)
@@ -669,6 +733,7 @@ def atomic_replace_bytes(
         )
         displacement_matches = (
             displacement_matches
+            and descriptor_matches
             and displaced_before.st_dev == displaced.st_dev
             and displaced_before.st_ino == displaced.st_ino
             and displaced_digest.hexdigest() == expected_sha256
@@ -683,16 +748,15 @@ def atomic_replace_bytes(
             canonical.st_dev == installed.st_dev and canonical.st_ino == installed.st_ino
         )
         if not displacement_matches or not replacement_matches or not canonical_matches:
-            rename_exchange(directory, temporary, target.name)
-            exchanged = False
-            restored_temporary = os.stat(
-                temporary, dir_fd=directory, follow_symlinks=False
+            _, preserve = recover_exchange_if_unchanged(
+                directory,
+                temporary,
+                target.name,
+                displaced,
+                created,
             )
-            if (
-                restored_temporary.st_dev != created.st_dev
-                or restored_temporary.st_ino != created.st_ino
-            ):
-                preserve_temporary = True
+            exchanged = False
+            preserve_temporary = preserve_temporary or preserve
             raise InstallError("atomic target comparison failed")
         os.fsync(directory)
         final_displaced = os.stat(temporary, dir_fd=directory, follow_symlinks=False)
@@ -711,16 +775,18 @@ def atomic_replace_bytes(
             os.close(descriptor)
         if exchanged and temporary is not None:
             try:
-                rename_exchange(directory, temporary, target.name)
-                exchanged = False
-                restored_temporary = os.stat(
+                current_displaced = os.stat(
                     temporary, dir_fd=directory, follow_symlinks=False
                 )
-                if (
-                    restored_temporary.st_dev != created.st_dev
-                    or restored_temporary.st_ino != created.st_ino
-                ):
-                    preserve_temporary = True
+                _, preserve = recover_exchange_if_unchanged(
+                    directory,
+                    temporary,
+                    target.name,
+                    current_displaced,
+                    created,
+                )
+                exchanged = False
+                preserve_temporary = preserve_temporary or preserve
             except (InstallError, OSError):
                 preserve_temporary = True
         if temporary is not None and not preserve_temporary:

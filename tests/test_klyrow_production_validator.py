@@ -745,6 +745,91 @@ def test_authorized_keys_atomic_exchange_preserves_concurrent_change(
     assert list(tmp_path.glob(".authorized_keys.kpv-install.*")) == []
 
 
+def test_atomic_exchange_recovery_preserves_newest_rotation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    installer = load_source_script(
+        "install-klyrow-production-validator.py", "kpv_installer_exchange_recovery"
+    )
+    target = tmp_path / "authorized_keys"
+    target.write_text("original\n", encoding="utf-8")
+    target.chmod(0o600)
+    expected = target.stat(follow_symlinks=False)
+    real_exchange = installer.rename_exchange
+    calls = 0
+
+    def racing_exchange(directory, left, right):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            rotation = tmp_path / "first-rotation"
+            rotation.write_text("first-rotation\n", encoding="utf-8")
+            rotation.chmod(0o600)
+            os.replace(rotation, target)
+        elif calls == 2:
+            rotation = tmp_path / "newest-rotation"
+            rotation.write_text("newest-rotation\n", encoding="utf-8")
+            rotation.chmod(0o600)
+            os.replace(rotation, target)
+        return real_exchange(directory, left, right)
+
+    monkeypatch.setattr(installer, "rename_exchange", racing_exchange)
+    with pytest.raises(installer.InstallError, match="atomic target comparison failed"):
+        installer.atomic_replace_bytes(
+            target,
+            b"operator-forced-command\n",
+            expected,
+            expected_sha256=hashlib.sha256(b"original\n").hexdigest(),
+            mode=0o600,
+            uid=os.getuid(),
+            gid=os.getgid(),
+            label="install",
+        )
+    assert calls == 3
+    assert target.read_text(encoding="utf-8") == "newest-rotation\n"
+    displaced = list(tmp_path.glob(".authorized_keys.kpv-install.*"))
+    assert len(displaced) == 1
+    assert displaced[0].read_text(encoding="utf-8") == "first-rotation\n"
+
+
+def test_displaced_fifo_cannot_block_or_become_canonical(
+    tmp_path: Path, monkeypatch
+) -> None:
+    installer = load_source_script(
+        "install-klyrow-production-validator.py", "kpv_installer_fifo_exchange"
+    )
+    target = tmp_path / "authorized_keys"
+    target.write_text("original\n", encoding="utf-8")
+    target.chmod(0o600)
+    expected = target.stat(follow_symlinks=False)
+    real_exchange = installer.rename_exchange
+    swapped = False
+
+    def fifo_exchange(directory, left, right):
+        nonlocal swapped
+        real_exchange(directory, left, right)
+        if not swapped:
+            swapped = True
+            os.unlink(left, dir_fd=directory)
+            os.mkfifo(left, mode=0o600, dir_fd=directory)
+
+    monkeypatch.setattr(installer, "rename_exchange", fifo_exchange)
+    with pytest.raises(installer.InstallError, match="atomic target comparison failed"):
+        installer.atomic_replace_bytes(
+            target,
+            b"operator-forced-command\n",
+            expected,
+            expected_sha256=hashlib.sha256(b"original\n").hexdigest(),
+            mode=0o600,
+            uid=os.getuid(),
+            gid=os.getgid(),
+            label="install",
+        )
+    assert swapped
+    assert target.is_file() and not target.is_symlink()
+    assert target.read_text(encoding="utf-8") == "operator-forced-command\n"
+
+
 def test_pinned_probes_are_bundled_and_structurally_no_data() -> None:
     required = (
         "kpv_probe_core.py",
