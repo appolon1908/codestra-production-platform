@@ -80,15 +80,18 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  publish-protected-artifact:
+  build-protected-artifact:
     if: github.event_name == 'push' && github.ref == 'refs/heads/release/production-activation'
     needs: validate-operator
     permissions:
-      contents: write
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ env.OPERATOR_SOURCE_SHA }}
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -106,23 +109,135 @@ jobs:
             --source-sha "${OPERATOR_SOURCE_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist
           (cd dist && sha256sum --check --strict SHA256SUMS)
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: klyrow-validator-unsigned-${{ env.OPERATOR_SOURCE_SHA }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-protected-artifact:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release/production-activation'
+    needs: build-protected-artifact
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: klyrow-validator-unsigned-${{ env.OPERATOR_SOURCE_SHA }}
+          path: dist
+
+      - name: Validate isolated signing payload
+        run: |
+          set -Eeuo pipefail
+          expected_files="$(printf '%s\n' \
+            "SHA256SUMS" \
+            "installation-manifest.json" \
+            "klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz" \
+            "provenance.json" \
+            "sbom.spdx.json" \
+            "vulnerability-report.json" | /usr/bin/sort)"
+          actual_files="$(/usr/bin/find dist -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | /usr/bin/sort)"
+          test "${actual_files}" = "${expected_files}"
+          test -z "$(/usr/bin/find dist -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          /usr/bin/python3 -I - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          root = Path("dist")
+          source_sha = os.environ["OPERATOR_SOURCE_SHA"]
+          archive_name = f"klyrow-production-validator-{source_sha}.tar.gz"
+          checksummed = {
+              archive_name,
+              "installation-manifest.json",
+              "provenance.json",
+              "sbom.spdx.json",
+              "vulnerability-report.json",
+          }
+          limits = {name: 2 * 1024 * 1024 for name in checksummed}
+          limits[archive_name] = 32 * 1024 * 1024
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          def digest_file(path):
+              value = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      value.update(chunk)
+              return value.hexdigest()
+
+          parsed = {}
+          for line in (root / "SHA256SUMS").read_text(encoding="ascii").splitlines():
+              match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9._-]+)", line)
+              require(match is not None, "checksum manifest syntax rejected")
+              require(match.group(2) not in parsed, "duplicate checksum member")
+              parsed[match.group(2)] = match.group(1)
+          require(set(parsed) == checksummed, "checksum manifest members rejected")
+          for name, expected in parsed.items():
+              path = root / name
+              require(path.stat().st_size <= limits[name], "signing payload too large")
+              require(digest_file(path) == expected, "signing payload checksum mismatch")
+
+          digest = parsed[archive_name]
+          manifest = json.loads((root / "installation-manifest.json").read_text())
+          provenance = json.loads((root / "provenance.json").read_text())
+          sbom = json.loads((root / "sbom.spdx.json").read_text())
+          vulnerability = json.loads((root / "vulnerability-report.json").read_text())
+          require(manifest["source_repository"] == "appolon1908-hue/codestra-production-platform", "repository mismatch")
+          require(manifest["source_sha"] == source_sha, "source SHA mismatch")
+          require(manifest["artifact"] == archive_name, "artifact name mismatch")
+          require(manifest["artifact_sha256"] == digest, "artifact digest mismatch")
+          require(manifest["application_runtime_mutations"] == 0, "runtime mutation declaration rejected")
+          require(provenance["subject"] == [{"name": archive_name, "digest": {"sha256": digest}}], "provenance subject mismatch")
+          definition = provenance["predicate"]["buildDefinition"]
+          require(definition["externalParameters"] == {"source_sha": source_sha}, "provenance parameter mismatch")
+          require(definition["resolvedDependencies"] == [{
+              "uri": "git+https://github.com/appolon1908-hue/codestra-production-platform",
+              "digest": {"gitCommit": source_sha},
+          }], "provenance dependency mismatch")
+          package = sbom["packages"]
+          require(len(package) == 1, "SBOM package count mismatch")
+          require(package[0]["versionInfo"] == source_sha, "SBOM source SHA mismatch")
+          require(package[0]["checksums"] == [{"algorithm": "SHA256", "checksumValue": digest}], "SBOM digest mismatch")
+          require(vulnerability["source_sha"] == source_sha, "scan source SHA mismatch")
+          require(vulnerability["gate"] == "PASS", "vulnerability gate failed")
+          require(vulnerability["high"] == 0, "high-severity finding present")
+          require(vulnerability["source_scan"]["scanner"] == "bandit", "scanner mismatch")
+          require(vulnerability["source_scan"]["scanner_version"] == "1.9.4", "scanner version mismatch")
+          require(vulnerability["source_scan"]["errors"] == 0, "scanner error present")
+          PY
+
       - name: Sign and verify checksum authority
         env:
           SIGNING_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_KEY }}
           SIGNING_PUBLIC_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_PUBLIC_KEY }}
         run: |
+          set -Eeuo pipefail
           test -n "${SIGNING_KEY}"
           test -n "${SIGNING_PUBLIC_KEY}"
-          install -m 0700 -d "${RUNNER_TEMP}/kpv-signing"
-          printf '%s\n' "${SIGNING_KEY}" > "${RUNNER_TEMP}/kpv-signing/key"
-          chmod 0600 "${RUNNER_TEMP}/kpv-signing/key"
-          printf 'codestra-release %s\n' "${SIGNING_PUBLIC_KEY}" > "${RUNNER_TEMP}/kpv-signing/allowed_signers"
-          ssh-keygen -Y sign -q -f "${RUNNER_TEMP}/kpv-signing/key" \
+          /usr/bin/install -m 0700 -d "${RUNNER_TEMP}/kpv-signing"
+          cleanup_signing_key() {
+            /usr/bin/shred -u "${RUNNER_TEMP}/kpv-signing/key" 2>/dev/null ||
+              /usr/bin/rm -f "${RUNNER_TEMP}/kpv-signing/key"
+          }
+          trap cleanup_signing_key EXIT
+          /usr/bin/printf '%s\n' "${SIGNING_KEY}" > "${RUNNER_TEMP}/kpv-signing/key"
+          /usr/bin/chmod 0600 "${RUNNER_TEMP}/kpv-signing/key"
+          /usr/bin/printf 'codestra-release %s\n' "${SIGNING_PUBLIC_KEY}" > "${RUNNER_TEMP}/kpv-signing/allowed_signers"
+          /usr/bin/ssh-keygen -Y sign -q -f "${RUNNER_TEMP}/kpv-signing/key" \
             -n codestra-klyrow-validator dist/SHA256SUMS
-          ssh-keygen -Y verify -q -f "${RUNNER_TEMP}/kpv-signing/allowed_signers" \
+          /usr/bin/ssh-keygen -Y verify -q -f "${RUNNER_TEMP}/kpv-signing/allowed_signers" \
             -I codestra-release -n codestra-klyrow-validator \
             -s dist/SHA256SUMS.sig < dist/SHA256SUMS
-          shred -u "${RUNNER_TEMP}/kpv-signing/key"
+          cleanup_signing_key
+          trap - EXIT
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

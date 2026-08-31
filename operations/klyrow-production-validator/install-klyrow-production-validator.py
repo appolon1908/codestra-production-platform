@@ -11,6 +11,7 @@ import json
 import os
 import pwd
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -96,7 +97,7 @@ def regular(path: Path, *, private: bool = False) -> None:
 
 def snapshot_file(
     source: Path, destination: Path, *, private: bool, maximum_bytes: int
-) -> None:
+) -> tuple[bytes, os.stat_result]:
     descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
         before = os.fstat(descriptor)
@@ -118,6 +119,10 @@ def snapshot_file(
         stable_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
         if any(getattr(before, field) != getattr(after, field) for field in stable_fields):
             raise InstallError(f"release input changed during snapshot: {source.name}")
+        current = source.lstat()
+        if any(getattr(current, field) != getattr(after, field) for field in stable_fields):
+            raise InstallError(f"release input path changed during snapshot: {source.name}")
+        data = b"".join(chunks)
     finally:
         os.close(descriptor)
     output = os.open(
@@ -126,7 +131,6 @@ def snapshot_file(
         0o600,
     )
     try:
-        data = b"".join(chunks)
         written = 0
         while written < len(data):
             count = os.write(output, data[written:])
@@ -136,6 +140,7 @@ def snapshot_file(
         os.fsync(output)
     finally:
         os.close(output)
+    return data, after
 
 
 def stage_install_inputs(args: argparse.Namespace, destination: Path) -> argparse.Namespace:
@@ -499,26 +504,130 @@ def validate_authority(
         raise InstallError("change ID invalid")
 
 
-def backup_file(target: Path, backup_dir: Path, label: str) -> dict[str, object]:
+def backup_file(
+    target: Path, backup_dir: Path, label: str
+) -> tuple[dict[str, object], bytes | None, os.stat_result | None]:
     validate_directory_chain(target.parent)
     record: dict[str, object] = {"target": str(target), "label": label, "present": False}
-    if target.exists() or target.is_symlink():
-        if target.is_symlink() or not target.is_file():
-            raise InstallError(f"unsafe existing target: {target}")
-        destination = backup_dir / label
-        shutil.copy2(target, destination, follow_symlinks=False)
-        os.chmod(destination, 0o600)
-        metadata = target.stat(follow_symlinks=False)
-        record.update(
-            {
-                "present": True,
-                "sha256": sha256(destination),
-                "uid": metadata.st_uid,
-                "gid": metadata.st_gid,
-                "mode": metadata.st_mode & 0o777,
-            }
+    destination = backup_dir / label
+    try:
+        data, metadata = snapshot_file(
+            target,
+            destination,
+            private=label == "authorized_keys",
+            maximum_bytes=8 * 1024 * 1024,
         )
-    return record
+    except FileNotFoundError:
+        if target.exists() or target.is_symlink():
+            raise InstallError(f"target appeared during backup: {target}")
+        return record, None, None
+    record.update(
+        {
+            "present": True,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "uid": metadata.st_uid,
+            "gid": metadata.st_gid,
+            "mode": metadata.st_mode & 0o777,
+        }
+    )
+    return record, data, metadata
+
+
+def atomic_replace_bytes(
+    target: Path,
+    content: bytes,
+    expected_target: os.stat_result,
+    *,
+    mode: int,
+    uid: int,
+    gid: int,
+    label: str,
+) -> os.stat_result:
+    if not re.fullmatch(r"[a-z0-9-]{3,32}", label):
+        raise InstallError("temporary label rejected")
+    validate_directory_chain(target.parent)
+    directory = os.open(
+        target.parent,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+    )
+    descriptor: int | None = None
+    temporary: str | None = None
+    try:
+        parent = os.fstat(directory)
+        current_parent = target.parent.lstat()
+        if current_parent.st_dev != parent.st_dev or current_parent.st_ino != parent.st_ino:
+            raise InstallError("target directory changed before replace")
+        for _attempt in range(32):
+            candidate = f".{target.name}.kpv-{label}.{secrets.token_hex(12)}"
+            try:
+                descriptor = os.open(
+                    candidate,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | os.O_NOFOLLOW
+                    | os.O_CLOEXEC,
+                    mode,
+                    dir_fd=directory,
+                )
+                temporary = candidate
+                break
+            except FileExistsError:
+                continue
+        if descriptor is None or temporary is None:
+            raise InstallError("secure temporary file unavailable")
+        written = 0
+        while written < len(content):
+            count = os.write(descriptor, content[written:])
+            if count <= 0:
+                raise InstallError("temporary file write failed")
+            written += count
+        os.fchmod(descriptor, mode)
+        os.fchown(descriptor, uid, gid)
+        os.fsync(descriptor)
+        created = os.fstat(descriptor)
+        temporary_metadata = os.stat(temporary, dir_fd=directory, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(temporary_metadata.st_mode)
+            or temporary_metadata.st_dev != created.st_dev
+            or temporary_metadata.st_ino != created.st_ino
+        ):
+            raise InstallError("secure temporary file replaced")
+        current = os.stat(target.name, dir_fd=directory, follow_symlinks=False)
+        stable_target = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(
+            getattr(current, field) != getattr(expected_target, field)
+            for field in stable_target
+        ):
+            raise InstallError("target changed before replace")
+        os.replace(
+            temporary,
+            target.name,
+            src_dir_fd=directory,
+            dst_dir_fd=directory,
+        )
+        installed = os.stat(target.name, dir_fd=directory, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(installed.st_mode)
+            or installed.st_dev != created.st_dev
+            or installed.st_ino != created.st_ino
+        ):
+            raise InstallError("target replacement rejected")
+        os.fsync(directory)
+        canonical = target.lstat()
+        if canonical.st_dev != installed.st_dev or canonical.st_ino != installed.st_ino:
+            raise InstallError("target directory changed during replace")
+        temporary = None
+        return installed
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary is not None:
+            try:
+                os.unlink(temporary, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+        os.close(directory)
 
 
 def restore_backups(records: list[dict[str, object]], backup_dir: Path) -> None:
@@ -670,6 +779,9 @@ def main() -> int:
     backup: Path | None = None
     version_root: Path | None = None
     staging_root: Path | None = None
+    authorized_original: bytes | None = None
+    authorized_original_metadata: os.stat_result | None = None
+    authorized_installed_metadata: os.stat_result | None = None
     try:
         staging_root = Path(tempfile.mkdtemp(prefix="kpv-release-"))
         os.chmod(staging_root, 0o700)
@@ -755,7 +867,22 @@ def main() -> int:
                 "probe-smtp": mapped(simulator, "/opt/codestra/operators/klyrow-production-validator/probes/smtp-no-data"),
                 "probe-manifest": mapped(simulator, "/etc/codestra/klyrow-production-validator/probe-manifest.json"),
             }
-            backups = [backup_file(path, backup, label) for label, path in targets.items()]
+            backup_results = {
+                label: backup_file(path, backup, label)
+                for label, path in targets.items()
+            }
+            backups = [result[0] for result in backup_results.values()]
+            _, authorized_original, authorized_original_metadata = backup_results[
+                "authorized_keys"
+            ]
+            if authorized_original is None or authorized_original_metadata is None:
+                raise InstallError("existing authorized_keys authority is required")
+            if (
+                authorized_original_metadata.st_uid != codestra.pw_uid
+                or authorized_original_metadata.st_gid != codestra.pw_gid
+                or authorized_original_metadata.st_mode & 0o777 != 0o600
+            ):
+                raise InstallError("authorized_keys ownership or mode rejected")
             prepare_directory(
                 version_root.parent, mode=0o755, uid=install_uid, gid=install_gid
             )
@@ -831,7 +958,10 @@ def main() -> int:
             prepare_directory(
                 authorized.parent, mode=0o700, uid=codestra.pw_uid, gid=codestra.pw_gid
             )
-            existing = authorized.read_text(encoding="utf-8").splitlines() if authorized.exists() else []
+            try:
+                existing = authorized_original.decode("utf-8").splitlines()
+            except UnicodeDecodeError as exc:
+                raise InstallError("authorized_keys encoding rejected") from exc
             key_type, key_blob = public_key.split()
             retained = [
                 line
@@ -844,9 +974,16 @@ def main() -> int:
                 "restrict,no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty,no-user-rc "
                 + public_key
             )
-            authorized_tmp = backup / "authorized_keys.new"
-            authorized_tmp.write_text("\n".join([*retained, forced]) + "\n", encoding="utf-8")
-            atomic_install(authorized_tmp, authorized, 0o600, codestra.pw_uid, codestra.pw_gid)
+            authorized_content = ("\n".join([*retained, forced]) + "\n").encode("utf-8")
+            authorized_installed_metadata = atomic_replace_bytes(
+                authorized,
+                authorized_content,
+                authorized_original_metadata,
+                mode=0o600,
+                uid=codestra.pw_uid,
+                gid=codestra.pw_gid,
+                label="install",
+            )
             installation = {
                 "schema_version": "1.0.0",
                 "source_sha": source_sha,
@@ -865,7 +1002,7 @@ def main() -> int:
                 "key_fingerprint": fingerprint,
                 "source_restriction": args.source_cidr,
                 "expires_at": args.expiry,
-                "authorized_keys_sha256": sha256(authorized),
+                "authorized_keys_sha256": hashlib.sha256(authorized_content).hexdigest(),
                 "backup_directory": str(backup),
                 "backups": backups,
                 "application_runtime_changed": False,
@@ -882,7 +1019,28 @@ def main() -> int:
     except (InstallError, OSError, KeyError, ValueError, json.JSONDecodeError, tarfile.TarError):
         if backup is not None and backups:
             try:
-                restore_backups(backups, backup)
+                restore_backups(
+                    [record for record in backups if record.get("label") != "authorized_keys"],
+                    backup,
+                )
+                if (
+                    authorized_installed_metadata is not None
+                    and authorized_original is not None
+                    and authorized_original_metadata is not None
+                ):
+                    atomic_replace_bytes(
+                        Path(str(next(
+                            record["target"]
+                            for record in backups
+                            if record.get("label") == "authorized_keys"
+                        ))),
+                        authorized_original,
+                        authorized_installed_metadata,
+                        mode=authorized_original_metadata.st_mode & 0o777,
+                        uid=authorized_original_metadata.st_uid,
+                        gid=authorized_original_metadata.st_gid,
+                        label="rollback",
+                    )
                 if version_root is not None and version_root.is_dir() and not version_root.is_symlink():
                     shutil.rmtree(version_root)
             except (InstallError, OSError):

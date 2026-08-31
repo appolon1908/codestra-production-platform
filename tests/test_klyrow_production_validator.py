@@ -655,6 +655,58 @@ def test_protected_release_publication_is_retry_safe() -> None:
     assert publication.rindex("require_draft", 0, upload_asset) < upload_asset
 
 
+def test_signing_secrets_are_isolated_from_repository_code() -> None:
+    workflow = (SOURCE.parents[1] / ".github/workflows/klyrow-production-validator.yml").read_text(
+        encoding="utf-8"
+    )
+    build = workflow.split("  build-protected-artifact:", 1)[1].split(
+        "  publish-protected-artifact:", 1
+    )[0]
+    signing = workflow.split("  publish-protected-artifact:", 1)[1]
+    assert "contents: write" not in build
+    assert "SIGNING_KEY" not in build
+    assert "build-operator-artifact.py" in build
+    assert "needs: build-protected-artifact" in signing
+    assert "actions/checkout@" not in signing
+    assert "actions/setup-python@" not in signing
+    assert "build-operator-artifact.py" not in signing
+    assert "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" in signing
+    assert "/usr/bin/ssh-keygen -Y sign" in signing
+    assert "/usr/bin/ssh-keygen -Y verify" in signing
+    assert "Validate isolated signing payload" in signing
+
+
+def test_backup_rejects_authorized_keys_symlink_swap(tmp_path: Path, monkeypatch) -> None:
+    installer = load_source_script(
+        "install-klyrow-production-validator.py", "kpv_installer_backup_race"
+    )
+    target = tmp_path / "authorized_keys"
+    original = tmp_path / "authorized_keys.original"
+    trap = tmp_path / "root-owned-trap"
+    backup = tmp_path / "backup"
+    target.write_text("ssh-ed25519 original\n", encoding="utf-8")
+    target.chmod(0o600)
+    trap.write_text("must-not-change\n", encoding="utf-8")
+    backup.mkdir(mode=0o700)
+    real_open = installer.os.open
+    swapped = False
+
+    def racing_open(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if not swapped and Path(path) == target:
+            swapped = True
+            target.rename(original)
+            target.symlink_to(trap)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(installer.os, "open", racing_open)
+    with pytest.raises((installer.InstallError, OSError)):
+        installer.backup_file(target, backup, "authorized_keys")
+    assert swapped
+    assert trap.read_text(encoding="utf-8") == "must-not-change\n"
+    assert not (backup / "authorized_keys").exists()
+
+
 def test_pinned_probes_are_bundled_and_structurally_no_data() -> None:
     required = (
         "kpv_probe_core.py",
