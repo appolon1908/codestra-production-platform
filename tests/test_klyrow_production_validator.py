@@ -636,11 +636,23 @@ def test_protected_release_publication_is_retry_safe() -> None:
         "releases/assets/${remote_id}",
         'cmp "${asset}"',
         ".target_commitish",
+        "require_draft",
+        "expected_tag_binding",
+        '-f ref="refs/tags/${tag}"',
         ".object.sha",
         "-F draft=false",
     ):
         assert required in publication
     assert "gh release create \"klyrow-validator-${OPERATOR_SOURCE_SHA}\" dist/*" not in publication
+    publish = publication.index("-F draft=false")
+    assert publication.index("expected_tag_binding") < publish
+    assert publication.rindex("expected_tag_binding", 0, publish) < publish
+    assert publication.rindex("require_draft", 0, publish) < publish
+    assert publication.count("require_draft") >= 4
+    delete_asset = publication.index("releases/assets/${remote_id}")
+    upload_asset = publication.index('gh release upload "${tag}" "${asset}"')
+    assert publication.rindex("require_draft", 0, delete_asset) < delete_asset
+    assert publication.rindex("require_draft", 0, upload_asset) < upload_asset
 
 
 def test_pinned_probes_are_bundled_and_structurally_no_data() -> None:

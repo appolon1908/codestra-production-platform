@@ -162,6 +162,22 @@ jobs:
           test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .prerelease)" = "false"
           release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)"
           test "${release_id}" -gt 0
+          release_draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq .draft)"
+          test "${release_draft}" = "true" || test "${release_draft}" = "false"
+          require_draft() {
+            test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq .draft)" = "true"
+          }
+          expected_tag_binding="$(printf 'commit\t%s' "${OPERATOR_SOURCE_SHA}")"
+          if tag_binding="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '[.object.type, .object.sha] | @tsv' 2>/dev/null)"; then
+            test "${tag_binding}" = "${expected_tag_binding}"
+          else
+            require_draft
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${tag}" -f sha="${OPERATOR_SOURCE_SHA}" --jq .ref >/dev/null
+          fi
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '[.object.type, .object.sha] | @tsv')" = "${expected_tag_binding}"
           remote_assets=()
           while IFS=$'\t' read -r remote_id remote_asset remote_state; do
             test "${remote_id}" -gt 0
@@ -175,6 +191,7 @@ jobs:
             if test "${remote_state}" = "uploaded"; then
               remote_assets+=("${remote_asset}")
             else
+              require_draft
               gh api --method DELETE \
                 "repos/${GITHUB_REPOSITORY}/releases/assets/${remote_id}"
             fi
@@ -197,6 +214,7 @@ jobs:
               gh release download "${tag}" --pattern "${name}" --dir "${verification_root}"
               cmp "${asset}" "${verification_root}/${name}"
             else
+              require_draft
               gh release upload "${tag}" "${asset}"
             fi
           done
@@ -207,7 +225,10 @@ jobs:
           for asset in "${assets[@]}"; do
             cmp "${asset}" "${final_root}/$(basename "${asset}")"
           done
-          if test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .draft)" = "true"; then
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '[.object.type, .object.sha] | @tsv')" = "${expected_tag_binding}"
+          if test "${release_draft}" = "true"; then
+            require_draft
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
               -F draft=false --jq .id >/dev/null
           fi
