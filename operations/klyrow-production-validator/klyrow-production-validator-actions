@@ -255,6 +255,8 @@ def projected_release_identity(value: dict[str, object]) -> dict[str, object]:
         for field in ("oci_source_revision", "source_commit_sha"):
             if not COMMIT_RE.fullmatch(container[field]):
                 raise PolicyError(f"RELEASE_{field.upper()}_REJECTED")
+        if container["source_commit_sha"] != container["oci_source_revision"]:
+            raise PolicyError("RELEASE_SOURCE_REVISION_MISMATCH")
         if not REPOSITORY_RE.fullmatch(container["source_repository"]):
             raise PolicyError("RELEASE_SOURCE_REPOSITORY_REJECTED")
         for field in (
@@ -337,6 +339,7 @@ def live_release_bindings(containers: list[dict[str, object]]) -> tuple[list[dic
         matched = (
             image_reference == expected_reference
             and revision == asserted["oci_source_revision"]
+            and revision == asserted["source_commit_sha"]
             and source_repository == asserted["source_repository"]
         )
         all_match = all_match and matched
@@ -345,6 +348,7 @@ def live_release_bindings(containers: list[dict[str, object]]) -> tuple[list[dic
                 "container": name,
                 "image_reference_matches": image_reference == expected_reference,
                 "source_revision_matches": revision == asserted["oci_source_revision"],
+                "source_commit_matches": revision == asserted["source_commit_sha"],
                 "source_repository_matches": source_repository == asserted["source_repository"],
                 "matched": matched,
             }

@@ -401,6 +401,14 @@ def test_release_identity_rejects_nested_top_level_status_values() -> None:
         actions.projected_release_identity(value)
 
 
+def test_release_identity_requires_source_commit_to_match_oci_revision() -> None:
+    actions = load_actions_module()
+    value = release_readback(actions)
+    value["containers"][0]["source_commit_sha"] = "e" * 40
+    with pytest.raises(PolicyError, match="RELEASE_SOURCE_REVISION_MISMATCH"):
+        actions.projected_release_identity(value)
+
+
 def test_release_identity_rejects_stale_readback_and_binds_live_containers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -521,9 +529,11 @@ def test_sudo_listing_rejects_unrestricted_and_generic_grants() -> None:
 
 
 def test_callback_invalid_signature_uses_current_timestamp_and_stays_incomplete() -> None:
+    callback_module = load_source_script("probe-callback-tests", "kpv_probe_callback")
     callback = (SOURCE / "probe-callback-tests").read_text(encoding="utf-8")
     assert "current_timestamp = str(int(time.time()))" in callback
     assert '"X-Klyrow-Timestamp": current_timestamp' in callback
+    assert callback_module.BAD_SIGNATURE == "sha256=" + ("0" * 64)
     assert '"complete": False' in callback
     assert "return 3" in callback
 

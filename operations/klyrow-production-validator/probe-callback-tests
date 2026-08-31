@@ -20,6 +20,7 @@ BODY = json.dumps(
     },
     separators=(",", ":"),
 ).encode("utf-8")
+BAD_SIGNATURE = "sha256=" + ("0" * 64)
 
 
 def main() -> int:
@@ -31,7 +32,7 @@ def main() -> int:
                 "Content-Type": "application/json",
                 "X-Klyrow-Timestamp": current_timestamp,
                 "X-Klyrow-Event-Id": "00000000-0000-0000-0000-000000000000",
-                "X-Klyrow-Signature": "invalid",
+                "X-Klyrow-Signature": BAD_SIGNATURE,
             },
         ),
         (
@@ -39,7 +40,7 @@ def main() -> int:
             {
                 "Content-Type": "application/json",
                 "X-Klyrow-Timestamp": current_timestamp,
-                "X-Klyrow-Signature": "invalid",
+                "X-Klyrow-Signature": BAD_SIGNATURE,
             },
         ),
     )
