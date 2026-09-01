@@ -1,0 +1,48 @@
+name: codestra-email-reseller
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/email-reseller/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - /etc/codestra/secrets/kyqra-telnexa/middleware.env
+    environment:
+      EMAIL_DATABASE_URL_FILE: /run/secrets/email_database_url
+      EMAIL_SUBMISSION_MODE: synthetic
+      EMAIL_MAX_REQUEST_BYTES: "262144"
+      EMAIL_MAX_RECIPIENTS: "50"
+      EMAIL_RATE_PER_MINUTE: "60"
+      KLYROW_HEALTH_URL: https://klyrow.internal.codestra.agency:18000/v1/health
+      KLYROW_CLIENT_CERT_FILE: /run/codestra-mtls/klyrow/client-fullchain.crt
+      KLYROW_CLIENT_KEY_FILE: /run/codestra-mtls/klyrow/client.key
+      KLYROW_CA_FILE: /run/codestra-mtls/klyrow/root-ca.crt
+    secrets: [email_database_url]
+    volumes:
+      - /etc/codestra/mtls/clients/klyrow:/run/codestra-mtls/klyrow:ro
+    ports:
+      # TLS/mTLS is terminated by the host Caddy listener on 10.40.0.1:18080.
+      # Keep the application origin unreachable from the private network.
+      - "127.0.0.1:18180:8080"
+    networks: [edge, backend]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/readyz]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+volumes:
+  email_reseller_data:
+secrets:
+  email_database_url:
+    file: /etc/codestra/secrets/middleware-certification/email-database-url
+networks:
+  edge:
+    name: codestra_edge
+    external: true
+  backend:
+    name: codestra_backend
+    external: true
