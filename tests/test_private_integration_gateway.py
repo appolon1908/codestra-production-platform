@@ -5,8 +5,10 @@ import hmac
 import importlib.util
 import json
 import os
+import socket
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -344,6 +346,8 @@ def test_customer_timezone_delivery_window_blocks_before_sms_reservation(
         {"timezone": "Europe/Berlin", "start": "09:00", "end": "17:00"},
         {"timezone": "Z", "start": "09:00", "end": "09:00"},
         {"timezone": "Z", "start": "9:00", "end": "17:00"},
+        {"timezone": "+13:99", "start": "09:00", "end": "17:00"},
+        {"timezone": "-14:01", "start": "09:00", "end": "17:00"},
     ],
 )
 def test_enabled_customer_delivery_window_configuration_fails_closed(
@@ -2107,6 +2111,42 @@ def test_crashed_submitting_row_reconciles_only_from_production_dlr_path(
     assert completed["provider_message_id"] == "3f08d4cb-fc4b-4474-95c1-0d305af3a679"
     assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
     assert completed["operation_token"] is None
+
+
+def test_request_body_read_timeout_and_short_read_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(gateway, "REQUEST_IO_TIMEOUT_SECONDS", 0.1)
+    app = gateway.Gateway(settings(tmp_path), store(tmp_path))
+    server = gateway.ThreadingHTTPServer(("127.0.0.1", 0), gateway.handler_for(app))
+    server.daemon_threads = True
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        started = time.monotonic()
+        with socket.create_connection(("127.0.0.1", server.server_port), timeout=2) as client:
+            client.settimeout(2)
+            client.sendall(
+                b"POST /api/v1/kyqra/jobs HTTP/1.1\r\n"
+                b"Host: localhost\r\nContent-Length: 16\r\n\r\n{}"
+            )
+            timeout_response = client.recv(4096)
+        assert time.monotonic() - started < 1.5
+        assert b" 408 " in timeout_response.split(b"\r\n", 1)[0]
+
+        with socket.create_connection(("127.0.0.1", server.server_port), timeout=2) as client:
+            client.settimeout(2)
+            client.sendall(
+                b"POST /api/v1/kyqra/jobs HTTP/1.1\r\n"
+                b"Host: localhost\r\nContent-Length: 16\r\n\r\n{}"
+            )
+            client.shutdown(socket.SHUT_WR)
+            short_response = client.recv(4096)
+        assert b" 400 " in short_response.split(b"\r\n", 1)[0]
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
 
 
 def test_crash_after_reservation_is_lease_resumable_before_carrier_submission(

@@ -104,6 +104,7 @@ DISPATCH_LEASE_SECONDS = 30
 DELIVERY_TIME = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 DELIVERY_TIMEZONE = re.compile(r"([+-])([0-9]{2}):([0-9]{2})")
 AMBIGUOUS_CARRIER_HTTP_STATUSES = {408, 409, 425, 429}
+REQUEST_IO_TIMEOUT_SECONDS = 10.0
 
 
 class DispatchOutcomeUnknown(RuntimeError):
@@ -1188,9 +1189,11 @@ def validate_delivery_window(
             raise PermissionError("delivery_window_policy_invalid")
         offset_hours = int(timezone_match.group(2))
         offset_remainder = int(timezone_match.group(3))
-        if offset_hours > 14 or (offset_hours == 14 and offset_remainder != 0):
+        if offset_remainder > 59:
             raise PermissionError("delivery_window_policy_invalid")
         offset_minutes = offset_hours * 60 + offset_remainder
+        if offset_minutes > 14 * 60:
+            raise PermissionError("delivery_window_policy_invalid")
         if timezone_match.group(1) == "-":
             offset_minutes = -offset_minutes
     delivery_zone = timezone(timedelta(minutes=offset_minutes))
@@ -1864,6 +1867,10 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "CodestraPrivateIntegrationGateway/2"
 
+        def setup(self) -> None:
+            super().setup()
+            self.connection.settimeout(REQUEST_IO_TIMEOUT_SECONDS)
+
         def log_message(self, _format_string: str, *_arguments: Any) -> None:
             LOG.info(
                 "system=http client=%s method=%s path=%s",
@@ -1930,7 +1937,14 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
             )
             if length <= 0 or length > maximum:
                 return self.send_json(413, {"detail": "invalid body size"})
-            body = self.rfile.read(length)
+            try:
+                body = self.rfile.read(length)
+            except (TimeoutError, socket.timeout):
+                self.close_connection = True
+                return self.send_json(408, {"detail": "request body timeout"})
+            if len(body) != length:
+                self.close_connection = True
+                return self.send_json(400, {"detail": "incomplete request body"})
             if parsed_path.path == JASMIN_DLR_PATH:
                 content_type = self.headers.get("Content-Type", "").split(";", 1)[0]
                 if content_type.strip().lower() != "application/x-www-form-urlencoded":
