@@ -1,0 +1,259 @@
+#!/usr/bin/python3
+"""Emit a fixed, sanitized, read-only inventory of running Docker workloads."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from typing import Any
+
+
+DOCKER = "/usr/bin/docker"
+SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+SOURCE_RE = re.compile(
+    r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$"
+)
+APPROVED_METADATA_LABELS = {
+    "org.opencontainers.image.revision": "git_sha",
+    "org.opencontainers.image.version": "version",
+    "org.opencontainers.image.source": "source",
+    "com.codestra.release.id": "release_id",
+}
+SAFETY_FLAGS = (
+    "ALLOW_CAMPAIGN_ACTIVATION",
+    "ALLOW_LIVE_CALLS",
+    "ALLOW_LIVE_EMAIL",
+    "ALLOW_LIVE_SMS",
+    "CALLBACK_DELIVERY_ENABLED",
+    "CALLBACK_EMAIL_COMMAND_ENABLED",
+    "CALLBACK_DISPATCH",
+    "CALLBACK_DISPATCH_ENABLED",
+    "CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED",
+    "COD_WEB_OUT_EMAIL_ENABLED",
+    "CONTROL_PLANE_OUTBOUND_ENABLED",
+    "CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED",
+    "CRAWLER_EXECUTION_ENABLED",
+    "CRAWLER_EXTERNAL_CONTACT_ENABLED",
+    "CRAWLER_ODOO_DELIVERY_ENABLED",
+    "EMAIL_DELIVERY_ENABLED",
+    "ENABLE_AGENT_SYNC",
+    "ENABLE_EXTERNAL_DELIVERY",
+    "ENABLE_IVR_CALLBACKS",
+    "ENABLE_LEAD_PUBLICATION",
+    "ENABLE_LIVE_CALL_CONTROL",
+    "ENABLE_PROVISIONING",
+    "ENABLE_PRODUCTION_DIALING",
+    "ENABLE_VICIDIAL_WRITES",
+    "ENABLE_WARM_TRANSFER",
+    "EXTERNAL_DIAL_ENABLED",
+    "LIVE_ADVERTISING_ENABLED",
+    "LIVE_CALL_CONTROL",
+    "LIVE_CALL_CONTROL_ENABLED",
+    "EXTERNAL_DELIVERY_ENABLED",
+    "SOCIAL_PUBLISHING_ENABLED",
+    "EXTERNAL_MODEL_CALLS_ENABLED",
+    "FORM_ODOO_DELIVERY_ENABLED",
+    "GLOBAL_EMAIL_PRODUCTION",
+    "LIVE_SMS_DELIVERY",
+    "LIVE_EMAIL_DELIVERY",
+    "LIVE_PSTN_DIALING",
+    "LIVE_WRITE",
+    "LIVE_WRITES",
+    "GENERAL_AI_DIALING",
+    "N8N_EXTERNAL_PROVIDER_WRITES",
+    "N8N_DELIVERY_ENABLED",
+    "N8N_PRODUCTION_WORKFLOWS_ENABLED",
+    "ODOO_AUTOMATION_WRITES_ENABLED",
+    "ODOO_DELIVERY_ENABLED",
+    "ODOO_RESULT_DELIVERY_ENABLED",
+    "ODOO_WRITE",
+    "ODOO_WRITE_ENABLED",
+    "OUTBOX_DISPATCH_ENABLED",
+    "POSTAL_INBOUND_ENABLED",
+    "PRODUCTION_CALLBACKS_ENABLED",
+    "PRODUCTION_DIALING",
+    "PRODUCTION_DIALING_ENABLED",
+    "PRODUCTION_WEBRTC_ENABLED",
+    "SCRAPPER_EXECUTION_ENABLED",
+    "SCRAPPER_EXTERNAL_CONTACT_ENABLED",
+    "SCRAPPER_ODOO_DELIVERY_ENABLED",
+    "SEND_EVENTS",
+    "SMS_DELIVERY_ENABLED",
+    "SMS_PRODUCTION",
+    "SOCIAL_DELIVERY_ENABLED",
+    "TRANSFERS_ENABLED",
+    "UNRESTRICTED_CRAWLING",
+    "VICIDIAL_WRITE_ENABLED",
+    "VICIDIAL_WRITES_ENABLED",
+    "WEBRTC_PRODUCTION_ROUTES_ENABLED",
+)
+NORMALIZED_SAFETY_VALUES = {
+    "0": "false",
+    "false": "false",
+    "no": "false",
+    "off": "false",
+    "disabled": "disabled",
+    "not_applicable": "not_applicable",
+    "n/a": "not_applicable",
+    "1": "true",
+    "true": "true",
+    "yes": "true",
+    "on": "true",
+    "enabled": "true",
+}
+
+
+class InventoryError(RuntimeError):
+    pass
+
+
+def docker_output(*args: str) -> str:
+    result = subprocess.run(
+        [DOCKER, *args],
+        check=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+    )
+    return result.stdout
+
+
+def docker_json(*args: str) -> Any:
+    return json.loads(docker_output(*args))
+
+
+def normalized_safety_flags(environment: list[str] | None) -> dict[str, str]:
+    selected: dict[str, str] = {}
+    duplicates: set[str] = set()
+    allowed = set(SAFETY_FLAGS)
+    for entry in environment or []:
+        name, separator, value = entry.partition("=")
+        if separator and name in allowed:
+            if name in selected:
+                duplicates.add(name)
+            elif name not in duplicates:
+                selected[name] = NORMALIZED_SAFETY_VALUES.get(
+                    value.strip().lower(), "unknown"
+                )
+    for name in duplicates:
+        selected[name] = "unknown"
+    # Absence is unknown, not not-applicable. A later capability authority may
+    # prove that a gate is inapplicable; this inventory must never infer that.
+    return {name: selected.get(name, "unknown") for name in SAFETY_FLAGS}
+
+
+def release_metadata(labels: dict[str, str] | None) -> dict[str, str | None]:
+    labels = labels or {}
+    metadata = {
+        output: labels.get(label) for label, output in APPROVED_METADATA_LABELS.items()
+    }
+    revision = metadata["git_sha"]
+    if revision is not None and not GIT_SHA_RE.fullmatch(revision):
+        metadata["git_sha"] = None
+    for field in ("version", "release_id"):
+        value = metadata[field]
+        if value is not None:
+            metadata[field] = "sha256:" + hashlib.sha256(value.encode()).hexdigest()
+    source = metadata["source"]
+    if source is not None and not SOURCE_RE.fullmatch(source):
+        metadata["source"] = None
+    return metadata
+
+
+def image_identity(container: dict[str, Any]) -> tuple[str | None, bool]:
+    image_id = container.get("Image")
+    if not isinstance(image_id, str) or not SHA256_RE.fullmatch(image_id):
+        image_id = None
+    configured = container.get("Config", {}).get("Image")
+    immutable_reference = bool(
+        isinstance(configured, str)
+        and re.search(r"@sha256:[0-9a-f]{64}$", configured)
+    )
+    return image_id, immutable_reference
+
+
+def sanitized_ports(container: dict[str, Any]) -> list[dict[str, Any]]:
+    ports = []
+    bindings = container.get("NetworkSettings", {}).get("Ports") or {}
+    for container_port in sorted(bindings):
+        for binding in bindings[container_port] or []:
+            ports.append(
+                {
+                    "container": container_port,
+                    "host_ip": binding.get("HostIp"),
+                    "host_port": binding.get("HostPort"),
+                }
+            )
+    return ports
+
+
+def inventory() -> dict[str, Any]:
+    identifiers = docker_output("ps", "--quiet", "--no-trunc").splitlines()
+    containers = docker_json("inspect", *identifiers) if identifiers else []
+    workloads = []
+    for container in containers:
+        digest, immutable_reference = image_identity(container)
+        image = docker_json("image", "inspect", digest)[0] if digest else {}
+        metadata = release_metadata(image.get("Config", {}).get("Labels"))
+        state = container.get("State", {})
+        health = (state.get("Health") or {}).get("Status", "not_configured")
+        workloads.append(
+            {
+                "name": str(container.get("Name", "")).removeprefix("/"),
+                "image": container.get("Config", {}).get("Image"),
+                "image_digest": digest,
+                "immutable_reference": immutable_reference,
+                "health": health,
+                "restart_count": int(container.get("RestartCount", 0)),
+                "networks": sorted((container.get("NetworkSettings", {}).get("Networks") or {}).keys()),
+                "ports": sanitized_ports(container),
+                "release": metadata,
+                "safety_flags": normalized_safety_flags(container.get("Config", {}).get("Env")),
+            }
+        )
+    workloads.sort(key=lambda item: item["name"])
+    immutable = sum(item["immutable_reference"] for item in workloads)
+    revisions = sum(item["release"]["git_sha"] is not None for item in workloads)
+    unknown = sum(
+        not item["immutable_reference"] or item["release"]["git_sha"] is None
+        for item in workloads
+    )
+    return {
+        "schema": "codestra.runtime-inventory.v1",
+        "host": os.uname().nodename,
+        "workloads": workloads,
+        "summary": {
+            "docker_runtime_inventory": "PASS",
+            "immutable_images": {"passing": immutable, "total": len(workloads)},
+            "source_revision_exposed": {"passing": revisions, "total": len(workloads)},
+            "unknown_provenance_workloads": unknown,
+            "source_lock": "PASS" if workloads and unknown == 0 else "FAIL",
+        },
+    }
+
+
+def main(argv: list[str]) -> int:
+    if argv:
+        print("runtime inventory accepts no arguments", file=sys.stderr)
+        return 2
+    if os.geteuid() != 0:
+        print("runtime inventory must run through the restricted root authority", file=sys.stderr)
+        return 2
+    try:
+        print(json.dumps(inventory(), sort_keys=True, separators=(",", ":")))
+    except (InventoryError, subprocess.SubprocessError, json.JSONDecodeError, OSError) as exc:
+        print(f"runtime inventory failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
