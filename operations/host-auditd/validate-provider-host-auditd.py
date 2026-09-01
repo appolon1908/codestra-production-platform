@@ -30,6 +30,12 @@ RELEASE_TRUST_ROOT = Path("/etc/codestra/release")
 ALLOWED_SIGNERS_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers"
 SIGNER_FINGERPRINT_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers.ssh-fingerprint"
 PYTHON_INTERPRETER = Path("/usr/bin/python3")
+COMMAND_MAX_BYTES = 64 * 1024 * 1024
+COMMANDS = {
+    "auditctl": Path("/usr/sbin/auditctl"),
+    "ausearch": Path("/usr/sbin/ausearch"),
+    "systemctl": Path("/usr/bin/systemctl"),
+}
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REQUIRED_KEYS = {
     "codestra_ssh_authority",
@@ -177,6 +183,15 @@ def audit_status(value: str) -> dict[str, int]:
     return result
 
 
+def healthy_audit_status() -> dict[str, int]:
+    status = audit_status(run([str(COMMANDS["auditctl"]), "-s"]))
+    if status["enabled"] not in {1, 2} or status["pid"] <= 0 or status["lost"] != 0:
+        raise ValidationError("audit kernel state rejected")
+    if status["backlog"] >= status["backlog_limit"]:
+        raise ValidationError("audit kernel backlog exhausted")
+    return status
+
+
 def rule_keys(value: str) -> set[str]:
     result: set[str] = set()
     for line in value.splitlines():
@@ -322,6 +337,35 @@ def python_runtime_identity() -> tuple[Path, str]:
     return resolved, hashlib.sha256(value).hexdigest()
 
 
+def command_runtime_identities() -> dict[str, tuple[Path, str]]:
+    """Authenticate every fixed privileged helper before invoking any helper."""
+
+    identities: dict[str, tuple[Path, str]] = {}
+    for name, path in COMMANDS.items():
+        if not path.is_absolute():
+            raise ValidationError(f"audit command path rejected: {name}")
+        try:
+            alias = path.lstat()
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            raise ValidationError(f"audit command unavailable: {name}") from exc
+        if (
+            not stat.S_ISREG(alias.st_mode)
+            or alias.st_uid != 0
+            or alias.st_gid != 0
+            or stat.S_IMODE(alias.st_mode) & 0o022
+            or stat.S_IMODE(alias.st_mode) & 0o111 == 0
+            or not resolved.is_absolute()
+            or resolved != path
+        ):
+            raise ValidationError(f"audit command authority rejected: {name}")
+        value = checked_regular(resolved, max_bytes=COMMAND_MAX_BYTES)
+        if not value:
+            raise ValidationError(f"audit command target rejected: {name}")
+        identities[name] = (resolved, hashlib.sha256(value).hexdigest())
+    return identities
+
+
 def installed_release_binding(
     expected_source_sha: str,
 ) -> tuple[bytes, str, str, str]:
@@ -355,28 +399,13 @@ def validate(expected_source_sha: str) -> dict[str, object]:
         raise ValidationError("validator must run as root")
     if not SHA_RE.fullmatch(expected_source_sha):
         raise ValidationError("expected source SHA rejected")
-    active = run(["/usr/bin/systemctl", "is-active", "auditd.service"]).strip()
-    enabled = run(["/usr/bin/systemctl", "is-enabled", "auditd.service"]).strip()
-    if active != "active" or enabled != "enabled":
-        raise ValidationError("auditd service state rejected")
-    status = audit_status(run(["/usr/sbin/auditctl", "-s"]))
-    if status["enabled"] not in {1, 2} or status["pid"] <= 0 or status["lost"] != 0:
-        raise ValidationError("audit kernel state rejected")
-    if status["backlog"] >= status["backlog_limit"]:
-        raise ValidationError("audit kernel backlog exhausted")
+    command_identities = command_runtime_identities()
     installed, rule_sha, validator_sha, launcher_sha = installed_release_binding(
         expected_source_sha
     )
-    active_rules = run(["/usr/sbin/auditctl", "-l"])
-    active_keys = rule_keys(active_rules)
-    if not REQUIRED_KEYS <= active_keys:
-        raise ValidationError("managed audit keys are not all active")
-    expected_signatures = managed_rule_signatures(installed.decode("utf-8", "strict"), REQUIRED_KEYS)
-    active_signatures = managed_rule_signatures(active_rules, REQUIRED_KEYS)
-    if expected_signatures != active_signatures:
-        raise ValidationError("managed audit rule semantics differ from source")
     audit_log = log_path()
     python_target, python_digest = python_runtime_identity()
+    command_targets = [identity[0] for identity in command_identities.values()]
     if not operator_cannot_modify(
         path_authority_chain(
             [
@@ -392,19 +421,38 @@ def validate(expected_source_sha: str) -> dict[str, object]:
             SIGNER_FINGERPRINT_AUTHORITY,
             PYTHON_INTERPRETER.parent,
             python_target,
+            *COMMANDS.values(),
+            *command_targets,
             audit_log.parent,
             audit_log,
             ]
         )
     ):
         raise ValidationError("codestra-admin can modify audit authority")
+    active = run([str(COMMANDS["systemctl"]), "is-active", "auditd.service"]).strip()
+    enabled = run([str(COMMANDS["systemctl"]), "is-enabled", "auditd.service"]).strip()
+    if active != "active" or enabled != "enabled":
+        raise ValidationError("auditd service state rejected")
+    healthy_audit_status()
+    active_rules = run([str(COMMANDS["auditctl"]), "-l"])
+    active_keys = rule_keys(active_rules)
+    if not REQUIRED_KEYS <= active_keys:
+        raise ValidationError("managed audit keys are not all active")
+    expected_signatures = managed_rule_signatures(
+        installed.decode("utf-8", "strict"), REQUIRED_KEYS
+    )
+    active_signatures = managed_rule_signatures(active_rules, REQUIRED_KEYS)
+    if expected_signatures != active_signatures:
+        raise ValidationError("managed audit rule semantics differ from source")
     correlation = uuid.uuid4().hex
     marker = f"CODESTRA_HOST_AUDIT_TEST_{correlation}"
-    run(["/usr/sbin/auditctl", "-m", marker])
+    run([str(COMMANDS["auditctl"]), "-m", marker])
     found = False
     for _ in range(10):
         try:
-            found = marker in run(["/usr/sbin/ausearch", "-m", "USER", "--start", "recent", "--raw"])
+            found = marker in run(
+                [str(COMMANDS["ausearch"]), "-m", "USER", "--start", "recent", "--raw"]
+            )
         except subprocess.CalledProcessError:
             found = False
         if found:
@@ -412,19 +460,23 @@ def validate(expected_source_sha: str) -> dict[str, object]:
         time.sleep(0.1)
     if not found:
         raise ValidationError("synthetic audit read-back failed")
+    final_status = healthy_audit_status()
     return {
         "schema": "codestra.host-auditd.validation.v1",
         "source_sha": expected_source_sha,
         "correlation_id": correlation,
         "service": "enabled-active",
-        "kernel_enabled": status["enabled"],
-        "lost_records": status["lost"],
-        "backlog": status["backlog"],
-        "backlog_limit": status["backlog_limit"],
+        "kernel_enabled": final_status["enabled"],
+        "lost_records": final_status["lost"],
+        "backlog": final_status["backlog"],
+        "backlog_limit": final_status["backlog_limit"],
         "rule_sha256": rule_sha,
         "validator_sha256": validator_sha,
         "validator_launcher_sha256": launcher_sha,
         "python_interpreter_sha256": python_digest,
+        "command_sha256": {
+            name: identity[1] for name, identity in sorted(command_identities.items())
+        },
         "managed_keys": sorted(REQUIRED_KEYS),
         "audit_log": str(audit_log),
         "audit_log_root_owned": True,

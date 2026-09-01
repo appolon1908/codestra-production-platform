@@ -539,6 +539,8 @@ def test_release_trust_and_python_runtime_are_in_operator_acl_boundary() -> None
         "SIGNER_FINGERPRINT_AUTHORITY",
         "PYTHON_INTERPRETER.parent",
         "python_target",
+        "*COMMANDS.values()",
+        "*command_targets",
         "path_authority_chain",
         "operator_cannot_modify",
     ):
@@ -550,8 +552,77 @@ def test_release_trust_and_python_runtime_are_in_operator_acl_boundary() -> None
         "SIGNER_FINGERPRINT_AUTHORITY",
         "PYTHON_INTERPRETER.parent",
         "python_target",
+        "*COMMANDS.values()",
+        "*command_targets",
     ):
         assert token in validation
+
+
+def test_command_helpers_are_root_owned_digested_and_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    helper = tmp_path / "audit-helper"
+    helper.write_bytes(b"#!/bin/sh\nexit 0\n")
+    helper.chmod(0o755)
+
+    monkeypatch.setattr(INSTALLER, "COMMANDS", {"helper": helper})
+    installer_identities = INSTALLER.command_runtime_identities()
+    assert installer_identities == {
+        "helper": (helper, hashlib.sha256(helper.read_bytes()).hexdigest())
+    }
+
+    monkeypatch.setattr(VALIDATOR, "COMMANDS", {"helper": helper})
+    validator_identities = VALIDATOR.command_runtime_identities()
+    assert validator_identities == installer_identities
+
+    helper.chmod(0o775)
+    with pytest.raises(INSTALLER.InstallError, match="authority rejected"):
+        INSTALLER.command_runtime_identities()
+    with pytest.raises(VALIDATOR.ValidationError, match="authority rejected"):
+        VALIDATOR.command_runtime_identities()
+
+
+def test_command_acl_boundary_precedes_first_privileged_helper_execution() -> None:
+    installer = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    prerequisite = installer.split("def require_prerequisites()", 1)[1].split(
+        "def snapshot_file", 1
+    )[0]
+    installer_acl = prerequisite.index(
+        'raise InstallError("codestra-admin can modify audit command authority")'
+    )
+    first_installer_command = prerequisite.index("package = command_output(")
+    assert installer_acl < first_installer_command
+
+    validator = (PACKAGE / "validate-provider-host-auditd.py").read_text()
+    validation = validator.split("def validate(expected_source_sha", 1)[1].split(
+        "def main", 1
+    )[0]
+    validator_acl = validation.index(
+        'raise ValidationError("codestra-admin can modify audit authority")'
+    )
+    first_validator_command = validation.index("active = run(")
+    assert validator_acl < first_validator_command
+
+
+def test_validator_rechecks_kernel_health_after_synthetic_readback() -> None:
+    source = (PACKAGE / "validate-provider-host-auditd.py").read_text()
+    validation = source.split("def validate(expected_source_sha", 1)[1].split(
+        "def main", 1
+    )[0]
+    first_status = validation.index("healthy_audit_status()")
+    readback = validation.index("if not found:")
+    final_status = validation.index("final_status = healthy_audit_status()")
+    evidence = validation.index('"lost_records": final_status["lost"]')
+    assert first_status < readback < final_status < evidence
+
+
+def test_healthy_audit_status_fails_closed_on_post_probe_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = "enabled 1\npid 42\nlost 1\nbacklog 0\nbacklog_limit 8192\n"
+    monkeypatch.setattr(VALIDATOR, "run", lambda command: status)
+    with pytest.raises(VALIDATOR.ValidationError, match="kernel state"):
+        VALIDATOR.healthy_audit_status()
 
 
 def test_operator_writability_probe_detects_extended_acl() -> None:

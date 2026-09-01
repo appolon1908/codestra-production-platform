@@ -36,6 +36,7 @@ RELEASE_TRUST_ROOT = Path("/etc/codestra/release")
 ALLOWED_SIGNERS_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers"
 SIGNER_FINGERPRINT_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers.ssh-fingerprint"
 PYTHON_INTERPRETER = Path("/usr/bin/python3")
+COMMAND_MAX_BYTES = 64 * 1024 * 1024
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 STAMP_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z$")
@@ -406,6 +407,40 @@ def python_runtime_identity() -> tuple[Path, str]:
     return resolved, sha256_bytes(value)
 
 
+def command_runtime_identities() -> dict[str, tuple[Path, str]]:
+    """Authenticate every fixed privileged helper before invoking any helper."""
+
+    identities: dict[str, tuple[Path, str]] = {}
+    for name, path in COMMANDS.items():
+        if not path.is_absolute():
+            raise InstallError(f"required audit command path rejected: {name}")
+        try:
+            alias_info = path.lstat()
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            raise InstallError(f"required audit command missing: {name}") from exc
+        if (
+            not stat.S_ISREG(alias_info.st_mode)
+            or alias_info.st_uid != 0
+            or alias_info.st_gid != 0
+            or stat.S_IMODE(alias_info.st_mode) & 0o022
+            or not resolved.is_absolute()
+            or resolved != path
+        ):
+            raise InstallError(f"required audit command authority rejected: {name}")
+        value, info = checked_regular_snapshot(resolved, max_bytes=COMMAND_MAX_BYTES)
+        if (
+            info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022
+            or stat.S_IMODE(info.st_mode) & 0o111 == 0
+            or not value
+        ):
+            raise InstallError(f"required audit command target rejected: {name}")
+        identities[name] = (resolved, sha256_bytes(value))
+    return identities
+
+
 def write_all(descriptor: int, value: bytes) -> None:
     view = memoryview(value)
     while view:
@@ -772,9 +807,12 @@ def require_prerequisites() -> None:
     identity = next((line.split("=", 1)[1].strip().strip('"') for line in os_release.splitlines() if line.startswith("ID=")), "")
     if identity not in {"ubuntu", "debian"}:
         raise InstallError("unsupported operating system")
-    for name, path in COMMANDS.items():
-        if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):
-            raise InstallError(f"required audit command missing: {name}")
+    command_identities = command_runtime_identities()
+    command_targets = [identity[0] for identity in command_identities.values()]
+    if not operator_cannot_modify(
+        path_authority_chain([*COMMANDS.values(), *command_targets])
+    ):
+        raise InstallError("codestra-admin can modify audit command authority")
     package = command_output([str(COMMANDS["dpkg-query"]), "-W", "-f=${Status}", "auditd"]).strip()
     if package != "install ok installed":
         raise InstallError("distribution auditd package is not installed")
@@ -806,6 +844,8 @@ def require_prerequisites() -> None:
             SIGNER_FINGERPRINT_AUTHORITY,
             PYTHON_INTERPRETER.parent,
             python_target,
+            *COMMANDS.values(),
+            *command_targets,
             RULE_TARGET,
             AGGREGATE_TARGET,
             VALIDATOR_TARGET,
