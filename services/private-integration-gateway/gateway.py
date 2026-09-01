@@ -105,11 +105,40 @@ DELIVERY_TIME = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 DELIVERY_TIMEZONE = re.compile(r"([+-])([0-9]{2}):([0-9]{2})")
 AMBIGUOUS_CARRIER_HTTP_STATUSES = {408, 409, 425, 429}
 REQUEST_IO_TIMEOUT_SECONDS = 10.0
+REQUEST_HEADER_DEADLINE_SECONDS = 10.0
 REQUEST_BODY_DEADLINE_SECONDS = 10.0
 
 
 class DispatchOutcomeUnknown(RuntimeError):
     """The receiver may have committed the request before transport failed."""
+
+
+class AbsoluteDeadlineReader:
+    """Read header lines without allowing progress to reset the total deadline."""
+
+    def __init__(self, stream: Any, connection: socket.socket, deadline: float):
+        self.stream = stream
+        self.connection = connection
+        self.deadline = deadline
+
+    def readline(self, limit: int = -1) -> bytes:
+        output = bytearray()
+        while limit < 0 or len(output) < limit:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("absolute request-header deadline exceeded")
+            self.connection.settimeout(
+                max(0.001, min(REQUEST_IO_TIMEOUT_SECONDS, remaining))
+            )
+            block = self.stream.read1(1)
+            if not block:
+                break
+            output.extend(block)
+            if block == b"\n":
+                break
+        if time.monotonic() > self.deadline:
+            raise TimeoutError("absolute request-header deadline exceeded")
+        return bytes(output)
 
 
 def sms_effect_sha256(
@@ -770,6 +799,7 @@ class Store:
         payload_hash: str,
         customer_id: str,
         effect_hash: str,
+        logical_route: str,
         operation_token: str,
         now: float,
     ) -> tuple[bool, sqlite3.Row]:
@@ -779,7 +809,8 @@ class Store:
             cursor = connection.execute(
                 """UPDATE sms_transactions
                 SET state='preflight',operation_token=?,lease_expires_at=?
-                WHERE adapter_message_id=? AND payload_hash=? AND (
+                WHERE adapter_message_id=? AND payload_hash=?
+                  AND effect_hash=? AND logical_route=? AND (
                     state IN ('reserved','dependency_unavailable') OR
                     (state='preflight' AND lease_expires_at<=?)
                 ) AND NOT EXISTS (
@@ -793,6 +824,8 @@ class Store:
                     now + 30,
                     adapter_message_id,
                     payload_hash,
+                    effect_hash,
+                    logical_route,
                     now,
                     adapter_message_id,
                     customer_id,
@@ -1754,12 +1787,18 @@ class Gateway:
         )
         if reserved["payload_hash"] != payload_sha256:
             return 409, {"detail": "idempotency_conflict"}
+        if (
+            reserved["effect_hash"] != effect_sha256
+            or reserved["logical_route"] != route
+        ):
+            return 409, {"detail": "idempotency_effect_conflict"}
         operation_token = str(uuid.uuid4())
         claimed, reservation = self.store.claim_sms(
             reserved["adapter_message_id"],
             payload_sha256,
             customer,
             effect_sha256,
+            route,
             operation_token,
             now,
         )
@@ -1871,6 +1910,46 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
         def setup(self) -> None:
             super().setup()
             self.connection.settimeout(REQUEST_IO_TIMEOUT_SECONDS)
+
+        def handle_one_request(self) -> None:
+            original_reader = self.rfile
+            try:
+                self.rfile = AbsoluteDeadlineReader(
+                    original_reader,
+                    self.connection,
+                    time.monotonic() + REQUEST_HEADER_DEADLINE_SECONDS,
+                )
+                self.raw_requestline = self.rfile.readline(65537)
+                if len(self.raw_requestline) > 65536:
+                    self.requestline = ""
+                    self.request_version = ""
+                    self.command = ""
+                    self.send_error(414)
+                    return
+                if not self.raw_requestline:
+                    self.close_connection = True
+                    return
+                if not self.parse_request():
+                    return
+            except (TimeoutError, socket.timeout) as error:
+                self.log_error("Request header timed out: %r", error)
+                self.close_connection = True
+                return
+            finally:
+                self.rfile = original_reader
+                self.connection.settimeout(REQUEST_IO_TIMEOUT_SECONDS)
+
+            method_name = "do_" + self.command
+            if not hasattr(self, method_name):
+                self.send_error(501, "Unsupported method (%r)" % self.command)
+                return
+            method = getattr(self, method_name)
+            try:
+                method()
+                self.wfile.flush()
+            except (TimeoutError, socket.timeout) as error:
+                self.log_error("Request timed out: %r", error)
+                self.close_connection = True
 
         def log_message(self, _format_string: str, *_arguments: Any) -> None:
             LOG.info(

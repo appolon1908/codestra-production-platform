@@ -1428,6 +1428,53 @@ def test_dependency_failure_reservation_is_resumed_without_duplicate_effect(
     assert probes == []
 
 
+def test_retry_rejects_changed_authorized_route_before_carrier_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    probes = 0
+
+    def unavailable(_url, **_kwargs):
+        nonlocal probes
+        probes += 1
+        raise TimeoutError("synthetic dependency outage")
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(tmp_path), state, clock=lambda: now, urlopen=unavailable
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    first_code, first_result = app.outbound(
+        body, outbound_headers(body, now, "nonce-route-change-0001")
+    )
+    assert (first_code, first_result) == (
+        503,
+        {"detail": "jasmin_dependency_unavailable"},
+    )
+
+    policy = gateway.customer_policy()
+    policy["tenant-a"]["route"] = "alternate"
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    second_code, second_result = app.outbound(
+        body, outbound_headers(body, now, "nonce-route-change-0002")
+    )
+    assert (second_code, second_result) == (
+        409,
+        {"detail": "idempotency_effect_conflict"},
+    )
+    assert probes == 1
+    with state.connect() as connection:
+        reservation = connection.execute(
+            "SELECT * FROM sms_transactions"
+        ).fetchone()
+    assert reservation["logical_route"] == "synthetic"
+    assert reservation["state"] == "dependency_unavailable"
+    assert reservation["operation_token"] is None
+
+
 @pytest.mark.parametrize(
     "raw",
     [
@@ -2177,6 +2224,39 @@ def test_request_body_deadline_rejects_continuous_byte_drip(
             response = client.recv(4096)
         assert time.monotonic() - started < 1.0
         assert b" 408 " in response.split(b"\r\n", 1)[0]
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+
+
+def test_request_header_deadline_rejects_continuous_byte_drip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(gateway, "REQUEST_IO_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(gateway, "REQUEST_HEADER_DEADLINE_SECONDS", 0.15)
+    app = gateway.Gateway(settings(tmp_path), store(tmp_path))
+    server = gateway.ThreadingHTTPServer(("127.0.0.1", 0), gateway.handler_for(app))
+    server.daemon_threads = True
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        started = time.monotonic()
+        response = b""
+        with socket.create_connection(("127.0.0.1", server.server_port), timeout=2) as client:
+            client.settimeout(2)
+            for byte in b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n":
+                try:
+                    client.sendall(bytes((byte,)))
+                except OSError:
+                    break
+                time.sleep(0.05)
+            try:
+                response = client.recv(4096)
+            except (ConnectionError, OSError):
+                pass
+        assert time.monotonic() - started < 1.0
+        assert b" 200 " not in response.split(b"\r\n", 1)[0]
     finally:
         server.shutdown()
         server.server_close()
