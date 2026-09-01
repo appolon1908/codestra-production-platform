@@ -45,12 +45,27 @@ def fixture_container() -> dict:
     }
 
 
+def fixture_image() -> dict:
+    return {
+        "Config": {
+            "Labels": {
+                "org.opencontainers.image.revision": "c" * 40,
+                "org.opencontainers.image.version": "2026.09.1",
+                "org.opencontainers.image.source": "https://github.com/example/repo",
+                "com.codestra.release.id": "release-1",
+            }
+        }
+    }
+
+
 def test_inventory_emits_only_fixed_sanitized_schema(monkeypatch) -> None:
     monkeypatch.setattr(MODULE, "docker_output", lambda *args: "container-id\n")
 
     def fake_docker(*args: str):
-        assert args == ("inspect", "container-id")
-        return [fixture_container()]
+        if args == ("inspect", "container-id"):
+            return [fixture_container()]
+        assert args == ("image", "inspect", "sha256:" + "a" * 64)
+        return [fixture_image()]
 
     monkeypatch.setattr(MODULE, "docker_json", fake_docker)
     result = MODULE.inventory()
@@ -73,13 +88,14 @@ def test_inventory_emits_only_fixed_sanitized_schema(monkeypatch) -> None:
 
 def test_mutable_or_unversioned_workload_fails_source_lock(monkeypatch) -> None:
     container = fixture_container()
+    image = fixture_image()
     container["Config"]["Image"] = "ghcr.io/codestra/api:production"
-    container["Config"]["Labels"].pop("org.opencontainers.image.revision")
+    image["Config"]["Labels"].pop("org.opencontainers.image.revision")
     monkeypatch.setattr(MODULE, "docker_output", lambda *args: "id\n")
     monkeypatch.setattr(
         MODULE,
         "docker_json",
-        lambda *args: [container],
+        lambda *args: [container] if args[0] == "inspect" else [image],
     )
     summary = MODULE.inventory()["summary"]
     assert summary["immutable_images"] == {"passing": 0, "total": 1}
@@ -101,10 +117,13 @@ def test_all_operational_write_gates_are_allowlisted_and_normalized() -> None:
         "CALLBACK_EMAIL_COMMAND_ENABLED",
         "CALLBACK_DISPATCH",
         "CALLBACK_DISPATCH_ENABLED",
+        "CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED",
+        "COD_WEB_OUT_EMAIL_ENABLED",
         "CONTROL_PLANE_OUTBOUND_ENABLED",
         "CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED",
         "ENABLE_EXTERNAL_DELIVERY",
         "FORM_ODOO_DELIVERY_ENABLED",
+        "GLOBAL_EMAIL_PRODUCTION",
         "ENABLE_VICIDIAL_WRITES",
         "EXTERNAL_DELIVERY_ENABLED",
         "GENERAL_AI_DIALING",
@@ -119,6 +138,7 @@ def test_all_operational_write_gates_are_allowlisted_and_normalized() -> None:
         "ODOO_WRITE_ENABLED",
         "PRODUCTION_DIALING",
         "SEND_EVENTS",
+        "SMS_PRODUCTION",
         "VICIDIAL_WRITE_ENABLED",
         "VICIDIAL_WRITES_ENABLED",
     }
@@ -127,6 +147,19 @@ def test_all_operational_write_gates_are_allowlisted_and_normalized() -> None:
         [f"{name}=false" for name in required]
     )
     assert all(result[name] == "false" for name in required)
+
+
+def test_source_revision_comes_from_runtime_image_not_container(monkeypatch) -> None:
+    container = fixture_container()
+    container["Config"]["Labels"]["org.opencontainers.image.revision"] = "d" * 40
+    monkeypatch.setattr(MODULE, "docker_output", lambda *args: "id\n")
+    monkeypatch.setattr(
+        MODULE,
+        "docker_json",
+        lambda *args: [container] if args[0] == "inspect" else [fixture_image()],
+    )
+    workload = MODULE.inventory()["workloads"][0]
+    assert workload["release"]["git_sha"] == "c" * 40
 
 
 def test_arguments_and_non_root_execution_fail_closed(monkeypatch) -> None:

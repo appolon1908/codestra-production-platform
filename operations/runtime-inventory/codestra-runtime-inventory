@@ -29,6 +29,8 @@ SAFETY_FLAGS = (
     "CALLBACK_EMAIL_COMMAND_ENABLED",
     "CALLBACK_DISPATCH",
     "CALLBACK_DISPATCH_ENABLED",
+    "CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED",
+    "COD_WEB_OUT_EMAIL_ENABLED",
     "CONTROL_PLANE_OUTBOUND_ENABLED",
     "CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED",
     "CRAWLER_EXECUTION_ENABLED",
@@ -47,6 +49,7 @@ SAFETY_FLAGS = (
     "SOCIAL_PUBLISHING_ENABLED",
     "EXTERNAL_MODEL_CALLS_ENABLED",
     "FORM_ODOO_DELIVERY_ENABLED",
+    "GLOBAL_EMAIL_PRODUCTION",
     "LIVE_SMS_DELIVERY",
     "LIVE_EMAIL_DELIVERY",
     "LIVE_PSTN_DIALING",
@@ -71,6 +74,7 @@ SAFETY_FLAGS = (
     "SCRAPPER_ODOO_DELIVERY_ENABLED",
     "SEND_EVENTS",
     "SMS_DELIVERY_ENABLED",
+    "SMS_PRODUCTION",
     "SOCIAL_DELIVERY_ENABLED",
     "TRANSFERS_ENABLED",
     "UNRESTRICTED_CRAWLING",
@@ -172,7 +176,8 @@ def inventory() -> dict[str, Any]:
     workloads = []
     for container in containers:
         digest, immutable_reference = image_identity(container)
-        metadata = release_metadata(container.get("Config", {}).get("Labels"))
+        image = docker_json("image", "inspect", digest)[0] if digest else {}
+        metadata = release_metadata(image.get("Config", {}).get("Labels"))
         state = container.get("State", {})
         health = (state.get("Health") or {}).get("Status", "not_configured")
         workloads.append(
