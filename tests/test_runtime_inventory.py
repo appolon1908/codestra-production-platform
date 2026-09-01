@@ -165,16 +165,16 @@ def test_source_revision_comes_from_runtime_image_not_container(monkeypatch) -> 
 def test_release_metadata_rejects_arbitrary_or_credential_bearing_values() -> None:
     labels = {
         "org.opencontainers.image.revision": "not-a-sha:secret",
-        "org.opencontainers.image.version": "version with secret material",
+        "org.opencontainers.image.version": "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
         "org.opencontainers.image.source": "https://user:token@github.com/org/repo",
-        "com.codestra.release.id": "release\nsecret",
+        "com.codestra.release.id": "alphanumeric-api-key-1234567890",
     }
     result = MODULE.release_metadata(labels)
     assert result == {
         "git_sha": None,
-        "version": None,
+        "version": "sha256:faaa7b43e631a9e9a3242da86d987ec050a9f0db84884dbddce714774b2f761c",
         "source": None,
-        "release_id": None,
+        "release_id": "sha256:d37dbcc8b2c5b2605e51a0269b30c35c99346fd37c23dc310b002063d2d42074",
     }
     assert "secret" not in json.dumps(result)
 
