@@ -6,14 +6,18 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import io
 import json
 import os
 import pwd
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -29,6 +33,9 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 STAMP_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z$")
 CHANGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$")
 APPROVER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._@-]{1,127}$")
+FINGERPRINT_RE = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
+MANIFEST_LINE_RE = re.compile(r"^([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9._-]{0,255})$")
+ALLOWED_SIGNER_TYPES = {"ssh-ed25519", "ecdsa-sha2-nistp256", "sk-ssh-ed25519@openssh.com"}
 ROOT_AUTHORITY_PATHS = (
     Path("/etc/ssh"),
     Path("/etc/sudoers"),
@@ -48,8 +55,14 @@ COMMANDS = {
     "dpkg-query": Path("/usr/bin/dpkg-query"),
     "runuser": Path("/usr/sbin/runuser"),
     "service": Path("/usr/sbin/service"),
+    "ssh-keygen": Path("/usr/bin/ssh-keygen"),
     "systemctl": Path("/usr/bin/systemctl"),
     "test": Path("/usr/bin/test"),
+}
+ARCHIVE_MEMBERS = {
+    "installer": "codestra/operations/host-auditd/install-provider-host-auditd.py",
+    "rules": f"codestra/operations/host-auditd/{RULE_NAME}",
+    "validator": "codestra/operations/host-auditd/validate-provider-host-auditd.py",
 }
 SNAPSHOT_NAMES = {
     RULE_TARGET: "rules.managed",
@@ -75,7 +88,9 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def checked_regular(path: Path, *, max_bytes: int = 1024 * 1024) -> bytes:
+def checked_regular_snapshot(
+    path: Path, *, max_bytes: int = 1024 * 1024
+) -> tuple[bytes, os.stat_result]:
     flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
     descriptor = os.open(path, flags)
     try:
@@ -95,9 +110,20 @@ def checked_regular(path: Path, *, max_bytes: int = 1024 * 1024) -> bytes:
         value = b"".join(chunks)
         if len(value) > max_bytes:
             raise InstallError(f"oversized file rejected: {path}")
-        return value
+        return value, info
     finally:
         os.close(descriptor)
+
+
+def checked_regular(path: Path, *, max_bytes: int = 1024 * 1024) -> bytes:
+    return checked_regular_snapshot(path, max_bytes=max_bytes)[0]
+
+
+def checked_root_regular(path: Path, *, max_bytes: int = 1024 * 1024) -> bytes:
+    value, info = checked_regular_snapshot(path, max_bytes=max_bytes)
+    if info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) & 0o022:
+        raise InstallError(f"unsafe root trust authority: {path}")
+    return value
 
 
 def write_all(descriptor: int, value: bytes) -> None:
@@ -169,8 +195,204 @@ def run_checked(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def run_checked_bytes(command: list[str], input_bytes: bytes) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        command,
+        check=True,
+        input=input_bytes,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=60,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+    )
+
+
 def command_output(command: list[str]) -> str:
     return run_checked(command).stdout
+
+
+def snapshot_release_inputs(args: argparse.Namespace) -> tuple[Path, dict[str, Path], dict[str, str]]:
+    root_home = Path(pwd.getpwnam("root").pw_dir)
+    root_home_info = root_home.lstat()
+    if (
+        not stat.S_ISDIR(root_home_info.st_mode)
+        or root_home_info.st_uid != 0
+        or root_home_info.st_gid != 0
+        or stat.S_IMODE(root_home_info.st_mode) & 0o022
+    ):
+        raise InstallError("unsafe root staging authority")
+    stage = Path(
+        tempfile.mkdtemp(prefix="codestra-host-auditd.", dir=str(root_home))
+    )
+    os.chown(stage, 0, 0)
+    os.chmod(stage, 0o700)
+    sources = {
+        "archive": (Path(args.release_archive), 128 * 1024 * 1024, False),
+        "deployment": (Path(args.release_manifest), 1024 * 1024, False),
+        "checksums": (Path(args.release_checksums), 1024 * 1024, False),
+        "signature": (Path(args.release_signature), 64 * 1024, False),
+        "allowed_signers": (Path(args.allowed_signers), 64 * 1024, True),
+    }
+    staged: dict[str, Path] = {}
+    digests: dict[str, str] = {}
+    identities: set[tuple[int, int]] = set()
+    try:
+        for label, (source, limit, root_authority) in sources.items():
+            value, info = checked_regular_snapshot(source, max_bytes=limit)
+            if root_authority and (
+                info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) & 0o022
+            ):
+                raise InstallError(f"unsafe root trust authority: {source}")
+            identity = (info.st_dev, info.st_ino)
+            if identity in identities:
+                raise InstallError("release input aliases another input")
+            identities.add(identity)
+            target = stage / label
+            atomic_write(target, value, 0o600)
+            staged[label] = target
+            digests[label] = sha256_bytes(value)
+        return stage, staged, digests
+    except BaseException:
+        shutil.rmtree(stage)
+        raise
+
+
+def parse_release_checksums(value: bytes) -> dict[str, str]:
+    try:
+        lines = value.decode("ascii", "strict").splitlines()
+    except UnicodeDecodeError as exc:
+        raise InstallError("release checksums encoding rejected") from exc
+    result: dict[str, str] = {}
+    for line in lines:
+        match = MANIFEST_LINE_RE.fullmatch(line)
+        if match is None or match.group(2) in result:
+            raise InstallError("release checksums format rejected")
+        result[match.group(2)] = match.group(1)
+    if not result:
+        raise InstallError("release checksums are empty")
+    return result
+
+
+def signer_fingerprint(allowed_signers: bytes, stage: Path) -> str:
+    try:
+        lines = allowed_signers.decode("ascii", "strict").splitlines()
+    except UnicodeDecodeError as exc:
+        raise InstallError("allowed-signers encoding rejected") from exc
+    if len(lines) != 1:
+        raise InstallError("allowed-signers authority must contain exactly one record")
+    fields = lines[0].split()
+    if (
+        len(fields) != 3
+        or fields[0] != "codestra-release"
+        or fields[1] not in ALLOWED_SIGNER_TYPES
+        or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", fields[2])
+    ):
+        raise InstallError("allowed-signers authority rejected")
+    public_key = f"{fields[1]} {fields[2]}\n".encode("ascii")
+    public_key_path = stage / "signer.pub"
+    atomic_write(public_key_path, public_key, 0o600)
+    output = command_output(
+        [str(COMMANDS["ssh-keygen"]), "-lf", str(public_key_path), "-E", "sha256"]
+    ).split()
+    if len(output) < 2 or FINGERPRINT_RE.fullmatch(output[1]) is None:
+        raise InstallError("signer fingerprint output rejected")
+    return output[1]
+
+
+def archive_members(archive: bytes) -> dict[str, bytes]:
+    try:
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as bundle:
+            members = bundle.getmembers()
+            result: dict[str, bytes] = {}
+            for label, expected_name in ARCHIVE_MEMBERS.items():
+                matches = [member for member in members if member.name == expected_name]
+                if len(matches) != 1:
+                    raise InstallError(f"signed archive member identity rejected: {label}")
+                member = matches[0]
+                if not member.isfile() or member.size <= 0 or member.size > 2 * 1024 * 1024:
+                    raise InstallError(f"signed archive member type or size rejected: {label}")
+                stream = bundle.extractfile(member)
+                if stream is None:
+                    raise InstallError(f"signed archive member unreadable: {label}")
+                value = stream.read(2 * 1024 * 1024 + 1)
+                if len(value) != member.size:
+                    raise InstallError(f"signed archive member read-back rejected: {label}")
+                result[label] = value
+            return result
+    except (tarfile.TarError, OSError) as exc:
+        raise InstallError("signed release archive rejected") from exc
+
+
+def verify_signed_release(
+    args: argparse.Namespace,
+    stage: Path,
+    staged: dict[str, Path],
+    input_digests: dict[str, str],
+) -> tuple[bytes, bytes, dict[str, object]]:
+    allowed_signers = checked_root_regular(staged["allowed_signers"], max_bytes=64 * 1024)
+    fingerprint = signer_fingerprint(allowed_signers, stage)
+    if fingerprint != args.expected_signer_fingerprint:
+        raise InstallError("approved signer fingerprint mismatch")
+    checksums_bytes = checked_root_regular(staged["checksums"])
+    run_checked_bytes(
+        [
+            str(COMMANDS["ssh-keygen"]),
+            "-Y",
+            "verify",
+            "-f",
+            str(staged["allowed_signers"]),
+            "-I",
+            "codestra-release",
+            "-n",
+            "codestra-release",
+            "-s",
+            str(staged["signature"]),
+        ],
+        checksums_bytes,
+    )
+    archive_name = f"codestra-production-platform-{args.source_sha}.tar.gz"
+    if Path(args.release_archive).name != archive_name:
+        raise InstallError("release archive filename rejected")
+    checksums = parse_release_checksums(checksums_bytes)
+    if checksums.get(archive_name) != input_digests["archive"]:
+        raise InstallError("release archive checksum mismatch")
+    if checksums.get("deployment-manifest.json") != input_digests["deployment"]:
+        raise InstallError("release deployment manifest checksum mismatch")
+    try:
+        deployment = json.loads(checked_root_regular(staged["deployment"]))
+    except json.JSONDecodeError as exc:
+        raise InstallError("release deployment manifest rejected") from exc
+    release_tuple = deployment.get("release_tuple")
+    if (
+        deployment.get("schema_version") != "codestra.deployment.v1"
+        or deployment.get("commit") != args.source_sha
+        or deployment.get("artifact") != archive_name
+        or deployment.get("artifact_sha256") != input_digests["archive"]
+        or not isinstance(release_tuple, dict)
+        or release_tuple.get("orchestration_repository")
+        != "appolon1908-hue/codestra-production-platform"
+        or release_tuple.get("orchestration_protected_sha") != args.source_sha
+    ):
+        raise InstallError("release source identity mismatch")
+    archive = checked_root_regular(staged["archive"], max_bytes=128 * 1024 * 1024)
+    members = archive_members(archive)
+    installer_source = Path(__file__).absolute()
+    if installer_source.is_symlink():
+        raise InstallError("symlink installer source rejected")
+    if checked_regular(installer_source, max_bytes=2 * 1024 * 1024) != members["installer"]:
+        raise InstallError("running installer differs from signed release")
+    return members["rules"], members["validator"], {
+        "release_archive": archive_name,
+        "release_archive_sha256": input_digests["archive"],
+        "release_manifest_sha256": input_digests["deployment"],
+        "release_checksums_sha256": input_digests["checksums"],
+        "release_signature_sha256": input_digests["signature"],
+        "allowed_signers_sha256": input_digests["allowed_signers"],
+        "signer_fingerprint": fingerprint,
+        "signature_verification": "PASS",
+    }
 
 
 def audit_status(run: Callable[[list[str]], str] = command_output) -> dict[str, int]:
@@ -292,6 +514,20 @@ def managed_keys(value: str) -> set[str]:
     return keys
 
 
+def require_additive_rules(rule_bytes: bytes) -> None:
+    try:
+        lines = rule_bytes.decode("utf-8", "strict").splitlines()
+    except UnicodeDecodeError as exc:
+        raise InstallError("managed rule encoding rejected") from exc
+    try:
+        for line in lines:
+            tokens = shlex.split(line.partition("#")[0].strip())
+            if tokens and tokens[0] in {"-D", "-e"}:
+                raise InstallError("managed rules may not flush or change global policy")
+    except ValueError as exc:
+        raise InstallError("managed rule syntax rejected") from exc
+
+
 def managed_rule_signatures(value: str, keys: set[str]) -> set[tuple[object, ...]]:
     signatures: set[tuple[object, ...]] = set()
     for line in value.splitlines():
@@ -411,59 +647,60 @@ def install(args: argparse.Namespace) -> dict[str, object]:
         raise InstallError("change ID rejected")
     if not APPROVER_RE.fullmatch(args.approver):
         raise InstallError("approver rejected")
-    installer_source = Path(__file__).absolute()
-    if installer_source.is_symlink():
-        raise InstallError("symlink installer source rejected")
-    source = installer_source.parent / RULE_NAME
-    validator_source = installer_source.parent / "validate-provider-host-auditd.py"
-    if source.is_symlink() or validator_source.is_symlink():
-        raise InstallError("symlink package source rejected")
-    rule_bytes = checked_regular(source)
-    validator_bytes = checked_regular(validator_source)
-    if b"\n-D" in rule_bytes or b"\n-e 2" in rule_bytes:
-        raise InstallError("managed rules may not flush or lock unrelated policy")
-    status_before = audit_status()
-    if RULE_TARGET.exists() and INSTALLATION_RECORD.exists() and VALIDATOR_TARGET.exists():
-        existing_record = json.loads(checked_regular(INSTALLATION_RECORD))
-        if (
-            checked_regular(RULE_TARGET) == rule_bytes
-            and checked_regular(VALIDATOR_TARGET) == validator_bytes
-            and existing_record.get("source_sha") == args.source_sha
-            and existing_record.get("change_id") == args.change_id
-            and existing_record.get("approver") == args.approver
-        ):
-            validate_live(rule_bytes)
-            return existing_record
-    if status_before["enabled"] == 2:
-        raise InstallError("immutable kernel audit policy blocks this exact change")
-    before = service_state()
-    secure_directory(STATE_ROOT)
-    stamp, checkpoint, rollback_record = snapshot_before(args.source_sha, before)
+    if FINGERPRINT_RE.fullmatch(args.expected_signer_fingerprint) is None:
+        raise InstallError("expected signer fingerprint rejected")
+    stage, staged, input_digests = snapshot_release_inputs(args)
     try:
-        atomic_write(RULE_TARGET, rule_bytes, 0o600)
-        atomic_write(VALIDATOR_TARGET, validator_bytes, 0o750)
-        run_checked([str(COMMANDS["systemctl"]), "enable", "auditd.service"])
-        if not service_state()["active"]:
-            run_checked([str(COMMANDS["systemctl"]), "start", "auditd.service"])
-        run_checked([str(COMMANDS["augenrules"]), "--load"])
-        live = validate_live(rule_bytes)
-        record = {
-            "schema": "codestra.host-auditd.installation.v1",
-            "source_sha": args.source_sha,
-            "change_id": args.change_id,
-            "approver": args.approver,
-            "installed_at_utc": utc_now().isoformat().replace("+00:00", "Z"),
-            "rollback_stamp": stamp,
-            "rule_sha256": sha256_bytes(rule_bytes),
-            "validator_sha256": sha256_bytes(validator_bytes),
-            "state": live,
-        }
-        payload = json.dumps(record, sort_keys=True, separators=(",", ":")).encode() + b"\n"
-        atomic_write(INSTALLATION_RECORD, payload, 0o600)
-        return record
-    except BaseException:
-        restore_checkpoint(checkpoint, rollback_record)
-        raise
+        rule_bytes, validator_bytes, release_binding = verify_signed_release(
+            args, stage, staged, input_digests
+        )
+        require_additive_rules(rule_bytes)
+        status_before = audit_status()
+        if RULE_TARGET.exists() and INSTALLATION_RECORD.exists() and VALIDATOR_TARGET.exists():
+            existing_record = json.loads(checked_regular(INSTALLATION_RECORD))
+            if (
+                checked_regular(RULE_TARGET) == rule_bytes
+                and checked_regular(VALIDATOR_TARGET) == validator_bytes
+                and existing_record.get("source_sha") == args.source_sha
+                and existing_record.get("change_id") == args.change_id
+                and existing_record.get("approver") == args.approver
+                and existing_record.get("release") == release_binding
+            ):
+                validate_live(rule_bytes)
+                return existing_record
+        if status_before["enabled"] == 2:
+            raise InstallError("immutable kernel audit policy blocks this exact change")
+        before = service_state()
+        secure_directory(STATE_ROOT)
+        stamp, checkpoint, rollback_record = snapshot_before(args.source_sha, before)
+        try:
+            atomic_write(RULE_TARGET, rule_bytes, 0o600)
+            atomic_write(VALIDATOR_TARGET, validator_bytes, 0o750)
+            run_checked([str(COMMANDS["systemctl"]), "enable", "auditd.service"])
+            if not service_state()["active"]:
+                run_checked([str(COMMANDS["systemctl"]), "start", "auditd.service"])
+            run_checked([str(COMMANDS["augenrules"]), "--load"])
+            live = validate_live(rule_bytes)
+            record = {
+                "schema": "codestra.host-auditd.installation.v1",
+                "source_sha": args.source_sha,
+                "change_id": args.change_id,
+                "approver": args.approver,
+                "installed_at_utc": utc_now().isoformat().replace("+00:00", "Z"),
+                "rollback_stamp": stamp,
+                "rule_sha256": sha256_bytes(rule_bytes),
+                "validator_sha256": sha256_bytes(validator_bytes),
+                "release": release_binding,
+                "state": live,
+            }
+            payload = json.dumps(record, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+            atomic_write(INSTALLATION_RECORD, payload, 0o600)
+            return record
+        except BaseException:
+            restore_checkpoint(checkpoint, rollback_record)
+            raise
+    finally:
+        shutil.rmtree(stage)
 
 
 def rollback(args: argparse.Namespace) -> dict[str, object]:
@@ -504,6 +741,12 @@ def parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--source-sha", required=True)
     install_parser.add_argument("--change-id", required=True)
     install_parser.add_argument("--approver", required=True)
+    install_parser.add_argument("--release-archive", required=True)
+    install_parser.add_argument("--release-manifest", required=True)
+    install_parser.add_argument("--release-checksums", required=True)
+    install_parser.add_argument("--release-signature", required=True)
+    install_parser.add_argument("--allowed-signers", required=True)
+    install_parser.add_argument("--expected-signer-fingerprint", required=True)
     rollback_parser = commands.add_parser("rollback")
     rollback_parser.add_argument("--backup-stamp", required=True)
     rollback_parser.add_argument("--expected-source-sha", required=True)

@@ -20,7 +20,10 @@ kernel is already locked and the exact rule set is not already active.
 
 - Debian or Ubuntu with the distribution `auditd` package already installed;
 - an authorized, audited installation administrator with root privilege;
-- the exact signed protected platform source archive; and
+- the exact protected platform archive, deployment manifest, checksum manifest,
+  and detached signature;
+- a root-owned allowed-signers authority obtained independently of that release,
+  plus its approved SHA-256 key fingerprint; and
 - existing `/opt/codestra`, `/var/lib/codestra`, and `codestra-admin` SSH
   authority paths.
 
@@ -30,20 +33,33 @@ change.
 
 ## Install
 
-From the exact protected source tree, run:
+Run the installer extracted from the exact protected release archive. The
+allowed-signers path is a separately provisioned trust authority; it must not
+come from the release being verified.
 
 ```text
 python3 -I operations/host-auditd/install-provider-host-auditd.py install \
   --source-sha <40-hex-protected-sha> \
+  --release-archive <codestra-production-platform-SHA.tar.gz> \
+  --release-manifest <deployment-manifest.json> \
+  --release-checksums <manifest.sha256> \
+  --release-signature <manifest.sha256.sig> \
+  --allowed-signers </independent/root-owned/allowed_signers> \
+  --expected-signer-fingerprint <SHA256:fingerprint> \
   --change-id <approved-change-id> \
   --approver <named-approver>
 ```
 
-The installer snapshots the prior managed rule, generated aggregate rules,
-service state, and checksums before mutation. It writes the managed rule
-atomically, enables/starts `auditd` without restarting it, loads the aggregate
-rules, validates the exact live state, then durably records installation
-evidence. Repeating the exact install is idempotent.
+Before any host-state mutation, the installer snapshots every release input
+once into private root-owned staging, verifies the approved signer fingerprint
+and OpenSSH signature in the `codestra-release` namespace, binds the archive and
+manifest to the exact protected SHA, and requires its own bytes to match the
+installer in that signed archive. The managed rule and validator are read only
+from that archive. It then snapshots the prior managed rule, generated aggregate
+rules, service state, and checksums; writes atomically; enables/starts `auditd`
+without restarting it; validates the exact live state; and durably records the
+release identity and installation evidence. Repeating the exact signed install
+is idempotent.
 
 ## Validate
 
@@ -59,8 +75,8 @@ printed only after root-owned evidence is completely written and synced.
 
 ## Roll back the managed rule
 
-Rollback restores only the two files captured by the requested checkpoint and
-the prior enable/active state:
+Rollback restores only the managed files captured by the requested checkpoint
+and the prior enable/active state:
 
 ```text
 python3 -I operations/host-auditd/install-provider-host-auditd.py rollback \

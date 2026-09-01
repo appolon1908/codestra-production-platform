@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import argparse
+import hashlib
 import importlib.machinery
 import importlib.util
+import io
+import json
 import os
 from pathlib import Path
+import subprocess
+import tarfile
 
 import pytest
 
@@ -25,6 +31,102 @@ INSTALLER = load("host_auditd_installer", "install-provider-host-auditd.py")
 VALIDATOR = load("host_auditd_validator", "validate-provider-host-auditd.py")
 
 
+def signed_release_fixture(
+    tmp_path: Path,
+    *,
+    source_sha: str = "a" * 40,
+    installer_bytes: bytes | None = None,
+    rule_bytes: bytes = b"-w /etc/ssh -p wa -k codestra_ssh_authority\n",
+    validator_bytes: bytes = b"#!/usr/bin/python3\nprint('validator')\n",
+) -> argparse.Namespace:
+    key = tmp_path / "signing-key"
+    subprocess.run(
+        ["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+        check=True,
+    )
+    public_fields = (tmp_path / "signing-key.pub").read_text().split()
+    allowed_signers = tmp_path / "codestra-release.allowed_signers"
+    allowed_signers.write_text(
+        f"codestra-release {public_fields[0]} {public_fields[1]}\n"
+    )
+    allowed_signers.chmod(0o600)
+    fingerprint = subprocess.run(
+        ["/usr/bin/ssh-keygen", "-lf", str(key) + ".pub", "-E", "sha256"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()[1]
+
+    archive_name = f"codestra-production-platform-{source_sha}.tar.gz"
+    archive = tmp_path / archive_name
+    members = {
+        INSTALLER.ARCHIVE_MEMBERS["installer"]: (
+            (PACKAGE / "install-provider-host-auditd.py").read_bytes()
+            if installer_bytes is None
+            else installer_bytes
+        ),
+        INSTALLER.ARCHIVE_MEMBERS["rules"]: rule_bytes,
+        INSTALLER.ARCHIVE_MEMBERS["validator"]: validator_bytes,
+    }
+    with tarfile.open(archive, "w:gz") as bundle:
+        for name, value in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(value)
+            info.mode = 0o600
+            bundle.addfile(info, io.BytesIO(value))
+    archive_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+
+    deployment = tmp_path / "deployment-manifest.json"
+    deployment.write_text(
+        json.dumps(
+            {
+                "schema_version": "codestra.deployment.v1",
+                "commit": source_sha,
+                "artifact": archive_name,
+                "artifact_sha256": archive_digest,
+                "release_tuple": {
+                    "orchestration_repository": (
+                        "appolon1908-hue/codestra-production-platform"
+                    ),
+                    "orchestration_protected_sha": source_sha,
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    checksums = tmp_path / "manifest.sha256"
+    checksums.write_text(
+        f"{archive_digest}  {archive_name}\n"
+        f"{hashlib.sha256(deployment.read_bytes()).hexdigest()}  deployment-manifest.json\n"
+    )
+    subprocess.run(
+        [
+            "/usr/bin/ssh-keygen",
+            "-Y",
+            "sign",
+            "-q",
+            "-f",
+            str(key),
+            "-n",
+            "codestra-release",
+            str(checksums),
+        ],
+        check=True,
+    )
+    return argparse.Namespace(
+        source_sha=source_sha,
+        change_id="CHG-TEST-001",
+        approver="Security Owner",
+        release_archive=str(archive),
+        release_manifest=str(deployment),
+        release_checksums=str(checksums),
+        release_signature=str(checksums) + ".sig",
+        allowed_signers=str(allowed_signers),
+        expected_signer_fingerprint=fingerprint,
+    )
+
+
 def test_managed_rules_are_additive_and_cover_operator_authorities() -> None:
     rules = (PACKAGE / "60-codestra-provider-host.rules").read_text()
     assert "\n-D" not in rules
@@ -37,6 +139,11 @@ def test_managed_rules_are_additive_and_cover_operator_authorities() -> None:
     assert "-F euid=0 -F auid=0 -k codestra_root_session_exec" in rules
     assert "-F euid=0 -F auid>=1000 -F auid!=unset -k codestra_privileged_exec" in rules
     assert VALIDATOR.REQUIRED_KEYS <= INSTALLER.managed_keys(rules)
+    INSTALLER.require_additive_rules(rules.encode())
+    with pytest.raises(INSTALLER.InstallError, match="global policy"):
+        INSTALLER.require_additive_rules(b"  -D # hidden flush\n")
+    with pytest.raises(INSTALLER.InstallError, match="global policy"):
+        INSTALLER.require_additive_rules(b"-e 2\n")
 
 
 def test_installer_never_installs_packages_or_touches_application_runtime() -> None:
@@ -61,11 +168,12 @@ def test_installer_never_installs_packages_or_touches_application_runtime() -> N
 
 def test_installer_snapshots_before_managed_rule_mutation_and_records_after_validation() -> None:
     source = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    trust = source.index("rule_bytes, validator_bytes, release_binding = verify_signed_release(")
     snapshot = source.index("snapshot_before(args.source_sha, before)")
     mutation = source.index("atomic_write(RULE_TARGET, rule_bytes, 0o600)", snapshot)
     validate = source.index("live = validate_live(rule_bytes)", mutation)
     evidence = source.index("atomic_write(INSTALLATION_RECORD, payload, 0o600)", validate)
-    assert snapshot < mutation < validate < evidence
+    assert trust < snapshot < mutation < validate < evidence
     assert set(INSTALLER.SNAPSHOT_NAMES) == {
         INSTALLER.RULE_TARGET,
         INSTALLER.AGGREGATE_TARGET,
@@ -139,6 +247,64 @@ def test_displaced_fifo_is_rejected_without_blocking(tmp_path) -> None:
         INSTALLER.checked_regular(fifo)
     with pytest.raises(VALIDATOR.ValidationError, match="unsafe root-owned file"):
         VALIDATOR.checked_regular(fifo)
+
+
+def test_installer_binds_installed_bytes_to_signed_protected_archive(tmp_path) -> None:
+    expected_rule = b"-w /etc/audit -p wa -k exact_signed_rule\n"
+    expected_validator = b"#!/usr/bin/python3\nprint('exact signed validator')\n"
+    args = signed_release_fixture(
+        tmp_path, rule_bytes=expected_rule, validator_bytes=expected_validator
+    )
+    stage, staged, digests = INSTALLER.snapshot_release_inputs(args)
+    try:
+        rule, validator, evidence = INSTALLER.verify_signed_release(
+            args, stage, staged, digests
+        )
+    finally:
+        INSTALLER.shutil.rmtree(stage)
+    assert rule == expected_rule
+    assert validator == expected_validator
+    assert evidence["release_archive_sha256"] == digests["archive"]
+    assert evidence["signer_fingerprint"] == args.expected_signer_fingerprint
+    assert evidence["signature_verification"] == "PASS"
+
+
+def test_checkout_installer_differing_from_signed_archive_is_rejected(tmp_path) -> None:
+    args = signed_release_fixture(tmp_path, installer_bytes=b"#!/usr/bin/python3\n")
+    stage, staged, digests = INSTALLER.snapshot_release_inputs(args)
+    try:
+        with pytest.raises(INSTALLER.InstallError, match="running installer differs"):
+            INSTALLER.verify_signed_release(args, stage, staged, digests)
+    finally:
+        INSTALLER.shutil.rmtree(stage)
+
+
+def test_release_input_fifo_is_rejected_nonblocking(tmp_path) -> None:
+    args = argparse.Namespace(
+        release_archive=str(tmp_path / "archive"),
+        release_manifest=str(tmp_path / "deployment"),
+        release_checksums=str(tmp_path / "checksums"),
+        release_signature=str(tmp_path / "signature"),
+        allowed_signers=str(tmp_path / "allowed_signers"),
+    )
+    os.mkfifo(args.release_archive)
+    with pytest.raises(INSTALLER.InstallError, match="non-regular"):
+        INSTALLER.snapshot_release_inputs(args)
+
+
+def test_release_source_mismatch_fails_before_any_host_mutation(tmp_path, monkeypatch) -> None:
+    args = signed_release_fixture(tmp_path)
+    args.source_sha = "b" * 40
+    mutations: list[Path] = []
+    monkeypatch.setattr(
+        INSTALLER,
+        "secure_directory",
+        lambda path, mode=0o700: mutations.append(path),
+    )
+    monkeypatch.setattr(INSTALLER, "require_prerequisites", lambda: None)
+    with pytest.raises(INSTALLER.InstallError, match="release archive filename rejected"):
+        INSTALLER.install(args)
+    assert mutations == []
 
 
 def test_validation_evidence_completes_partial_writes_before_readback(tmp_path, monkeypatch) -> None:
