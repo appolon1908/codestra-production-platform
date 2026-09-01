@@ -34,8 +34,9 @@ Disposition C — partially reconciled.
 - Application source authority: protected head, because its `control_plane/`
   tree exactly preserves the runtime application source.
 - Deployment and migration authority: protected head.
-- Runtime-only history: retained by immutable Git object
-  `44d2addf48ae31da6eeb3c3f9ab3fe34d999042c` and this reconciliation record.
+- Runtime-only history: retained as reachable branch ancestry at immutable Git
+  object `44d2addf48ae31da6eeb3c3f9ab3fe34d999042c`; CI verifies its ancestry and the
+  reconciled `control_plane` tree.
 - Production replacement: prohibited in this phase.
 - Migration execution: prohibited in this phase.
 
