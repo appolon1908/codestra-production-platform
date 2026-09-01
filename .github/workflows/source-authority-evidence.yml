@@ -21,4 +21,4 @@ jobs:
       - run: git fetch origin agent/middleware-n8n-control-plane
       - run: python3 scripts/validate_control_plane_authority_evidence.py
       - name: Scan complete source tree for secrets
-        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 dir /repo --redact --exit-code 1
+        run: docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 dir . --redact --exit-code 1
