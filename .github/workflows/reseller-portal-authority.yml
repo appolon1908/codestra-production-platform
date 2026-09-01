@@ -35,4 +35,8 @@ jobs:
           install -m 0755 "${RUNNER_TEMP}/gitleaks" "${RUNNER_TEMP}/authority-gitleaks"
 
       - name: Scan complete source tree for secrets
-        run: '"${RUNNER_TEMP}/authority-gitleaks" dir --no-banner --redact --exit-code 1 .'
+        run: |
+          scan_root="${RUNNER_TEMP}/tracked-source"
+          mkdir -p "${scan_root}"
+          git archive HEAD | tar -x -C "${scan_root}"
+          "${RUNNER_TEMP}/authority-gitleaks" dir --no-banner --redact --exit-code 1 "${scan_root}"
