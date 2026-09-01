@@ -35,4 +35,4 @@ jobs:
           scan_root="${RUNNER_TEMP}/tracked-source"
           mkdir -p "${scan_root}"
           git archive HEAD | tar -x -C "${scan_root}"
-          "${RUNNER_TEMP}/authority-gitleaks" dir --no-banner --redact --exit-code 1 "${scan_root}"
+          (cd "${scan_root}" && "${RUNNER_TEMP}/authority-gitleaks" dir --no-banner --redact --exit-code 1 .)
