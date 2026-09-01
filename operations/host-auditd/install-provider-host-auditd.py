@@ -35,7 +35,9 @@ VALIDATOR_LAUNCHER_TARGET = Path(
 RELEASE_TRUST_ROOT = Path("/etc/codestra/release")
 ALLOWED_SIGNERS_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers"
 SIGNER_FINGERPRINT_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers.ssh-fingerprint"
+PYTHON_INTERPRETER = Path("/usr/bin/python3")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 STAMP_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z$")
 CHANGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$")
 APPROVER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._@-]{1,127}$")
@@ -60,11 +62,9 @@ COMMANDS = {
     "augenrules": Path("/usr/sbin/augenrules"),
     "ausearch": Path("/usr/sbin/ausearch"),
     "dpkg-query": Path("/usr/bin/dpkg-query"),
-    "runuser": Path("/usr/sbin/runuser"),
     "service": Path("/usr/sbin/service"),
     "ssh-keygen": Path("/usr/bin/ssh-keygen"),
     "systemctl": Path("/usr/bin/systemctl"),
-    "test": Path("/usr/bin/test"),
 }
 ARCHIVE_MEMBERS = {
     "installer": "codestra/operations/host-auditd/install-provider-host-auditd.py",
@@ -114,20 +114,26 @@ def validator_launcher_bytes(
     ):
         raise InstallError("launcher authority root rejected")
     expected_digest = sha256_bytes(validator_bytes)
-    source = f'''#!/usr/bin/python3
+    python_target, python_digest = python_runtime_identity()
+    source = f'''#!/usr/bin/python3 -I
 from __future__ import annotations
 
 import hashlib
 import os
+import pwd
 import stat
 import sys
 from pathlib import Path
 
 VALIDATOR = Path({str(validator_target)!r})
 AUTHORITY_ROOT = Path({str(authority_root)!r})
+PYTHON_ALIAS = Path({str(PYTHON_INTERPRETER)!r})
+PYTHON_TARGET = Path({str(python_target)!r})
 EXPECTED_SOURCE_SHA = {source_sha!r}
 EXPECTED_VALIDATOR_SHA256 = {expected_digest!r}
+EXPECTED_PYTHON_SHA256 = {python_digest!r}
 MAX_VALIDATOR_BYTES = 2 * 1024 * 1024
+MAX_PYTHON_BYTES = 64 * 1024 * 1024
 
 
 def fail() -> None:
@@ -141,15 +147,30 @@ if sys.argv[1:] != ["--expected-source-sha", EXPECTED_SOURCE_SHA]:
 launcher = Path(__file__).absolute()
 if AUTHORITY_ROOT not in launcher.parents or AUTHORITY_ROOT not in VALIDATOR.parents:
     fail()
+try:
+    if (
+        PYTHON_ALIAS.resolve(strict=True) != PYTHON_TARGET
+        or Path("/proc/self/exe").resolve(strict=True) != PYTHON_TARGET
+    ):
+        fail()
+    alias_info = PYTHON_ALIAS.lstat()
+    if (
+        not (stat.S_ISLNK(alias_info.st_mode) or stat.S_ISREG(alias_info.st_mode))
+        or alias_info.st_uid != 0
+        or alias_info.st_gid != 0
+    ):
+        fail()
+except OSError:
+    fail()
 
 
-def authority_chain(path: Path) -> set[Path]:
+def authority_chain(path: Path, root: Path) -> set[Path]:
     result = {{path}}
     cursor = path
-    while cursor != AUTHORITY_ROOT:
+    while cursor != root:
         parent = cursor.parent
         if parent == cursor or (
-            parent != AUTHORITY_ROOT and AUTHORITY_ROOT not in parent.parents
+            parent != root and root not in parent.parents
         ):
             fail()
         result.add(parent)
@@ -157,8 +178,13 @@ def authority_chain(path: Path) -> set[Path]:
     return result
 
 
-file_authorities = {{launcher, VALIDATOR}}
-authorities = authority_chain(launcher) | authority_chain(VALIDATOR)
+file_authorities = {{launcher, VALIDATOR, PYTHON_TARGET}}
+authorities = (
+    authority_chain(launcher, AUTHORITY_ROOT)
+    | authority_chain(VALIDATOR, AUTHORITY_ROOT)
+    | authority_chain(PYTHON_ALIAS.parent, Path("/"))
+    | authority_chain(PYTHON_TARGET, Path("/"))
+)
 for authority in sorted(authorities, key=lambda item: (len(item.parts), str(item))):
     try:
         info = authority.lstat()
@@ -173,6 +199,75 @@ for authority in sorted(authorities, key=lambda item: (len(item.parts), str(item
         or stat.S_IMODE(info.st_mode) & 0o022
     ):
         fail()
+
+
+def identity_can_write(path: Path) -> bool:
+    try:
+        account = pwd.getpwnam("codestra-admin")
+        groups = os.getgrouplist(account.pw_name, account.pw_gid)
+        child = os.fork()
+    except (KeyError, OSError):
+        fail()
+    if child == 0:
+        try:
+            os.setgroups(groups)
+            os.setgid(account.pw_gid)
+            os.setuid(account.pw_uid)
+            os._exit(0 if os.access(path, os.W_OK) else 1)
+        except BaseException:
+            os._exit(2)
+    try:
+        waited, status = os.waitpid(child, 0)
+    except OSError:
+        fail()
+    if waited != child or not os.WIFEXITED(status):
+        fail()
+    result = os.WEXITSTATUS(status)
+    if result not in {{0, 1}}:
+        fail()
+    return result == 0
+
+
+if any(identity_can_write(authority) for authority in authorities):
+    fail()
+
+
+def exact_digest(path: Path, maximum: int) -> str:
+    try:
+        file_descriptor = os.open(
+            path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+        )
+    except OSError:
+        fail()
+    try:
+        file_info = os.fstat(file_descriptor)
+        if (
+            not stat.S_ISREG(file_info.st_mode)
+            or file_info.st_uid != 0
+            or file_info.st_gid != 0
+            or stat.S_IMODE(file_info.st_mode) & 0o022
+            or file_info.st_size <= 0
+            or file_info.st_size > maximum
+        ):
+            fail()
+        chunks = []
+        remaining = maximum + 1
+        while remaining:
+            block = os.read(file_descriptor, min(1024 * 1024, remaining))
+            if not block:
+                break
+            chunks.append(block)
+            remaining -= len(block)
+        payload = b"".join(chunks)
+        if len(payload) != file_info.st_size:
+            fail()
+        return hashlib.sha256(payload).hexdigest()
+    finally:
+        os.close(file_descriptor)
+
+
+if exact_digest(PYTHON_TARGET, MAX_PYTHON_BYTES) != EXPECTED_PYTHON_SHA256:
+    fail()
 
 try:
     descriptor = os.open(VALIDATOR, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -206,9 +301,9 @@ try:
     os.lseek(descriptor, 0, os.SEEK_SET)
     os.set_inheritable(descriptor, True)
     os.execve(
-        "/usr/bin/python3",
+        str(PYTHON_TARGET),
         [
-            "/usr/bin/python3",
+            str(PYTHON_TARGET),
             "-I",
             f"/proc/self/fd/{{descriptor}}",
             "--expected-source-sha",
@@ -271,6 +366,35 @@ def checked_root_regular_exact(
     ):
         raise InstallError(f"unsafe exact root metadata: {path}")
     return value
+
+
+def python_runtime_identity() -> tuple[Path, str]:
+    """Bind the fixed shebang alias to one protected root-owned interpreter."""
+
+    if not PYTHON_INTERPRETER.is_absolute():
+        raise InstallError("Python interpreter alias rejected")
+    try:
+        alias_info = PYTHON_INTERPRETER.lstat()
+        resolved = PYTHON_INTERPRETER.resolve(strict=True)
+    except OSError as exc:
+        raise InstallError("Python interpreter authority unavailable") from exc
+    if (
+        not (stat.S_ISLNK(alias_info.st_mode) or stat.S_ISREG(alias_info.st_mode))
+        or alias_info.st_uid != 0
+        or alias_info.st_gid != 0
+        or not resolved.is_absolute()
+    ):
+        raise InstallError("Python interpreter alias rejected")
+    value, info = checked_regular_snapshot(resolved, max_bytes=64 * 1024 * 1024)
+    if (
+        info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) & 0o022
+        or stat.S_IMODE(info.st_mode) & 0o111 == 0
+        or not value
+    ):
+        raise InstallError("Python interpreter target rejected")
+    return resolved, sha256_bytes(value)
 
 
 def write_all(descriptor: int, value: bytes) -> None:
@@ -358,13 +482,37 @@ def command_output(command: list[str]) -> str:
     return run_checked(command).stdout
 
 
-def operator_cannot_modify(paths: list[Path]) -> bool:
+def identity_can_write(path: Path, account: pwd.struct_passwd) -> bool:
+    """Evaluate effective write access after irreversibly dropping a child UID."""
+
+    groups = os.getgrouplist(account.pw_name, account.pw_gid)
+    child = os.fork()
+    if child == 0:
+        try:
+            os.setgroups(groups)
+            os.setgid(account.pw_gid)
+            os.setuid(account.pw_uid)
+            os._exit(0 if os.access(path, os.W_OK) else 1)
+        except BaseException:
+            os._exit(2)
+    waited, status = os.waitpid(child, 0)
+    if waited != child or not os.WIFEXITED(status):
+        raise InstallError("operator writability child failed")
+    result = os.WEXITSTATUS(status)
+    if result not in {0, 1}:
+        raise InstallError("operator writability check failed")
+    return result == 0
+
+
+def operator_cannot_modify(paths: list[Path], *, allow_missing: bool = False) -> bool:
     account = pwd.getpwnam("codestra-admin")
     for path in paths:
         try:
             info = path.lstat()
         except FileNotFoundError:
-            continue
+            if allow_missing:
+                continue
+            return False
         if stat.S_ISLNK(info.st_mode):
             return False
         mode = stat.S_IMODE(info.st_mode)
@@ -374,27 +522,8 @@ def operator_cannot_modify(paths: list[Path]) -> bool:
             return False
         if mode & 0o002:
             return False
-        result = subprocess.run(
-            [
-                str(COMMANDS["runuser"]),
-                "--user",
-                account.pw_name,
-                "--",
-                str(COMMANDS["test"]),
-                "-w",
-                str(path),
-            ],
-            check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-            env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
-        )
-        if result.returncode == 0:
+        if identity_can_write(path, account):
             return False
-        if result.returncode != 1:
-            raise InstallError("operator writability check failed")
     return True
 
 
@@ -660,11 +789,23 @@ def require_prerequisites() -> None:
         or stat.S_IMODE(home_info.st_mode) & 0o022
     ):
         raise InstallError("codestra-admin home authority rejected")
+    python_target, _python_digest = python_runtime_identity()
     operator_paths = path_authority_chain(
-        [VALIDATOR_TARGET, VALIDATOR_LAUNCHER_TARGET]
+        [
+            *ROOT_AUTHORITY_PATHS,
+            ALLOWED_SIGNERS_AUTHORITY,
+            SIGNER_FINGERPRINT_AUTHORITY,
+            PYTHON_INTERPRETER.parent,
+            python_target,
+            RULE_TARGET,
+            AGGREGATE_TARGET,
+            VALIDATOR_TARGET,
+            VALIDATOR_LAUNCHER_TARGET,
+            INSTALLATION_RECORD,
+        ]
     )
-    if not operator_cannot_modify(operator_paths):
-        raise InstallError("codestra-admin can modify validator execution authority")
+    if not operator_cannot_modify(operator_paths, allow_missing=True):
+        raise InstallError("codestra-admin can modify host installation authority")
 
 
 def snapshot_file(path: Path, destination: Path) -> dict[str, object]:
@@ -717,6 +858,137 @@ def snapshot_before(source_sha: str, state: dict[str, bool]) -> tuple[str, Path,
         0o600,
     )
     return stamp, destination, record
+
+
+def validate_rollback_checkpoint(
+    checkpoint: Path, expected_source_sha: str, expected_stamp: str
+) -> dict[str, object]:
+    """Authenticate one complete root-only checkpoint before any restoration."""
+
+    if (
+        SHA_RE.fullmatch(expected_source_sha) is None
+        or STAMP_RE.fullmatch(expected_stamp) is None
+        or checkpoint != BACKUP_ROOT / expected_stamp
+    ):
+        raise InstallError("rollback checkpoint identity rejected")
+    manifest_path = checkpoint / "rollback.json"
+    checksums_path = checkpoint / "SHA256SUMS"
+    initial_paths = path_authority_chain(
+        [BACKUP_ROOT, checkpoint, manifest_path, checksums_path]
+    )
+    for path in initial_paths:
+        try:
+            info = path.lstat()
+        except FileNotFoundError as exc:
+            raise InstallError("rollback checkpoint authority is incomplete") from exc
+        if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_gid != 0:
+            raise InstallError("rollback checkpoint authority rejected")
+        if path in {manifest_path, checksums_path}:
+            if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
+                raise InstallError("rollback checkpoint file metadata rejected")
+        elif not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o022:
+            raise InstallError("rollback checkpoint directory metadata rejected")
+    if not operator_cannot_modify(initial_paths):
+        raise InstallError("codestra-admin can modify rollback checkpoint authority")
+
+    manifest = checked_root_regular_exact(manifest_path, 0o600)
+    checksums = checked_root_regular_exact(
+        checksums_path, 0o600, max_bytes=4096
+    )
+    if checksums != f"{sha256_bytes(manifest)}  rollback.json\n".encode("ascii"):
+        raise InstallError("rollback manifest checksum mismatch")
+    try:
+        record = json.loads(manifest)
+    except json.JSONDecodeError as exc:
+        raise InstallError("rollback manifest JSON rejected") from exc
+    if (
+        not isinstance(record, dict)
+        or set(record) != {"schema", "stamp", "source_sha", "service_before", "files"}
+        or record.get("schema") != "codestra.host-auditd.rollback.v1"
+        or record.get("stamp") != expected_stamp
+        or record.get("source_sha") != expected_source_sha
+    ):
+        raise InstallError("rollback manifest identity rejected")
+    service = record.get("service_before")
+    if (
+        not isinstance(service, dict)
+        or set(service) != {"enabled", "active"}
+        or not all(isinstance(service[key], bool) for key in service)
+    ):
+        raise InstallError("rollback service checkpoint rejected")
+    items = record.get("files")
+    if not isinstance(items, list) or len(items) != len(SNAPSHOT_NAMES):
+        raise InstallError("rollback file set rejected")
+    paths: set[Path] = set()
+    snapshots: set[Path] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise InstallError("rollback manifest file entry rejected")
+        target = Path(str(item.get("path")))
+        if target not in SNAPSHOT_NAMES or target in paths:
+            raise InstallError("rollback target set rejected")
+        paths.add(target)
+        present = item.get("present")
+        if not isinstance(present, bool):
+            raise InstallError("rollback target presence rejected")
+        if not present:
+            if set(item) != {"path", "present"}:
+                raise InstallError("absent rollback entry schema rejected")
+            continue
+        if set(item) != {
+            "path",
+            "present",
+            "sha256",
+            "mode",
+            "uid",
+            "gid",
+            "snapshot",
+        }:
+            raise InstallError("rollback snapshot entry schema rejected")
+        digest = item.get("sha256")
+        mode = item.get("mode")
+        uid = item.get("uid")
+        gid = item.get("gid")
+        snapshot_name = item.get("snapshot")
+        if (
+            not isinstance(digest, str)
+            or DIGEST_RE.fullmatch(digest) is None
+            or not isinstance(mode, int)
+            or isinstance(mode, bool)
+            or not 0 <= mode <= 0o7777
+            or not isinstance(uid, int)
+            or isinstance(uid, bool)
+            or uid < 0
+            or not isinstance(gid, int)
+            or isinstance(gid, bool)
+            or gid < 0
+            or snapshot_name != SNAPSHOT_NAMES[target]
+        ):
+            raise InstallError("rollback snapshot metadata rejected")
+        snapshot = checkpoint / str(snapshot_name)
+        if snapshot in snapshots:
+            raise InstallError("rollback snapshot alias rejected")
+        snapshots.add(snapshot)
+    if paths != set(SNAPSHOT_NAMES):
+        raise InstallError("rollback target set rejected")
+    expected_children = {manifest_path, checksums_path, *snapshots}
+    try:
+        observed_children = set(checkpoint.iterdir())
+    except OSError as exc:
+        raise InstallError("rollback checkpoint listing failed") from exc
+    if observed_children != expected_children:
+        raise InstallError("rollback checkpoint contains unexpected files")
+    snapshot_authorities = path_authority_chain(list(snapshots))
+    if not operator_cannot_modify(snapshot_authorities):
+        raise InstallError("codestra-admin can modify rollback snapshots")
+    for item in items:
+        if item.get("present") is not True:
+            continue
+        snapshot = checkpoint / str(item["snapshot"])
+        value = checked_root_regular_exact(snapshot, 0o600)
+        if sha256_bytes(value) != item["sha256"]:
+            raise InstallError("rollback snapshot checksum mismatch")
+    return record
 
 
 def managed_keys(value: str) -> set[str]:
@@ -844,7 +1116,7 @@ def restore_file(record: dict[str, object], checkpoint: Path) -> None:
             target.unlink()
         return
     snapshot = checkpoint / str(record["snapshot"])
-    value = checked_regular(snapshot)
+    value = checked_root_regular_exact(snapshot, 0o600)
     if sha256_bytes(value) != record.get("sha256"):
         raise InstallError("rollback snapshot checksum mismatch")
     atomic_write(target, value, int(record["mode"]))
@@ -898,7 +1170,12 @@ def restored_checkpoint_evidence(
     return {"files": restored_files, "service": observed_service}
 
 
-def restore_checkpoint(checkpoint: Path, record: dict[str, object]) -> dict[str, object]:
+def restore_checkpoint(
+    checkpoint: Path, expected_source_sha: str, expected_stamp: str
+) -> dict[str, object]:
+    record = validate_rollback_checkpoint(
+        checkpoint, expected_source_sha, expected_stamp
+    )
     items = record.get("files")
     if not isinstance(items, list) or len(items) != len(SNAPSHOT_NAMES):
         raise InstallError("rollback file set rejected")
@@ -1026,7 +1303,8 @@ def install(args: argparse.Namespace) -> dict[str, object]:
             raise InstallError("immutable kernel audit policy blocks this exact change")
         before = service_state()
         secure_directory(STATE_ROOT)
-        stamp, checkpoint, rollback_record = snapshot_before(args.source_sha, before)
+        stamp, checkpoint, _rollback_record = snapshot_before(args.source_sha, before)
+        validate_rollback_checkpoint(checkpoint, args.source_sha, stamp)
         try:
             atomic_write(RULE_TARGET, rule_bytes, 0o600)
             atomic_write(VALIDATOR_TARGET, validator_bytes, 0o750)
@@ -1054,7 +1332,7 @@ def install(args: argparse.Namespace) -> dict[str, object]:
             }
             return persist_installation_record(record)
         except BaseException:
-            restore_checkpoint(checkpoint, rollback_record)
+            restore_checkpoint(checkpoint, args.source_sha, stamp)
             raise
     finally:
         shutil.rmtree(stage)
@@ -1065,14 +1343,9 @@ def rollback(args: argparse.Namespace) -> dict[str, object]:
     if not SHA_RE.fullmatch(args.expected_source_sha) or not STAMP_RE.fullmatch(args.backup_stamp):
         raise InstallError("rollback identity rejected")
     checkpoint = BACKUP_ROOT / args.backup_stamp
-    manifest = checked_regular(checkpoint / "rollback.json")
-    checksums = checked_regular(checkpoint / "SHA256SUMS", max_bytes=4096).decode("ascii", "strict")
-    if checksums != f"{sha256_bytes(manifest)}  rollback.json\n":
-        raise InstallError("rollback manifest checksum mismatch")
-    record = json.loads(manifest)
-    if record.get("source_sha") != args.expected_source_sha or record.get("stamp") != args.backup_stamp:
-        raise InstallError("rollback source identity mismatch")
-    restored = restore_checkpoint(checkpoint, record)
+    restored = restore_checkpoint(
+        checkpoint, args.expected_source_sha, args.backup_stamp
+    )
     result = {
         "schema": "codestra.host-auditd.rollback-result.v1",
         "source_sha": args.expected_source_sha,

@@ -8,9 +8,12 @@ import io
 import json
 import os
 from pathlib import Path
+import pwd
+import shutil
 import stat
 import subprocess
 import tarfile
+import tempfile
 from types import SimpleNamespace
 
 import pytest
@@ -517,8 +520,70 @@ def test_validator_operator_check_includes_executable_and_parent_authority() -> 
     launcher_source = INSTALLER.validator_launcher_bytes(
         b"validator\n", "a" * 40
     ).decode()
-    assert "authority_chain(launcher) | authority_chain(VALIDATOR)" in launcher_source
-    assert "while cursor != AUTHORITY_ROOT" in launcher_source
+    assert "authority_chain(launcher, AUTHORITY_ROOT)" in launcher_source
+    assert "authority_chain(VALIDATOR, AUTHORITY_ROOT)" in launcher_source
+    assert "while cursor != root" in launcher_source
+
+
+def test_release_trust_and_python_runtime_are_in_operator_acl_boundary() -> None:
+    installer = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    prerequisite = installer.split("def require_prerequisites()", 1)[1].split(
+        "def snapshot_file", 1
+    )[0]
+    for token in (
+        "ALLOWED_SIGNERS_AUTHORITY",
+        "SIGNER_FINGERPRINT_AUTHORITY",
+        "PYTHON_INTERPRETER.parent",
+        "python_target",
+        "path_authority_chain",
+        "operator_cannot_modify",
+    ):
+        assert token in prerequisite
+    validator = (PACKAGE / "validate-provider-host-auditd.py").read_text()
+    validation = validator.split("def validate(expected_source_sha", 1)[1]
+    for token in (
+        "ALLOWED_SIGNERS_AUTHORITY",
+        "SIGNER_FINGERPRINT_AUTHORITY",
+        "PYTHON_INTERPRETER.parent",
+        "python_target",
+    ):
+        assert token in validation
+
+
+def test_operator_writability_probe_detects_extended_acl() -> None:
+    if shutil.which("setfacl") is None:
+        pytest.skip("setfacl unavailable")
+    try:
+        pwd.getpwnam("codestra-admin")
+    except KeyError:
+        pytest.skip("codestra-admin unavailable")
+    with tempfile.TemporaryDirectory(prefix="codestra-acl-test.", dir="/tmp") as directory:
+        root = Path(directory)
+        root.chmod(0o711)
+        authority = root / "authority"
+        authority.write_text("public trust authority\n")
+        authority.chmod(0o600)
+        assert INSTALLER.operator_cannot_modify([root, authority])
+        subprocess.run(
+            ["setfacl", "-m", "u:codestra-admin:rw", str(authority)], check=True
+        )
+        assert not INSTALLER.operator_cannot_modify([root, authority])
+
+
+def test_launcher_uses_isolated_bound_python_runtime() -> None:
+    launcher = INSTALLER.validator_launcher_bytes(
+        b"print('validator')\n", "a" * 40
+    ).decode()
+    assert launcher.startswith("#!/usr/bin/python3 -I\n")
+    for token in (
+        'Path("/proc/self/exe").resolve(strict=True)',
+        "PYTHON_ALIAS.resolve(strict=True) != PYTHON_TARGET",
+        "EXPECTED_PYTHON_SHA256",
+        "exact_digest(PYTHON_TARGET, MAX_PYTHON_BYTES)",
+        "identity_can_write(authority)",
+        "os.execve(\n        str(PYTHON_TARGET)",
+    ):
+        assert token in launcher
 
 
 def test_installation_record_is_read_back_before_success(
@@ -664,11 +729,88 @@ def test_rollback_revalidates_restored_files_and_service_before_completion(
 
 def test_rollback_pass_record_follows_post_restore_readback() -> None:
     source = (PACKAGE / "install-provider-host-auditd.py").read_text()
-    restore = source.index("restored = restore_checkpoint(checkpoint, record)")
+    restore = source.index("restored = restore_checkpoint(")
     completion = source.index('"completed_at_utc"', restore)
     evidence = source.index('"restored": restored', completion)
     write = source.index('atomic_write(checkpoint / "rollback-result.json"', evidence)
     assert restore < completion < evidence < write
+
+
+def test_rollback_authenticates_complete_root_only_checkpoint_before_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stamp = "20260901T120000Z"
+    source_sha = "a" * 40
+    backup_root = tmp_path / "backups"
+    checkpoint = backup_root / stamp
+    backup_root.mkdir(mode=0o700)
+    checkpoint.mkdir(mode=0o700)
+    monkeypatch.setattr(INSTALLER, "BACKUP_ROOT", backup_root)
+
+    items = []
+    for index, (target, snapshot_name) in enumerate(INSTALLER.SNAPSHOT_NAMES.items()):
+        payload = f"snapshot-{index}\n".encode()
+        snapshot = checkpoint / snapshot_name
+        snapshot.write_bytes(payload)
+        snapshot.chmod(0o600)
+        items.append(
+            {
+                "path": str(target),
+                "present": True,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "mode": 0o600,
+                "uid": 0,
+                "gid": 0,
+                "snapshot": snapshot_name,
+            }
+        )
+    record = {
+        "schema": "codestra.host-auditd.rollback.v1",
+        "stamp": stamp,
+        "source_sha": source_sha,
+        "service_before": {"enabled": True, "active": True},
+        "files": items,
+    }
+    manifest = json.dumps(record, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    (checkpoint / "rollback.json").write_bytes(manifest)
+    (checkpoint / "SHA256SUMS").write_text(
+        f"{hashlib.sha256(manifest).hexdigest()}  rollback.json\n"
+    )
+    (checkpoint / "rollback.json").chmod(0o600)
+    (checkpoint / "SHA256SUMS").chmod(0o600)
+
+    def local_authorities(paths: list[Path]) -> list[Path]:
+        return sorted(
+            {backup_root, checkpoint, *paths},
+            key=lambda item: (len(item.parts), str(item)),
+        )
+
+    monkeypatch.setattr(INSTALLER, "path_authority_chain", local_authorities)
+    assert (
+        INSTALLER.validate_rollback_checkpoint(checkpoint, source_sha, stamp)
+        == record
+    )
+
+    displaced = checkpoint / items[0]["snapshot"]
+    displaced.chmod(0o666)
+    with pytest.raises(INSTALLER.InstallError, match="modify rollback snapshots"):
+        INSTALLER.validate_rollback_checkpoint(checkpoint, source_sha, stamp)
+    displaced.chmod(0o600)
+    unexpected = checkpoint / "attacker-extra"
+    unexpected.write_text("unexpected\n")
+    unexpected.chmod(0o600)
+    with pytest.raises(INSTALLER.InstallError, match="unexpected files"):
+        INSTALLER.validate_rollback_checkpoint(checkpoint, source_sha, stamp)
+
+
+def test_restore_reauthenticates_checkpoint_before_first_target_mutation() -> None:
+    source = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    restore = source.split("def restore_checkpoint(", 1)[1].split(
+        "def persist_installation_record", 1
+    )[0]
+    authenticate = restore.index("record = validate_rollback_checkpoint(")
+    mutate = restore.index("restore_file(item, checkpoint)")
+    assert authenticate < mutate
 
 
 def test_validation_evidence_completes_partial_writes_before_readback(tmp_path, monkeypatch) -> None:

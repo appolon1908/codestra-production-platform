@@ -58,8 +58,11 @@ both fixed trust files once into private root-owned staging, verifies the trust
 anchor against its independently provisioned fingerprint and the OpenSSH
 signature in the `codestra-release` namespace, binds the archive and manifest to
 the exact protected SHA, and requires its own bytes to match the installer in
-that signed archive. The managed rule and validator are read only from that
-archive. It then snapshots the prior managed rule, generated aggregate rules,
+that signed archive. It also proves that `codestra-admin` cannot write either
+trust file, their complete authority chains, or the fixed resolved Python
+runtime through modes, groups, or extended ACLs. The managed rule and validator
+are read only from that archive. It then snapshots the prior managed rule,
+generated aggregate rules,
 service state, and checksums; writes atomically; reads both installed payloads
 back before service mutation; enables/starts `auditd` without restarting it;
 revalidates the payloads and exact live state; and durably records the release
@@ -77,8 +80,11 @@ Validation requires an enabled and active daemon, kernel auditing enabled,
 zero lost records, all managed keys active, exact read-back of both the managed
 rule and installed validator against the signed installation record, and a
 separate root-only launcher that checks the expected signed validator digest
-and source SHA before executing the already-open validator bytes. Validation
-also requires protected root-owned paths and a bounded synthetic audit record
+and source SHA before executing the already-open validator bytes. The launcher
+starts in Python isolated mode, binds `/usr/bin/python3` and `/proc/self/exe` to
+the protected resolved interpreter, and repeats the ACL-aware authority check
+before executing the validator. Validation also requires protected root-owned
+paths and a bounded synthetic audit record
 that is read back from the audit log. PASS is printed only after root-owned
 evidence is completely written and synced.
 
@@ -92,6 +98,11 @@ python3 -I operations/host-auditd/install-provider-host-auditd.py rollback \
   --backup-stamp <UTC-checkpoint> \
   --expected-source-sha <40-hex-protected-sha>
 ```
+
+Before its first target mutation, rollback reauthenticates the exact checkpoint
+directory, manifest, checksum, complete file set, and every present snapshot as
+root-owned, non-writable by `codestra-admin`, byte-bound evidence. Unexpected,
+missing, aliased, writable, or non-regular checkpoint entries fail closed.
 
 Do not use rollback to disable a production-certified audit service merely to
 complete a test. Operator, application, Docker, firewall, DNS, and delivery

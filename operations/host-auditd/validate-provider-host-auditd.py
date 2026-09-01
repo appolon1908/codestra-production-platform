@@ -26,6 +26,10 @@ VALIDATOR_LAUNCHER = Path(
 INSTALLATION_RECORD = Path("/var/lib/codestra/host-auditd/installation.json")
 EVIDENCE_ROOT = Path("/var/lib/codestra/host-auditd/evidence")
 AUDIT_CONFIG = Path("/etc/audit/auditd.conf")
+RELEASE_TRUST_ROOT = Path("/etc/codestra/release")
+ALLOWED_SIGNERS_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers"
+SIGNER_FINGERPRINT_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers.ssh-fingerprint"
+PYTHON_INTERPRETER = Path("/usr/bin/python3")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REQUIRED_KEYS = {
     "codestra_ssh_authority",
@@ -246,6 +250,26 @@ def log_path() -> Path:
     return path
 
 
+def identity_can_write(path: Path, account: pwd.struct_passwd) -> bool:
+    groups = os.getgrouplist(account.pw_name, account.pw_gid)
+    child = os.fork()
+    if child == 0:
+        try:
+            os.setgroups(groups)
+            os.setgid(account.pw_gid)
+            os.setuid(account.pw_uid)
+            os._exit(0 if os.access(path, os.W_OK) else 1)
+        except BaseException:
+            os._exit(2)
+    waited, status = os.waitpid(child, 0)
+    if waited != child or not os.WIFEXITED(status):
+        raise ValidationError("operator writability child failed")
+    result = os.WEXITSTATUS(status)
+    if result not in {0, 1}:
+        raise ValidationError("operator writability check failed")
+    return result == 0
+
+
 def operator_cannot_modify(paths: list[Path]) -> bool:
     account = pwd.getpwnam("codestra-admin")
     for path in paths:
@@ -259,19 +283,8 @@ def operator_cannot_modify(paths: list[Path]) -> bool:
             return False
         if mode & 0o002:
             return False
-        result = subprocess.run(
-            ["/usr/sbin/runuser", "--user", account.pw_name, "--", "/usr/bin/test", "-w", str(path)],
-            check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-            env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
-        )
-        if result.returncode == 0:
+        if identity_can_write(path, account):
             return False
-        if result.returncode != 1:
-            raise ValidationError("operator writability check failed")
     return True
 
 
@@ -287,6 +300,26 @@ def path_authority_chain(paths: list[Path]) -> list[Path]:
                 break
             cursor = cursor.parent
     return sorted(authorities, key=lambda item: (len(item.parts), str(item)))
+
+
+def python_runtime_identity() -> tuple[Path, str]:
+    try:
+        alias = PYTHON_INTERPRETER.lstat()
+        resolved = PYTHON_INTERPRETER.resolve(strict=True)
+        running = Path("/proc/self/exe").resolve(strict=True)
+    except OSError as exc:
+        raise ValidationError("Python runtime authority unavailable") from exc
+    if (
+        not (stat.S_ISLNK(alias.st_mode) or stat.S_ISREG(alias.st_mode))
+        or alias.st_uid != 0
+        or alias.st_gid != 0
+        or resolved != running
+    ):
+        raise ValidationError("Python runtime identity rejected")
+    value = checked_regular(resolved, max_bytes=64 * 1024 * 1024)
+    if not value:
+        raise ValidationError("Python runtime is empty")
+    return resolved, hashlib.sha256(value).hexdigest()
 
 
 def installed_release_binding(
@@ -343,6 +376,7 @@ def validate(expected_source_sha: str) -> dict[str, object]:
     if expected_signatures != active_signatures:
         raise ValidationError("managed audit rule semantics differ from source")
     audit_log = log_path()
+    python_target, python_digest = python_runtime_identity()
     if not operator_cannot_modify(
         path_authority_chain(
             [
@@ -354,6 +388,10 @@ def validate(expected_source_sha: str) -> dict[str, object]:
             VALIDATOR_LAUNCHER,
             INSTALLATION_RECORD.parent,
             INSTALLATION_RECORD,
+            ALLOWED_SIGNERS_AUTHORITY,
+            SIGNER_FINGERPRINT_AUTHORITY,
+            PYTHON_INTERPRETER.parent,
+            python_target,
             audit_log.parent,
             audit_log,
             ]
@@ -386,6 +424,7 @@ def validate(expected_source_sha: str) -> dict[str, object]:
         "rule_sha256": rule_sha,
         "validator_sha256": validator_sha,
         "validator_launcher_sha256": launcher_sha,
+        "python_interpreter_sha256": python_digest,
         "managed_keys": sorted(REQUIRED_KEYS),
         "audit_log": str(audit_log),
         "audit_log_root_owned": True,
