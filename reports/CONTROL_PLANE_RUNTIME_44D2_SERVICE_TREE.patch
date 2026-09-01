@@ -1,0 +1,1080 @@
+diff --git a/control_plane_service/admission.py b/control_plane_service/admission.py
+deleted file mode 100644
+index 90b5bc1c405335b94d5cd5053ff3218c65e447cc..0000000000000000000000000000000000000000
+--- a/control_plane_service/admission.py
++++ /dev/null
+@@ -1,26 +0,0 @@
+-"""Fail-closed container entrypoint for all externally delivered channels."""
+-from __future__ import annotations
+-
+-import os
+-import sys
+-
+-
+-REQUIRED_DISABLED_FLAGS = (
+-    "LIVE_SMS_DELIVERY",
+-    "LIVE_EMAIL_DELIVERY",
+-    "LIVE_PSTN_DIALING",
+-)
+-
+-
+-def main(argv: list[str] | None = None) -> None:
+-    command = list(sys.argv[1:] if argv is None else argv)
+-    for flag in REQUIRED_DISABLED_FLAGS:
+-        if os.environ.get(flag) != "false":
+-            raise SystemExit(f"live-delivery admission denied: {flag} must be exactly false")
+-    if not command:
+-        raise SystemExit("live-delivery admission denied: command is required")
+-    os.execvp(command[0], command)
+-
+-
+-if __name__ == "__main__":
+-    main()
+diff --git a/control_plane_service/campaign_gates.py b/control_plane_service/campaign_gates.py
+index c04fc1dde5e6881a19ef1757247b5913beaf8bb7..39beba7aa69e3addc3892571bea77aa0749bb3f4 100644
+--- a/control_plane_service/campaign_gates.py
++++ b/control_plane_service/campaign_gates.py
+@@ -6,7 +6,6 @@ empty canary allowlist authorizes policy simulation only and cannot dispatch.
+ from __future__ import annotations
+ 
+ import os
+-from pathlib import Path
+ 
+ from .core import ControlPlaneError
+ 
+@@ -15,21 +14,6 @@ def _enabled(name: str) -> bool:
+     return os.getenv(name, "false").strip().lower() == "true"
+ 
+ 
+-def _canary_allowlist() -> set[str]:
+-    path = os.getenv("COD_WEB_OUT_CANARY_RECIPIENT_FILE", "").strip()
+-    if path:
+-        try:
+-            info = os.stat(path, follow_symlinks=False)
+-            if not os.path.isfile(path) or info.st_mode & 0o077:
+-                raise ControlPlaneError("canary_recipient_file_permissions_invalid")
+-            raw = Path(path).read_text(encoding="utf-8")
+-        except OSError as exc:
+-            raise ControlPlaneError("canary_recipient_file_unavailable") from exc
+-    else:
+-        raw = os.getenv("COD_WEB_OUT_CANARY_RECIPIENT", "")
+-    return {item.strip().casefold() for item in raw.split(",") if item.strip()}
+-
+-
+ def authorize_campaign_email(value: dict, *, simulation: bool = False) -> None:
+     campaign = str(value.get("campaign_id") or "")
+     if campaign != "COD-WEB-OUT":
+@@ -48,7 +32,10 @@ def authorize_campaign_email(value: dict, *, simulation: bool = False) -> None:
+     if not _enabled("COD_WEB_OUT_EMAIL_ALLOWLIST_REQUIRED"):
+         raise ControlPlaneError("canary_allowlist_required")
+     recipient = str(value.get("recipient") or "").strip().casefold()
+-    allowlist = _canary_allowlist()
++    allowlist = {
++        item.strip().casefold() for item in
++        os.getenv("COD_WEB_OUT_CANARY_RECIPIENT", "").split(",") if item.strip()
++    }
+     if simulation and not recipient and not allowlist:
+         if value.get("external_submission") is not False:
+             raise ControlPlaneError("simulation_must_disable_external_submission")
+diff --git a/control_plane_service/core.py b/control_plane_service/core.py
+index 97a8f9543253278309671fb367cd013c0a76c19a..ebc2f7e8f29e3d9dcb7a1bc39cf215264d3d9774 100644
+--- a/control_plane_service/core.py
++++ b/control_plane_service/core.py
+@@ -403,6 +403,8 @@ class Store:
+         required = ("idempotency_key", "request_id", "correlation_id", "sender", "recipient", "source_application", "classification")
+         if not tenant or not customer or any(not value.get(k) for k in required): raise ControlPlaneError("missing_message_fields")
+         if value["classification"] not in {"marketing", "transactional"}: raise ControlPlaneError("invalid_classification")
++        if channel == "email" and value.get("campaign_id") == "COD-WEB-OUT" and value.get("business_unit_id") != "COD":
++            raise ControlPlaneError("campaign_business_unit_denied")
+         destination = normalize_destination(channel, str(value["recipient"]))
+         if value["classification"] == "marketing" and not self.preference_allows(tenant, customer, channel): raise ControlPlaneError("consent_required")
+         if self.is_suppressed(tenant, channel, destination): raise ControlPlaneError("destination_suppressed")
+@@ -476,7 +478,7 @@ class Store:
+             rank={"created":0,"validated":1,"queued":2,"accepted":3,"sent":4,"deferred":4,
+                   "delivered":6,"inbound_received":6,"failed":6,"rejected":6,"expired":6,
+                   "undeliverable":6,"bounced":7,"complained":8,"unsubscribed":9,
+-                  "cancelled":9,"opted_out":9,"blocked":9}
++                  "cancelled":9,"opted_out":9}
+             current=str(message["status"])
+             if rank.get(status,0) < rank.get(current,0):
+                 return True
+diff --git a/control_plane_service/database.py b/control_plane_service/database.py
+index 6c4239a8bf69dd707c3ec10be137faa2d6db3ce9..2bfc2d3002686a415911b283391289a89c933be5 100644
+--- a/control_plane_service/database.py
++++ b/control_plane_service/database.py
+@@ -1,6 +1,5 @@
+ from __future__ import annotations
+ 
+-import json
+ import os
+ import sqlite3
+ from typing import Any, Iterable
+@@ -25,25 +24,16 @@ def is_postgres() -> bool:
+ if is_postgres():
+     import psycopg
+     from psycopg.rows import dict_row
+-    from psycopg.types.json import Jsonb
+     IntegrityError = psycopg.IntegrityError
+ else:
+     IntegrityError = sqlite3.IntegrityError
+ 
+ 
+-def json_value(value: Any) -> Any:
+-    """Return a value explicitly adapted for the active JSON storage type."""
+-    if is_postgres():
+-        return Jsonb(value)
+-    return json.dumps(value, separators=(",", ":"), sort_keys=True)
+-
+-
+ def _postgres_sql(sql: str) -> str:
+     translated = sql.replace("?", "%s")
+     # The embedded test schema uses collision-resistant cp_* names. PostgreSQL
+     # exposes the same model as the dedicated control_plane schema.
+     mapping = {
+-        "postal_inbound_event": "control_plane.postal_inbound_event",
+         "cp_campaign_email_domain": "control_plane.campaign_email_domain",
+         "cp_agent_mailbox": "control_plane.agent_mailbox",
+         "cp_mailbox_provisioning_event": "control_plane.mailbox_provisioning_event",
+diff --git a/control_plane_service/email_adapters.py b/control_plane_service/email_adapters.py
+index 781bde7a28afe40dc477acde3abde408e130e61d..ceafcfb9df22523e1c5385065648d3cbede916d7 100644
+--- a/control_plane_service/email_adapters.py
++++ b/control_plane_service/email_adapters.py
+@@ -20,8 +20,6 @@ from .core import ControlPlaneError
+ 
+ CANONICAL_ISSUER = "https://auth.codestra.co/realms/codestra"
+ KLYROW_PRIVATE_ENDPOINT = "https://10.40.0.4:18000"
+-ODOO_PRIVATE_ENDPOINT = "https://10.40.0.1:8443"
+-FORBIDDEN_AGENT_MAIL_ROLES = {"email-admin", "codestra-email-admin", "mail-admin"}
+ 
+ 
+ def _private_file(path: str) -> str:
+@@ -138,37 +136,45 @@ class KeycloakIdentityAdapter:
+         )
+ 
+     def reconcile(self, command: dict[str, Any]) -> dict[str, Any]:
+-        user_id = str(command.get("keycloak_user_id") or "").strip()
+-        if not user_id:
+-            raise ControlPlaneError("authoritative_keycloak_subject_required")
+-        user = self._call(command, "GET", f"/users/{urllib.parse.quote(user_id)}")
+-        if user.get("id") != user_id or user.get("enabled") is not True:
+-            raise ControlPlaneError("keycloak_identity_readback_failed")
++        username = f"agent:{command['tenant_id']}:{command['agent_id']}"
++        users = self._call(command, "GET", "/users?" + urllib.parse.urlencode(
++            {"username": username, "exact": "true"}
++        ))
++        if len(users) > 1:
++            raise ControlPlaneError("ambiguous_keycloak_identity")
++        if users:
++            user_id = users[0]["id"]
++        else:
++            self._call(command, "POST", "/users", {
++                "username": username, "email": command["primary_email"], "enabled": True,
++                "attributes": {"tenant_id": [command["tenant_id"]],
++                               "campaign_id": [command["campaign_id"]],
++                               "agent_id": [command["agent_id"]]},
++            })
++            users = self._call(command, "GET", "/users?" + urllib.parse.urlencode(
++                {"username": username, "exact": "true"}
++            ))
++            if len(users) != 1:
++                raise ControlPlaneError("keycloak_identity_readback_failed")
++            user_id = users[0]["id"]
+         roles = [self._call(command, "GET", f"/roles/{urllib.parse.quote(role)}")
+                  for role in command["roles"]]
+         self._call(command, "POST", f"/users/{user_id}/role-mappings/realm", roles, expected=(204,))
+-        effective = self._call(command, "GET", f"/users/{user_id}/role-mappings/realm/composite")
+-        names = {str(role.get("name")) for role in effective}
+-        if not set(command["roles"]).issubset(names) or names & FORBIDDEN_AGENT_MAIL_ROLES:
+-            raise ControlPlaneError("keycloak_grant_readback_failed")
+         return {"user_id": user_id}
+ 
+     def revoke_mailbox_grants(self, command: dict[str, Any]) -> None:
+-        user_id = str(command.get("keycloak_user_id") or "").strip()
+-        if not user_id:
+-            raise ControlPlaneError("authoritative_keycloak_subject_required")
+-        user = self._call(command, "GET", f"/users/{urllib.parse.quote(user_id)}")
+-        if user.get("id") != user_id:
++        username = f"agent:{command['tenant_id']}:{command['agent_id']}"
++        users = self._call(command, "GET", "/users?" + urllib.parse.urlencode(
++            {"username": username, "exact": "true"}
++        ))
++        if len(users) != 1:
+             raise ControlPlaneError("keycloak_identity_readback_failed")
+         roles = [self._call(command, "GET", f"/roles/{urllib.parse.quote(role)}")
+                  for role in command["roles"]]
+         self._call(
+-            command, "DELETE", f"/users/{user_id}/role-mappings/realm",
++            command, "DELETE", f"/users/{users[0]['id']}/role-mappings/realm",
+             roles, expected=(204,),
+         )
+-        effective = self._call(command, "GET", f"/users/{user_id}/role-mappings/realm/composite")
+-        if set(command["roles"]) & {str(role.get("name")) for role in effective}:
+-            raise ControlPlaneError("keycloak_grant_revocation_readback_failed")
+ 
+ 
+ class KlyrowMailboxAdapter:
+@@ -205,22 +211,6 @@ class KlyrowMailboxAdapter:
+         value = self._call(command, "POST", "/v1/email/validations/inbound", command)
+         return value.get("matched") is True and value.get("match") == "EXACT"
+ 
+-    def destination_readback(self, command):
+-        address = urllib.parse.quote(command["primary_email"])
+-        mailbox = self._call(command, "GET", f"/v1/email/mailboxes/{address}")
+-        route = self._call(command, "GET", f"/v1/email/inbound-routes/{address}")
+-        sender = self._call(command, "GET", f"/v1/email/sender-authorizations/{address}")
+-        return (
+-            mailbox.get("primary_email") == command["primary_email"]
+-            and mailbox.get("tenant_id") == command["tenant_id"]
+-            and mailbox.get("campaign_id") == command["campaign_id"]
+-            and mailbox.get("agent_id") == command["agent_id"]
+-            and route.get("recipient") == command["primary_email"]
+-            and route.get("match") == "EXACT" and route.get("catch_all") is False
+-            and sender.get("from_address") == command["primary_email"]
+-            and sender.get("authorized") is True
+-        )
+-
+     def disable(self, command: dict[str, Any]) -> None:
+         self._call(
+             command, "POST",
+@@ -231,28 +221,16 @@ class KlyrowMailboxAdapter:
+ 
+ class OdooMailboxAdapter:
+     def __init__(self, client: MtlsJsonClient, tokens: ServiceTokenProvider,
+-                 base_url: str = ODOO_PRIVATE_ENDPOINT):
+-        if base_url.rstrip("/") != ODOO_PRIVATE_ENDPOINT:
+-            raise ControlPlaneError("unapproved_odoo_endpoint")
++                 base_url: str = "https://10.40.0.1:8443"):
+         self.client, self.tokens, self.base = client, tokens, base_url.rstrip("/")
+ 
+     def write_mailbox(self, command: dict[str, Any]) -> None:
+-        allowed = {
+-            "mailbox_id", "agent_id", "employee_id", "odoo_user_id", "campaign_id",
+-            "tenant_id", "primary_email", "mailbox_status", "sending_enabled",
+-            "receiving_enabled", "quota", "rate_limit", "correlation_id",
+-            "idempotency_key", "failure_state_safe",
+-        }
+-        projection = {key: value for key, value in command.items() if key in allowed}
+         value = self.client.request(
+             "PUT", self.base + "/internal/v1/odoo/mailbox-projections",
+-            token=self.tokens.token(command["tenant_id"]), body=projection,
++            token=self.tokens.token(command["tenant_id"]), body=command,
+             headers={"X-Codestra-Tenant": command["tenant_id"],
+                      "X-Correlation-ID": command["correlation_id"],
+                      "Idempotency-Key": command["idempotency_key"]},
+         )
+-        if (value.get("tenant_id") != command["tenant_id"]
+-                or value.get("primary_email") != command["primary_email"]
+-                or value.get("mailbox_id") != command["mailbox_id"]
+-                or value.get("mailbox_status") != command["mailbox_status"]):
++        if value.get("tenant_id") != command["tenant_id"] or value.get("primary_email") != command["primary_email"]:
+             raise ControlPlaneError("odoo_projection_readback_mismatch")
+diff --git a/control_plane_service/email_provisioning.py b/control_plane_service/email_provisioning.py
+index 89ab002cde590a9c53590c0544865cc6ca73c3c9..353ab1703c8dec858d0cb6dea208f2a3cf80e32b 100644
+--- a/control_plane_service/email_provisioning.py
++++ b/control_plane_service/email_provisioning.py
+@@ -87,7 +87,6 @@ class MailAdapter(Protocol):
+     def authorize_sender(self, command: dict[str, Any]) -> dict[str, Any]: ...
+     def validate_send_path(self, command: dict[str, Any]) -> bool: ...
+     def validate_inbound_route(self, command: dict[str, Any]) -> bool: ...
+-    def destination_readback(self, command: dict[str, Any]) -> bool: ...
+     def disable(self, command: dict[str, Any]) -> None: ...
+ 
+ 
+@@ -171,46 +170,32 @@ class CampaignMailboxRegistry:
+                 return {"mailbox_status":ADDRESS_CONFLICT,"primary_email":primary,"provisioning_error":"address already reserved"}, False
+             db.execute("INSERT INTO cp_mailbox_provisioning_event VALUES(?,?,?,?,?,?,?,?,?)", (str(uuid.uuid4()),tenant,key,request_hash,mailbox_id,"PROVISIONING",correlation,None,stamp))
+ 
+-        command = {"mailbox_id":mailbox_id,"tenant_id":tenant,"campaign_id":str(value["campaign_id"]),"agent_id":str(value["agent_id"]),"primary_email":primary,"display_name":value["display_name"],"correlation_id":correlation,"idempotency_key":key,"keycloak_user_id":value.get("keycloak_user_id"),"odoo_user_id":value.get("odoo_user_id"),"employee_id":value.get("employee_id"),"roles":["codestra-email-agent"],"scopes":["klyrow.email.send.own","klyrow.email.read.own","klyrow.email.reply.own","klyrow.email.attachments.own"],"quota":int(value.get("quota",2048)),"rate_limit":int(value.get("rate_limit",60))}
++        command = {"tenant_id":tenant,"campaign_id":str(value["campaign_id"]),"agent_id":str(value["agent_id"]),"primary_email":primary,"display_name":value["display_name"],"correlation_id":correlation,"idempotency_key":key,"roles":["codestra-email-agent"],"scopes":["klyrow.email.send.own","klyrow.email.read.own","klyrow.email.reply.own","klyrow.email.attachments.own"],"quota":int(value.get("quota",2048)),"rate_limit":int(value.get("rate_limit",60))}
+         try:
+             kc = identity.reconcile(command)
+             mail.provision_identity(command)
+             mail.provision_inbound_route(command)
+             mail.authorize_sender(command)
+-            odoo.write_mailbox({**command,"mailbox_status":"PROVISIONING","sending_enabled":False,"receiving_enabled":False})
++            odoo.write_mailbox(command)
+             if not mail.validate_send_path({**command,"external_delivery":False}):
+                 raise ControlPlaneError("send_path_validation_failed")
+             if not mail.validate_inbound_route(command):
+                 raise ControlPlaneError("inbound_route_validation_failed")
+-            if not mail.destination_readback(command):
+-                raise ControlPlaneError("mailbox_destination_readback_failed")
+             with Connection(self.path) as db:
+                 self._tenant(db,tenant)
+                 db.execute("UPDATE cp_agent_mailbox SET keycloak_user_id=?,sending_enabled=?,receiving_enabled=?,mailbox_status=?,activated_at=?,audit_version=audit_version+1 WHERE mailbox_id=?", (kc.get("user_id"),db_bool(True),db_bool(True),MAILBOX_ACTIVE,now(),mailbox_id))
+                 db.execute("UPDATE cp_mailbox_provisioning_event SET status=? WHERE tenant_id=? AND idempotency_key=?", (MAILBOX_ACTIVE,tenant,key))
+-            odoo.write_mailbox({**command,"mailbox_status":MAILBOX_ACTIVE,"sending_enabled":True,"receiving_enabled":True})
+             return self.get_mailbox(tenant,mailbox_id) or {}, False
+         except Exception as exc:
+             safe = str(exc)[:240] if isinstance(exc, ControlPlaneError) else "downstream provisioning failure"
+-            compensation_errors = []
+             try:
+                 mail.disable(command)
+-            except Exception:
+-                compensation_errors.append("mail_disable_failed")
+-            try:
++            finally:
+                 identity.revoke_mailbox_grants(command)
+-            except Exception:
+-                compensation_errors.append("identity_revoke_failed")
+-            if compensation_errors:
+-                safe = f"{safe};compensation={','.join(compensation_errors)}"[:240]
+             with Connection(self.path) as db:
+                 self._tenant(db,tenant)
+                 db.execute("UPDATE cp_agent_mailbox SET sending_enabled=?,receiving_enabled=?,mailbox_status=?,provisioning_error=?,audit_version=audit_version+1 WHERE mailbox_id=?", (db_bool(False),db_bool(False),PROVISIONING_FAILED,safe,mailbox_id))
+                 db.execute("UPDATE cp_mailbox_provisioning_event SET status=?,error_detail_safe=? WHERE tenant_id=? AND idempotency_key=?", (PROVISIONING_FAILED,safe,tenant,key))
+-            try:
+-                odoo.write_mailbox({**command,"mailbox_status":PROVISIONING_FAILED,"sending_enabled":False,"receiving_enabled":False,"failure_state_safe":safe})
+-            except Exception:
+-                pass
+             return self.get_mailbox(tenant,mailbox_id) or {}, False
+ 
+     def suspend(self, tenant: str, mailbox_id: str, identity: IdentityAdapter, mail: MailAdapter) -> dict[str, Any]:
+@@ -220,7 +205,6 @@ class CampaignMailboxRegistry:
+         command = {
+             "tenant_id": tenant, "agent_id": mailbox["agent_id"],
+             "campaign_id": mailbox["campaign_id"], "primary_email": mailbox["primary_email"],
+-            "keycloak_user_id": mailbox["keycloak_user_id"],
+             "correlation_id": str(uuid.uuid4()),
+             "idempotency_key": f"suspend:{mailbox_id}:{mailbox['audit_version']}",
+             "roles": ["codestra-email-agent"],
+@@ -244,22 +228,11 @@ class CampaignMailboxRegistry:
+             raise ControlPlaneError("mailbox_sender_not_authorized")
+         return dict(row)
+ 
+-    def route_inbound(self, recipient: str, tenant_id: str | None = None) -> dict[str, Any]:
++    def route_inbound(self, recipient: str) -> dict[str, Any]:
+         """Resolve one exact active recipient. Deliberately provides no catch-all."""
+         normalized = recipient.strip().lower()
+         with Connection(self.path) as db:
+-            if is_postgres():
+-                self._tenant(db, str(tenant_id or ""))
+-            if tenant_id:
+-                row = db.execute(
+-                    "SELECT * FROM cp_agent_mailbox WHERE tenant_id=? AND lower(primary_email)=? AND mailbox_status='ACTIVE' AND receiving_enabled=?",
+-                    (tenant_id, normalized, db_bool(True)),
+-                ).fetchone()
+-            else:
+-                row = db.execute(
+-                    "SELECT * FROM cp_agent_mailbox WHERE lower(primary_email)=? AND mailbox_status='ACTIVE' AND receiving_enabled=?",
+-                    (normalized, db_bool(True)),
+-                ).fetchone()
++            row = db.execute("SELECT * FROM cp_agent_mailbox WHERE lower(primary_email)=? AND mailbox_status='ACTIVE' AND receiving_enabled=?", (normalized,db_bool(True))).fetchone()
+         if not row:
+             raise ControlPlaneError("inbound_recipient_not_found")
+         return dict(row)
+diff --git a/control_plane_service/mapping_registry.py b/control_plane_service/mapping_registry.py
+index f6edccbd5cac029083d964f6e13e6cd6e1d131ba..3b6a5b22b0b934c6aa94d264ef2390a5f27f0524 100644
+--- a/control_plane_service/mapping_registry.py
++++ b/control_plane_service/mapping_registry.py
+@@ -251,13 +251,10 @@ class MappingRegistry:
+             result = dict(row); result["status"] = target
+             return result
+ 
+-    def record_result(self, job_id: str, value: dict[str, Any], *, tenant_id: str,
+-                      actor: str = "n8n") -> dict[str, Any]:
++    def record_result(self, job_id: str, value: dict[str, Any], *, actor: str = "n8n") -> dict[str, Any]:
+         with Connection(self.path) as db:
+             job = db.execute("SELECT * FROM cp_sync_job WHERE id=?", (job_id,)).fetchone()
+             if not job: raise ControlPlaneError("job_not_found")
+-            if not tenant_id or job["tenant_id"] != tenant_id:
+-                raise ControlPlaneError("cross_tenant_denied")
+             version = int(value["entity_version"])
+             if version != int(job["entity_version"]): raise ControlPlaneError("stale_version")
+             digest = payload_hash(value)
+diff --git a/control_plane_service/postal_inbound.py b/control_plane_service/postal_inbound.py
+deleted file mode 100644
+index 8fe737d6d47d5b7813ae60d1024ecd1f619e6304..0000000000000000000000000000000000000000
+--- a/control_plane_service/postal_inbound.py
++++ /dev/null
+@@ -1,136 +0,0 @@
+-"""Fail-closed Postal inbound adapter with exact routing and attachment quarantine."""
+-from __future__ import annotations
+-
+-import re
+-import hashlib
+-import unicodedata
+-from email import policy
+-from email.parser import BytesParser
+-from pathlib import PurePath
+-from typing import Any, Protocol
+-
+-from .core import ControlPlaneError
+-
+-
+-ALLOWED_ATTACHMENT_MIME = {
+-    "application/pdf", "image/gif", "image/jpeg", "image/png", "text/csv",
+-    "text/plain", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+-}
+-DENIED_EXTENSIONS = {
+-    ".app", ".bat", ".bin", ".cmd", ".com", ".dll", ".dmg", ".exe", ".hta",
+-    ".iso", ".jar", ".js", ".lnk", ".msi", ".ps1", ".scr", ".sh", ".vbs",
+-}
+-MAX_MESSAGE_BYTES = 26_214_400
+-MAX_ATTACHMENT_BYTES = 10_485_760
+-MAX_TOTAL_ATTACHMENT_BYTES = 20_971_520
+-MAX_ATTACHMENTS = 20
+-
+-
+-class ExactRouter(Protocol):
+-    def route_inbound(self, recipient: str, tenant_id: str | None = None) -> dict[str, Any]: ...
+-
+-
+-class MalwareScanner(Protocol):
+-    def scan(self, content: bytes, *, filename: str, mime_type: str) -> str: ...
+-
+-
+-class TenantObjectStore(Protocol):
+-    def put_clean(self, *, tenant_id: str, object_key: str, content: bytes,
+-                  metadata: dict[str, str]) -> str: ...
+-    def put_quarantine(self, *, tenant_id: str, object_key: str, content: bytes,
+-                       metadata: dict[str, str]) -> str: ...
+-
+-
+-class InboundProjection(Protocol):
+-    def deliver(self, value: dict[str, Any]) -> dict[str, Any]: ...
+-
+-
+-def sanitize_filename(value: str | None) -> str:
+-    original = PurePath((value or "attachment").replace("\\", "/")).name
+-    normalized = unicodedata.normalize("NFKD", original).encode("ascii", "ignore").decode()
+-    normalized = normalized.replace("\x00", "")
+-    safe = re.sub(r"[^A-Za-z0-9._ -]", "_", normalized).strip(" .")[:180]
+-    if not safe or safe in {".", ".."}:
+-        safe = "attachment"
+-    if PurePath(safe).suffix.lower() in DENIED_EXTENSIONS:
+-        raise ControlPlaneError("attachment_executable_denied")
+-    return safe
+-
+-
+-class PostalInboundAdapter:
+-    def __init__(self, router: ExactRouter, scanner: MalwareScanner,
+-                 storage: TenantObjectStore, projection: InboundProjection):
+-        self.router, self.scanner = router, scanner
+-        self.storage, self.projection = storage, projection
+-
+-    def ingest(self, *, tenant_id: str, recipient: str, raw_message: bytes,
+-               correlation_id: str, provider_event_id: str) -> dict[str, Any]:
+-        if not tenant_id or not correlation_id or not provider_event_id:
+-            raise ControlPlaneError("inbound_metadata_required")
+-        if not raw_message or len(raw_message) > MAX_MESSAGE_BYTES:
+-            raise ControlPlaneError("inbound_message_size_denied")
+-        route = self.router.route_inbound(recipient, tenant_id)
+-        if route.get("tenant_id") != tenant_id:
+-            raise ControlPlaneError("inbound_tenant_mismatch")
+-        message = BytesParser(policy=policy.default).parsebytes(raw_message)
+-        message_id = str(message.get("Message-ID") or "").strip()
+-        if not message_id:
+-            raise ControlPlaneError("inbound_message_id_required")
+-
+-        pending: list[tuple[str, str, bytes]] = []
+-        total = 0
+-        for part in message.iter_attachments():
+-            if len(pending) >= MAX_ATTACHMENTS:
+-                raise ControlPlaneError("attachment_count_denied")
+-            mime_type = part.get_content_type().lower()
+-            if mime_type not in ALLOWED_ATTACHMENT_MIME:
+-                raise ControlPlaneError("attachment_mime_denied")
+-            filename = sanitize_filename(part.get_filename())
+-            content = part.get_payload(decode=True) or b""
+-            if not content or len(content) > MAX_ATTACHMENT_BYTES:
+-                raise ControlPlaneError("attachment_size_denied")
+-            total += len(content)
+-            if total > MAX_TOTAL_ATTACHMENT_BYTES:
+-                raise ControlPlaneError("attachment_total_size_denied")
+-            pending.append((filename, mime_type, content))
+-
+-        scan_results = []
+-        for filename, mime_type, content in pending:
+-            result = str(self.scanner.scan(content, filename=filename, mime_type=mime_type)).upper()
+-            scan_results.append(result)
+-            if result != "CLEAN":
+-                self.storage.put_quarantine(
+-                    tenant_id=tenant_id,
+-                    object_key=f"quarantine/{provider_event_id}/{hashlib.sha256(content).hexdigest()}/{filename}", content=content,
+-                    metadata={"scan_result": result, "provider_event_id": provider_event_id,
+-                              "correlation_id": correlation_id, "mime_type": mime_type},
+-                )
+-                raise ControlPlaneError("attachment_quarantined")
+-
+-        attachments = []
+-        for (filename, mime_type, content), scan_result in zip(pending, scan_results):
+-            reference = self.storage.put_clean(
+-                tenant_id=tenant_id,
+-                object_key=f"messages/{provider_event_id}/{hashlib.sha256(content).hexdigest()}/{filename}", content=content,
+-                metadata={"scan_result": scan_result, "provider_event_id": provider_event_id,
+-                          "correlation_id": correlation_id, "mime_type": mime_type},
+-            )
+-            attachments.append({"filename": filename, "mime_type": mime_type,
+-                                "size": len(content), "object_reference": reference,
+-                                "scan_result": scan_result})
+-
+-        projection = {
+-            "tenant_id": tenant_id, "campaign_id": route["campaign_id"],
+-            "agent_id": route["agent_id"], "mailbox_id": route["mailbox_id"],
+-            "recipient": recipient.strip().lower(), "message_id": message_id,
+-            "in_reply_to": str(message.get("In-Reply-To") or "").strip() or None,
+-            "references": str(message.get("References") or "").split(),
+-            "correlation_id": correlation_id, "provider_event_id": provider_event_id,
+-            "subject": str(message.get("Subject") or ""), "attachments": attachments,
+-        }
+-        readback = self.projection.deliver(projection)
+-        required = ("tenant_id", "campaign_id", "agent_id", "mailbox_id", "message_id", "correlation_id")
+-        if any(readback.get(key) != projection[key] for key in required):
+-            raise ControlPlaneError("inbound_projection_readback_mismatch")
+-        return projection
+diff --git a/control_plane_service/postal_runtime.py b/control_plane_service/postal_runtime.py
+deleted file mode 100644
+index 36836d59e789cfde86e096868fcb2f1350c1b4bd..0000000000000000000000000000000000000000
+--- a/control_plane_service/postal_runtime.py
++++ /dev/null
+@@ -1,202 +0,0 @@
+-"""Production dependencies and durable inbox for the Postal inbound adapter."""
+-from __future__ import annotations
+-
+-import hashlib
+-import hmac
+-import json
+-import os
+-import socket
+-import struct
+-import time
+-import urllib.error
+-import urllib.parse
+-import urllib.request
+-from datetime import datetime, timedelta, timezone
+-from typing import Any
+-
+-from .core import ControlPlaneError, now_iso
+-from .database import Connection, is_postgres, json_value
+-from .email_provisioning import CampaignMailboxRegistry
+-from .postal_inbound import PostalInboundAdapter
+-
+-
+-INBOX_SCHEMA = """
+-CREATE TABLE IF NOT EXISTS postal_inbound_event(
+- provider_event_id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,request_hash TEXT NOT NULL,
+- correlation_id TEXT NOT NULL,status TEXT NOT NULL,result_json TEXT,error_detail_safe TEXT,
+- created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+-"""
+-
+-
+-def _secret(name: str) -> str:
+-    value = os.getenv(name, "")
+-    path = os.getenv(name + "_FILE", "")
+-    if not value and path:
+-        with open(path, encoding="utf-8") as handle:
+-            value = handle.read().strip()
+-    return value
+-
+-
+-def _secure_url(name: str) -> str:
+-    value = os.getenv(name, "").rstrip("/")
+-    if not value:
+-        raise ControlPlaneError(name.lower() + "_not_configured")
+-    if not value.startswith("https://") and os.getenv("POSTAL_ALLOW_INSECURE_TEST_ENDPOINTS", "false") != "true":
+-        raise ControlPlaneError("insecure_dependency_url_denied")
+-    return value
+-
+-
+-class ClamdScanner:
+-    """Minimal clamd INSTREAM client. Any protocol or network error fails closed."""
+-
+-    def scan(self, content: bytes, *, filename: str, mime_type: str) -> str:
+-        host = os.getenv("POSTAL_CLAMD_HOST", "")
+-        port = int(os.getenv("POSTAL_CLAMD_PORT", "3310"))
+-        if not host:
+-            raise ControlPlaneError("malware_scanner_not_configured")
+-        try:
+-            with socket.create_connection((host, port), timeout=float(os.getenv("POSTAL_DEPENDENCY_TIMEOUT", "5"))) as stream:
+-                stream.sendall(b"zINSTREAM\0")
+-                for offset in range(0, len(content), 65536):
+-                    chunk = content[offset:offset + 65536]
+-                    stream.sendall(struct.pack("!I", len(chunk)) + chunk)
+-                stream.sendall(struct.pack("!I", 0))
+-                response = stream.recv(4096).decode("utf-8", "replace").strip("\0\r\n")
+-        except OSError as exc:
+-            raise ControlPlaneError("malware_scanner_unavailable") from exc
+-        if response.endswith(" OK"):
+-            return "CLEAN"
+-        if " FOUND" in response:
+-            return "MALWARE"
+-        raise ControlPlaneError("malware_scanner_invalid_response")
+-
+-
+-class ProtectedHttpObjectStore:
+-    """Writes opaque objects to a tenant-scoped protected storage API."""
+-
+-    def _put(self, kind: str, *, tenant_id: str, object_key: str, content: bytes,
+-             metadata: dict[str, str]) -> str:
+-        base = _secure_url("POSTAL_OBJECT_STORE_URL")
+-        token = _secret("POSTAL_OBJECT_STORE_TOKEN")
+-        if not token:
+-            raise ControlPlaneError("object_store_credentials_not_configured")
+-        path = "/".join(urllib.parse.quote(x, safe="") for x in (tenant_id, kind, object_key))
+-        headers = {
+-            "Authorization": "Bearer " + token,
+-            "Content-Type": "application/octet-stream",
+-            "X-Object-Metadata": json.dumps(metadata, separators=(",", ":"), sort_keys=True),
+-            "If-None-Match": "*",
+-        }
+-        request = urllib.request.Request(base + "/v1/objects/" + path, content, headers, method="PUT")
+-        try:
+-            with urllib.request.urlopen(request, timeout=float(os.getenv("POSTAL_DEPENDENCY_TIMEOUT", "5"))) as response:
+-                result = json.loads(response.read())
+-        except urllib.error.HTTPError as exc:
+-            if exc.code != 412:
+-                raise ControlPlaneError("object_store_unavailable") from exc
+-            result = {"object_reference": f"protected-object://{tenant_id}/{kind}/{object_key}"}
+-        except (OSError, ValueError, json.JSONDecodeError) as exc:
+-            raise ControlPlaneError("object_store_unavailable") from exc
+-        reference = str(result.get("object_reference") or "")
+-        if not reference or reference.startswith(("http://", "https://")):
+-            raise ControlPlaneError("object_store_invalid_reference")
+-        return reference
+-
+-    def put_clean(self, **value: Any) -> str:
+-        return self._put("clean", **value)
+-
+-    def put_quarantine(self, **value: Any) -> str:
+-        return self._put("quarantine", **value)
+-
+-
+-class OdooInboundProjection:
+-    """Projects through an authenticated Odoo HTTP contract and requires read-back."""
+-
+-    def deliver(self, value: dict[str, Any]) -> dict[str, Any]:
+-        url = _secure_url("POSTAL_ODOO_INBOUND_URL")
+-        secret = _secret("POSTAL_ODOO_HMAC_SECRET")
+-        if not secret:
+-            raise ControlPlaneError("odoo_inbound_credentials_not_configured")
+-        raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+-        stamp = str(int(time.time()))
+-        event_id = str(value["provider_event_id"])
+-        path = urllib.parse.urlsplit(url).path
+-        canonical = b"\n".join((stamp.encode(), event_id.encode(), b"POST", path.encode(), raw))
+-        signature = hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
+-        headers = {
+-            "Content-Type": "application/json", "X-Codestra-Timestamp": stamp,
+-            "X-Codestra-Event-ID": event_id, "X-Codestra-Signature": signature,
+-            "X-Tenant-ID": str(value["tenant_id"]),
+-            "X-Correlation-ID": str(value["correlation_id"]),
+-            "Idempotency-Key": "postal-inbound:" + event_id,
+-        }
+-        try:
+-            with urllib.request.urlopen(urllib.request.Request(url, raw, headers, method="POST"),
+-                                        timeout=float(os.getenv("POSTAL_DEPENDENCY_TIMEOUT", "5"))) as response:
+-                if response.status not in (200, 201):
+-                    raise ControlPlaneError("odoo_inbound_projection_failed")
+-                result = json.loads(response.read())
+-        except urllib.error.HTTPError as exc:
+-            raise ControlPlaneError("odoo_inbound_projection_failed") from exc
+-        except (OSError, ValueError, json.JSONDecodeError) as exc:
+-            raise ControlPlaneError("odoo_inbound_unavailable") from exc
+-        return result
+-
+-
+-class PostalInbox:
+-    def __init__(self, path: str):
+-        self.path = path
+-        if not is_postgres():
+-            with Connection(path) as db:
+-                db.executescript(INBOX_SCHEMA)
+-
+-    def _tenant(self, db: Connection, tenant_id: str) -> None:
+-        if is_postgres():
+-            db.execute("SELECT set_config('app.tenant_id', ?, true)", (tenant_id,))
+-
+-    def run(self, *, tenant_id: str, provider_event_id: str, correlation_id: str,
+-            recipient: str, raw_message: bytes, adapter: PostalInboundAdapter) -> tuple[dict[str, Any], bool]:
+-        request_hash = hashlib.sha256(b"\0".join((tenant_id.encode(), recipient.lower().encode(), raw_message))).hexdigest()
+-        stamp = now_iso()
+-        with Connection(self.path) as db:
+-            self._tenant(db, tenant_id)
+-            lock = " FOR UPDATE" if is_postgres() else ""
+-            row = db.execute("SELECT * FROM postal_inbound_event WHERE provider_event_id=?" + lock, (provider_event_id,)).fetchone()
+-            if row:
+-                if row["tenant_id"] != tenant_id or row["request_hash"] != request_hash:
+-                    raise ControlPlaneError("inbound_idempotency_conflict")
+-                if row["status"] == "COMPLETED":
+-                    result = row["result_json"]
+-                    return (result if isinstance(result, dict) else json.loads(result)), True
+-                if row["status"] == "PROCESSING":
+-                    updated = row["updated_at"]
+-                    if isinstance(updated, str):
+-                        updated = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+-                    if updated.tzinfo is None:
+-                        updated = updated.replace(tzinfo=timezone.utc)
+-                    lease = timedelta(seconds=int(os.getenv("POSTAL_PROCESSING_LEASE_SECONDS", "300")))
+-                    if datetime.now(timezone.utc) - updated <= lease:
+-                        raise ControlPlaneError("inbound_processing")
+-                db.execute("UPDATE postal_inbound_event SET status='PROCESSING',error_detail_safe=NULL,updated_at=? WHERE provider_event_id=?", (stamp, provider_event_id))
+-            else:
+-                db.execute("INSERT INTO postal_inbound_event(provider_event_id,tenant_id,request_hash,correlation_id,status,result_json,error_detail_safe,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+-                           (provider_event_id, tenant_id, request_hash, correlation_id, "PROCESSING", None, None, stamp, stamp))
+-        try:
+-            result = adapter.ingest(tenant_id=tenant_id, recipient=recipient, raw_message=raw_message,
+-                                    correlation_id=correlation_id, provider_event_id=provider_event_id)
+-        except Exception as exc:
+-            safe = str(exc)[:160] if isinstance(exc, ControlPlaneError) else "inbound_processing_failed"
+-            with Connection(self.path) as db:
+-                self._tenant(db, tenant_id)
+-                db.execute("UPDATE postal_inbound_event SET status='FAILED',error_detail_safe=?,updated_at=? WHERE provider_event_id=?", (safe, now_iso(), provider_event_id))
+-            raise
+-        encoded = json_value(result)
+-        with Connection(self.path) as db:
+-            self._tenant(db, tenant_id)
+-            db.execute("UPDATE postal_inbound_event SET status='COMPLETED',result_json=?,updated_at=? WHERE provider_event_id=?", (encoded, now_iso(), provider_event_id))
+-        return result, False
+-
+-
+-def production_adapter(path: str) -> PostalInboundAdapter:
+-    return PostalInboundAdapter(CampaignMailboxRegistry(path), ClamdScanner(),
+-                                ProtectedHttpObjectStore(), OdooInboundProjection())
+diff --git a/control_plane_service/server.py b/control_plane_service/server.py
+index 1302b0819c623585cf0b50ef406ef2283ab7240b..f7295188648b0df26f7b26f0f36bf8d4ed46723c 100644
+--- a/control_plane_service/server.py
++++ b/control_plane_service/server.py
+@@ -2,15 +2,11 @@ from __future__ import annotations
+ 
+ import hmac
+ import hashlib
+-import base64
+-import binascii
+ import json
+ import os
+ import uuid
+ import urllib.parse
+-import urllib.request
+ import ipaddress
+-import time
+ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ from urllib.parse import parse_qs, urlparse
+ 
+@@ -31,85 +27,14 @@ from .providers import ProviderError, crawler_action, submit_crawler
+ from .crm import ACTIVITY_FIELDS, CREATE_FIELDS, PATCH_FIELDS, CrmService, request_hash
+ from .forms import FormService, ORIGINS
+ from .mapping_registry import MappingRegistry
+-from .postal_runtime import PostalInbox, production_adapter
++from .automation import authorize_automation, record_execution_result
+ 
+ DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
+ STORE = Store(DB)
+ MAPPINGS = MappingRegistry(DB)
+-POSTAL_INBOX = PostalInbox(DB)
+ TTL = int(os.getenv("CONTROL_PLANE_HMAC_TTL", "300"))
+ MAX_BODY = int(os.getenv("CONTROL_PLANE_MAX_BODY", "524288"))
+ 
+-SYSTEM_COMPONENTS = ("keycloak", "kong", "middleware", "odoo", "n8n")
+-
+-
+-def release_identity() -> dict[str, str]:
+-    return {
+-        "service": "codestra-control-plane",
+-        "source_sha": os.getenv("SOURCE_SHA", "unknown"),
+-        "release_id": os.getenv("RELEASE_ID", "unknown"),
+-        "image_digest": os.getenv("IMAGE_DIGEST", "unknown"),
+-    }
+-
+-
+-def component_status(name: str) -> dict[str, object]:
+-    """Probe an explicitly configured private health URL and return no internals."""
+-    url = os.getenv(f"SYSTEM_{name.upper()}_HEALTH_URL", "").strip()
+-    if not url:
+-        return {"status": "unknown", "latency_ms": None}
+-    started = time.monotonic()
+-    try:
+-        with urllib.request.urlopen(url, timeout=2) as response:  # nosec B310
+-            ready = 200 <= response.status < 300
+-    except Exception:
+-        ready = False
+-    return {
+-        "status": "ready" if ready else "unavailable",
+-        "latency_ms": round((time.monotonic() - started) * 1000),
+-    }
+-
+-
+-def system_snapshot() -> dict[str, object]:
+-    try:
+-        STORE.list_events(None, limit=1)
+-        database = {"status": "ready", "latency_ms": None}
+-    except Exception:
+-        database = {"status": "unavailable", "latency_ms": None}
+-    components = {name: component_status(name) for name in SYSTEM_COMPONENTS}
+-    components["postgresql"] = database
+-    return components
+-
+-
+-def database_snapshot() -> dict[str, str]:
+-    """Return logical DB readiness through each application's private probe."""
+-    names = [
+-        name.strip()
+-        for name in os.getenv(
+-            "SYSTEM_DATABASE_NAMES",
+-            "odoo,keycloak,middleware,control_plane,n8n,kong",
+-        ).split(",")
+-        if name.strip()
+-    ]
+-    statuses: dict[str, str] = {}
+-    try:
+-        STORE.list_events(None, limit=1)
+-        statuses["control_plane"] = "ready"
+-    except Exception:
+-        statuses["control_plane"] = "unavailable"
+-    for name in names:
+-        if name != "control_plane":
+-            statuses[name] = str(component_status(name)["status"])
+-    return {name: statuses.get(name, "unknown") for name in names}
+-
+-
+-def production_delivery_enabled() -> bool:
+-    return (
+-        os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED", "false") == "true"
+-        and os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") == "true"
+-        and os.getenv("TELNEXA_MODE", "simulator") == "production"
+-        and os.getenv("KLYROW_MODE", "test") == "production"
+-    )
+-
+ 
+ def identity(source: str) -> tuple[str, str]:
+     prefix = source.upper()
+@@ -162,9 +87,9 @@ class Handler(BaseHTTPRequestHandler):
+         self.send_header("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-Correlation-ID")
+         self.send_header("Access-Control-Max-Age", "600"); self.end_headers()
+ 
+-    def body(self, maximum: int = MAX_BODY) -> bytes:
++    def body(self) -> bytes:
+         length = int(self.headers.get("Content-Length", "0"))
+-        if length < 1 or length > maximum:
++        if length < 1 or length > MAX_BODY:
+             raise ControlPlaneError("invalid_body_size")
+         return self.rfile.read(length)
+ 
+@@ -177,15 +102,12 @@ class Handler(BaseHTTPRequestHandler):
+             proxy_cidrs=[]; peer=None
+         client=self.headers.get("X-Authenticated-Client","")
+         tenant=self.headers.get("X-Authenticated-Tenant","")
+-        gateway_role=self.headers.get("X-Authenticated-Role", "tenant_admin")
+         gateway_verifier=verifier("KONG_GATEWAY_SHARED_SECRET")
+         gateway_secret=self.headers.get("X-Codestra-Gateway-Secret","")
+         gateway_valid=bool(gateway_verifier) and hmac.compare_digest(
+             gateway_verifier,hashlib.sha256(gateway_secret.encode()).hexdigest())
+-        if peer is not None and client and gateway_valid and gateway_role in roles and any(peer in network for network in proxy_cidrs):
+-            if gateway_role == "tenant_admin" and not tenant:
+-                self.send_json(403, {"error": "forbidden"}); return None
+-            return (client,gateway_role,tenant or None)
++        if peer is not None and client and tenant and gateway_valid and any(peer in network for network in proxy_cidrs):
++            return (client,"tenant_admin",tenant)
+         raw = self.headers.get("Authorization", "").removeprefix("Bearer ")
+         value = operator(raw)
+         if not value or value[1] not in roles:
+@@ -208,6 +130,20 @@ class Handler(BaseHTTPRequestHandler):
+         except ControlPlaneError as exc:
+             self.send_json(403, {"error": str(exc)}); return None
+ 
++    def n8n_gateway_caller(self):
++        expected = verifier("KONG_GATEWAY_SHARED_SECRET")
++        supplied = self.headers.get("X-Codestra-Gateway-Secret", "")
++        supplied_digest = hashlib.sha256(supplied.encode("utf-8")).hexdigest()
++        custom_id = self.headers.get("X-Consumer-Custom-ID", "")
++        consumer_id = self.headers.get("X-Consumer-ID", "")
++        if (not expected or not hmac.compare_digest(expected, supplied_digest)
++                or custom_id != "codestra-n8n-communications" or not consumer_id):
++            self.send_json(401, {"error": "unauthorized"}); return None
++        tenant = self.headers.get("X-Authenticated-Tenant", "")
++        if tenant != "COD":
++            self.send_json(403, {"error": "cross_tenant_denied"}); return None
++        return {"actor": custom_id, "tenant": tenant}
++
+     def crm_error(self, exc: Exception, correlation: str) -> None:
+         message = str(exc)
+         code = 409 if message == "idempotency_conflict" else 422 if message.startswith("unsupported_fields") else 503 if message in {"odoo_unavailable", "crm_odoo_not_configured"} else 404 if message.endswith("not_found") else 403
+@@ -287,32 +223,20 @@ class Handler(BaseHTTPRequestHandler):
+ 
+     def do_GET(self) -> None:
+         parsed = urlparse(self.path)
+-        if parsed.path in {"/health", "/healthz", "/v1/health", "/api/v1/health", "/livez"}:
++        if parsed.path in {"/health", "/v1/health", "/livez"}:
+             return self.send_json(200, {"status": "alive"})
+-        if parsed.path == "/version":
+-            return self.send_json(200, release_identity())
+         if parsed.path in {"/ready", "/readyz"}:
+             try: STORE.list_events(None, limit=1)
+             except Exception: return self.send_json(503, {"status": "not_ready"})
+-            return self.send_json(200, {"status": "ready", "outbound_safe_mode": not production_delivery_enabled()})
++            return self.send_json(200, {"status": "ready", "outbound_safe_mode": os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED", "false") != "true"})
+         if parsed.path == "/v1/ready":
+             try: STORE.list_messages("__readiness__", limit=1)
+             except Exception: return self.send_json(503, {"status": "not_ready"})
+-            production_enabled=production_delivery_enabled()
++            production_enabled=os.getenv("CONTROL_PLANE_OUTBOUND_ENABLED","false")=="true" and os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED","false")=="true" and os.getenv("TELNEXA_MODE","simulator")=="production" and os.getenv("KLYROW_MODE","test")=="production"
+             return self.send_json(200, {"status":"ready","providers":{"telnexa":os.getenv("TELNEXA_MODE","simulator"),"klyrow":os.getenv("KLYROW_MODE","test")},"production_delivery_enabled":production_enabled})
+         if parsed.path == "/metrics":
+             raw = (STORE.metrics()+MAPPINGS.metrics()).encode(); self.send_response(200); self.send_header("Content-Type", "text/plain; version=0.0.4"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); return self.wfile.write(raw)
+         if self.crm_get(parsed): return
+-        if parsed.path in {"/v1/admin/system/health", "/v1/admin/system/readiness", "/v1/admin/system/databases"}:
+-            system_operator = self.auth_operator({"platform_admin"})
+-            if not system_operator: return
+-            if parsed.path == "/v1/admin/system/databases":
+-                databases = database_snapshot()
+-                code = 200 if all(value == "ready" for value in databases.values()) else 503
+-                return self.send_json(code, {"status": "ready" if code == 200 else "not_ready", "databases": databases})
+-            components = system_snapshot()
+-            code = 200 if all(value["status"] == "ready" for value in components.values()) else 503
+-            return self.send_json(code, {"status": "ready" if code == 200 else "not_ready", "components": components})
+         op = self.auth_operator({"platform_admin", "operations", "support", "auditor", "tenant_admin"})
+         if not op: return
+         query = parse_qs(parsed.query); tenant = op[2] or query.get("tenant_id", [None])[0]
+@@ -355,40 +279,6 @@ class Handler(BaseHTTPRequestHandler):
+ 
+     def do_POST(self) -> None:
+         parsed = urlparse(self.path)
+-        if parsed.path == "/api/v1/integrations/postal/inbound":
+-            if os.getenv("POSTAL_INBOUND_ENABLED", "false") != "true":
+-                return self.send_json(503, {"error": "postal_inbound_disabled"})
+-            maximum = int(os.getenv("POSTAL_MAX_WEBHOOK_BYTES", "36700160"))
+-            try: body = self.body(maximum)
+-            except (ControlPlaneError, ValueError): return self.send_json(413, {"error": "invalid_body_size"})
+-            api_key, secret = identity("postal")
+-            supplied = self.headers.get("Authorization", "").removeprefix("Bearer ")
+-            digest = os.getenv("POSTAL_MIDDLEWARE_API_KEY_SHA256", "")
+-            if not credential_matches(supplied, api_key, digest):
+-                return self.send_json(401, {"error": "invalid_api_key"})
+-            event_id = self.headers.get("X-Event-Id", "")
+-            timestamp = self.headers.get("X-Timestamp", "")
+-            signature = self.headers.get("X-Signature", "")
+-            correlation = self.headers.get("X-Correlation-Id", "")
+-            try:
+-                verify_signature(secret, timestamp, event_id, "postal", body, signature, TTL)
+-                value = json.loads(body)
+-                if not isinstance(value, dict): raise ControlPlaneError("object_required")
+-                tenant = str(value.get("tenant_id") or "")
+-                recipient = str(value.get("recipient") or "")
+-                if not tenant or not recipient or not correlation:
+-                    raise ControlPlaneError("inbound_metadata_required")
+-                raw_message = base64.b64decode(str(value.get("raw_message_base64") or ""), validate=True)
+-                result, duplicate = POSTAL_INBOX.run(
+-                    tenant_id=tenant, provider_event_id=event_id, correlation_id=correlation,
+-                    recipient=recipient, raw_message=raw_message, adapter=production_adapter(DB))
+-                return self.send_json(200 if duplicate else 201, {**result, "duplicate": duplicate})
+-            except (json.JSONDecodeError, binascii.Error, ValueError):
+-                return self.send_json(422, {"error": "invalid_inbound_payload", "correlation_id": correlation})
+-            except ControlPlaneError as exc:
+-                message = str(exc)
+-                code = 409 if message in {"inbound_idempotency_conflict", "inbound_processing"} else 503 if message.endswith(("_unavailable", "_not_configured")) else 403 if message in {"invalid_signature", "expired_signature"} else 422
+-                return self.send_json(code, {"error": message, "correlation_id": correlation})
+         if parsed.path.startswith("/v1/forms/"):
+             origin = self.headers.get("Origin", "")
+             try:
+@@ -402,6 +292,23 @@ class Handler(BaseHTTPRequestHandler):
+                 return self.send_json(code, {"error": message.split(":", 1)[0]}, origin)
+         if parsed.path.startswith("/v1/crm/"):
+             self.crm_mutation("POST"); return
++        if parsed.path in {"/api/v1/automation/policy-check", "/api/v1/integrations/n8n/results"}:
++            caller = self.n8n_gateway_caller()
++            if not caller: return
++            try:
++                value = json.loads(self.body())
++                if parsed.path.endswith("policy-check"):
++                    result = authorize_automation(STORE, value, caller["tenant"])
++                    STORE.audit(caller["actor"], "n8n", "automation.policy.allowed", "campaign", str(value.get("campaign_id", "")), caller["tenant"], value.get("correlation_id"))
++                    return self.send_json(200, result)
++                result = record_execution_result(STORE, value, caller["tenant"])
++                STORE.audit(caller["actor"], "n8n", "automation.result.recorded", "workflow", str(value.get("workflow_key", "")), caller["tenant"], value.get("correlation_id"), {"duplicate": result.duplicate})
++                return self.send_json(200 if result.duplicate else 202, result.__dict__)
++            except json.JSONDecodeError:
++                return self.send_json(422, {"error": "invalid_json"})
++            except ControlPlaneError as exc:
++                code = 409 if str(exc) in {"idempotency_conflict", "replayed_event_id"} else 403 if str(exc) in {"cross_tenant_denied", "contact_policy_denied"} else 422
++                return self.send_json(code, {"error": str(exc)})
+         try: body = self.body()
+         except ControlPlaneError as exc: return self.send_json(413, {"error": str(exc)})
+         if parsed.path.startswith("/api/v1/events/") or parsed.path == "/v1/events":
+@@ -451,11 +358,8 @@ class Handler(BaseHTTPRequestHandler):
+             return self.send_json(200 if duplicate else 202,result)
+         if parsed.path.startswith("/api/v1/results/jobs/"):
+             job_id = parsed.path.rsplit("/",1)[-1]
+-            if not tenant: return self.send_json(422,{"error":"tenant_required"})
+-            try: result = MAPPINGS.record_result(job_id,value,tenant_id=tenant)
+-            except ControlPlaneError as exc:
+-                code = 403 if str(exc) == "cross_tenant_denied" else 409 if str(exc)=="stale_version" else 422
+-                return self.send_json(code,{"error":str(exc)})
++            try: result = MAPPINGS.record_result(job_id,value)
++            except ControlPlaneError as exc: return self.send_json(409 if str(exc)=="stale_version" else 422,{"error":str(exc)})
+             return self.send_json(202,result)
+         if parsed.path == "/api/v1/reconciliation/run":
+             if not tenant: return self.send_json(422,{"error":"tenant_required"})
+diff --git a/control_plane_service/worker.py b/control_plane_service/worker.py
+index 778e684fff70a1257c714bf9831c731290973937..db82cf6d4ca67b91c2be6ec08d3e5204203cc1f2 100644
+--- a/control_plane_service/worker.py
++++ b/control_plane_service/worker.py
+@@ -7,15 +7,12 @@ import os
+ import time
+ import urllib.request
+ import urllib.parse
+-from pathlib import Path
+ 
+-from .core import Store
++from .core import ControlPlaneError, Store
+ from .providers import submit
++from .campaign_gates import authorize_channel
+ 
+ MAX_ATTEMPTS = int(os.getenv("CONTROL_PLANE_MAX_ATTEMPTS", "5"))
+-WORKER_HEARTBEAT_FILE = Path(
+-    os.getenv("CONTROL_PLANE_WORKER_HEARTBEAT_FILE", "/tmp/control-plane-worker-heartbeat")
+-)
+ 
+ 
+ def delivery_request(target_name: str, target: str, row: object) -> urllib.request.Request:
+@@ -104,26 +101,20 @@ def dispatch_messages() -> int:
+     with current.connect() as db:
+         rows = [dict(row) for row in db.execute("SELECT * FROM messages WHERE status='queued' ORDER BY created_at LIMIT 50")]
+     for message in rows:
++        metadata = json.loads(message.get("content_metadata") or "{}")
++        message["business_unit_id"] = metadata.get("business_unit_id")
+         if not current.circuit_allows(message["provider"], int(os.getenv("CONTROL_PLANE_CIRCUIT_COOLDOWN", "30"))):
+             continue
+         try:
+-            if (message["classification"] == "marketing"
+-                    and not current.preference_allows(
+-                        message["tenant_id"], message["customer_id"], message["channel"]
+-                    )):
+-                current.transition_message(
+-                    message["message_id"], message["tenant_id"], "blocked", "consent_revoked"
+-                )
+-                processed += 1
+-                continue
+-            if current.is_suppressed(
+-                message["tenant_id"], message["channel"], message["normalized_destination"]
+-            ):
+-                current.transition_message(
+-                    message["message_id"], message["tenant_id"], "blocked", "destination_suppressed"
+-                )
+-                processed += 1
+-                continue
++            authorize_channel(message)
++        except ControlPlaneError as exc:
++            current.transition_message(
++                message["message_id"], message["tenant_id"], "rejected",
++                "campaign_policy_denied", error_code=str(exc),
++            )
++            processed += 1
++            continue
++        try:
+             result = submit(message)
+             current.transition_message(message["message_id"], message["tenant_id"], result.status, result.raw_status, provider_message_id=result.provider_message_id)
+             current.circuit_result(message["provider"], True)
+@@ -138,10 +129,7 @@ def dispatch_messages() -> int:
+ 
+ def main() -> None:
+     while True:
+-        once()
+-        dispatch_messages()
+-        WORKER_HEARTBEAT_FILE.write_text(str(time.time()), encoding="ascii")
+-        time.sleep(1)
++        once(); dispatch_messages(); time.sleep(1)
+ 
+ 
+ if __name__ == "__main__":
+

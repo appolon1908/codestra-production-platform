@@ -14,11 +14,13 @@ production build, deployment, restart, or migration.
 
 ## Result
 
-The complete `control_plane/` Python source tree is byte-identical between the
-runtime revision and the protected head. The 16 runtime Python modules sampled
-from the running image were previously shown to match the runtime revision.
-Consequently the protected head preserves the currently certified application
-implementation.
+The runtime application is under `control_plane_service/`, not `control_plane/`.
+The protected baseline differs from the runtime revision in eight existing
+modules and adds three modules. The earlier byte-identical conclusion was
+incorrect and is withdrawn. The checked-in
+`CONTROL_PLANE_RUNTIME_44D2_SERVICE_TREE.patch` is an inspectable reconstruction
+bundle from the named protected baseline to the exact runtime service tree; CI
+reconstructs it and compares every file byte-for-byte with the runtime commit.
 
 The histories diverge in deployment and migration material. The runtime branch
 contains older/different control-plane Compose and Dockerfile definitions and
@@ -31,21 +33,26 @@ would discard protected-only controls and change migration behavior.
 
 Disposition C — partially reconciled.
 
-- Application source authority: protected head, because its `control_plane/`
-  tree exactly preserves the runtime application source.
+- Application source authority: the protected successor remains the proposed
+  authority, but its differences from the certified runtime are explicit and
+  require immutable-candidate behavioral validation before any deployment.
 - Deployment and migration authority: protected head.
-- Runtime-only history: retained as reachable branch ancestry at immutable Git
-  object `44d2addf48ae31da6eeb3c3f9ab3fe34d999042c`; CI verifies its ancestry and the
-  reconciled `control_plane` tree.
+- Runtime-only source: retained by the reviewed reconstruction bundle
+  `reports/CONTROL_PLANE_RUNTIME_44D2_SERVICE_TREE.patch`. CI applies it to
+  protected baseline `aa3d903648d5f7c4cc10acee93e509a37ac36f76` and verifies
+  the complete `control_plane_service/` file set and contents against
+  `44d2addf48ae31da6eeb3c3f9ab3fe34d999042c`. This evidence survives the
+  required squash merge without relying on PR ancestry.
 - Production replacement: prohibited in this phase.
 - Migration execution: prohibited in this phase.
 
 ## Change classes
 
-- `CONTROL_PLANE_RUNTIME_ONLY_CHANGES`: historical migration RBAC delta within
-  the divergent branch; no runtime Python module delta.
-- `CONTROL_PLANE_PROTECTED_ONLY_CHANGES`: protected deployment hardening,
-  runtime-store and Postal-inbox migrations, and subsequent reviewed controls.
+- `CONTROL_PLANE_RUNTIME_ONLY_CHANGES`: the reconstruction patch records the
+  exact runtime forms of eight differing service modules.
+- `CONTROL_PLANE_PROTECTED_ONLY_CHANGES`: three service modules plus protected
+  deployment hardening, runtime-store and Postal-inbox migrations, and
+  subsequent reviewed controls.
 - `CONTROL_PLANE_CONFLICTS`: Dockerfile, Compose definitions, and migrations
   002 through 004. Protected versions remain authoritative.
 
