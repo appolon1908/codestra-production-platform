@@ -82,6 +82,7 @@ EVENT_TYPES = {
 }
 ROUTE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 DISPATCH_RECEIPT_STATES = {"queued", "retrying", "delivered", "dead_letter"}
+DISPATCH_LEASE_SECONDS = 30
 
 
 class DispatchOutcomeUnknown(RuntimeError):
@@ -564,17 +565,47 @@ class Store:
         with self.connect() as connection:
             return connection.execute(
                 """SELECT * FROM events
-                WHERE state='queued' AND dispatch_eligible=1 AND next_attempt<=?
+                WHERE state IN ('queued','dispatching')
+                  AND dispatch_eligible=1 AND next_attempt<=?
                 ORDER BY created_at,event_id LIMIT ?""",
                 (now, limit),
             ).fetchall()
 
-    def mark_event_delivered(self, event_id: str) -> None:
+    def begin_event_dispatch(
+        self, event_id: str, expected_attempts: int, now: float
+    ) -> sqlite3.Row:
+        """Durably claim an attempt before the request can reach the receiver."""
+
+        attempts = expected_attempts + 1
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE events
+                SET state='dispatching',attempts=?,next_attempt=?,
+                    last_error='DispatchOutcomeUnknown'
+                WHERE event_id=? AND state IN ('queued','dispatching')
+                  AND attempts=? AND dispatch_eligible=1 AND next_attempt<=?""",
+                (
+                    attempts,
+                    now + DISPATCH_LEASE_SECONDS,
+                    event_id,
+                    expected_attempts,
+                    now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM events WHERE event_id=?", (event_id,)
+            ).fetchone()
+        if cursor.rowcount != 1 or row is None:
+            raise RuntimeError("event dispatch claim changed concurrently")
+        return row
+
+    def mark_event_delivered(self, event_id: str, expected_attempts: int) -> None:
         with self.connect() as connection:
             cursor = connection.execute(
                 """UPDATE events SET state='delivered',last_error=NULL
-                WHERE event_id=? AND state='queued' AND dispatch_eligible=1""",
-                (event_id,),
+                WHERE event_id=? AND state='dispatching' AND attempts=?
+                  AND dispatch_eligible=1""",
+                (event_id, expected_attempts),
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("event delivery state changed concurrently")
@@ -587,8 +618,9 @@ class Store:
             cursor = connection.execute(
                 """UPDATE events
                 SET state=?,attempts=?,next_attempt=?,last_error=?
-                WHERE event_id=? AND state='queued' AND dispatch_eligible=1""",
-                (state, attempts, next_attempt, error[:128], event_id),
+                WHERE event_id=? AND state='dispatching' AND attempts=?
+                  AND dispatch_eligible=1""",
+                (state, attempts, next_attempt, error[:128], event_id, attempts),
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("event failure state changed concurrently")
@@ -773,7 +805,15 @@ class Gateway:
             return 0
         rows = self.store.pending_events(self.clock())
         for row in rows:
+            previous_attempts = int(row["attempts"])
+            previous_error = row["last_error"]
+            attempts = previous_attempts + 1
+            claimed = False
             try:
+                self.store.begin_event_dispatch(
+                    row["event_id"], previous_attempts, self.clock()
+                )
+                claimed = True
                 api_key_name, hmac_secret_name, _ = SYSTEMS[row["system"]]
                 api_key = read_secret(api_key_name)
                 hmac_secret = read_secret(hmac_secret_name)
@@ -850,10 +890,10 @@ class Gateway:
                     response_status,
                     response_body,
                     row["event_id"],
-                    int(row["attempts"]),
-                    row["last_error"],
+                    previous_attempts,
+                    previous_error,
                 )
-                self.store.mark_event_delivered(row["event_id"])
+                self.store.mark_event_delivered(row["event_id"], attempts)
                 LOG.info(
                     "system=%s event_id=%s dispatch=delivered receipt=%s "
                     "payload_sha256=%s",
@@ -863,14 +903,14 @@ class Gateway:
                     row["payload_sha256"],
                 )
             except Exception as error:
-                attempts = int(row["attempts"]) + 1
-                delay = min(300, 2**attempts)
-                self.store.mark_event_failure(
-                    row["event_id"],
-                    attempts,
-                    self.clock() + delay,
-                    type(error).__name__,
-                )
+                if claimed:
+                    delay = min(300, 2**attempts)
+                    self.store.mark_event_failure(
+                        row["event_id"],
+                        attempts,
+                        self.clock() + delay,
+                        type(error).__name__,
+                    )
                 LOG.warning(
                     "system=%s event_id=%s dispatch=failed attempts=%d error=%s",
                     row["system"],
@@ -937,6 +977,17 @@ class Gateway:
         )
         if missing := required - payload.keys():
             return 422, {"detail": "missing required fields", "fields": sorted(missing)}
+        dispatch_eligible = (
+            self.settings.middleware_forwarding_enabled and path in EVENT_TYPES
+        )
+        if dispatch_eligible:
+            tenant_id = payload.get("tenant_id")
+            if (
+                not isinstance(tenant_id, str)
+                or not tenant_id.strip()
+                or len(tenant_id) > 128
+            ):
+                return 422, {"detail": "tenant_id_required"}
         entity_key = str(
             payload.get("record_id")
             if system == "kyqra" and path == "/api/v1/kyqra/results"
@@ -950,7 +1001,7 @@ class Gateway:
             entity_key,
             serialized,
             self.clock(),
-            self.settings.middleware_forwarding_enabled and path in EVENT_TYPES,
+            dispatch_eligible,
         )
         if result in {"replay", "conflict"}:
             return 409, {

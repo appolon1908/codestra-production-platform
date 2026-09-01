@@ -523,6 +523,43 @@ def test_unmapped_ingress_contracts_remain_dispatch_quarantined(
     assert app.dispatch_once() == 0
 
 
+@pytest.mark.parametrize("tenant_id", [None, "", "   ", "x" * 129])
+def test_mapped_forwarding_callback_requires_tenant_before_acknowledgement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_id: str | None,
+):
+    now = 2_000_000_000
+    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "test-klyrow-key")
+    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "test-klyrow-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=lambda *_args, **_kwargs: pytest.fail("invalid event dispatched"),
+    )
+    payload = {} if tenant_id is None else {"tenant_id": tenant_id}
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    event_id = "event-missing-tenant-" + hashlib.sha256(body).hexdigest()[:16]
+    code, result = app.ingress(
+        "klyrow",
+        "/api/v1/klyrow/events",
+        body,
+        signed_headers("klyrow", body, now, event_id),
+    )
+    assert (code, result) == (422, {"detail": "tenant_id_required"})
+    with state.connect() as connection:
+        assert connection.execute(
+            "SELECT 1 FROM events WHERE event_id=?", (event_id,)
+        ).fetchone() is None
+
+
 class HttpResponse:
     def __init__(self, status: int = 202, body: bytes = b"{}"):
         self.status = status
@@ -616,7 +653,7 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
         row = connection.execute(
             "SELECT state,attempts FROM events WHERE event_id='event-dispatch-1'"
         ).fetchone()
-    assert dict(row) == {"state": "delivered", "attempts": 0}
+    assert dict(row) == {"state": "delivered", "attempts": 1}
 
 
 def test_unrelated_success_response_cannot_mark_event_delivered(
@@ -735,7 +772,7 @@ def test_authenticated_replay_receipt_reconciles_only_after_unknown_attempt(
             "SELECT state,attempts,last_error FROM events WHERE event_id=?",
             ("event-lost-receipt",),
         ).fetchone()
-    assert dict(row) == {"state": "delivered", "attempts": 1, "last_error": None}
+    assert dict(row) == {"state": "delivered", "attempts": 2, "last_error": None}
     assert responses == []
 
 
@@ -803,8 +840,92 @@ def test_lost_receipt_body_is_reconciled_by_the_exact_replay_response(
             "SELECT state,attempts,last_error FROM events WHERE event_id=?",
             ("event-lost-body",),
         ).fetchone()
-    assert dict(row) == {"state": "delivered", "attempts": 1, "last_error": None}
+    assert dict(row) == {"state": "delivered", "attempts": 2, "last_error": None}
     assert responses == []
+
+
+def test_crash_after_receiver_commit_recovers_from_durable_dispatch_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    class SimulatedProcessExit(BaseException):
+        pass
+
+    now = [2_000_000_000.0]
+    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "downstream-key")
+    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "downstream-secret")
+    state = store(tmp_path)
+    payload = json.dumps({"tenant_id": "tenant-a"}, separators=(",", ":"))
+    assert state.insert_event(
+        "event-process-exit",
+        "klyrow",
+        "/api/v1/klyrow/events",
+        None,
+        payload,
+        now[0],
+        True,
+    ) == "accepted"
+
+    def lose_process_after_commit(_event_id, _expected_attempts):
+        raise SimulatedProcessExit
+
+    original_mark_event_delivered = state.mark_event_delivered
+    monkeypatch.setattr(state, "mark_event_delivered", lose_process_after_commit)
+    first = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now[0],
+        urlopen=lambda request, **_kwargs: dispatch_receipt(request),
+    )
+    with pytest.raises(SimulatedProcessExit):
+        first.dispatch_once()
+    with state.connect() as connection:
+        claimed = connection.execute(
+            "SELECT state,attempts,last_error,next_attempt FROM events WHERE event_id=?",
+            ("event-process-exit",),
+        ).fetchone()
+    assert dict(claimed) == {
+        "state": "dispatching",
+        "attempts": 1,
+        "last_error": "DispatchOutcomeUnknown",
+        "next_attempt": now[0] + gateway.DISPATCH_LEASE_SECONDS,
+    }
+    assert state.pending_events(now[0]) == []
+
+    monkeypatch.setattr(state, "mark_event_delivered", original_mark_event_delivered)
+    now[0] += gateway.DISPATCH_LEASE_SECONDS + 1
+
+    def replay(request, **_kwargs):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            409,
+            "Conflict",
+            {},
+            BytesIO(b'{"error":"replayed_event_id"}'),
+        )
+
+    recovered = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now[0],
+        urlopen=replay,
+    )
+    assert recovered.dispatch_once() == 1
+    with state.connect() as connection:
+        row = connection.execute(
+            "SELECT state,attempts,last_error FROM events WHERE event_id=?",
+            ("event-process-exit",),
+        ).fetchone()
+    assert dict(row) == {"state": "delivered", "attempts": 2, "last_error": None}
 
 
 def test_dispatch_uses_each_selected_source_identity_and_contracted_event_type(

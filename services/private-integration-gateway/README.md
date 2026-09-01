@@ -24,12 +24,16 @@ per-source API-key and HMAC authorities are present. Existing database rows migr
 `dispatch_eligible=0`; the dispatcher never replays that historical quarantine.
 Ingress paths without an exact governed `EVENT_TYPES` mapping also remain
 dispatch-ineligible, even when forwarding is enabled.
+Mapped callbacks must supply a non-empty bounded `tenant_id` before they are
+persisted or acknowledged as dispatch-eligible.
 Delivery uses the control-plane event envelope and authentication headers,
 bounded response reads, exponential retries, and a five-attempt dead-letter
 limit. A transport 2xx is accepted only when its bounded JSON receipt names the
 exact event ID, correlation ID, duplicate flag, and known ingestion state. An
 exact `replayed_event_id` response reconciles a lost receipt only after a prior
-attempt reached an unknown result; it cannot authorize a first attempt. The
+attempt reached an unknown result; it cannot authorize a first attempt. Every
+attempt is durably claimed as outcome-unknown before network I/O, and an
+expired claim is retryable after restart without overlapping a live request. The
 committed shared-mode Compose contract explicitly keeps forwarding disabled.
 
 Outbound SMS idempotency is reserved before any Jasmin interaction. A short
