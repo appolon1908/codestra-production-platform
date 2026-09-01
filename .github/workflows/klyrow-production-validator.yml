@@ -424,24 +424,12 @@ jobs:
                 SHA256SUMS) content_type="text/plain" ;;
                 *) content_type="application/octet-stream" ;;
               esac
-              upload_record="$(
-                {
-                  /usr/bin/printf 'url = "%s?name=%s"\n' "${upload_endpoint}" "${name}"
-                  /usr/bin/printf 'request = "POST"\n'
-                  /usr/bin/printf 'fail-with-body\n'
-                  /usr/bin/printf 'silent\n'
-                  /usr/bin/printf 'show-error\n'
-                  /usr/bin/printf 'proto = "=https"\n'
-                  /usr/bin/printf 'tlsv1.2\n'
-                  /usr/bin/printf 'header = "Accept: application/vnd.github+json"\n'
-                  /usr/bin/printf 'header = "X-GitHub-Api-Version: 2022-11-28"\n'
-                  /usr/bin/printf 'header = "Authorization: Bearer %s"\n' "${GH_TOKEN}"
-                  /usr/bin/printf 'header = "Content-Type: %s"\n' "${content_type}"
-                  /usr/bin/printf 'data-binary = "@%s"\n' "${asset}"
-                } |
-                  /usr/bin/curl --config - |
-                  /usr/bin/jq -r '[.id, .name, .state, .size, (.digest // "")] | @tsv'
-              )"
+              upload_record="$(gh api --method POST "${upload_endpoint}" \
+                -f name="${name}" \
+                --header "Content-Type: ${content_type}" \
+                --header "X-GitHub-Api-Version: 2022-11-28" \
+                --input "${asset}" \
+                --jq '[.id, .name, .state, .size, (.digest // "")] | @tsv')"
               IFS=$'\t' read -r uploaded_id uploaded_name uploaded_state uploaded_size uploaded_digest \
                 <<< "${upload_record}"
               test "${uploaded_id}" -gt 0
