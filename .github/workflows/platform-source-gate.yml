@@ -10,6 +10,7 @@ on:
       - "eventing/**"
       - "identity/**"
       - "integrations/**"
+      - "services/private-integration-gateway/**"
       - "operations/**"
       - "config/**"
       - "deploy/**"

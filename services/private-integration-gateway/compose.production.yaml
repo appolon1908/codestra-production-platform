@@ -1,0 +1,45 @@
+name: private-app-integration
+
+services:
+  gateway:
+    image: ${PRIVATE_INTEGRATION_GATEWAY_IMAGE:?set an independently verified immutable image digest}
+    pull_policy: missing
+    restart: unless-stopped
+    user: "10001:10001"
+    env_file:
+      - ${PRIVATE_INTEGRATION_GATEWAY_ENV_FILE:-/etc/kyqra-telnexa-integration/shared.env}
+    environment:
+      SOURCE_COMMIT_SHA: ${PRIVATE_INTEGRATION_GATEWAY_SOURCE_SHA:?set the exact protected source SHA}
+      GATEWAY_MODE: shared
+      LIVE_SUBMISSION_ENABLED: "false"
+      PRODUCTION_DELIVERY_AUTHORIZED: "false"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=10001,gid=10001
+    volumes:
+      - gateway_data:/data
+    ports:
+      - "127.0.0.1:18443:8080"
+    networks: [private_api, telnexa_backend]
+    healthcheck:
+      test: [CMD, python, -I, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "5"}
+
+networks:
+  private_api:
+    driver: bridge
+    internal: true
+  telnexa_backend:
+    external: true
+    name: telnexa_backend
+
+volumes:
+  gateway_data:
