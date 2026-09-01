@@ -210,12 +210,44 @@ def jasmin_route_secret_names(route: str) -> tuple[str, str]:
     return stem + "_API_USER", stem + "_API_PASSWORD"
 
 
+def expected_dispatch_projection(
+    event_type: str, payload: dict[str, Any], event_id: str
+) -> dict[str, Any] | None:
+    """Return the exact durable receiver projection required for SMS status."""
+
+    status_by_event = {
+        "telnexa.sms.submitted": "accepted",
+        "telnexa.sms.delivered": "delivered",
+        "telnexa.sms.failed": "failed",
+    }
+    status = status_by_event.get(event_type)
+    if status is None:
+        return None
+    message_id = payload.get("message_id")
+    if not isinstance(message_id, str) or not message_id:
+        raise RuntimeError("dispatch_projection_identity_missing")
+    raw_status = payload.get("status") or event_type.rsplit(".", 1)[-1]
+    if not isinstance(raw_status, str) or not raw_status:
+        raise RuntimeError("dispatch_projection_identity_missing")
+    provider_message_id = payload.get("provider_message_id")
+    if provider_message_id is not None and not isinstance(provider_message_id, str):
+        raise RuntimeError("dispatch_projection_identity_missing")
+    return {
+        "event_id": event_id,
+        "message_id": message_id,
+        "provider_message_id": provider_message_id,
+        "raw_status": raw_status,
+        "status": status,
+    }
+
+
 def verify_dispatch_receipt(
     status: int,
     raw: bytes,
     event_id: str,
     previous_attempts: int,
     previous_error: str | None,
+    expected_projection: dict[str, Any] | None,
 ) -> str:
     """Authenticate a bounded control-plane ingestion result by exact content."""
 
@@ -226,7 +258,9 @@ def verify_dispatch_receipt(
     if not isinstance(value, dict):
         raise RuntimeError("invalid_downstream_receipt")
     if 200 <= status < 300:
-        if set(value) != {"event_id", "correlation_id", "duplicate", "state"}:
+        if set(value) != {
+            "event_id", "correlation_id", "duplicate", "projection", "state"
+        }:
             raise RuntimeError("invalid_downstream_receipt")
         if value["event_id"] != event_id:
             raise RuntimeError("downstream_event_identity_mismatch")
@@ -240,14 +274,21 @@ def verify_dispatch_receipt(
         correlation_id = value["correlation_id"]
         if not isinstance(correlation_id, str) or not 1 <= len(correlation_id) <= 128:
             raise RuntimeError("invalid_downstream_receipt")
+        if value["projection"] != expected_projection:
+            raise RuntimeError("downstream_projection_mismatch")
         return "duplicate" if value["duplicate"] else "accepted"
     if (
         status == 409
         and previous_attempts > 0
         and previous_error == "DispatchOutcomeUnknown"
-        and value == {"error": "replayed_event_id"}
+        and expected_projection is not None
+        and value == {
+            "error": "replayed_event_id",
+            "event_id": event_id,
+            "projection": expected_projection,
+        }
     ):
-        return "reconciled_replay"
+        return "reconciled_projection"
     raise RuntimeError("downstream_receipt_rejected")
 
 
@@ -1316,6 +1357,26 @@ def policy_recipient_set(policy: dict[str, Any], field: str) -> set[str]:
     return recipients
 
 
+def policy_sender_set(policy: dict[str, Any]) -> set[str]:
+    """Read a canonical list of unique, exact sender identities."""
+
+    values = policy.get("senders")
+    if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
+        raise PermissionError("sender_policy_invalid")
+    senders: set[str] = set()
+    for item in values:
+        try:
+            normalized = normalize_sender(item)
+        except ValueError as error:
+            raise PermissionError("sender_policy_invalid") from error
+        if item != normalized or item in senders:
+            raise PermissionError("sender_policy_invalid")
+        senders.add(item)
+    if not senders:
+        raise PermissionError("sender_policy_invalid")
+    return senders
+
+
 def validate_recipient_authorization(
     policy: dict[str, Any], destination: str
 ) -> None:
@@ -1404,6 +1465,10 @@ def validate_live_route_authorities() -> None:
             validate_delivery_window(policy, None)
         except PermissionError as error:
             raise RuntimeError("enabled customer delivery window is invalid") from error
+        try:
+            policy_sender_set(policy)
+        except PermissionError as error:
+            raise RuntimeError("enabled customer sender policy is invalid") from error
         route = policy.get("route")
         if not isinstance(route, str):
             raise RuntimeError("enabled customer route is invalid")
@@ -1432,7 +1497,7 @@ def validate_outbound(
     if not isinstance(policy, dict) or policy.get("enabled") is not True:
         raise PermissionError("customer_disabled_or_unknown")
     sender = normalize_sender(payload.get("sender", payload.get("from")))
-    if sender not in policy.get("senders", []):
+    if sender not in policy_sender_set(policy):
         raise PermissionError("sender_not_authorized")
     destination = normalize_destination(payload.get("to"))
     prefixes = policy.get("destination_prefixes", [])
@@ -1703,6 +1768,9 @@ class Gateway:
                     row["event_id"],
                     previous_attempts,
                     previous_error,
+                    expected_dispatch_projection(
+                        event_type, payload, row["event_id"]
+                    ),
                 )
                 self.store.mark_event_delivered(row["event_id"], attempts)
                 LOG.info(

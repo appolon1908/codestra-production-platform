@@ -267,6 +267,23 @@ def test_outbound_policy_accepts_exact_sender_destination_and_route(
 
 
 @pytest.mark.parametrize(
+    "senders",
+    ["CODESTRA", {"CODE": True}, [], ["TEST", "TEST"], [" TEST"]],
+)
+def test_sender_policy_requires_a_unique_canonical_list(
+    monkeypatch: pytest.MonkeyPatch, senders
+) -> None:
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["tenant-a"]["senders"] = senders
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    with pytest.raises(PermissionError, match="sender_policy_invalid"):
+        gateway.validate_outbound(valid_payload(sender="CODE"), 2_000_000_000)
+    with pytest.raises(RuntimeError, match="sender policy is invalid"):
+        gateway.validate_live_route_authorities()
+
+
+@pytest.mark.parametrize(
     ("policy_change", "detail"),
     [
         ({"approved_recipients": []}, "recipient_not_approved"),
@@ -772,16 +789,35 @@ class HttpResponse:
 
 def dispatch_receipt(request, *, status: int = 202, duplicate: bool = False):
     headers = {key.lower(): value for key, value in request.header_items()}
+    envelope = json.loads(request.data)
     body = json.dumps(
         {
             "event_id": headers["x-event-id"],
             "correlation_id": "receipt-correlation",
             "duplicate": duplicate,
+            "projection": gateway.expected_dispatch_projection(
+                envelope["event_type"], envelope["payload"], headers["x-event-id"]
+            ),
             "state": "queued",
         },
         separators=(",", ":"),
     ).encode()
     return HttpResponse(status, body)
+
+
+def replay_projection_receipt(request) -> bytes:
+    headers = {key.lower(): value for key, value in request.header_items()}
+    envelope = json.loads(request.data)
+    return json.dumps(
+        {
+            "error": "replayed_event_id",
+            "event_id": headers["x-event-id"],
+            "projection": gateway.expected_dispatch_projection(
+                envelope["event_type"], envelope["payload"], headers["x-event-id"]
+            ),
+        },
+        separators=(",", ":"),
+    ).encode()
 
 
 def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
@@ -982,9 +1018,10 @@ def test_unrelated_success_response_cannot_mark_event_delivered(
         gateway.verify_dispatch_receipt(
             202,
             b'{"event_id":"event-untrusted-2xx","correlation_id":"receipt",'
-            b'"duplicate":false,"state":[]}',
+            b'"duplicate":false,"projection":null,"state":[]}',
             "event-untrusted-2xx",
             0,
+            None,
             None,
         )
 
@@ -999,6 +1036,7 @@ def test_authenticated_replay_receipt_reconciles_only_after_unknown_attempt(
             "event-lost-receipt",
             0,
             None,
+            None,
         )
     with pytest.raises(RuntimeError, match="downstream_receipt_rejected"):
         gateway.verify_dispatch_receipt(
@@ -1007,16 +1045,22 @@ def test_authenticated_replay_receipt_reconciles_only_after_unknown_attempt(
             "event-lost-receipt",
             1,
             "RuntimeError",
+            None,
         )
     now = [2_000_000_000.0]
-    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "downstream-key")
-    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "downstream-secret")
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "downstream-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "downstream-secret")
     state = store(tmp_path)
-    payload = json.dumps({"tenant_id": "tenant-a"}, separators=(",", ":"))
+    payload = json.dumps({
+        "tenant_id": "tenant-a",
+        "message_id": "message-lost-receipt",
+        "provider_message_id": "carrier-lost-receipt",
+        "status": "delivery_success",
+    }, separators=(",", ":"))
     assert state.insert_event(
         "event-lost-receipt",
-        "klyrow",
-        "/api/v1/klyrow/events",
+        "telnexa",
+        "/api/v1/telnexa/dlr",
         None,
         payload,
         now[0],
@@ -1032,7 +1076,7 @@ def test_authenticated_replay_receipt_reconciles_only_after_unknown_attempt(
             409,
             "Conflict",
             {},
-            BytesIO(b'{"error":"replayed_event_id"}'),
+            BytesIO(replay_projection_receipt(request)),
         )
 
     app = gateway.Gateway(
@@ -1058,6 +1102,34 @@ def test_authenticated_replay_receipt_reconciles_only_after_unknown_attempt(
     assert responses == []
 
 
+def test_replay_receipt_requires_exact_durable_projection() -> None:
+    expected = {
+        "event_id": "event-lost-receipt",
+        "message_id": "message-lost-receipt",
+        "provider_message_id": "carrier-lost-receipt",
+        "raw_status": "delivery_success",
+        "status": "delivered",
+    }
+    mismatched = dict(expected, status="accepted")
+    raw = json.dumps(
+        {
+            "error": "replayed_event_id",
+            "event_id": "event-lost-receipt",
+            "projection": mismatched,
+        },
+        separators=(",", ":"),
+    ).encode()
+    with pytest.raises(RuntimeError, match="downstream_receipt_rejected"):
+        gateway.verify_dispatch_receipt(
+            409,
+            raw,
+            "event-lost-receipt",
+            1,
+            "DispatchOutcomeUnknown",
+            expected,
+        )
+
+
 def test_lost_receipt_body_is_reconciled_by_the_exact_replay_response(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1069,7 +1141,12 @@ def test_lost_receipt_body_is_reconciled_by_the_exact_replay_response(
     monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "downstream-key")
     monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "downstream-secret")
     state = store(tmp_path)
-    payload = json.dumps({"tenant_id": "tenant-a"}, separators=(",", ":"))
+    payload = json.dumps({
+        "tenant_id": "tenant-a",
+        "message_id": "message-lost-body",
+        "provider_message_id": "carrier-lost-body",
+        "status": "delivery_success",
+    }, separators=(",", ":"))
     assert state.insert_event(
         "event-lost-body",
         "telnexa",
@@ -1089,7 +1166,7 @@ def test_lost_receipt_body_is_reconciled_by_the_exact_replay_response(
                 409,
                 "Conflict",
                 {},
-                BytesIO(b'{"error":"replayed_event_id"}'),
+                BytesIO(replay_projection_receipt(request)),
             )
         return response
 
@@ -1133,14 +1210,19 @@ def test_crash_after_receiver_commit_recovers_from_durable_dispatch_claim(
         pass
 
     now = [2_000_000_000.0]
-    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "downstream-key")
-    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "downstream-secret")
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "downstream-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "downstream-secret")
     state = store(tmp_path)
-    payload = json.dumps({"tenant_id": "tenant-a"}, separators=(",", ":"))
+    payload = json.dumps({
+        "tenant_id": "tenant-a",
+        "message_id": "message-process-exit",
+        "provider_message_id": "carrier-process-exit",
+        "status": "delivery_success",
+    }, separators=(",", ":"))
     assert state.insert_event(
         "event-process-exit",
-        "klyrow",
-        "/api/v1/klyrow/events",
+        "telnexa",
+        "/api/v1/telnexa/dlr",
         None,
         payload,
         now[0],
@@ -1187,7 +1269,7 @@ def test_crash_after_receiver_commit_recovers_from_durable_dispatch_claim(
             409,
             "Conflict",
             {},
-            BytesIO(b'{"error":"replayed_event_id"}'),
+            BytesIO(replay_projection_receipt(request)),
         )
 
     recovered = gateway.Gateway(

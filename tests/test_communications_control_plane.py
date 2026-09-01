@@ -154,6 +154,46 @@ class CommunicationsTests(unittest.TestCase):
         self.assertEqual(projected["status"],"deferred")
         self.assertEqual(projected["provider_message_id"],"adapter-message-1")
 
+    def test_exact_replay_repairs_projection_after_ingest_only_crash(self):
+        message,_=self.store.create_message(request())
+        self.store.transition_message(
+            message["message_id"], "tenant-a", "deferred", "outcome_unknown",
+            provider_message_id="adapter-message-1",
+        )
+        event_id="telnexa-dlr-" + "d" * 64
+        env=validate_envelope({
+            "event_type":"telnexa.sms.submitted",
+            "event_version":"1.0",
+            "occurred_at":"2026-09-01T18:00:00Z",
+            "tenant_id":"tenant-a",
+            "customer_id":"customer-1",
+            "correlation_id":"correlation-1",
+            "idempotency_key":event_id,
+            "payload":{
+                "message_id":message["message_id"],
+                "provider_message_id":"carrier-message-1",
+                "status":"submitted",
+            },
+        },"telnexa",event_id)
+        self.store.ingest(env,reject_event_replay=True)
+        self.assertIsNone(self.store.provider_projection_receipt(event_id))
+        with self.assertRaisesRegex(ControlPlaneError,"replayed_event_id"):
+            self.store.ingest(env,reject_event_replay=True)
+        replay=self.store.exact_event_replay(env)
+        self.assertIsNotNone(replay)
+        self.assertTrue(replay.duplicate)
+        self.assertTrue(self.store.apply_provider_event("telnexa",env))
+        receipt=self.store.provider_projection_receipt(event_id)
+        self.assertEqual(receipt,{
+            "event_id":event_id,
+            "message_id":message["message_id"],
+            "provider_message_id":"carrier-message-1",
+            "raw_status":"submitted",
+            "status":"accepted",
+        })
+        self.assertFalse(self.store.apply_provider_event("telnexa",env))
+        self.assertEqual(self.store.provider_projection_receipt(event_id),receipt)
+
     def test_sms_stop_optout(self):
         message,_=self.store.create_message(request()); env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"stop-1","payload":{"message_id":message["message_id"],"status":"received","text":"STOP"}},"telnexa","stop-1")
         self.store.apply_provider_event("telnexa",env); self.assertFalse(self.store.preference_allows("tenant-a","customer-1","sms"))

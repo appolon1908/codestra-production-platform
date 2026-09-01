@@ -362,6 +362,48 @@ class Store:
                 return IngestResult(row["event_id"], row["correlation_id"], True, row["state"])
             raise ControlPlaneError("idempotency_conflict")
 
+    def exact_event_replay(self, envelope: dict[str, Any]) -> IngestResult | None:
+        """Read back one byte-equivalent producer event after a strict replay."""
+
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT event_id,correlation_id,envelope,state FROM events WHERE event_id=?",
+                (envelope["event_id"],),
+            ).fetchone()
+        if row is None:
+            return None
+        keys = (
+            "event_type", "event_version", "occurred_at", "tenant_id",
+            "customer_id", "causation_id", "idempotency_key", "payload", "metadata",
+        )
+        stored = json.loads(row["envelope"])
+        if {key: stored.get(key) for key in keys} != {
+            key: envelope.get(key) for key in keys
+        }:
+            return None
+        return IngestResult(row["event_id"], row["correlation_id"], True, row["state"])
+
+    def provider_projection_receipt(self, event_id: str) -> dict[str, Any] | None:
+        """Return the durable message-event projection committed for an event."""
+
+        with self.connect() as db:
+            row = db.execute(
+                """SELECT event_id,message_id,tenant_id,normalized_status,raw_status,envelope
+                FROM message_events WHERE event_id=?""",
+                (event_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        envelope = json.loads(row["envelope"])
+        payload = envelope.get("payload") or {}
+        return {
+            "event_id": row["event_id"],
+            "message_id": row["message_id"],
+            "provider_message_id": payload.get("provider_message_id"),
+            "raw_status": row["raw_status"],
+            "status": row["normalized_status"],
+        }
+
     def event_exists(self, event_id: str) -> bool:
         """Return whether an immutable producer event ID was already accepted."""
         with self.connect() as db:

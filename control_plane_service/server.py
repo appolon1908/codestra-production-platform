@@ -129,7 +129,7 @@ def operator(token: str) -> tuple[str, str, str | None] | None:
     return None
 
 
-def apply_provider_projection(store: Store, source: str, value: dict) -> None:
+def apply_provider_projection(store: Store, source: str, value: dict) -> dict | None:
     try:
         store.apply_provider_event(source, value)
     except ControlPlaneError as exc:
@@ -138,6 +138,16 @@ def apply_provider_projection(store: Store, source: str, value: dict) -> None:
         # optional local projection when the originating message is absent.
         if str(exc) != "message_not_found":
             raise
+        return None
+    return store.provider_projection_receipt(value["event_id"])
+
+
+def requires_telnexa_projection(value: dict) -> bool:
+    return value.get("event_type") in {
+        "telnexa.sms.submitted",
+        "telnexa.sms.delivered",
+        "telnexa.sms.failed",
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -423,16 +433,39 @@ class Handler(BaseHTTPRequestHandler):
                 # must use a fresh event ID and retain the original idempotency
                 # key; reusing the signed ID is a replay attack for every
                 # external producer, not only Odoo.
-                result = STORE.ingest(
-                    value,
-                    reject_event_replay=source in {"odoo", "telnexa", "klyrow"},
-                )
+                projection = None
+                try:
+                    result = STORE.ingest(
+                        value,
+                        reject_event_replay=source in {"odoo", "telnexa", "klyrow"},
+                    )
+                except ControlPlaneError as ingest_error:
+                    if str(ingest_error) != "replayed_event_id":
+                        raise
+                    replay = STORE.exact_event_replay(value)
+                    if replay is None:
+                        raise ControlPlaneError("idempotency_conflict") from ingest_error
+                    if requires_telnexa_projection(value):
+                        projection = apply_provider_projection(STORE, source, value)
+                        if projection is None:
+                            raise ControlPlaneError("provider_projection_missing")
+                        return self.send_json(409, {
+                            "error": "replayed_event_id",
+                            "event_id": replay.event_id,
+                            "projection": projection,
+                        })
+                    raise
                 if not result.duplicate and source in {"telnexa","klyrow"} and value.get("payload",{}).get("message_id") and not value.get("metadata", {}).get("sms_postgres_authority"):
-                    apply_provider_projection(STORE, source, value)
+                    projection = apply_provider_projection(STORE, source, value)
+                if requires_telnexa_projection(value) and projection is None:
+                    raise ControlPlaneError("provider_projection_missing")
             except (ControlPlaneError, json.JSONDecodeError) as exc:
                 code = 409 if str(exc) in {"idempotency_conflict", "replayed_event_id"} else 401 if "signature" in str(exc) or "timestamp" in str(exc) else 422
                 return self.send_json(code, {"error": str(exc)})
-            return self.send_json(200 if result.duplicate else 202, result.__dict__)
+            return self.send_json(
+                200 if result.duplicate else 202,
+                {**result.__dict__, "projection": projection},
+            )
         op = self.auth_operator({"platform_admin", "operations", "support", "tenant_admin"})
         if not op: return
         try: value = json.loads(body)
