@@ -56,6 +56,9 @@ def signed_release_fixture(
         capture_output=True,
         text=True,
     ).stdout.split()[1]
+    fingerprint_authority = tmp_path / "allowed_signers.ssh-fingerprint"
+    fingerprint_authority.write_text(fingerprint + "\n")
+    fingerprint_authority.chmod(0o600)
 
     archive_name = f"codestra-production-platform-{source_sha}.tar.gz"
     archive = tmp_path / archive_name
@@ -122,8 +125,16 @@ def signed_release_fixture(
         release_manifest=str(deployment),
         release_checksums=str(checksums),
         release_signature=str(checksums) + ".sig",
-        allowed_signers=str(allowed_signers),
-        expected_signer_fingerprint=fingerprint,
+        trust_allowed_signers=allowed_signers,
+        trust_fingerprint=fingerprint_authority,
+        signer_fingerprint=fingerprint,
+    )
+
+
+def bind_test_trust(args: argparse.Namespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(INSTALLER, "ALLOWED_SIGNERS_AUTHORITY", args.trust_allowed_signers)
+    monkeypatch.setattr(
+        INSTALLER, "SIGNER_FINGERPRINT_AUTHORITY", args.trust_fingerprint
     )
 
 
@@ -171,9 +182,30 @@ def test_installer_snapshots_before_managed_rule_mutation_and_records_after_vali
     trust = source.index("rule_bytes, validator_bytes, release_binding = verify_signed_release(")
     snapshot = source.index("snapshot_before(args.source_sha, before)")
     mutation = source.index("atomic_write(RULE_TARGET, rule_bytes, 0o600)", snapshot)
-    validate = source.index("live = validate_live(rule_bytes)", mutation)
+    validator_mutation = source.index(
+        "atomic_write(VALIDATOR_TARGET, validator_bytes, 0o750)", mutation
+    )
+    readback = source.index(
+        "installed_payloads(rule_bytes, validator_bytes)", validator_mutation
+    )
+    service_mutation = source.index(
+        'run_checked([str(COMMANDS["systemctl"]), "enable", "auditd.service"])',
+        readback,
+    )
+    validate = source.index(
+        "live = validate_live(rule_bytes, validator_bytes)", service_mutation
+    )
     evidence = source.index("atomic_write(INSTALLATION_RECORD, payload, 0o600)", validate)
-    assert trust < snapshot < mutation < validate < evidence
+    assert (
+        trust
+        < snapshot
+        < mutation
+        < validator_mutation
+        < readback
+        < service_mutation
+        < validate
+        < evidence
+    )
     assert set(INSTALLER.SNAPSHOT_NAMES) == {
         INSTALLER.RULE_TARGET,
         INSTALLER.AGGREGATE_TARGET,
@@ -249,12 +281,15 @@ def test_displaced_fifo_is_rejected_without_blocking(tmp_path) -> None:
         VALIDATOR.checked_regular(fifo)
 
 
-def test_installer_binds_installed_bytes_to_signed_protected_archive(tmp_path) -> None:
+def test_installer_binds_installed_bytes_to_signed_protected_archive(
+    tmp_path, monkeypatch
+) -> None:
     expected_rule = b"-w /etc/audit -p wa -k exact_signed_rule\n"
     expected_validator = b"#!/usr/bin/python3\nprint('exact signed validator')\n"
     args = signed_release_fixture(
         tmp_path, rule_bytes=expected_rule, validator_bytes=expected_validator
     )
+    bind_test_trust(args, monkeypatch)
     stage, staged, digests = INSTALLER.snapshot_release_inputs(args)
     try:
         rule, validator, evidence = INSTALLER.verify_signed_release(
@@ -265,12 +300,15 @@ def test_installer_binds_installed_bytes_to_signed_protected_archive(tmp_path) -
     assert rule == expected_rule
     assert validator == expected_validator
     assert evidence["release_archive_sha256"] == digests["archive"]
-    assert evidence["signer_fingerprint"] == args.expected_signer_fingerprint
+    assert evidence["signer_fingerprint"] == args.signer_fingerprint
     assert evidence["signature_verification"] == "PASS"
 
 
-def test_checkout_installer_differing_from_signed_archive_is_rejected(tmp_path) -> None:
+def test_checkout_installer_differing_from_signed_archive_is_rejected(
+    tmp_path, monkeypatch
+) -> None:
     args = signed_release_fixture(tmp_path, installer_bytes=b"#!/usr/bin/python3\n")
+    bind_test_trust(args, monkeypatch)
     stage, staged, digests = INSTALLER.snapshot_release_inputs(args)
     try:
         with pytest.raises(INSTALLER.InstallError, match="running installer differs"):
@@ -294,6 +332,7 @@ def test_release_input_fifo_is_rejected_nonblocking(tmp_path) -> None:
 
 def test_release_source_mismatch_fails_before_any_host_mutation(tmp_path, monkeypatch) -> None:
     args = signed_release_fixture(tmp_path)
+    bind_test_trust(args, monkeypatch)
     args.source_sha = "b" * 40
     mutations: list[Path] = []
     monkeypatch.setattr(
@@ -305,6 +344,32 @@ def test_release_source_mismatch_fails_before_any_host_mutation(tmp_path, monkey
     with pytest.raises(INSTALLER.InstallError, match="release archive filename rejected"):
         INSTALLER.install(args)
     assert mutations == []
+
+
+def test_signer_authority_is_fixed_outside_installer_arguments() -> None:
+    source = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    assert 'Path("/etc/codestra/release")' in source
+    assert 'RELEASE_TRUST_ROOT / "allowed_signers"' in source
+    assert 'RELEASE_TRUST_ROOT / "allowed_signers.ssh-fingerprint"' in source
+    assert 'add_argument("--allowed-signers"' not in source
+    assert 'add_argument("--expected-signer-fingerprint"' not in source
+    assert "Path(args.allowed_signers)" not in source
+    assert "args.expected_signer_fingerprint" not in source
+
+
+def test_installed_validator_is_read_back_before_service_mutation(
+    tmp_path, monkeypatch
+) -> None:
+    rule_target = tmp_path / "managed.rules"
+    validator_target = tmp_path / "validator"
+    rule_target.write_bytes(b"signed rule\n")
+    validator_target.write_bytes(b"displaced validator\n")
+    rule_target.chmod(0o600)
+    validator_target.chmod(0o750)
+    monkeypatch.setattr(INSTALLER, "RULE_TARGET", rule_target)
+    monkeypatch.setattr(INSTALLER, "VALIDATOR_TARGET", validator_target)
+    with pytest.raises(INSTALLER.InstallError, match="validator differs"):
+        INSTALLER.installed_payloads(b"signed rule\n", b"signed validator\n")
 
 
 def test_validation_evidence_completes_partial_writes_before_readback(tmp_path, monkeypatch) -> None:
