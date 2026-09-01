@@ -759,7 +759,7 @@ def test_release_inventory_failure_is_not_hidden_by_process_substitution() -> No
     _, publication = release_publication_source()
     for inventory in (
         "release_inventory",
-        "matched_inventory",
+        "confirmation_inventory",
         "remote_asset_inventory",
         "final_asset_inventory",
         "published_asset_inventory",
@@ -800,7 +800,6 @@ def test_exact_draft_release_resume_is_idempotent() -> None:
     _, publication = release_publication_source()
     assert 'if test "${#release_ids[@]}" -eq 0' in publication
     assert 'release_id="${release_ids[0]}"' in publication
-    assert 'test "${#matched_ids[@]}" -eq 1' in publication
     assert 'if test "${remote_states[${name}]}" = "uploaded"' in publication
     assert 'verify_uploaded_asset "${asset}"' in publication
     assert 'if test -z "${remote_ids[${name}]+x}"' in publication
@@ -832,7 +831,44 @@ def test_duplicate_draft_release_identity_fails_closed() -> None:
         'gh api --method POST "repos/${GITHUB_REPOSITORY}/releases"'
     )
     assert duplicate < failure < tag_mutation < release_mutation
-    assert 'test "${#matched_ids[@]}" -eq 1' in publication
+
+
+def test_new_draft_uses_create_response_id_without_eventually_consistent_relist() -> None:
+    _, publication = release_publication_source()
+    release_create = publication.index(
+        'release_id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases"'
+    )
+    numeric_verification = publication.index(
+        'release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"'
+    )
+    between_create_and_numeric_verification = publication[
+        release_create:numeric_verification
+    ]
+
+    assert 'releases?per_page=100' not in between_create_and_numeric_verification
+    assert "matched_inventory" not in publication
+    assert "matched_ids" not in publication
+    assert publication.count('releases?per_page=100') == 2
+    assert release_create < numeric_verification
+
+
+def test_zero_release_identity_is_stabilized_before_any_mutation() -> None:
+    _, publication = release_publication_source()
+    initial_zero = publication.index('if test "${#release_ids[@]}" -eq 0')
+    confirmation = publication.index('confirmation_inventory="$(gh api --paginate')
+    recovered = publication.index('release_ids=("${confirmation_ids[0]}")')
+    tag_mutation = publication.index(
+        'gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs"'
+    )
+    release_mutation = publication.index(
+        'gh api --method POST "repos/${GITHUB_REPOSITORY}/releases"'
+    )
+
+    assert 'for confirmation_delay in 1 2 4' in publication
+    assert '/usr/bin/sleep "${confirmation_delay}"' in publication
+    assert 'if test "${#confirmation_ids[@]}" -gt 1' in publication
+    assert 'if test "${#confirmation_ids[@]}" -eq 1' in publication
+    assert initial_zero < confirmation < recovered < tag_mutation < release_mutation
 
 
 def test_draft_release_interruption_matrix_contract() -> None:

@@ -291,6 +291,32 @@ jobs:
             exit 1
           fi
 
+          if test "${#release_ids[@]}" -eq 0; then
+            for confirmation_delay in 1 2 4; do
+              /usr/bin/sleep "${confirmation_delay}"
+              confirmation_inventory="$(gh api --paginate \
+                "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+                --jq '.[] | [.id, .tag_name] | @tsv')"
+              confirmation_ids=()
+              if test -n "${confirmation_inventory}"; then
+                while IFS=$'\t' read -r candidate_id candidate_tag; do
+                  if test "${candidate_tag}" = "${tag}"; then
+                    test "${candidate_id}" -gt 0
+                    confirmation_ids+=("${candidate_id}")
+                  fi
+                done <<< "${confirmation_inventory}"
+              fi
+              if test "${#confirmation_ids[@]}" -gt 1; then
+                echo "duplicate release identity rejected" >&2
+                exit 1
+              fi
+              if test "${#confirmation_ids[@]}" -eq 1; then
+                release_ids=("${confirmation_ids[0]}")
+                break
+              fi
+            done
+          fi
+
           expected_tag_binding="$(printf 'commit\t%s' "${OPERATOR_SOURCE_SHA}")"
           if tag_binding="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
             --jq '[.object.type, .object.sha] | @tsv' 2>/dev/null)"; then
@@ -315,20 +341,6 @@ jobs:
             release_id="${release_ids[0]}"
           fi
           test "${release_id}" -gt 0
-
-          matched_inventory="$(gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '.[] | [.id, .tag_name] | @tsv')"
-          matched_ids=()
-          if test -n "${matched_inventory}"; then
-            while IFS=$'\t' read -r candidate_id candidate_tag; do
-              if test "${candidate_tag}" = "${tag}"; then
-                matched_ids+=("${candidate_id}")
-              fi
-            done <<< "${matched_inventory}"
-          fi
-          test "${#matched_ids[@]}" -eq 1
-          test "${matched_ids[0]}" = "${release_id}"
 
           release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
           test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .id)" = "${release_id}"
