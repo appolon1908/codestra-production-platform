@@ -65,9 +65,9 @@ Carrier HTTP 5xx responses and other ambiguity-preserving statuses remain
 they can become terminal only through the exact attempt-bound DLR and block a
 replacement idempotency key in the interim.
 An `ESME_ROK` level-one receipt means only that the SMS-C accepted the submit;
-it projects `telnexa.sms.submitted` / `status=submitted` and never claims handset
-delivery. A separate delivery-level authority is required before any delivered
-state may be emitted.
+it uses a private projection identity for `telnexa.sms.submitted` /
+`status=submitted` and never claims handset delivery. Signed provider
+`/api/v1/telnexa/dlr` ingress remains reserved for actual delivery receipts.
 The gateway strips callback query material from its HTTP logs. Live startup also
 requires a distinct `JASMIN_RECONCILIATION_SECRET` of at least 32 bytes.
 

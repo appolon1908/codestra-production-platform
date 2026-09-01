@@ -46,6 +46,7 @@ SYSTEMS = {
         "X-Klyrow",
     ),
 }
+TELNEXA_SUBMITTED_EVENT_PATH = "/internal/v1/telnexa/submitted"
 INGRESS_PATHS = {
     "kyqra": {
         "/api/v1/kyqra/jobs",
@@ -73,7 +74,8 @@ EVENT_TYPES = {
     "/api/v1/kyqra/progress": "kyqra.job.completed",
     "/api/v1/kyqra/failures": "kyqra.job.failed",
     "/api/v1/telnexa/inbound": "telnexa.sms.received",
-    "/api/v1/telnexa/dlr": "telnexa.sms.submitted",
+    "/api/v1/telnexa/dlr": "telnexa.sms.delivered",
+    TELNEXA_SUBMITTED_EVENT_PATH: "telnexa.sms.submitted",
     "/api/v1/telnexa/failure": "telnexa.sms.failed",
     "/api/v1/klyrow/events": "klyrow.email.event",
     "/api/v1/klyrow/bounces": "klyrow.email.bounced",
@@ -1082,7 +1084,7 @@ class Store:
             ):
                 raise RuntimeError("SMS DLR customer identity is invalid")
             event_path = (
-                "/api/v1/telnexa/dlr"
+                TELNEXA_SUBMITTED_EVENT_PATH
                 if row["state"] == "submitted"
                 else "/api/v1/telnexa/failure"
             )

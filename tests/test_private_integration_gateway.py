@@ -2159,6 +2159,54 @@ def test_telnexa_status_with_exact_message_id_is_dispatch_eligible(
     }
 
 
+def test_signed_provider_delivery_receipt_dispatches_as_delivered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 2_000_000_000
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    requests: list[urllib.request.Request] = []
+
+    def urlopen(request, **_kwargs):
+        requests.append(request)
+        return dispatch_receipt(request)
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    payload = {
+        "tenant_id": "tenant-a",
+        "customer_id": "customer-1",
+        "correlation_id": "correlation-provider-dlr",
+        "message_id": "message-delivered-1",
+        "provider_message_id": "carrier-message-1",
+        "status": "delivery_success",
+    }
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    event_id = "event-provider-delivered-1"
+    code, result = app.ingress(
+        "telnexa",
+        "/api/v1/telnexa/dlr",
+        body,
+        signed_headers("telnexa", body, now, event_id),
+    )
+    assert code == 202 and result["accepted"] is True
+    assert app.dispatch_once() == 1
+    assert len(requests) == 1
+    envelope = json.loads(requests[0].data)
+    assert envelope["event_type"] == "telnexa.sms.delivered"
+    assert envelope["payload"]["status"] == "delivery_success"
+
+
 @pytest.mark.parametrize(
     ("message_status", "expected_state", "carrier_submitted"),
     [
@@ -2402,7 +2450,7 @@ def test_crashed_submitting_row_reconciles_only_from_production_dlr_path(
     assert completed["provider_message_id"] == "3f08d4cb-fc4b-4474-95c1-0d305af3a679"
     assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
     assert completed["operation_token"] is None
-    assert event["path"] == "/api/v1/telnexa/dlr"
+    assert event["path"] == gateway.TELNEXA_SUBMITTED_EVENT_PATH
     assert event["dispatch_eligible"] == 1
     assert json.loads(event["payload"])["status"] == "submitted"
     assert app.dispatch_once() == 1
