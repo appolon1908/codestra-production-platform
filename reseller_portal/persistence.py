@@ -28,3 +28,14 @@ class PostgresState:
         payload=json.dumps(asdict(store))
         with self.lock, psycopg.connect(self.dsn) as conn:
             conn.execute("INSERT INTO reseller.portal_state(singleton,payload) VALUES(true,%s::jsonb) ON CONFLICT(singleton) DO UPDATE SET payload=excluded.payload,updated_at=now()",(payload,))
+
+    def bootstrap_empty(self, store: MemoryStore) -> None:
+        """Create the initial authority exactly once; never overwrite state."""
+        payload=json.dumps(asdict(store))
+        with psycopg.connect(self.dsn) as conn:
+            inserted=conn.execute(
+                "INSERT INTO reseller.portal_state(singleton,payload) VALUES(true,%s::jsonb) ON CONFLICT(singleton) DO NOTHING RETURNING singleton",
+                (payload,),
+            ).fetchone()
+            if not inserted:
+                raise RuntimeError("portal authority is already initialized")

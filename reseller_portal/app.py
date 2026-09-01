@@ -36,7 +36,11 @@ class Subaccount(BaseModel): name:str; services:list[str]=["sms","email"]
 class Limits(BaseModel): requests_per_minute:int=Field(ge=1,le=10000); usage_cap_minor:int=Field(ge=0); countries:list[str]=[]
 class Switch(BaseModel): enabled:bool
 class Kyc(BaseModel): business_identity:dict; document_metadata:list[dict]=[]
-class Credit(BaseModel): amount_minor:int=Field(gt=0); reference:str
+class Credit(BaseModel):
+    tenant_id:str
+    amount_minor:int=Field(gt=0)
+    payment_provider:str=Field(min_length=2,max_length=80)
+    transaction_id:str=Field(min_length=8,max_length=200)
 class Invoice(BaseModel): period:str; amount_minor:int=Field(ge=0,default=0)
 class Synthetic(BaseModel): channel:Literal["sms","email"]; reference:str
 
@@ -46,11 +50,8 @@ def persist():
 def fail(exc):
     raise HTTPException(404 if str(exc)=="not_found" else 422,str(exc))
 
-def actor(session: str|None=Cookie(None,alias="codestra_session"),x_auth_request_user:str|None=Header(None),x_auth_request_email:str|None=Header(None)):
+def actor(session: str|None=Cookie(None,alias="codestra_session")):
     value=service.s.sessions.get(hash_secret(session or ""))
-    if not value and x_auth_request_user:
-        user=next((u for u in service.s.users.values() if u["subject"]==x_auth_request_user and u.get("status")=="active"),None)
-        if user: value={"user":user["id"],"tenant":user["tenant_id"]}
     if not value: raise HTTPException(401,"onboarding_assignment_required")
     user=service.s.users.get(value["user"])
     if not user or user.get("status")!="active": raise HTTPException(401,"session_revoked")
@@ -85,8 +86,8 @@ def dashboard(a=Depends(actor)): return service.dashboard(a["tenant"])
 @app.post("/v1/credentials",status_code=201)
 def credential(value:Credential,a=Depends(allow("owner","admin","developer"))): result=service.credential(a["tenant"],a["user"],value.name); persist(); return result
 @app.post("/v1/credentials/{cid}/rotate",status_code=201)
-def rotate(cid:str,a=Depends(allow("owner","admin","developer"))):
-    try: result=service.rotate(a["tenant"],a["user"],cid); persist(); return result
+def rotate(cid:str,idempotency_key:str=Header(...,alias="Idempotency-Key"),a=Depends(allow("owner","admin","developer"))):
+    try: result=service.rotate(a["tenant"],a["user"],cid,idempotency_key); persist(); return result
     except PortalError as exc: fail(exc)
 @app.delete("/v1/credentials/{cid}",status_code=204)
 def revoke(cid:str,a=Depends(allow("owner","admin","developer"))):
@@ -112,8 +113,15 @@ def limits(value:Limits,a=Depends(allow("owner","admin"))): result=service.updat
 def kill_switch(value:Switch,a=Depends(allow("owner","admin"))): result=service.set_kill_switch(a["tenant"],a["user"],value.enabled); persist(); return result
 @app.post("/v1/kyc",status_code=201)
 def kyc(value:Kyc,a=Depends(allow("owner","admin"))): result=service.kyc_submit(a["tenant"],a["user"],value.business_identity,value.document_metadata); persist(); return result
-@app.post("/v1/billing/credits",status_code=201)
-def credit(value:Credit,a=Depends(allow("owner","admin","billing"))): result=service.credit(a["tenant"],a["user"],value.amount_minor,value.reference); persist(); return result
+@app.post("/v1/internal/billing/credits",status_code=201)
+def credit(value:Credit,x_portal_billing_secret:str=Header(...)):
+    expected=os.getenv("PORTAL_BILLING_SHARED_SECRET","")
+    if not expected or not __import__("secrets").compare_digest(x_portal_billing_secret,expected):
+        raise HTTPException(401,"trusted_billing_authority_required")
+    try:
+        result=service.credit(value.tenant_id,"billing-authority",value.amount_minor,
+                              value.payment_provider,value.transaction_id); persist(); return result
+    except PortalError as exc: fail(exc)
 @app.post("/v1/billing/invoices",status_code=201)
 def invoice(value:Invoice,a=Depends(allow("owner","admin","billing"))): result=service.invoice(a["tenant"],a["user"],value.period,value.amount_minor); persist(); return result
 @app.post("/v1/synthetic/messages",status_code=201)

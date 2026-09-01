@@ -20,7 +20,7 @@ def test_synthetic_reseller_onboarding_and_isolation():
     assert sms["dlr"]=="delivered" and email["status"]=="synthetic_delivered"
     dash=svc.dashboard(child["id"]); assert len(dash["messages"])==2 and len(dash["ledger"])==2
     assert svc.dashboard(parent["id"])["messages"]==[]
-    replacement=svc.rotate(child["id"],child_user["id"],issued["id"]); assert store.credentials[issued["id"]]["status"]=="revoked"
+    replacement=svc.rotate(child["id"],child_user["id"],issued["id"],"rotation-1"); assert store.credentials[issued["id"]]["status"]=="revoked"
     svc.revoke(child["id"],child_user["id"],replacement["id"]); assert store.credentials[replacement["id"]]["status"]=="revoked"
     svc.suspend(child["id"],child_user["id"])
     with pytest.raises(PortalError): svc.synthetic_message(child["id"],child_user["id"],"sms","blocked")
@@ -45,3 +45,21 @@ def test_login_tenant_is_server_derived_from_unique_subject():
     assert svc.s.sessions[hash_secret(session)] == {"user":user["id"],"tenant":a["id"]}
     with pytest.raises(PortalError): svc.login("unknown-subject")
     with pytest.raises(PortalError): svc.user(b["id"],"subject-a","other@example.test")
+
+
+def test_rotation_retry_cannot_create_an_untracked_credential():
+    svc=PortalService(MemoryStore()); tenant=svc.organization("A"); user=svc.user(tenant["id"],"subject","a@example.test")
+    key=svc.credential(tenant["id"],user["id"],"key")
+    replacement=svc.rotate(tenant["id"],user["id"],key["id"],"rotation-retry-1")
+    with pytest.raises(PortalError,match=f"rotation_already_completed:{replacement['id']}"):
+        svc.rotate(tenant["id"],user["id"],key["id"],"rotation-retry-1")
+    assert sum(row["status"] == "active" for row in svc.s.credentials.values()) == 1
+
+
+def test_billing_credit_is_transaction_bound_and_idempotent():
+    svc=PortalService(MemoryStore()); tenant=svc.organization("A")
+    first=svc.credit(tenant["id"],"billing-authority",100,"provider","transaction-0001")
+    replay=svc.credit(tenant["id"],"billing-authority",100,"provider","transaction-0001")
+    assert first == replay and svc.s.organizations[tenant["id"]]["balance_minor"] == 100
+    with pytest.raises(PortalError,match="payment_transaction_conflict"):
+        svc.credit(tenant["id"],"billing-authority",200,"provider","transaction-0001")

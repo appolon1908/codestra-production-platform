@@ -69,8 +69,17 @@ class PortalService:
     def credential(self, tenant, actor, name):
         raw="csk_"+secrets.token_urlsafe(32); cid=str(uuid.uuid4()); prefix=raw[:12]
         self.s.credentials[cid]={"id":cid,"tenant_id":tenant,"name":name,"prefix":prefix,"secret_hash":hash_secret(raw),"status":"active","created_at":now(),"last_used_at":None}; self.audit(tenant,actor,"credential.create",cid); return {"id":cid,"prefix":prefix,"secret":raw}
-    def rotate(self, tenant, actor, cid):
-        row=self._tenant(self.s.credentials,cid,tenant); row["status"]="revoked"; value=self.credential(tenant,actor,row["name"]+" (rotated)"); self.audit(tenant,actor,"credential.rotate",cid,detail={"replacement":value["id"]}); return value
+    def rotate(self, tenant, actor, cid, idempotency_key):
+        if not idempotency_key or len(idempotency_key) > 200: raise PortalError("idempotency_key_required")
+        claim=f"credential.rotate:{tenant}:{cid}:{idempotency_key}"
+        previous=self.s.idempotency.get(claim)
+        if previous: raise PortalError(f"rotation_already_completed:{previous['replacement_id']}")
+        row=self._tenant(self.s.credentials,cid,tenant)
+        if row["status"] != "active": raise PortalError("credential_not_active")
+        row["status"]="revoked"; value=self.credential(tenant,actor,row["name"]+" (rotated)")
+        self.s.idempotency[claim]={"replacement_id":value["id"],"completed_at":now()}
+        self.audit(tenant,actor,"credential.rotate",cid,detail={"replacement":value["id"],"idempotency_key_hash":hash_secret(idempotency_key)})
+        return value
     def revoke(self, tenant, actor, cid):
         self._tenant(self.s.credentials,cid,tenant)["status"]="revoked"; self.audit(tenant,actor,"credential.revoke",cid)
     def sender(self, tenant, actor, value, sender_type, countries, services):
@@ -100,9 +109,24 @@ class PortalService:
         row=self._tenant(self.s.webhooks,wid,tenant); row["last_test"]={"at":now(),"status":"synthetic_verified","network_request_sent":False}; row["status"]="verified_synthetic"; self.audit(tenant,actor,"webhook.test",wid); return row["last_test"]
     def invoice(self, tenant, actor, period, amount_minor=0):
         iid=str(uuid.uuid4()); self.s.invoices[iid]={"id":iid,"tenant_id":tenant,"period":period,"amount_minor":amount_minor,"currency":"USD","status":"draft","created_at":now()}; self.audit(tenant,actor,"invoice.create",iid); return self.s.invoices[iid]
-    def credit(self, tenant, actor, amount_minor, reference):
+    def credit(self, tenant, actor, amount_minor, payment_provider, transaction_id):
         if amount_minor <= 0: raise PortalError("credit_must_be_positive")
-        self.s.organizations[tenant]["balance_minor"] += amount_minor; row={"id":str(uuid.uuid4()),"tenant_id":tenant,"type":"credit","amount_minor":amount_minor,"reference":reference,"at":now()}; self.s.ledger.append(row); self.audit(tenant,actor,"credit.create",row["id"]); return row
+        if tenant not in self.s.organizations: raise PortalError("not_found")
+        claim=f"billing.credit:{payment_provider}:{transaction_id}"
+        previous=self.s.idempotency.get(claim)
+        if previous:
+            if previous["tenant_id"] != tenant or previous["amount_minor"] != amount_minor:
+                raise PortalError("payment_transaction_conflict")
+            return next(row for row in self.s.ledger if row["id"] == previous["ledger_id"])
+        self.s.organizations[tenant]["balance_minor"] += amount_minor
+        row={"id":str(uuid.uuid4()),"tenant_id":tenant,"type":"verified_payment_credit",
+             "amount_minor":amount_minor,"payment_provider":payment_provider,
+             "transaction_id":transaction_id,"at":now()}
+        self.s.ledger.append(row)
+        self.s.idempotency[claim]={"ledger_id":row["id"],"tenant_id":tenant,"amount_minor":amount_minor}
+        self.audit(tenant,actor,"credit.create",row["id"],detail={"payment_provider":payment_provider,
+                                                                  "transaction_id_hash":hash_secret(transaction_id)})
+        return row
     @staticmethod
     def list_tenant(rows, tenant): return [{k:v for k,v in row.items() if k not in {"secret_hash","signing_secret_hash"}} for row in rows.values() if row.get("tenant_id")==tenant]
     @staticmethod
