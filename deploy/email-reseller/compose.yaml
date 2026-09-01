@@ -4,6 +4,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/email-reseller/Dockerfile
+    image: ghcr.io/appolon1908-hue/email-reseller@sha256:450fc399d454d4c11e38a3aba71200bacd1be54c78aea32fa42b08cd054d70be
     restart: unless-stopped
     env_file:
       - /etc/codestra/secrets/kyqra-telnexa/middleware.env
