@@ -251,6 +251,20 @@ def forwarding_inbound_sms_identity(payload: dict[str, Any]) -> tuple[str, str]:
     return customer_id, normalized_sender
 
 
+def forwarding_message_identity(payload: dict[str, Any]) -> str:
+    """Return the exact bounded message identity required for status projection."""
+
+    message_id = payload.get("message_id")
+    if (
+        not isinstance(message_id, str)
+        or not message_id
+        or message_id != message_id.strip()
+        or len(message_id) > 128
+    ):
+        raise ValueError("message_id_required")
+    return message_id
+
+
 def parse_jasmin_success_receipt(raw: bytes) -> str:
     """Return only the UUID from Jasmin's exact bounded success receipt."""
 
@@ -1530,15 +1544,21 @@ class Gateway:
                 not in KLYROW_FORWARDED_EMAIL_STATUS_EVENTS
             ):
                 return 422, {"detail": "unsupported_klyrow_email_status"}
-            if (
+            new_inbound_sms = (
                 system == "telnexa"
                 and path == "/api/v1/telnexa/inbound"
-                and not payload.get("message_id")
-            ):
+                and "message_id" not in payload
+            )
+            if new_inbound_sms:
                 try:
                     forwarding_inbound_sms_identity(payload)
                 except ValueError:
                     return 422, {"detail": "inbound_identity_required"}
+            elif system in {"telnexa", "klyrow"}:
+                try:
+                    forwarding_message_identity(payload)
+                except ValueError:
+                    return 422, {"detail": "message_id_required"}
         entity_key = str(
             payload.get("record_id")
             if system == "kyqra" and path == "/api/v1/kyqra/results"

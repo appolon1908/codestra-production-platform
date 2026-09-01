@@ -1701,6 +1701,104 @@ def test_new_inbound_sms_with_exact_receiver_identities_is_dispatch_eligible(
 
 
 @pytest.mark.parametrize(
+    ("system", "path", "payload"),
+    [
+        ("telnexa", "/api/v1/telnexa/dlr", {"tenant_id": "tenant-a"}),
+        ("telnexa", "/api/v1/telnexa/failure", {"tenant_id": "tenant-a"}),
+        (
+            "klyrow",
+            "/api/v1/klyrow/events",
+            {"tenant_id": "tenant-a", "event_type": "klyrow.email.delivered"},
+        ),
+        ("klyrow", "/api/v1/klyrow/bounces", {"tenant_id": "tenant-a"}),
+        ("klyrow", "/api/v1/klyrow/complaints", {"tenant_id": "tenant-a"}),
+        ("klyrow", "/api/v1/klyrow/unsubscribes", {"tenant_id": "tenant-a"}),
+    ],
+)
+def test_forwarded_provider_status_requires_message_id_before_acknowledgement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    system: str,
+    path: str,
+    payload: dict[str, str],
+):
+    now = 2_000_000_000
+    monkeypatch.setenv(f"{system.upper()}_MIDDLEWARE_API_KEY", f"test-{system}-key")
+    monkeypatch.setenv(f"{system.upper()}_WEBHOOK_SECRET", f"test-{system}-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=lambda *_args, **_kwargs: pytest.fail("invalid event dispatched"),
+    )
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    event_id = "event-missing-message-" + hashlib.sha256(body + path.encode()).hexdigest()[:16]
+    code, result = app.ingress(
+        system,
+        path,
+        body,
+        signed_headers(system, body, now, event_id),
+    )
+    assert (code, result) == (422, {"detail": "message_id_required"})
+    with state.connect() as connection:
+        assert connection.execute(
+            "SELECT 1 FROM events WHERE event_id=?", (event_id,)
+        ).fetchone() is None
+
+
+@pytest.mark.parametrize("message_id", [None, "", " ", "x" * 129, ["message-1"]])
+def test_forwarding_message_identity_rejects_noncanonical_values(message_id) -> None:
+    with pytest.raises(ValueError, match="message_id_required"):
+        gateway.forwarding_message_identity({"message_id": message_id})
+
+
+@pytest.mark.parametrize("path", ["/api/v1/telnexa/dlr", "/api/v1/telnexa/failure"])
+def test_telnexa_status_with_exact_message_id_is_dispatch_eligible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
+):
+    now = 2_000_000_000
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+    )
+    payload = {"tenant_id": "tenant-a", "message_id": "message-status-1"}
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    event_id = "event-valid-message-" + path.rsplit("/", 1)[-1]
+    code, result = app.ingress(
+        "telnexa",
+        path,
+        body,
+        signed_headers("telnexa", body, now, event_id),
+    )
+    assert code == 202 and result["accepted"] is True
+    with state.connect() as connection:
+        accepted = connection.execute(
+            "SELECT entity_key,dispatch_eligible,state FROM events WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+    assert dict(accepted) == {
+        "entity_key": "message-status-1",
+        "dispatch_eligible": 1,
+        "state": "queued",
+    }
+
+
+@pytest.mark.parametrize(
     ("message_status", "expected_state", "carrier_submitted"),
     [
         ("ESME_ROK", "submitted", True),
