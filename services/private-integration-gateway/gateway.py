@@ -378,6 +378,19 @@ def forwarding_tenant(payload: dict[str, Any]) -> str:
     return tenant_id
 
 
+def canonical_customer_id(value: Any) -> str:
+    """Return one exact bounded customer identity shared by policy and effects."""
+
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > 128
+    ):
+        raise ValueError("customer_required")
+    return value
+
+
 def forwarding_inbound_sms_identity(payload: dict[str, Any]) -> tuple[str, str]:
     """Return the exact receiver identities for a newly created inbound SMS."""
 
@@ -1525,7 +1538,11 @@ def validate_live_route_authorities() -> None:
 
     enabled_routes: set[str] = set()
     route_usernames: set[str] = set()
-    for policy in customer_policy().values():
+    for customer, policy in customer_policy().items():
+        try:
+            canonical_customer_id(customer)
+        except ValueError as error:
+            raise RuntimeError("customer policy identity is invalid") from error
         if not isinstance(policy, dict):
             raise RuntimeError("customer policy is invalid")
         enabled = policy.get("enabled")
@@ -1562,9 +1579,7 @@ def validate_live_route_authorities() -> None:
 def validate_outbound(
     payload: dict[str, Any], now_utc: float
 ) -> tuple[str, str, str, str, str | None]:
-    customer = payload.get("customer_id")
-    if not isinstance(customer, str) or not customer:
-        raise ValueError("customer_required")
+    customer = canonical_customer_id(payload.get("customer_id"))
     policy = customer_policy().get(customer)
     if not isinstance(policy, dict) or policy.get("enabled") is not True:
         raise PermissionError("customer_disabled_or_unknown")
@@ -1840,19 +1855,25 @@ class Gateway:
                     OSError,
                 ) as error:
                     raise DispatchOutcomeUnknown from error
-                if len(response_body) > 2048:
-                    raise RuntimeError("downstream_response_too_large")
-                receipt = verify_dispatch_receipt(
-                    response_status,
-                    response_body,
-                    row["event_id"],
-                    previous_attempts,
-                    previous_error,
-                    expected_dispatch_projection(
-                        event_type, payload, row["event_id"]
-                    ),
-                    projection_required,
-                )
+                try:
+                    if len(response_body) > 2048:
+                        raise RuntimeError("downstream_response_too_large")
+                    receipt = verify_dispatch_receipt(
+                        response_status,
+                        response_body,
+                        row["event_id"],
+                        previous_attempts,
+                        previous_error,
+                        expected_dispatch_projection(
+                            event_type, payload, row["event_id"]
+                        ),
+                        projection_required,
+                    )
+                except RuntimeError as response_error:
+                    # The request crossed the effect boundary.  Until an exact
+                    # authenticated receipt is accepted, preserve the durable
+                    # unknown-outcome marker so an idempotent 409 can reconcile.
+                    raise DispatchOutcomeUnknown from response_error
                 self.store.mark_event_delivered(row["event_id"], attempts)
                 LOG.info(
                     "system=%s event_id=%s dispatch=delivered receipt=%s "
@@ -2068,9 +2089,10 @@ class Gateway:
         idempotency_key = payload.get("idempotency_key")
         if not isinstance(idempotency_key, str) or not 8 <= len(idempotency_key) <= 128:
             return 422, {"detail": "invalid_idempotency_key"}
-        customer_id = payload.get("customer_id")
-        if not isinstance(customer_id, str) or not customer_id:
-            return 422, {"detail": "customer_required"}
+        try:
+            customer_id = canonical_customer_id(payload.get("customer_id"))
+        except ValueError as error:
+            return 422, {"detail": str(error)}
         canonical_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         payload_sha256 = hashlib.sha256(canonical_payload.encode()).hexdigest()
         terminal = self.store.sms_by_idempotency(customer_id, idempotency_key)

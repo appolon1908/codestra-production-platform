@@ -242,6 +242,8 @@ def valid_payload(**changes):
         ({"to": "+18095550101"}, PermissionError),
         ({"customer_id": "tenant-disabled"}, PermissionError),
         ({"customer_id": "tenant-b"}, PermissionError),
+        ({"customer_id": " tenant-a"}, ValueError),
+        ({"customer_id": "x" * 129}, ValueError),
         ({"correlation_id": "x" * 129}, ValueError),
     ],
 )
@@ -317,6 +319,50 @@ def test_customer_enablement_requires_literal_boolean_true(
         gateway.validate_outbound(valid_payload(), 2_000_000_000)
     with pytest.raises(RuntimeError, match="enabled flag is invalid"):
         gateway.validate_live_route_authorities()
+
+
+@pytest.mark.parametrize("customer_id", [" tenant-a", "tenant-a ", "x" * 129])
+def test_customer_identity_is_canonical_before_policy_startup_and_sms_reservation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    customer_id: str,
+) -> None:
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy[customer_id] = policy.pop("tenant-a")
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    with pytest.raises(RuntimeError, match="customer policy identity is invalid"):
+        gateway.validate_live_route_authorities()
+
+    configure_tenant(monkeypatch)
+    configure_jasmin_route(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-CANONICAL-CUSTOMER",
+        ),
+        state,
+        clock=lambda: 2_000_000_000,
+        urlopen=lambda *_args, **_kwargs: pytest.fail(
+            "carrier reached for a noncanonical customer"
+        ),
+    )
+    body = json.dumps(
+        valid_payload(customer_id=customer_id), separators=(",", ":")
+    ).encode()
+    assert app.outbound(
+        body,
+        outbound_headers(body, 2_000_000_000, "nonce-canonical-customer-0001"),
+    ) == (422, {"detail": "customer_required"})
+    with state.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM sms_transactions"
+        ).fetchone()[0] == 0
 
 
 def test_customer_timezone_delivery_window_blocks_before_sms_reservation(
@@ -1011,7 +1057,7 @@ def test_unrelated_success_response_cannot_mark_event_delivered(
     assert dict(row) == {
         "state": "queued",
         "attempts": 1,
-        "last_error": "RuntimeError",
+        "last_error": "DispatchOutcomeUnknown",
     }
 
     with pytest.raises(RuntimeError, match="invalid_downstream_receipt"):
@@ -1102,6 +1148,88 @@ def test_authenticated_replay_receipt_reconciles_only_after_unknown_attempt(
             ("event-lost-receipt",),
         ).fetchone()
     assert dict(row) == {"state": "delivered", "attempts": 2, "last_error": None}
+    assert responses == []
+
+
+def test_http_error_after_receiver_commit_reconciles_by_exact_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [2_000_000_000.0]
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "downstream-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "downstream-secret")
+    state = store(tmp_path)
+    payload = json.dumps(
+        {
+            "tenant_id": "tenant-a",
+            "message_id": "message-http-error",
+            "provider_message_id": "carrier-http-error",
+            "status": "submitted",
+        },
+        separators=(",", ":"),
+    )
+    assert state.insert_event(
+        "event-http-error",
+        "telnexa",
+        gateway.TELNEXA_SUBMITTED_EVENT_PATH,
+        None,
+        payload,
+        now[0],
+        True,
+    ) == "accepted"
+    responses = [500, 409]
+
+    def urlopen(request, **_kwargs):
+        status = responses.pop(0)
+        if status == 500:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                status,
+                "Internal Server Error",
+                {},
+                BytesIO(b'{"error":"internal"}'),
+            )
+        raise urllib.error.HTTPError(
+            request.full_url,
+            status,
+            "Conflict",
+            {},
+            BytesIO(replay_projection_receipt(request)),
+        )
+
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now[0],
+        urlopen=urlopen,
+    )
+    assert app.dispatch_once() == 1
+    with state.connect() as connection:
+        first = connection.execute(
+            "SELECT state,attempts,last_error FROM events WHERE event_id=?",
+            ("event-http-error",),
+        ).fetchone()
+    assert dict(first) == {
+        "state": "queued",
+        "attempts": 1,
+        "last_error": "DispatchOutcomeUnknown",
+    }
+    now[0] += 3
+    assert app.dispatch_once() == 1
+    with state.connect() as connection:
+        reconciled = connection.execute(
+            "SELECT state,attempts,last_error FROM events WHERE event_id=?",
+            ("event-http-error",),
+        ).fetchone()
+    assert dict(reconciled) == {
+        "state": "delivered",
+        "attempts": 2,
+        "last_error": None,
+    }
     assert responses == []
 
 
