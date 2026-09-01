@@ -91,7 +91,38 @@ def test_mutable_or_unversioned_workload_fails_source_lock(monkeypatch) -> None:
 def test_unknown_safety_value_is_not_echoed() -> None:
     result = MODULE.normalized_safety_flags(["LIVE_EMAIL_DELIVERY=unexpected-secretish-value"])
     assert result["LIVE_EMAIL_DELIVERY"] == "unknown"
+    assert result["ENABLE_VICIDIAL_WRITES"] == "unknown"
     assert "unexpected-secretish-value" not in json.dumps(result)
+
+
+def test_all_operational_write_gates_are_allowlisted_and_normalized() -> None:
+    required = {
+        "CALLBACK_DELIVERY_ENABLED",
+        "CALLBACK_DISPATCH",
+        "CALLBACK_DISPATCH_ENABLED",
+        "ENABLE_EXTERNAL_DELIVERY",
+        "ENABLE_VICIDIAL_WRITES",
+        "EXTERNAL_DELIVERY_ENABLED",
+        "GENERAL_AI_DIALING",
+        "LIVE_CALL_CONTROL",
+        "LIVE_EMAIL_DELIVERY",
+        "LIVE_PSTN_DIALING",
+        "LIVE_SMS_DELIVERY",
+        "LIVE_WRITE",
+        "N8N_DELIVERY_ENABLED",
+        "ODOO_DELIVERY_ENABLED",
+        "ODOO_WRITE",
+        "ODOO_WRITE_ENABLED",
+        "PRODUCTION_DIALING",
+        "SEND_EVENTS",
+        "VICIDIAL_WRITE_ENABLED",
+        "VICIDIAL_WRITES_ENABLED",
+    }
+    assert required <= set(MODULE.SAFETY_FLAGS)
+    result = MODULE.normalized_safety_flags(
+        [f"{name}=false" for name in required]
+    )
+    assert all(result[name] == "false" for name in required)
 
 
 def test_arguments_and_non_root_execution_fail_closed(monkeypatch) -> None:

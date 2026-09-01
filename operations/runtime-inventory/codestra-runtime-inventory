@@ -21,15 +21,58 @@ APPROVED_METADATA_LABELS = {
     "com.codestra.release.id": "release_id",
 }
 SAFETY_FLAGS = (
+    "ALLOW_CAMPAIGN_ACTIVATION",
+    "ALLOW_LIVE_CALLS",
+    "ALLOW_LIVE_EMAIL",
+    "ALLOW_LIVE_SMS",
+    "CALLBACK_DELIVERY_ENABLED",
+    "CALLBACK_DISPATCH",
+    "CALLBACK_DISPATCH_ENABLED",
+    "CRAWLER_EXECUTION_ENABLED",
+    "CRAWLER_EXTERNAL_CONTACT_ENABLED",
+    "CRAWLER_ODOO_DELIVERY_ENABLED",
+    "EMAIL_DELIVERY_ENABLED",
+    "ENABLE_EXTERNAL_DELIVERY",
+    "ENABLE_LIVE_CALL_CONTROL",
+    "ENABLE_PRODUCTION_DIALING",
+    "ENABLE_VICIDIAL_WRITES",
+    "EXTERNAL_DIAL_ENABLED",
     "LIVE_ADVERTISING_ENABLED",
+    "LIVE_CALL_CONTROL",
+    "LIVE_CALL_CONTROL_ENABLED",
     "EXTERNAL_DELIVERY_ENABLED",
     "SOCIAL_PUBLISHING_ENABLED",
     "EXTERNAL_MODEL_CALLS_ENABLED",
     "LIVE_SMS_DELIVERY",
     "LIVE_EMAIL_DELIVERY",
     "LIVE_PSTN_DIALING",
+    "LIVE_WRITE",
+    "LIVE_WRITES",
+    "GENERAL_AI_DIALING",
     "N8N_EXTERNAL_PROVIDER_WRITES",
+    "N8N_DELIVERY_ENABLED",
+    "N8N_PRODUCTION_WORKFLOWS_ENABLED",
+    "ODOO_AUTOMATION_WRITES_ENABLED",
+    "ODOO_DELIVERY_ENABLED",
+    "ODOO_RESULT_DELIVERY_ENABLED",
+    "ODOO_WRITE",
+    "ODOO_WRITE_ENABLED",
+    "OUTBOX_DISPATCH_ENABLED",
+    "PRODUCTION_CALLBACKS_ENABLED",
     "PRODUCTION_DIALING",
+    "PRODUCTION_DIALING_ENABLED",
+    "PRODUCTION_WEBRTC_ENABLED",
+    "SCRAPPER_EXECUTION_ENABLED",
+    "SCRAPPER_EXTERNAL_CONTACT_ENABLED",
+    "SCRAPPER_ODOO_DELIVERY_ENABLED",
+    "SEND_EVENTS",
+    "SMS_DELIVERY_ENABLED",
+    "SOCIAL_DELIVERY_ENABLED",
+    "TRANSFERS_ENABLED",
+    "UNRESTRICTED_CRAWLING",
+    "VICIDIAL_WRITE_ENABLED",
+    "VICIDIAL_WRITES_ENABLED",
+    "WEBRTC_PRODUCTION_ROUTES_ENABLED",
 )
 NORMALIZED_SAFETY_VALUES = {
     "0": "false",
@@ -76,7 +119,9 @@ def normalized_safety_flags(environment: list[str] | None) -> dict[str, str]:
         name, separator, value = entry.partition("=")
         if separator and name in allowed:
             selected[name] = NORMALIZED_SAFETY_VALUES.get(value.strip().lower(), "unknown")
-    return {name: selected.get(name, "not_applicable") for name in SAFETY_FLAGS}
+    # Absence is unknown, not not-applicable. A later capability authority may
+    # prove that a gate is inapplicable; this inventory must never infer that.
+    return {name: selected.get(name, "unknown") for name in SAFETY_FLAGS}
 
 
 def release_metadata(labels: dict[str, str] | None) -> dict[str, str | None]:
