@@ -13,6 +13,7 @@ services:
       GATEWAY_MODE: shared
       LIVE_SUBMISSION_ENABLED: "false"
       PRODUCTION_DELIVERY_AUTHORIZED: "false"
+      MIDDLEWARE_FORWARDING_ENABLED: "false"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

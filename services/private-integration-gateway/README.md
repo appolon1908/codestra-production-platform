@@ -13,6 +13,16 @@ both `LIVE_SUBMISSION_ENABLED=true` and
 destination, audit, rollback, and approved-recipient gates.  A health response
 does not authorize delivery.
 
+Middleware forwarding is independently fail-closed. New authenticated ingress
+events become dispatch-eligible only when `MIDDLEWARE_FORWARDING_ENABLED=true`
+in `middleware` mode and an HTTPS `MIDDLEWARE_EVENTS_URL` plus the dedicated
+API-key and HMAC authorities are present. Existing database rows migrate with
+`dispatch_eligible=0`; the dispatcher never replays that historical quarantine.
+Delivery uses the control-plane event envelope and authentication headers,
+bounded response reads, exponential retries, and a five-attempt dead-letter
+limit. The committed shared-mode Compose contract explicitly keeps forwarding
+disabled.
+
 ## Release and installation contract
 
 1. Merge through normal protection into `release/production-activation`.

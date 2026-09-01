@@ -6,6 +6,8 @@ import importlib.util
 import json
 import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -33,7 +35,12 @@ def clean_gateway_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "LIVE_SUBMISSION_ENABLED",
         "PRODUCTION_DELIVERY_AUTHORIZED",
         "PRODUCTION_CHANGE_ID",
+        "MIDDLEWARE_FORWARDING_ENABLED",
         "MIDDLEWARE_EVENTS_URL",
+        "MIDDLEWARE_EVENTS_API_KEY",
+        "MIDDLEWARE_EVENTS_API_KEY_FILE",
+        "MIDDLEWARE_EVENTS_HMAC_SECRET",
+        "MIDDLEWARE_EVENTS_HMAC_SECRET_FILE",
         "JASMIN_HTTP_URL",
         "TELNEXA_CUSTOMER_POLICY_JSON",
         "TELNEXA_CUSTOMER_POLICY_JSON_FILE",
@@ -63,6 +70,7 @@ def settings(tmp_path: Path, **changes):
         "live_submission_enabled": False,
         "production_delivery_authorized": False,
         "production_change_id": "",
+        "middleware_forwarding_enabled": False,
         "downstream_url": "",
         "jasmin_url": "http://jasmin:1401",
     }
@@ -94,6 +102,24 @@ def test_live_delivery_requires_second_gate_and_change_id(tmp_path: Path):
             live_submission_enabled=True,
             production_delivery_authorized=True,
         )
+
+
+def test_middleware_forwarding_is_explicit_and_mode_bounded(tmp_path: Path):
+    with pytest.raises(ValueError, match="middleware mode"):
+        settings(tmp_path, middleware_forwarding_enabled=True)
+    with pytest.raises(ValueError, match="MIDDLEWARE_EVENTS_URL"):
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+        )
+    value = settings(
+        tmp_path,
+        mode="middleware",
+        middleware_forwarding_enabled=True,
+        downstream_url="https://middleware.invalid/v1/events",
+    )
+    assert value.middleware_forwarding_enabled is True
 
 
 def test_only_private_jasmin_service_is_accepted(tmp_path: Path):
@@ -263,13 +289,16 @@ def test_existing_live_database_schema_is_migrated_without_data_loss(tmp_path: P
     value.initialize()
     with value.connect() as connection:
         event = connection.execute(
-            "SELECT payload,payload_sha256 FROM events WHERE event_id='old-event'"
+            """SELECT payload,payload_sha256,dispatch_eligible
+            FROM events WHERE event_id='old-event'"""
         ).fetchone()
         sms_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(sms_transactions)")
         }
     assert event["payload"] == '{"old":true}'
     assert event["payload_sha256"] == hashlib.sha256(b'{"old":true}').hexdigest()
+    assert event["dispatch_eligible"] == 0
+    assert value.pending_events(2_000_000_000) == []
     assert "provider_response_sha256" in sms_columns
 
 
@@ -334,6 +363,191 @@ def test_kyqra_entity_duplicate_requires_the_same_payload(
     assert app.ingress("kyqra", "/api/v1/kyqra/results", changed, conflict)[0] == 409
 
 
+def test_kyqra_lifecycle_paths_do_not_conflict_on_shared_job_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    monkeypatch.setenv("KYQRA_MIDDLEWARE_API_KEY", "test-kyqra-key")
+    monkeypatch.setenv("KYQRA_WEBHOOK_SECRET", "test-kyqra-secret")
+    app = gateway.Gateway(
+        settings(tmp_path, mode="middleware"), store(tmp_path), clock=lambda: now
+    )
+    for index, path in enumerate(
+        (
+            "/api/v1/kyqra/jobs",
+            "/api/v1/kyqra/progress",
+            "/api/v1/kyqra/failures",
+        ),
+        start=1,
+    ):
+        body = json.dumps({"job_id": "job-shared"}, separators=(",", ":")).encode()
+        headers = signed_headers("kyqra", body, now, f"event-life-{index}")
+        assert app.ingress("kyqra", path, body, headers)[0] == 202
+
+
+class HttpResponse:
+    def __init__(self, status: int = 202, body: bytes = b'{"accepted":true}'):
+        self.status = status
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self, limit=None):
+        return self.body if limit is None else self.body[:limit]
+
+
+def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "test-klyrow-key")
+    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "test-klyrow-secret")
+    monkeypatch.setenv("MIDDLEWARE_EVENTS_API_KEY", "downstream-key")
+    monkeypatch.setenv("MIDDLEWARE_EVENTS_HMAC_SECRET", "downstream-secret")
+    requests = []
+
+    def urlopen(request, **_kwargs):
+        requests.append(request)
+        return HttpResponse()
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    payload = {
+        "message_id": "message-1",
+        "tenant_id": "tenant-a",
+        "customer_id": "customer-a",
+        "idempotency_key": "delivery-1",
+        "occurred_at": "2026-09-01T00:00:00Z",
+    }
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    headers = signed_headers("klyrow", body, now, "event-dispatch-1")
+    assert app.ingress("klyrow", "/api/v1/klyrow/events", body, headers)[0] == 202
+    assert app.dispatch_once() == 1
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.full_url == "https://middleware.invalid/v1/events"
+    sent = json.loads(request.data)
+    assert sent == {
+        "customer_id": "customer-a",
+        "event_type": "klyrow.delivery.event",
+        "event_version": "1.0",
+        "idempotency_key": "delivery-1",
+        "occurred_at": "2026-09-01T00:00:00Z",
+        "payload": payload,
+        "tenant_id": "tenant-a",
+    }
+    request_headers = {key.lower(): value for key, value in request.header_items()}
+    assert request_headers["authorization"] == "Bearer downstream-key"
+    assert request_headers["x-event-source"] == "klyrow"
+    assert request_headers["x-event-id"] == "event-dispatch-1"
+    assert request_headers["x-timestamp"] == str(now)
+    expected = hmac.new(
+        b"downstream-secret",
+        gateway.canonical(str(now), "event-dispatch-1", "klyrow", request.data),
+        hashlib.sha256,
+    ).hexdigest()
+    assert request_headers["x-signature"] == "sha256=" + expected
+    with state.connect() as connection:
+        row = connection.execute(
+            "SELECT state,attempts FROM events WHERE event_id='event-dispatch-1'"
+        ).fetchone()
+    assert dict(row) == {"state": "delivered", "attempts": 0}
+
+
+def test_dispatch_failures_are_bounded_and_dead_lettered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = [2_000_000_000.0]
+    monkeypatch.setenv("MIDDLEWARE_EVENTS_API_KEY", "downstream-key")
+    monkeypatch.setenv("MIDDLEWARE_EVENTS_HMAC_SECRET", "downstream-secret")
+    state = store(tmp_path)
+    payload = json.dumps({"tenant_id": "tenant-a"}, separators=(",", ":"))
+    assert state.insert_event(
+        "event-failure-1",
+        "klyrow",
+        "/api/v1/klyrow/events",
+        None,
+        payload,
+        now[0],
+        True,
+    ) == "accepted"
+
+    def unavailable(*_args, **_kwargs):
+        raise TimeoutError("synthetic timeout")
+
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now[0],
+        urlopen=unavailable,
+    )
+    for _ in range(5):
+        assert app.dispatch_once() == 1
+        now[0] += 1_000
+    with state.connect() as connection:
+        row = connection.execute(
+            "SELECT state,attempts,last_error FROM events WHERE event_id='event-failure-1'"
+        ).fetchone()
+    assert dict(row) == {
+        "state": "dead_letter",
+        "attempts": 5,
+        "last_error": "TimeoutError",
+    }
+    assert app.dispatch_once() == 0
+
+
+def test_dispatcher_startup_requires_credentials_and_starts_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        store(tmp_path),
+    )
+    with pytest.raises(RuntimeError, match="MIDDLEWARE_EVENTS_API_KEY"):
+        gateway.start_dispatcher(app)
+    monkeypatch.setenv("MIDDLEWARE_EVENTS_API_KEY", "downstream-key")
+    monkeypatch.setenv("MIDDLEWARE_EVENTS_HMAC_SECRET", "downstream-secret")
+    started = []
+
+    class FakeThread:
+        def __init__(self, **values):
+            self.values = values
+
+        def start(self):
+            started.append(self.values)
+
+    monkeypatch.setattr(gateway.threading, "Thread", FakeThread)
+    gateway.start_dispatcher(app)
+    assert len(started) == 1
+    assert started[0]["target"] is gateway.dispatch_worker
+    assert started[0]["args"] == (app,)
+    assert started[0]["daemon"] is True
+
+
 class HealthyJasmin:
     status = 200
 
@@ -388,6 +602,68 @@ def test_no_effect_outbound_is_idempotent_and_never_calls_carrier(
     assert carrier_calls == ["http://jasmin:1401/ping"]
 
 
+def test_live_idempotency_is_reserved_before_concurrent_carrier_submission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    monkeypatch.setenv("JASMIN_API_USER", "test-user")
+    monkeypatch.setenv("JASMIN_API_PASSWORD", "test-password")
+    carrier_started = threading.Event()
+    release_carrier = threading.Event()
+    calls = {"ping": 0, "send": 0}
+    call_lock = threading.Lock()
+
+    def urlopen(url, **_kwargs):
+        with call_lock:
+            if isinstance(url, str) and url.endswith("/ping"):
+                calls["ping"] += 1
+                return HealthyJasmin()
+            calls["send"] += 1
+        carrier_started.set()
+        assert release_carrier.wait(timeout=5)
+        return HealthyJasmin()
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-TEST-1",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            app.outbound,
+            body,
+            outbound_headers(body, now, "nonce-concurrent-0001"),
+        )
+        assert carrier_started.wait(timeout=5)
+        second = executor.submit(
+            app.outbound,
+            body,
+            outbound_headers(body, now, "nonce-concurrent-0002"),
+        )
+        second_code, second_result = second.result(timeout=5)
+        release_carrier.set()
+        first_code, first_result = first.result(timeout=5)
+    assert first_code == second_code == 202
+    assert first_result["duplicate"] is False
+    assert second_result["duplicate"] is True
+    assert first_result["adapter_message_id"] == second_result["adapter_message_id"]
+    assert calls == {"ping": 1, "send": 1}
+    with state.connect() as connection:
+        count = connection.execute("SELECT COUNT(*) FROM sms_transactions").fetchone()[0]
+    assert count == 1
+
+
 def test_compose_is_digest_only_nonroot_and_fail_closed():
     compose = yaml.safe_load((SERVICE / "compose.production.yaml").read_text())
     service = compose["services"]["gateway"]
@@ -400,6 +676,7 @@ def test_compose_is_digest_only_nonroot_and_fail_closed():
     assert service["ports"] == ["127.0.0.1:18443:8080"]
     assert service["environment"]["LIVE_SUBMISSION_ENABLED"] == "false"
     assert service["environment"]["PRODUCTION_DELIVERY_AUTHORIZED"] == "false"
+    assert service["environment"]["MIDDLEWARE_FORWARDING_ENABLED"] == "false"
     assert compose["networks"]["private_api"]["internal"] is True
     assert "/etc/kyqra-telnexa-integration/shared.env" in service["env_file"][0]
 

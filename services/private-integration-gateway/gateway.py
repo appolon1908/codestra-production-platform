@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -130,6 +131,7 @@ class Settings:
     live_submission_enabled: bool
     production_delivery_authorized: bool
     production_change_id: str
+    middleware_forwarding_enabled: bool
     downstream_url: str
     jasmin_url: str
 
@@ -147,6 +149,9 @@ class Settings:
                 "PRODUCTION_DELIVERY_AUTHORIZED"
             ),
             production_change_id=os.getenv("PRODUCTION_CHANGE_ID", "").strip(),
+            middleware_forwarding_enabled=env_bool(
+                "MIDDLEWARE_FORWARDING_ENABLED"
+            ),
             downstream_url=os.getenv("MIDDLEWARE_EVENTS_URL", "").strip(),
             jasmin_url=os.getenv("JASMIN_HTTP_URL", "http://jasmin:1401").rstrip("/"),
         )
@@ -173,6 +178,10 @@ class Settings:
             raise ValueError(
                 "live submission requires production authorization and a change ID"
             )
+        if self.middleware_forwarding_enabled and self.mode != "middleware":
+            raise ValueError("middleware forwarding requires middleware mode")
+        if self.middleware_forwarding_enabled and not self.downstream_url:
+            raise ValueError("middleware forwarding requires MIDDLEWARE_EVENTS_URL")
         if self.downstream_url and not self.downstream_url.startswith("https://"):
             raise ValueError("MIDDLEWARE_EVENTS_URL must use HTTPS")
         parsed = urllib.parse.urlsplit(self.jasmin_url)
@@ -211,13 +220,19 @@ class Store:
                     attempts INTEGER NOT NULL DEFAULT 0,
                     next_attempt REAL NOT NULL DEFAULT 0,
                     created_at REAL NOT NULL,
-                    last_error TEXT
+                    last_error TEXT,
+                    dispatch_eligible INTEGER NOT NULL DEFAULT 0
                 )"""
             )
             connection.execute(
-                """CREATE UNIQUE INDEX IF NOT EXISTS kyqra_record_unique
+                "DROP INDEX IF EXISTS kyqra_record_unique"
+            )
+            connection.execute(
+                """CREATE UNIQUE INDEX kyqra_record_unique
                 ON events(system, entity_key)
-                WHERE system='kyqra' AND entity_key IS NOT NULL"""
+                WHERE system='kyqra'
+                  AND path='/api/v1/kyqra/results'
+                  AND entity_key IS NOT NULL"""
             )
             event_columns = {
                 row["name"]
@@ -225,6 +240,10 @@ class Store:
             }
             if "payload_sha256" not in event_columns:
                 connection.execute("ALTER TABLE events ADD COLUMN payload_sha256 TEXT")
+            if "dispatch_eligible" not in event_columns:
+                connection.execute(
+                    "ALTER TABLE events ADD COLUMN dispatch_eligible INTEGER NOT NULL DEFAULT 0"
+                )
             for row in connection.execute(
                 "SELECT event_id,payload FROM events WHERE payload_sha256 IS NULL OR payload_sha256=''"
             ).fetchall():
@@ -281,6 +300,7 @@ class Store:
         entity_key: str | None,
         payload: str,
         now: float,
+        dispatch_eligible: bool,
     ) -> str:
         digest = hashlib.sha256(payload.encode()).hexdigest()
         try:
@@ -288,9 +308,18 @@ class Store:
                 connection.execute(
                     """INSERT INTO events(
                         event_id,system,path,entity_key,payload,payload_sha256,
-                        state,created_at
-                    ) VALUES(?,?,?,?,?,?,'queued',?)""",
-                    (event_id, system, path, entity_key, payload, digest, now),
+                        state,created_at,dispatch_eligible
+                    ) VALUES(?,?,?,?,?,?,'queued',?,?)""",
+                    (
+                        event_id,
+                        system,
+                        path,
+                        entity_key,
+                        payload,
+                        digest,
+                        now,
+                        int(dispatch_eligible),
+                    ),
                 )
             return "accepted"
         except sqlite3.IntegrityError:
@@ -304,8 +333,8 @@ class Store:
                 with self.connect() as connection:
                     duplicate = connection.execute(
                         """SELECT payload_sha256 FROM events
-                        WHERE system=? AND entity_key=?""",
-                        (system, entity_key),
+                        WHERE system=? AND path=? AND entity_key=?""",
+                        (system, path, entity_key),
                     ).fetchone()
                 if duplicate is not None:
                     return "duplicate" if duplicate["payload_sha256"] == digest else "conflict"
@@ -336,17 +365,93 @@ class Store:
                 (customer_id, idempotency_key),
             ).fetchone()
 
-    def insert_sms(self, values: tuple[Any, ...]) -> None:
-        with self.connect() as connection:
-            connection.execute(
-                """INSERT INTO sms_transactions(
+    def reserve_sms(self, values: tuple[Any, ...]) -> tuple[bool, sqlite3.Row]:
+        try:
+            with self.connect() as connection:
+                connection.execute(
+                    """INSERT INTO sms_transactions(
                     adapter_message_id,customer_id,idempotency_key,payload_hash,
                     payload,correlation_id,sender,destination,logical_route,
                     validation_result,jasmin_dependency,state,carrier_submitted,
                     provider_message_id,provider_response,provider_response_sha256,created_at
                 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                values,
+                    values,
+                )
+            created = True
+        except sqlite3.IntegrityError:
+            created = False
+        row = self.sms_by_idempotency(str(values[1]), str(values[2]))
+        if row is None:
+            raise RuntimeError("SMS reservation read-back failed")
+        return created, row
+
+    def complete_sms(
+        self,
+        adapter_message_id: str,
+        *,
+        state: str,
+        jasmin_dependency: str,
+        carrier_submitted: bool,
+        provider_message_id: str | None,
+        provider_response_sha256: str | None,
+    ) -> sqlite3.Row:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE sms_transactions
+                SET state=?,jasmin_dependency=?,carrier_submitted=?,provider_message_id=?,
+                    provider_response_sha256=?
+                WHERE adapter_message_id=? AND state='pending'""",
+                (
+                    state,
+                    jasmin_dependency,
+                    int(carrier_submitted),
+                    provider_message_id,
+                    provider_response_sha256,
+                    adapter_message_id,
+                ),
             )
+            if cursor.rowcount != 1:
+                raise RuntimeError("SMS completion lost its pending reservation")
+            row = connection.execute(
+                "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                (adapter_message_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("SMS completion read-back failed")
+        return row
+
+    def pending_events(self, now: float, limit: int = 20) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return connection.execute(
+                """SELECT * FROM events
+                WHERE state='queued' AND dispatch_eligible=1 AND next_attempt<=?
+                ORDER BY created_at,event_id LIMIT ?""",
+                (now, limit),
+            ).fetchall()
+
+    def mark_event_delivered(self, event_id: str) -> None:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE events SET state='delivered',last_error=NULL
+                WHERE event_id=? AND state='queued' AND dispatch_eligible=1""",
+                (event_id,),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("event delivery state changed concurrently")
+
+    def mark_event_failure(
+        self, event_id: str, attempts: int, next_attempt: float, error: str
+    ) -> None:
+        state = "dead_letter" if attempts >= 5 else "queued"
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE events
+                SET state=?,attempts=?,next_attempt=?,last_error=?
+                WHERE event_id=? AND state='queued' AND dispatch_eligible=1""",
+                (state, attempts, next_attempt, error[:128], event_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("event failure state changed concurrently")
 
     def event_counts(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
@@ -495,6 +600,98 @@ class Gateway:
             return "transport_error", type(error).__name__
         return state, raw.decode(errors="replace")
 
+    def dispatch_once(self) -> int:
+        """Deliver only new, explicitly eligible events with bounded retries."""
+
+        if not self.settings.middleware_forwarding_enabled:
+            return 0
+        api_key = read_secret("MIDDLEWARE_EVENTS_API_KEY")
+        hmac_secret = read_secret("MIDDLEWARE_EVENTS_HMAC_SECRET")
+        if not api_key or not hmac_secret:
+            raise RuntimeError("middleware forwarding credentials are unavailable")
+        rows = self.store.pending_events(self.clock())
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+                tenant_id = payload.get("tenant_id")
+                if not isinstance(tenant_id, str) or not tenant_id:
+                    raise ValueError("tenant_id_required")
+                occurred_at = payload.get("occurred_at")
+                if not isinstance(occurred_at, str) or not occurred_at:
+                    occurred_at = datetime.fromtimestamp(
+                        float(row["created_at"]), timezone.utc
+                    ).isoformat().replace("+00:00", "Z")
+                event_type = EVENT_TYPES.get(row["path"])
+                if event_type is None:
+                    event_type = (
+                        row["system"] + "." + row["path"].rsplit("/", 1)[-1]
+                    )
+                envelope = {
+                    "event_type": event_type,
+                    "event_version": "1.0",
+                    "occurred_at": occurred_at,
+                    "tenant_id": tenant_id,
+                    "idempotency_key": str(
+                        payload.get("idempotency_key") or row["event_id"]
+                    ),
+                    "payload": payload,
+                }
+                for optional in ("customer_id", "correlation_id", "causation_id"):
+                    if payload.get(optional) is not None:
+                        envelope[optional] = payload[optional]
+                body = json.dumps(
+                    envelope, separators=(",", ":"), sort_keys=True
+                ).encode()
+                timestamp = str(int(self.clock()))
+                signature = hmac.new(
+                    hmac_secret.encode(),
+                    canonical(timestamp, row["event_id"], row["system"], body),
+                    hashlib.sha256,
+                ).hexdigest()
+                request = urllib.request.Request(
+                    self.settings.downstream_url,
+                    body,
+                    {
+                        "Authorization": "Bearer " + api_key,
+                        "Content-Type": "application/json",
+                        "X-Event-Source": row["system"],
+                        "X-Timestamp": timestamp,
+                        "X-Event-Id": row["event_id"],
+                        "X-Signature": "sha256=" + signature,
+                    },
+                    method="POST",
+                )
+                with self.urlopen(request, timeout=10) as response:
+                    response_body = response.read(2049)
+                    if len(response_body) > 2048:
+                        raise RuntimeError("downstream_response_too_large")
+                    if not 200 <= response.status < 300:
+                        raise RuntimeError("downstream_status")
+                self.store.mark_event_delivered(row["event_id"])
+                LOG.info(
+                    "system=%s event_id=%s dispatch=delivered payload_sha256=%s",
+                    row["system"],
+                    row["event_id"],
+                    row["payload_sha256"],
+                )
+            except Exception as error:
+                attempts = int(row["attempts"]) + 1
+                delay = min(300, 2**attempts)
+                self.store.mark_event_failure(
+                    row["event_id"],
+                    attempts,
+                    self.clock() + delay,
+                    type(error).__name__,
+                )
+                LOG.warning(
+                    "system=%s event_id=%s dispatch=failed attempts=%d error=%s",
+                    row["system"],
+                    row["event_id"],
+                    attempts,
+                    type(error).__name__,
+                )
+        return len(rows)
+
     def authenticate_key(self, system: str, supplied: str) -> bool:
         key_name, _, _ = SYSTEMS[system]
         expected = read_secret(key_name)
@@ -559,7 +756,13 @@ class Gateway:
         ) or None
         serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         result = self.store.insert_event(
-            event_id, system, path, entity_key, serialized, self.clock()
+            event_id,
+            system,
+            path,
+            entity_key,
+            serialized,
+            self.clock(),
+            self.settings.middleware_forwarding_enabled,
         )
         if result in {"replay", "conflict"}:
             return 409, {
@@ -632,21 +835,49 @@ class Gateway:
             return 403, {"detail": str(error)}
         canonical_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         payload_sha256 = hashlib.sha256(canonical_payload.encode()).hexdigest()
-        existing = self.store.sms_by_idempotency(customer, idempotency_key)
-        if existing:
-            if existing["payload_hash"] != payload_sha256:
+        adapter_message_id = str(uuid.uuid4())
+        created, reserved = self.store.reserve_sms(
+            (
+                adapter_message_id,
+                customer,
+                idempotency_key,
+                payload_sha256,
+                canonical_payload,
+                correlation,
+                sender,
+                destination,
+                route,
+                "valid",
+                "unchecked",
+                "pending",
+                0,
+                None,
+                None,
+                None,
+                now,
+            )
+        )
+        if not created:
+            if reserved["payload_hash"] != payload_sha256:
                 return 409, {"detail": "idempotency_conflict"}
             return 202, {
                 "accepted": True,
                 "duplicate": True,
-                "adapter_message_id": existing["adapter_message_id"],
-                "carrier_submitted": bool(existing["carrier_submitted"]),
-                "state": existing["state"],
+                "adapter_message_id": reserved["adapter_message_id"],
+                "carrier_submitted": bool(reserved["carrier_submitted"]),
+                "state": reserved["state"],
             }
         dependency = self.jasmin_health()
         if dependency != "reachable":
+            self.store.complete_sms(
+                adapter_message_id,
+                state="dependency_unavailable",
+                jasmin_dependency=dependency,
+                carrier_submitted=False,
+                provider_message_id=None,
+                provider_response_sha256=None,
+            )
             return 503, {"detail": "jasmin_dependency_unavailable"}
-        adapter_message_id = str(uuid.uuid4())
         state = "mock_accepted"
         carrier_submitted = False
         provider_message_id = None
@@ -665,26 +896,13 @@ class Gateway:
                     provider_response.encode()
                 ).hexdigest()
             provider_message_id = provider_response if carrier_submitted else None
-        self.store.insert_sms(
-            (
-                adapter_message_id,
-                customer,
-                idempotency_key,
-                payload_sha256,
-                canonical_payload,
-                correlation,
-                sender,
-                destination,
-                route,
-                "valid",
-                dependency,
-                state,
-                int(carrier_submitted),
-                provider_message_id,
-                None,
-                provider_response_sha256,
-                now,
-            )
+        completed = self.store.complete_sms(
+            adapter_message_id,
+            state=state,
+            jasmin_dependency=dependency,
+            carrier_submitted=carrier_submitted,
+            provider_message_id=provider_message_id,
+            provider_response_sha256=provider_response_sha256,
         )
         LOG.info(
             "system=telnexa adapter_message_id=%s idempotency_key_sha256=%s "
@@ -699,8 +917,8 @@ class Gateway:
             "accepted": True,
             "duplicate": False,
             "adapter_message_id": adapter_message_id,
-            "carrier_submitted": carrier_submitted,
-            "state": state,
+            "carrier_submitted": bool(completed["carrier_submitted"]),
+            "state": completed["state"],
         }
 
 
@@ -776,6 +994,34 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
+def dispatch_worker(gateway: Gateway) -> None:
+    """Continuously drain the explicitly eligible queue without blocking HTTP."""
+
+    while True:
+        try:
+            dispatched = gateway.dispatch_once()
+        except Exception as error:
+            dispatched = 0
+            LOG.error("event=dispatch_loop_failed error=%s", type(error).__name__)
+        time.sleep(0.25 if dispatched else 1.0)
+
+
+def start_dispatcher(gateway: Gateway) -> threading.Thread:
+    """Validate downstream authority before starting the isolated worker."""
+
+    for name in ("MIDDLEWARE_EVENTS_API_KEY", "MIDDLEWARE_EVENTS_HMAC_SECRET"):
+        if not read_secret(name):
+            raise RuntimeError(f"{name} is unavailable")
+    worker = threading.Thread(
+        target=dispatch_worker,
+        args=(gateway,),
+        daemon=True,
+        name="middleware-event-dispatcher",
+    )
+    worker.start()
+    return worker
+
+
 def main() -> None:
     os.umask(0o077)
     logging.basicConfig(
@@ -786,6 +1032,8 @@ def main() -> None:
     store = Store(settings.database_path)
     store.initialize()
     gateway = Gateway(settings, store)
+    if settings.middleware_forwarding_enabled:
+        start_dispatcher(gateway)
     server = ThreadingHTTPServer((settings.listen_address, 8080), handler_for(gateway))
     server.daemon_threads = True
     LOG.info(
