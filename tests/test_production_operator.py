@@ -25,6 +25,29 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(OPERATOR)
 
 
+def _model_root_owned_test_files(monkeypatch) -> None:
+    """Model root-owned fixtures without requiring pytest itself to run as root."""
+    real_fstat = OPERATOR.os.fstat
+    real_lstat = OPERATOR.Path.lstat
+
+    def root_owned(info):
+        values = list(info)
+        values[4] = 0
+        values[5] = 0
+        return os.stat_result(values)
+
+    monkeypatch.setattr(
+        OPERATOR.os,
+        "fstat",
+        lambda descriptor: root_owned(real_fstat(descriptor)),
+    )
+    monkeypatch.setattr(
+        OPERATOR.Path,
+        "lstat",
+        lambda path: root_owned(real_lstat(path)),
+    )
+
+
 EXPECTED_ACTIONS = {
     "preflight",
     "backup",
@@ -349,6 +372,7 @@ def test_restore_test_records_one_stable_backup_stamp(monkeypatch):
 
 
 def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, tmp_path):
+    _model_root_owned_test_files(monkeypatch)
     root = tmp_path / "restore"
     root.mkdir(mode=0o700)
     stamp = "20260830T190000Z"
@@ -406,6 +430,7 @@ def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, 
 
 
 def test_restore_result_rejects_unadvertised_backup(monkeypatch, tmp_path):
+    _model_root_owned_test_files(monkeypatch)
     root = tmp_path / "restore"
     root.mkdir(mode=0o700)
     (root / "LAST_SUCCESS").write_text("20260830T190000Z\n")
@@ -643,6 +668,7 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
 
 
 def test_compose_layers_are_copied_before_privileged_use(monkeypatch, tmp_path):
+    _model_root_owned_test_files(monkeypatch)
     monkeypatch.setattr(
         OPERATOR.pwd,
         "getpwnam",
@@ -810,6 +836,7 @@ def test_middleware_snapshot_flushes_bundle_before_marker(monkeypatch, tmp_path)
 def test_middleware_database_clients_quiesce_and_resume_exact_prior_set(
     monkeypatch, tmp_path
 ):
+    _model_root_owned_test_files(monkeypatch)
     root = tmp_path / "middleware-backups"
     root.mkdir(mode=0o700)
     marker = root / "QUIESCED"
@@ -922,6 +949,7 @@ def test_middleware_database_client_bundle_validation_rejects_bad_replica_sets()
 
 
 def test_completed_rollback_forces_fresh_snapshot(monkeypatch, tmp_path):
+    _model_root_owned_test_files(monkeypatch)
     config = OPERATOR.load_release_config()
     stamp = "20260830T190000Z"
     backup = tmp_path / stamp
@@ -955,6 +983,7 @@ def test_completed_rollback_forces_fresh_snapshot(monkeypatch, tmp_path):
 
 
 def test_incomplete_attempt_reuses_original_snapshot(monkeypatch, tmp_path):
+    _model_root_owned_test_files(monkeypatch)
     config = OPERATOR.load_release_config()
     stamp = "20260830T190000Z"
     backup = tmp_path / stamp
