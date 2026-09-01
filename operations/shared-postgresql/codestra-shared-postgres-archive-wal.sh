@@ -12,15 +12,14 @@ recipient="$(<"$authority/archive-recipient")"
 retention_days="$(<"$authority/wal-retention-days")"
 [[ "$retention_days" =~ ^[1-9][0-9]*$ ]]
 max_files="${CODESTRA_SHARED_WAL_MAX_FILES_PER_RUN:-16}"
-pause_percent="${CODESTRA_SHARED_WAL_PAUSE_PERCENT:-82}"
-[[ "$max_files" =~ ^[1-9][0-9]*$ && "$pause_percent" =~ ^[1-9][0-9]*$ ]]
-(( max_files <= 512 && pause_percent >= 75 && pause_percent < 90 ))
+[[ "$max_files" =~ ^[1-9][0-9]*$ ]]
+(( max_files <= 512 ))
 mkdir -p "$spool"
 chmod 0700 "$spool"
 metrics_state="${CODESTRA_SHARED_POSTGRES_STATE:-/var/lib/codestra-shared-postgresql}"
 mkdir -p "$metrics_state"
 chmod 0700 "$metrics_state"
-disk_used="$(df -P "$stage" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+disk_used="$(df -P "$spool" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
 [[ "$disk_used" =~ ^[0-9]+$ ]]
 if (( disk_used >= 90 )); then
   printf 'critical WAL spool filesystem usage: %s%%\n' "$disk_used" >&2
@@ -40,12 +39,6 @@ shopt -s nullglob
 processed=0
 for source_path in "$stage"/[0-9A-F]*; do
   (( processed < max_files )) || break
-  current_used="$(df -P "$stage" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
-  [[ "$current_used" =~ ^[0-9]+$ ]]
-  if (( current_used >= pause_percent )); then
-    printf 'WAL offload paused at filesystem safety threshold: %s%%\n' "$current_used" >&2
-    break
-  fi
   [[ -f "$source_path" && ! -L "$source_path" ]]
   [[ "$source_path" == *.offhost ]] && continue
   wal_name="${source_path##*/}"
@@ -54,11 +47,9 @@ for source_path in "$stage"/[0-9A-F]*; do
   if [[ -f "$marker" && ! -L "$marker" ]] \
     && grep -qx 'EVIDENCE_TYPE=WAL_OFFHOST' "$marker" \
     && grep -qx 'STATUS=PASS' "$marker"; then
-    recorded_artifact="$(awk -F= '$1=="ARTIFACT_PATH"{print substr($0,index($0,"=")+1)}' "$marker")"
     recorded_hash="$(awk -F= '$1=="ARTIFACT_SHA256"{print $2}' "$marker")"
-    if [[ "$recorded_artifact" == "$spool"/* && -f "$recorded_artifact" && ! -L "$recorded_artifact" \
-      && "$recorded_hash" =~ ^[0-9a-f]{64}$ \
-      && "$(sha256sum "$recorded_artifact" | awk '{print $1}')" == "$recorded_hash" ]]; then
+    recorded_snapshot="$(awk -F= '$1=="REMOTE_SNAPSHOT_ID"{print $2}' "$marker")"
+    if [[ "$recorded_hash" =~ ^[0-9a-f]{64}$ && "$recorded_snapshot" =~ ^[0-9a-f]{64}$ ]]; then
       continue
     fi
   fi
@@ -103,6 +94,10 @@ EOF
   mv "$marker_tmp" "$marker"
   sync -d "$stage"
   touch "$spool/LAST_OFFHOST_SUCCESS"
+  # The staged WAL remains available for the configured local retention
+  # window. Remove the transient encrypted copy only after exact remote
+  # readback and the durable evidence marker both succeed.
+  find "$artifact" "$artifact.sha256" -delete
   processed=$((processed + 1))
 done
 

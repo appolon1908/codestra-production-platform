@@ -213,12 +213,12 @@ def test_wal_worker_has_verified_bounded_retention_and_metrics():
     rules = (PACKAGE / "shared-postgres.rules.yml").read_text()
     assert "restic dump" in worker and "OFFHOST_STATUS=PASS" not in worker
     assert "STATUS=PASS" in worker and "wal-retention-days" in worker and "-mtime" in worker
-    assert "recorded_artifact" in worker and "continue" in worker
+    assert "recorded_snapshot" in worker and "continue" in worker
     assert "wal_spool_disk_critical" in worker and "critical WAL spool filesystem usage" in worker
     assert "CODESTRA_SHARED_WAL_MAX_FILES_PER_RUN" in worker
-    assert "CODESTRA_SHARED_WAL_PAUSE_PERCENT" in worker
     assert "processed < max_files" in worker
-    assert "current_used >= pause_percent" in worker
+    assert 'df -P "$spool"' in worker
+    assert 'find "$artifact" "$artifact.sha256" -delete' in worker
     assert "exit 1" not in worker
     assert "SharedPostgresWALSpoolCleanupFailure" in rules
 
