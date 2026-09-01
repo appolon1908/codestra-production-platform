@@ -1179,12 +1179,12 @@ def managed_rule_signatures(value: str, keys: set[str]) -> set[tuple[object, ...
 def installed_payloads(
     rule_bytes: bytes, validator_bytes: bytes, launcher_bytes: bytes
 ) -> dict[str, str]:
-    installed_rule = checked_root_regular(RULE_TARGET)
-    installed_validator = checked_root_regular(
-        VALIDATOR_TARGET, max_bytes=2 * 1024 * 1024
+    installed_rule = checked_root_regular_exact(RULE_TARGET, 0o600)
+    installed_validator = checked_root_regular_exact(
+        VALIDATOR_TARGET, 0o750, max_bytes=2 * 1024 * 1024
     )
-    installed_launcher = checked_root_regular(
-        VALIDATOR_LAUNCHER_TARGET, max_bytes=2 * 1024 * 1024
+    installed_launcher = checked_root_regular_exact(
+        VALIDATOR_LAUNCHER_TARGET, 0o750, max_bytes=2 * 1024 * 1024
     )
     if installed_rule != rule_bytes:
         raise InstallError("installed managed rule differs from signed release")
@@ -1483,7 +1483,12 @@ def rollback(args: argparse.Namespace) -> dict[str, object]:
     }
     payload = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
     atomic_write(checkpoint / ROLLBACK_RESULT_NAME, payload, 0o600)
-    return result
+    persisted = completed_rollback_result(
+        checkpoint, args.expected_source_sha, args.backup_stamp
+    )
+    if persisted is None or persisted != result:
+        raise InstallError("rollback completion durable read-back mismatch")
+    return persisted
 
 
 def parser() -> argparse.ArgumentParser:

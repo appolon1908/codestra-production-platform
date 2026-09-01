@@ -408,6 +408,32 @@ def test_installed_validator_is_read_back_before_service_mutation(
         )
 
 
+def test_installed_payloads_require_exact_executable_metadata(
+    tmp_path, monkeypatch
+) -> None:
+    rule_target = tmp_path / "managed.rules"
+    validator_target = tmp_path / "validator"
+    launcher_target = tmp_path / "launcher"
+    rule_target.write_bytes(b"signed rule\n")
+    validator_target.write_bytes(b"signed validator\n")
+    launcher_target.write_bytes(b"signed launcher\n")
+    rule_target.chmod(0o600)
+    validator_target.chmod(0o750)
+    launcher_target.chmod(0o750)
+    monkeypatch.setattr(INSTALLER, "RULE_TARGET", rule_target)
+    monkeypatch.setattr(INSTALLER, "VALIDATOR_TARGET", validator_target)
+    monkeypatch.setattr(INSTALLER, "VALIDATOR_LAUNCHER_TARGET", launcher_target)
+
+    INSTALLER.installed_payloads(
+        b"signed rule\n", b"signed validator\n", b"signed launcher\n"
+    )
+    launcher_target.chmod(0o600)
+    with pytest.raises(INSTALLER.InstallError, match="exact root metadata"):
+        INSTALLER.installed_payloads(
+            b"signed rule\n", b"signed validator\n", b"signed launcher\n"
+        )
+
+
 def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch) -> None:
     rule_path = Path("/test/managed.rules")
     validator_path = Path("/test/validator")
@@ -808,7 +834,39 @@ def test_rollback_pass_record_follows_post_restore_readback() -> None:
     completion = source.index('"completed_at_utc"', restore)
     evidence = source.index('"restored": restored', completion)
     write = source.index("atomic_write(checkpoint / ROLLBACK_RESULT_NAME", evidence)
-    assert restore < completion < evidence < write
+    readback = source.index("persisted = completed_rollback_result(", write)
+    returned = source.index("return persisted", readback)
+    assert restore < completion < evidence < write < readback < returned
+
+
+def test_rollback_rejects_failed_durable_completion_readback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stamp = "20260901T120000Z"
+    source_sha = "a" * 40
+    checkpoint = tmp_path / stamp
+    checkpoint.mkdir()
+    calls = 0
+
+    def completion_readback(*_args):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        raise INSTALLER.InstallError("durable rollback completion rejected")
+
+    monkeypatch.setattr(INSTALLER, "BACKUP_ROOT", tmp_path)
+    monkeypatch.setattr(INSTALLER, "require_prerequisites", lambda: None)
+    monkeypatch.setattr(INSTALLER, "completed_rollback_result", completion_readback)
+    monkeypatch.setattr(
+        INSTALLER,
+        "restore_checkpoint",
+        lambda *_args: {"files": [], "service": {"enabled": False, "active": False}},
+    )
+    args = argparse.Namespace(expected_source_sha=source_sha, backup_stamp=stamp)
+    with pytest.raises(INSTALLER.InstallError, match="durable rollback completion"):
+        INSTALLER.rollback(args)
+    assert calls == 2
 
 
 def test_rollback_authenticates_complete_root_only_checkpoint_before_restore(
