@@ -966,8 +966,10 @@ class Store:
         adapter_message_id: str,
         reconciliation_proof_sha256: str,
         carrier_dlr: bytes,
+        now: float,
+        dispatch_eligible: bool,
     ) -> sqlite3.Row:
-        """Apply an exact, attempt-bound Jasmin SMS-C receipt idempotently."""
+        """Atomically reconcile a receipt and enqueue its governed projection."""
 
         provider_message_id, message_status, _connector = parse_jasmin_dlr(
             carrier_dlr
@@ -1063,6 +1065,87 @@ class Store:
                 "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
                 (adapter_message_id,),
             ).fetchone()
+            if row is None:
+                raise RuntimeError("SMS DLR reconciliation read-back failed")
+            try:
+                original_payload = json.loads(row["payload"])
+            except json.JSONDecodeError as error:
+                raise RuntimeError("SMS DLR source payload is invalid") from error
+            if not isinstance(original_payload, dict):
+                raise RuntimeError("SMS DLR source payload is invalid")
+            tenant_id = forwarding_tenant(original_payload)
+            message_id = forwarding_message_identity(original_payload)
+            customer_id = original_payload.get("customer_id")
+            if (
+                not isinstance(customer_id, str)
+                or not customer_id
+                or customer_id != customer_id.strip()
+                or len(customer_id) > 128
+            ):
+                raise RuntimeError("SMS DLR customer identity is invalid")
+            event_path = (
+                "/api/v1/telnexa/dlr"
+                if row["state"] == "submitted"
+                else "/api/v1/telnexa/failure"
+            )
+            event_id = "telnexa-dlr-" + hashlib.sha256(
+                (adapter_message_id + "\n" + carrier_dlr_sha256).encode()
+            ).hexdigest()
+            event_payload: dict[str, Any] = {
+                "adapter_message_id": adapter_message_id,
+                "correlation_id": row["correlation_id"],
+                "customer_id": customer_id,
+                "idempotency_key": event_id,
+                "message_id": message_id,
+                "occurred_at": datetime.fromtimestamp(now, timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "provider_message_id": provider_message_id,
+                "status": (
+                    "delivery_success"
+                    if row["state"] == "submitted"
+                    else "delivery_failed"
+                ),
+                "tenant_id": tenant_id,
+            }
+            if row["state"] == "rejected":
+                event_payload["error_code"] = message_status
+            serialized = json.dumps(
+                event_payload, separators=(",", ":"), sort_keys=True
+            )
+            payload_sha256 = hashlib.sha256(serialized.encode()).hexdigest()
+            cursor = connection.execute(
+                """INSERT INTO events(
+                    event_id,system,path,entity_key,payload,payload_sha256,
+                    state,created_at,dispatch_eligible
+                ) VALUES(?,?,?,?,?,?,'queued',?,?)
+                ON CONFLICT(event_id) DO NOTHING""",
+                (
+                    event_id,
+                    "telnexa",
+                    event_path,
+                    message_id,
+                    serialized,
+                    payload_sha256,
+                    now,
+                    int(dispatch_eligible),
+                ),
+            )
+            if cursor.rowcount != 1:
+                existing_event = connection.execute(
+                    """SELECT system,path,entity_key,payload_sha256,dispatch_eligible
+                    FROM events WHERE event_id=?""",
+                    (event_id,),
+                ).fetchone()
+                expected_event = (
+                    "telnexa",
+                    event_path,
+                    message_id,
+                    payload_sha256,
+                    int(dispatch_eligible),
+                )
+                if existing_event is None or tuple(existing_event) != expected_event:
+                    raise RuntimeError("SMS DLR projection conflicts with prior event")
         if row is None:
             raise RuntimeError("SMS DLR reconciliation read-back failed")
         return row
@@ -1497,7 +1580,11 @@ class Gateway:
             if not hmac.compare_digest(expected_proof, supplied_proof):
                 raise PermissionError("invalid_jasmin_dlr_proof")
         completed = self.store.reconcile_sms_dlr(
-            row["adapter_message_id"], supplied_proof_sha256, carrier_dlr
+            row["adapter_message_id"],
+            supplied_proof_sha256,
+            carrier_dlr,
+            self.clock(),
+            self.settings.middleware_forwarding_enabled,
         )
         LOG.info(
             "system=telnexa adapter_message_id=%s reconciliation=jasmin_dlr state=%s",
@@ -1786,9 +1873,21 @@ class Gateway:
             return 422, {"detail": "invalid json"}
         if not isinstance(payload, dict):
             return 422, {"detail": "payload must be an object"}
-        required = {"customer_id", "to", "body", "idempotency_key"}
+        required = {
+            "body",
+            "customer_id",
+            "idempotency_key",
+            "message_id",
+            "tenant_id",
+            "to",
+        }
         if missing := required - payload.keys():
             return 422, {"detail": "missing required fields", "fields": sorted(missing)}
+        try:
+            forwarding_tenant(payload)
+            forwarding_message_identity(payload)
+        except ValueError as error:
+            return 422, {"detail": str(error)}
         message = payload.get("body")
         if not isinstance(message, str) or not message.strip() or len(message) > 1600:
             return 422, {"detail": "invalid_body"}

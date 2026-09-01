@@ -59,6 +59,35 @@ class CommunicationsTests(unittest.TestCase):
         self.assertEqual(self.store.get_message(message["message_id"],"tenant-a")["status"],"delivered")
         self.assertEqual(len(self.store.message_events(message["message_id"],"tenant-a")),3)
 
+    def test_late_telnexa_rejection_projects_to_originating_message(self):
+        message,_=self.store.create_message(request())
+        self.store.transition_message(
+            message["message_id"], "tenant-a", "accepted", "submitted",
+            provider_message_id="adapter-message-1",
+        )
+        event_id="telnexa-dlr-" + "a" * 64
+        env=validate_envelope({
+            "event_type":"telnexa.sms.failed",
+            "event_version":"1.0",
+            "occurred_at":"2026-09-01T18:00:00Z",
+            "tenant_id":"tenant-a",
+            "customer_id":"customer-1",
+            "correlation_id":"correlation-1",
+            "idempotency_key":event_id,
+            "payload":{
+                "message_id":message["message_id"],
+                "provider_message_id":"carrier-message-1",
+                "status":"delivery_failed",
+                "error_code":"ESME_RSUBMITFAIL",
+            },
+        },"telnexa",event_id)
+        self.assertTrue(self.store.apply_provider_event("telnexa",env))
+        projected=self.store.get_message(message["message_id"],"tenant-a")
+        self.assertEqual(projected["status"],"failed")
+        self.assertEqual(projected["raw_provider_status"],"delivery_failed")
+        self.assertEqual(projected["provider_message_id"],"carrier-message-1")
+        self.assertEqual(projected["provider_error_code"],"ESME_RSUBMITFAIL")
+
     def test_sms_stop_optout(self):
         message,_=self.store.create_message(request()); env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"stop-1","payload":{"message_id":message["message_id"],"status":"received","text":"STOP"}},"telnexa","stop-1")
         self.store.apply_provider_event("telnexa",env); self.assertFalse(self.store.preference_allows("tenant-a","customer-1","sms"))

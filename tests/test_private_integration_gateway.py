@@ -218,6 +218,8 @@ def configure_jasmin_route(
 def valid_payload(**changes):
     value = {
         "customer_id": "tenant-a",
+        "message_id": "message-0001",
+        "tenant_id": "tenant-a",
         "sender": "TEST",
         "to": "+4915512345678",
         "body": "synthetic",
@@ -1745,9 +1747,12 @@ def test_attempt_bound_rejection_dlr_supersedes_synchronous_success(
     app = gateway.Gateway(
         settings(
             tmp_path,
+            mode="middleware",
             live_submission_enabled=True,
             production_delivery_authorized=True,
             production_change_id="CHG-JASMIN-LATE-REJECTION",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://10.40.0.2/v1/events",
         ),
         state,
         clock=lambda: now,
@@ -1779,6 +1784,29 @@ def test_attempt_bound_rejection_dlr_supersedes_synchronous_success(
     assert completed["provider_message_id"] == "07033084-5cfd-4812-90a4-e4d24ffb6e3d"
     assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
     assert completed["operation_token"] is None
+    with state.connect() as connection:
+        events = connection.execute("SELECT * FROM events").fetchall()
+    assert len(events) == 1
+    event = events[0]
+    assert event["system"] == "telnexa"
+    assert event["path"] == "/api/v1/telnexa/failure"
+    assert event["entity_key"] == "message-0001"
+    assert event["dispatch_eligible"] == 1
+    projection = json.loads(event["payload"])
+    assert projection == {
+        "adapter_message_id": result["adapter_message_id"],
+        "correlation_id": "corr-0001",
+        "customer_id": "tenant-a",
+        "error_code": "ESME_RSUBMITFAIL",
+        "idempotency_key": event["event_id"],
+        "message_id": "message-0001",
+        "occurred_at": datetime.fromtimestamp(now, timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "provider_message_id": "07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+        "status": "delivery_failed",
+        "tenant_id": "tenant-a",
+    }
 
 
 def test_carrier_5xx_remains_unknown_until_attempt_bound_dlr_reconciles(
