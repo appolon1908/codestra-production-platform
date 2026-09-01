@@ -90,6 +90,27 @@ KLYROW_FORWARDED_EMAIL_STATUS_EVENTS = {
     "klyrow.email.deferred",
     "klyrow.email.held",
 }
+PROJECTION_MESSAGE_STATES = {
+    "accepted",
+    "blocked",
+    "bounced",
+    "cancelled",
+    "clicked",
+    "complained",
+    "created",
+    "deferred",
+    "delivered",
+    "expired",
+    "failed",
+    "inbound_received",
+    "opened",
+    "queued",
+    "rejected",
+    "sent",
+    "unsubscribed",
+    "undeliverable",
+    "validated",
+}
 ROUTE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 JASMIN_SUCCESS_RECEIPT = re.compile(
     r'Success "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
@@ -215,7 +236,7 @@ def jasmin_route_secret_names(route: str) -> tuple[str, str]:
 def expected_dispatch_projection(
     event_type: str, payload: dict[str, Any], event_id: str
 ) -> dict[str, Any] | None:
-    """Return the exact durable receiver projection required for SMS status."""
+    """Return the exact durable receiver projection for governed status events."""
 
     status_by_event = {
         "telnexa.sms.submitted": "accepted",
@@ -223,12 +244,52 @@ def expected_dispatch_projection(
         "telnexa.sms.failed": "failed",
     }
     status = status_by_event.get(event_type)
-    if status is None:
+    projected_event_type = event_type
+    raw_status: Any = payload.get("status")
+    if event_type == "klyrow.email.event":
+        projected_event_type = payload.get("event_type")
+        if projected_event_type == "klyrow.email.held":
+            projected_event_type = "klyrow.email.deferred"
+            raw_status = "deferred"
+        elif projected_event_type not in (
+            KLYROW_FORWARDED_EMAIL_STATUS_EVENTS - {"klyrow.email.held"}
+        ):
+            raise RuntimeError("dispatch_projection_status_invalid")
+    if isinstance(projected_event_type, str) and projected_event_type.startswith(
+        "klyrow.email."
+    ):
+        if projected_event_type not in {
+            "klyrow.email.bounced",
+            "klyrow.email.complained",
+            "klyrow.email.deferred",
+            "klyrow.email.delivered",
+            "klyrow.email.unsubscribed",
+        }:
+            return None
+        if raw_status is None:
+            raw_status = projected_event_type.rsplit(".", 1)[-1]
+        if not isinstance(raw_status, str) or not raw_status:
+            raise RuntimeError("dispatch_projection_identity_missing")
+        normalized_key = raw_status.lower().replace("-", "_")
+        status = {
+            "delivery_failed": "failed",
+            "delivery_success": "delivered",
+            "hard_bounce": "bounced",
+            "opted_out": "unsubscribed",
+            "received": "inbound_received",
+            "soft_bounce": "deferred",
+            "spam_complaint": "complained",
+            "submitted": "accepted",
+            "success": "accepted",
+        }.get(normalized_key, normalized_key)
+        if status not in PROJECTION_MESSAGE_STATES:
+            status = "failed"
+    elif status is None:
         return None
     message_id = payload.get("message_id")
     if not isinstance(message_id, str) or not message_id:
         raise RuntimeError("dispatch_projection_identity_missing")
-    raw_status = payload.get("status") or event_type.rsplit(".", 1)[-1]
+    raw_status = raw_status or event_type.rsplit(".", 1)[-1]
     if not isinstance(raw_status, str) or not raw_status:
         raise RuntimeError("dispatch_projection_identity_missing")
     provider_message_id = payload.get("provider_message_id")
@@ -2007,6 +2068,34 @@ class Gateway:
         idempotency_key = payload.get("idempotency_key")
         if not isinstance(idempotency_key, str) or not 8 <= len(idempotency_key) <= 128:
             return 422, {"detail": "invalid_idempotency_key"}
+        customer_id = payload.get("customer_id")
+        if not isinstance(customer_id, str) or not customer_id:
+            return 422, {"detail": "customer_required"}
+        canonical_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        payload_sha256 = hashlib.sha256(canonical_payload.encode()).hexdigest()
+        terminal = self.store.sms_by_idempotency(customer_id, idempotency_key)
+        if terminal is not None and terminal["state"] in {
+            "mock_accepted",
+            "rejected",
+            "submitted",
+        }:
+            if terminal["payload_hash"] != payload_sha256:
+                return 409, {"detail": "idempotency_conflict"}
+            if terminal["payload"] != canonical_payload:
+                raise RuntimeError("SMS terminal payload read-back mismatch")
+            expected_carrier_submitted = terminal["state"] == "submitted"
+            if (
+                bool(terminal["carrier_submitted"]) is not expected_carrier_submitted
+                or terminal["operation_token"] is not None
+            ):
+                raise RuntimeError("SMS terminal result is inconsistent")
+            return 202, {
+                "accepted": True,
+                "duplicate": True,
+                "adapter_message_id": terminal["adapter_message_id"],
+                "carrier_submitted": bool(terminal["carrier_submitted"]),
+                "state": terminal["state"],
+            }
         try:
             customer, sender, destination, route, correlation = validate_outbound(
                 payload, now
@@ -2015,8 +2104,6 @@ class Gateway:
             return 422, {"detail": str(error)}
         except PermissionError as error:
             return 403, {"detail": str(error)}
-        canonical_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-        payload_sha256 = hashlib.sha256(canonical_payload.encode()).hexdigest()
         effect_sha256 = sms_effect_sha256(
             customer, sender, destination, route, message
         )

@@ -1180,6 +1180,90 @@ def test_external_status_receipt_allows_an_absent_local_projection() -> None:
     ) == "reconciled_event"
 
 
+@pytest.mark.parametrize(
+    ("event_type", "payload", "raw_status", "normalized_status"),
+    [
+        (
+            "klyrow.email.event",
+            {
+                "event_type": "klyrow.email.delivered",
+                "message_id": "klyrow-message-1",
+                "provider_message_id": "klyrow-provider-1",
+                "status": "delivery_success",
+            },
+            "delivery_success",
+            "delivered",
+        ),
+        (
+            "klyrow.email.event",
+            {
+                "event_type": "klyrow.email.held",
+                "message_id": "klyrow-message-2",
+                "provider_message_id": "klyrow-provider-2",
+                "status": "Held",
+            },
+            "deferred",
+            "deferred",
+        ),
+        (
+            "klyrow.email.complained",
+            {
+                "message_id": "klyrow-message-3",
+                "provider_message_id": "klyrow-provider-3",
+                "status": "spam_complaint",
+            },
+            "spam_complaint",
+            "complained",
+        ),
+    ],
+)
+def test_klyrow_status_receipts_use_the_exact_receiver_projection(
+    event_type: str,
+    payload: dict[str, str],
+    raw_status: str,
+    normalized_status: str,
+) -> None:
+    event_id = "klyrow-projection-" + normalized_status
+    expected = {
+        "event_id": event_id,
+        "message_id": payload["message_id"],
+        "provider_message_id": payload["provider_message_id"],
+        "raw_status": raw_status,
+        "status": normalized_status,
+    }
+    assert gateway.expected_dispatch_projection(event_type, payload, event_id) == expected
+    accepted = json.dumps(
+        {
+            "event_id": event_id,
+            "correlation_id": "klyrow-projection-correlation",
+            "duplicate": False,
+            "projection": expected,
+            "state": "queued",
+        },
+        separators=(",", ":"),
+    ).encode()
+    assert gateway.verify_dispatch_receipt(
+        202, accepted, event_id, 0, None, expected, False
+    ) == "accepted"
+    replay = json.dumps(
+        {
+            "error": "replayed_event_id",
+            "event_id": event_id,
+            "projection": expected,
+        },
+        separators=(",", ":"),
+    ).encode()
+    assert gateway.verify_dispatch_receipt(
+        409,
+        replay,
+        event_id,
+        1,
+        "DispatchOutcomeUnknown",
+        expected,
+        False,
+    ) == "reconciled_event"
+
+
 def test_lost_receipt_body_is_reconciled_by_the_exact_replay_response(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1622,6 +1706,89 @@ def test_dependency_failure_reservation_is_resumed_without_duplicate_effect(
     assert second_result["adapter_message_id"] == reserved["adapter_message_id"]
     assert second_result["state"] == "mock_accepted"
     assert probes == []
+
+
+@pytest.mark.parametrize(
+    ("policy_change", "policy_error"),
+    [
+        ({"enabled": False}, "customer_disabled_or_unknown"),
+        (
+            {"suppressed_recipients": ["+4915512345678"]},
+            "recipient_suppressed",
+        ),
+        (
+            {
+                "delivery_window": {
+                    "timezone": "Z",
+                    "start": "04:00",
+                    "end": "05:00",
+                }
+            },
+            "quiet_hours",
+        ),
+    ],
+)
+def test_terminal_sms_retry_is_read_back_before_mutable_policy_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    policy_change: dict[str, object],
+    policy_error: str,
+) -> None:
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    configure_jasmin_route(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    calls: list[str] = []
+
+    def urlopen(url, **_kwargs):
+        calls.append(url)
+        return HealthyJasmin()
+
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-TERMINAL-READBACK",
+        ),
+        store(tmp_path),
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    first_code, first = app.outbound(
+        body, outbound_headers(body, now, "nonce-terminal-readback-0001")
+    )
+    assert first_code == 202
+    assert first["state"] == "submitted"
+    assert first["carrier_submitted"] is True
+    policy = gateway.customer_policy()
+    policy["tenant-a"].update(policy_change)
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+
+    retry_code, retry = app.outbound(
+        body, outbound_headers(body, now, "nonce-terminal-readback-0002")
+    )
+    assert retry_code == 202
+    assert retry == {**first, "duplicate": True}
+
+    conflict_body = json.dumps(
+        valid_payload(body="different-payload"), separators=(",", ":")
+    ).encode()
+    assert app.outbound(
+        conflict_body,
+        outbound_headers(conflict_body, now, "nonce-terminal-readback-0003"),
+    ) == (409, {"detail": "idempotency_conflict"})
+
+    new_body = json.dumps(
+        valid_payload(idempotency_key="idem-new-policy-check"),
+        separators=(",", ":"),
+    ).encode()
+    assert app.outbound(
+        new_body, outbound_headers(new_body, now, "nonce-terminal-readback-0004")
+    ) == (403, {"detail": policy_error})
+    assert len(calls) == 2
 
 
 def test_retry_rejects_changed_authorized_route_before_carrier_probe(
