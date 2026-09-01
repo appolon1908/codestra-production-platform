@@ -27,7 +27,6 @@ SPEC.loader.exec_module(OPERATOR)
 
 def _model_root_owned_test_files(monkeypatch) -> None:
     """Model root-owned fixtures without requiring pytest itself to run as root."""
-    real_fstat = OPERATOR.os.fstat
     real_lstat = OPERATOR.Path.lstat
 
     def root_owned(info):
@@ -36,16 +35,49 @@ def _model_root_owned_test_files(monkeypatch) -> None:
         values[5] = 0
         return os.stat_result(values)
 
-    monkeypatch.setattr(
-        OPERATOR.os,
-        "fstat",
-        lambda descriptor: root_owned(real_fstat(descriptor)),
-    )
+    def checked_root_fixture_bytes(path, *, expected_mode=0o600):
+        try:
+            descriptor = os.open(
+                path,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            )
+        except OSError as error:
+            if error.errno == OPERATOR.errno.ELOOP:
+                raise OPERATOR.OperatorError(f"unsafe file type: {path}") from error
+            raise OPERATOR.OperatorError(
+                f"required root file unavailable: {path}"
+            ) from error
+        with os.fdopen(descriptor, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not OPERATOR.stat.S_ISREG(info.st_mode):
+                raise OPERATOR.OperatorError(f"unsafe file type: {path}")
+            if info.st_uid != os.geteuid() or info.st_gid != os.getegid():
+                raise OPERATOR.OperatorError(f"unsafe fixture ownership: {path}")
+            if OPERATOR.stat.S_IMODE(info.st_mode) != expected_mode:
+                raise OPERATOR.OperatorError(f"unsafe mode: {path}")
+            return stream.read()
+
+    monkeypatch.setattr(OPERATOR, "checked_root_bytes", checked_root_fixture_bytes)
     monkeypatch.setattr(
         OPERATOR.Path,
         "lstat",
         lambda path: root_owned(real_lstat(path)),
     )
+
+
+def test_root_owned_fixture_model_preserves_effective_operator_identity(
+    monkeypatch, tmp_path
+) -> None:
+    fixture = tmp_path / "ownership-model"
+    fixture.write_bytes(b"fixture")
+    fixture.chmod(0o600)
+    _model_root_owned_test_files(monkeypatch)
+
+    with fixture.open("rb") as stream:
+        info = OPERATOR.os.fstat(stream.fileno())
+    assert (info.st_uid, info.st_gid) == (os.geteuid(), os.getegid())
+    assert OPERATOR.checked_root_bytes(fixture) == b"fixture"
+    assert OPERATOR.checked_operator_bytes(fixture, expected_mode=0o600) == b"fixture"
 
 
 EXPECTED_ACTIONS = {
