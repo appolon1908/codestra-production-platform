@@ -912,14 +912,23 @@ def stage_control_plane(config: dict[str, str]) -> dict[str, object]:
 def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
     rollback = validate_control_plane_rollback()
     stamp = rollback["rollback_stamp"]
-    for label in ("api", "worker"):
-        run_bytes(["/usr/bin/docker", "tag", f"codestra/{CONTROL_PLANE_PROJECT}-{label}:rollback-{stamp}", f"{CONTROL_PLANE_PROJECT}-{label}:latest"], timeout=60)
     _, release = control_plane_paths(config)
+    backup = CONTROL_PLANE_BACKUP_ROOT / stamp
+    rollback_images = backup / "rollback-images.yaml"
+    atomic_root_bytes(
+        rollback_images,
+        (
+            "services:\n"
+            f"  api:\n    image: codestra/{CONTROL_PLANE_PROJECT}-api:rollback-{stamp}\n"
+            f"  worker:\n    image: codestra/{CONTROL_PLANE_PROJECT}-worker:rollback-{stamp}\n"
+        ).encode("ascii"),
+        mode=0o600,
+    )
     compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
                "--file", str(release / "deploy/control-plane/compose.yaml"),
-               "--file", str(release / "deploy/control-plane/compose.live-delivery-safety.yaml")]
+               "--file", str(release / "deploy/control-plane/compose.live-delivery-safety.yaml"),
+               "--file", str(rollback_images)]
     run_bytes([*compose, "stop", "--timeout", "30"], timeout=120)
-    backup = CONTROL_PLANE_BACKUP_ROOT / stamp
     database_owner = checked_root_file(backup / "database-owner", expected_mode=0o600)
     if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
         raise OperatorError("control-plane rollback database owner is malformed")

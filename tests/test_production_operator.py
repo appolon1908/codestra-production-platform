@@ -1924,6 +1924,10 @@ def test_control_plane_rollback_restores_database_before_old_images_start() -> N
     assert '"createdb"' in rollback
     assert 'stdin=database_dump' in rollback
     assert rollback.index('stdin=database_dump') < rollback.index('"up", "--detach", "--no-build"')
+    assert 'rollback_images = backup / "rollback-images.yaml"' in rollback
+    assert f'codestra/{{CONTROL_PLANE_PROJECT}}-api:rollback-{{stamp}}' in rollback
+    assert f'codestra/{{CONTROL_PLANE_PROJECT}}-worker:rollback-{{stamp}}' in rollback
+    assert '"--file", str(rollback_images)' in rollback
 
 
 def test_waiver_cannot_bypass_tuple_or_protected_approval() -> None:
