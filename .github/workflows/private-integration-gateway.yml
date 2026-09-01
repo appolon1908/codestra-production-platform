@@ -155,6 +155,7 @@ jobs:
           PY
           PRIVATE_INTEGRATION_GATEWAY_IMAGE="example.invalid/gateway@sha256:$(printf 'a%.0s' {1..64})" \
           PRIVATE_INTEGRATION_GATEWAY_SOURCE_SHA="$(printf 'b%.0s' {1..40})" \
+          PRIVATE_INTEGRATION_GATEWAY_ENV_FILE=/dev/null \
             docker compose -f services/private-integration-gateway/compose.production.yaml config --quiet
           git diff --check "${BASE_SHA}..HEAD"
 

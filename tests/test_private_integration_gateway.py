@@ -401,6 +401,7 @@ def test_compose_is_digest_only_nonroot_and_fail_closed():
     assert service["environment"]["LIVE_SUBMISSION_ENABLED"] == "false"
     assert service["environment"]["PRODUCTION_DELIVERY_AUTHORIZED"] == "false"
     assert compose["networks"]["private_api"]["internal"] is True
+    assert "/etc/kyqra-telnexa-integration/shared.env" in service["env_file"][0]
 
 
 def test_container_base_and_runtime_are_immutable_and_isolated():
