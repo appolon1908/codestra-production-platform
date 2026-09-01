@@ -1,0 +1,26 @@
+name: mail-api-authority
+on:
+  pull_request:
+    paths: [mail_platform/**, deploy/mail-platform/**, .github/workflows/mail-api-authority.yml]
+permissions: {contents: read, pull-requests: read}
+jobs:
+  validate-mail-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m compileall -q mail_platform
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/mail-platform/Dockerfile.api
+          load: true
+          tags: codestra/mail-api:${{ github.sha }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.sha }}
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with: {image-ref: 'codestra/mail-api:${{ github.sha }}', severity: 'CRITICAL,HIGH', ignore-unfixed: true, exit-code: '1'}
+      - uses: gitleaks/gitleaks-action@v2
+        env: {GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
+
