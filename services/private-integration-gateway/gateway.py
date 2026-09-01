@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import http.client
 import json
 import logging
 import os
+import re
 import socket
 import sqlite3
 import stat
@@ -78,6 +80,12 @@ EVENT_TYPES = {
     "/api/v1/klyrow/complaints": "klyrow.email.complained",
     "/api/v1/klyrow/unsubscribes": "klyrow.email.unsubscribed",
 }
+ROUTE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+DISPATCH_RECEIPT_STATES = {"queued", "retrying", "delivered", "dead_letter"}
+
+
+class DispatchOutcomeUnknown(RuntimeError):
+    """The receiver may have committed the request before transport failed."""
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -119,6 +127,56 @@ def read_secret(name: str) -> str:
     if not value:
         raise ValueError(f"{name}_FILE is empty")
     return value
+
+
+def jasmin_route_secret_names(route: str) -> tuple[str, str]:
+    """Return the dedicated Jasmin authority names for an approved route."""
+
+    if ROUTE_NAME.fullmatch(route) is None:
+        raise PermissionError("route_not_authorized")
+    stem = "JASMIN_ROUTE_" + route.upper().replace("-", "_")
+    return stem + "_API_USER", stem + "_API_PASSWORD"
+
+
+def verify_dispatch_receipt(
+    status: int,
+    raw: bytes,
+    event_id: str,
+    previous_attempts: int,
+    previous_error: str | None,
+) -> str:
+    """Authenticate a bounded control-plane ingestion result by exact content."""
+
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise RuntimeError("invalid_downstream_receipt") from error
+    if not isinstance(value, dict):
+        raise RuntimeError("invalid_downstream_receipt")
+    if 200 <= status < 300:
+        if set(value) != {"event_id", "correlation_id", "duplicate", "state"}:
+            raise RuntimeError("invalid_downstream_receipt")
+        if value["event_id"] != event_id:
+            raise RuntimeError("downstream_event_identity_mismatch")
+        if not isinstance(value["duplicate"], bool):
+            raise RuntimeError("invalid_downstream_receipt")
+        if (
+            not isinstance(value["state"], str)
+            or value["state"] not in DISPATCH_RECEIPT_STATES
+        ):
+            raise RuntimeError("invalid_downstream_receipt")
+        correlation_id = value["correlation_id"]
+        if not isinstance(correlation_id, str) or not 1 <= len(correlation_id) <= 128:
+            raise RuntimeError("invalid_downstream_receipt")
+        return "duplicate" if value["duplicate"] else "accepted"
+    if (
+        status == 409
+        and previous_attempts > 0
+        and previous_error == "DispatchOutcomeUnknown"
+        and value == {"error": "replayed_event_id"}
+    ):
+        return "reconciled_replay"
+    raise RuntimeError("downstream_receipt_rejected")
 
 
 @dataclass(frozen=True)
@@ -603,6 +661,30 @@ def customer_policy() -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def validate_live_route_authorities() -> None:
+    """Require a distinct credential authority for every enabled policy route."""
+
+    enabled_routes: set[str] = set()
+    route_usernames: set[str] = set()
+    for policy in customer_policy().values():
+        if not isinstance(policy, dict) or not policy.get("enabled", False):
+            continue
+        route = policy.get("route")
+        if not isinstance(route, str):
+            raise RuntimeError("enabled customer route is invalid")
+        username_name, password_name = jasmin_route_secret_names(route)
+        username = read_secret(username_name)
+        password = read_secret(password_name)
+        if not username or not password:
+            raise RuntimeError("enabled customer route authority is unavailable")
+        if route not in enabled_routes and username in route_usernames:
+            raise RuntimeError("enabled routes must use distinct Jasmin authorities")
+        enabled_routes.add(route)
+        route_usernames.add(username)
+    if not enabled_routes:
+        raise RuntimeError("no enabled customer route authority is configured")
+
+
 def validate_outbound(payload: dict[str, Any]) -> tuple[str, str, str, str, str | None]:
     customer = payload.get("customer_id")
     if not isinstance(customer, str) or not customer:
@@ -622,6 +704,7 @@ def validate_outbound(payload: dict[str, Any]) -> tuple[str, str, str, str, str 
     route = policy.get("route")
     if not isinstance(route, str) or not route:
         raise PermissionError("route_not_authorized")
+    jasmin_route_secret_names(route)
     correlation = payload.get("correlation_id") or payload.get("client_reference")
     if correlation is not None and (
         not isinstance(correlation, str) or not 1 <= len(correlation) <= 128
@@ -652,10 +735,11 @@ class Gateway:
             return "unreachable"
 
     def submit_to_jasmin(
-        self, sender: str, destination: str, message: str
+        self, route: str, sender: str, destination: str, message: str
     ) -> tuple[str, str | None]:
-        username = read_secret("JASMIN_API_USER")
-        password = read_secret("JASMIN_API_PASSWORD")
+        username_name, password_name = jasmin_route_secret_names(route)
+        username = read_secret(username_name)
+        password = read_secret(password_name)
         if not username or not password:
             return "transport_error", "jasmin_credentials_unavailable"
         query = urllib.parse.urlencode(
@@ -706,9 +790,7 @@ class Gateway:
                     ).isoformat().replace("+00:00", "Z")
                 event_type = EVENT_TYPES.get(row["path"])
                 if event_type is None:
-                    event_type = (
-                        row["system"] + "." + row["path"].rsplit("/", 1)[-1]
-                    )
+                    raise RuntimeError("dispatch_event_type_unmapped")
                 envelope = {
                     "event_type": event_type,
                     "event_version": "1.0",
@@ -744,17 +826,40 @@ class Gateway:
                     },
                     method="POST",
                 )
-                with self.urlopen(request, timeout=10) as response:
-                    response_body = response.read(2049)
-                    if len(response_body) > 2048:
-                        raise RuntimeError("downstream_response_too_large")
-                    if not 200 <= response.status < 300:
-                        raise RuntimeError("downstream_status")
+                try:
+                    with self.urlopen(request, timeout=10) as response:
+                        response_status = response.status
+                        response_body = response.read(2049)
+                except urllib.error.HTTPError as error:
+                    response_status = error.code
+                    try:
+                        response_body = error.read(2049)
+                    except Exception as response_error:
+                        raise DispatchOutcomeUnknown from response_error
+                except (
+                    TimeoutError,
+                    urllib.error.URLError,
+                    ConnectionError,
+                    http.client.HTTPException,
+                    OSError,
+                ) as error:
+                    raise DispatchOutcomeUnknown from error
+                if len(response_body) > 2048:
+                    raise RuntimeError("downstream_response_too_large")
+                receipt = verify_dispatch_receipt(
+                    response_status,
+                    response_body,
+                    row["event_id"],
+                    int(row["attempts"]),
+                    row["last_error"],
+                )
                 self.store.mark_event_delivered(row["event_id"])
                 LOG.info(
-                    "system=%s event_id=%s dispatch=delivered payload_sha256=%s",
+                    "system=%s event_id=%s dispatch=delivered receipt=%s "
+                    "payload_sha256=%s",
                     row["system"],
                     row["event_id"],
+                    receipt,
                     row["payload_sha256"],
                 )
             except Exception as error:
@@ -845,7 +950,7 @@ class Gateway:
             entity_key,
             serialized,
             self.clock(),
-            self.settings.middleware_forwarding_enabled,
+            self.settings.middleware_forwarding_enabled and path in EVENT_TYPES,
         )
         if result in {"replay", "conflict"}:
             return 409, {
@@ -970,7 +1075,9 @@ class Gateway:
         provider_response_sha256 = None
         if self.settings.live_submission_enabled:
             self.store.begin_sms_submission(adapter_message_id, operation_token)
-            mapped, provider_response = self.submit_to_jasmin(sender, destination, message)
+            mapped, provider_response = self.submit_to_jasmin(
+                route, sender, destination, message
+            )
             state = {
                 "accepted": "submitted",
                 "rejected": "rejected",
@@ -1124,6 +1231,8 @@ def main() -> None:
     store = Store(settings.database_path)
     store.initialize()
     gateway = Gateway(settings, store)
+    if settings.live_submission_enabled:
+        validate_live_route_authorities()
     if settings.middleware_forwarding_enabled:
         start_dispatcher(gateway)
     server = ThreadingHTTPServer((settings.listen_address, 8080), handler_for(gateway))

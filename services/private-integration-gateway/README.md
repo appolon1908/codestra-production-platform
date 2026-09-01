@@ -11,17 +11,26 @@ both `LIVE_SUBMISSION_ENABLED=true` and
 `PRODUCTION_DELIVERY_AUTHORIZED=true`, supplies a non-empty
 `PRODUCTION_CHANGE_ID`, and passes the consent, suppression, sender, route,
 destination, audit, rollback, and approved-recipient gates.  A health response
-does not authorize delivery.
+does not authorize delivery. Each enabled customer-policy `route` resolves to
+its own `JASMIN_ROUTE_<ROUTE>_API_USER` and
+`JASMIN_ROUTE_<ROUTE>_API_PASSWORD` authority; the gateway never falls back to
+one global Jasmin account for differently authorized routes and refuses two
+logical routes that resolve to the same Jasmin username.
 
 Middleware forwarding is independently fail-closed. New authenticated ingress
 events become dispatch-eligible only when `MIDDLEWARE_FORWARDING_ENABLED=true`
 in `middleware` mode and an HTTPS `MIDDLEWARE_EVENTS_URL` plus the dedicated
 per-source API-key and HMAC authorities are present. Existing database rows migrate with
 `dispatch_eligible=0`; the dispatcher never replays that historical quarantine.
+Ingress paths without an exact governed `EVENT_TYPES` mapping also remain
+dispatch-ineligible, even when forwarding is enabled.
 Delivery uses the control-plane event envelope and authentication headers,
 bounded response reads, exponential retries, and a five-attempt dead-letter
-limit. The committed shared-mode Compose contract explicitly keeps forwarding
-disabled.
+limit. A transport 2xx is accepted only when its bounded JSON receipt names the
+exact event ID, correlation ID, duplicate flag, and known ingestion state. An
+exact `replayed_event_id` response reconciles a lost receipt only after a prior
+attempt reached an unknown result; it cannot authorize a first attempt. The
+committed shared-mode Compose contract explicitly keeps forwarding disabled.
 
 Outbound SMS idempotency is reserved before any Jasmin interaction. A short
 preflight lease permits safe recovery after a crash or dependency failure only

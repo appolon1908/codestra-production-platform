@@ -7,6 +7,9 @@ import json
 import os
 import sys
 import threading
+import urllib.error
+import urllib.parse
+from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -52,8 +55,10 @@ def clean_gateway_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "KLYROW_MIDDLEWARE_API_KEY_FILE",
         "KLYROW_WEBHOOK_SECRET",
         "KLYROW_WEBHOOK_SECRET_FILE",
-        "JASMIN_API_USER",
-        "JASMIN_API_PASSWORD",
+        "JASMIN_ROUTE_SYNTHETIC_API_USER",
+        "JASMIN_ROUTE_SYNTHETIC_API_PASSWORD",
+        "JASMIN_ROUTE_ALTERNATE_API_USER",
+        "JASMIN_ROUTE_ALTERNATE_API_PASSWORD",
     }
     for name in names:
         monkeypatch.delenv(name, raising=False)
@@ -177,6 +182,17 @@ def configure_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def configure_jasmin_route(
+    monkeypatch: pytest.MonkeyPatch,
+    route: str = "synthetic",
+    username: str = "test-user",
+    password: str = "test-password",
+) -> None:
+    stem = "JASMIN_ROUTE_" + route.upper().replace("-", "_")
+    monkeypatch.setenv(stem + "_API_USER", username)
+    monkeypatch.setenv(stem + "_API_PASSWORD", password)
+
+
 def valid_payload(**changes):
     value = {
         "customer_id": "tenant-a",
@@ -221,6 +237,84 @@ def test_outbound_policy_accepts_exact_sender_destination_and_route(
         "synthetic",
         "corr-0001",
     )
+
+
+def test_live_submission_uses_the_customer_route_specific_jasmin_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    monkeypatch.setenv(
+        "TELNEXA_CUSTOMER_POLICY_JSON",
+        json.dumps(
+            {
+                "tenant-a": {
+                    "enabled": True,
+                    "senders": ["TEST"],
+                    "destination_prefixes": ["+49155"],
+                    "route": "synthetic",
+                },
+                "tenant-b": {
+                    "enabled": True,
+                    "senders": ["TEST"],
+                    "destination_prefixes": ["+49155"],
+                    "route": "alternate",
+                },
+            }
+        ),
+    )
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    configure_jasmin_route(
+        monkeypatch, "synthetic", "route-synthetic-user", "route-synthetic-password"
+    )
+    configure_jasmin_route(
+        monkeypatch, "alternate", "route-alternate-user", "route-alternate-password"
+    )
+    gateway.validate_live_route_authorities()
+    submissions = []
+
+    def urlopen(url, **_kwargs):
+        if url.endswith("/ping"):
+            return HealthyJasmin()
+        submissions.append(urllib.parse.parse_qs(urllib.parse.urlsplit(url).query))
+        return HealthyJasmin()
+
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-ROUTE-AUTHORITY",
+        ),
+        store(tmp_path),
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    for index, tenant in enumerate(("tenant-a", "tenant-b"), start=1):
+        body = json.dumps(
+            valid_payload(
+                customer_id=tenant,
+                idempotency_key=f"route-idem-{index}",
+            ),
+            separators=(",", ":"),
+        ).encode()
+        code, result = app.outbound(
+            body, outbound_headers(body, now, f"route-nonce-0000000{index}")
+        )
+        assert code == 202 and result["state"] == "submitted"
+    assert [item["username"] for item in submissions] == [
+        ["route-synthetic-user"],
+        ["route-alternate-user"],
+    ]
+    assert [item["password"] for item in submissions] == [
+        ["route-synthetic-password"],
+        ["route-alternate-password"],
+    ]
+    monkeypatch.setenv(
+        "JASMIN_ROUTE_ALTERNATE_API_USER", "route-synthetic-user"
+    )
+    with pytest.raises(RuntimeError, match="distinct Jasmin authorities"):
+        gateway.validate_live_route_authorities()
 
 
 def signed_headers(system: str, body: bytes, now: int, event_id: str):
@@ -387,8 +481,50 @@ def test_kyqra_lifecycle_paths_do_not_conflict_on_shared_job_id(
         assert app.ingress("kyqra", path, body, headers)[0] == 202
 
 
+@pytest.mark.parametrize(
+    ("system", "path"),
+    [
+        ("kyqra", "/api/v1/kyqra/jobs"),
+        ("telnexa", "/api/v1/telnexa/provider-status"),
+        ("klyrow", "/api/v1/klyrow/campaigns"),
+        ("klyrow", "/api/v1/klyrow/contacts"),
+    ],
+)
+def test_unmapped_ingress_contracts_remain_dispatch_quarantined(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    system: str,
+    path: str,
+):
+    now = 2_000_000_000
+    monkeypatch.setenv(f"{system.upper()}_MIDDLEWARE_API_KEY", f"test-{system}-key")
+    monkeypatch.setenv(f"{system.upper()}_WEBHOOK_SECRET", f"test-{system}-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=lambda *_args, **_kwargs: pytest.fail("quarantined event dispatched"),
+    )
+    body = json.dumps({"tenant_id": "tenant-a"}, separators=(",", ":")).encode()
+    event_id = "event-quarantine-" + system + path.rsplit("/", 1)[-1]
+    headers = signed_headers(system, body, now, event_id)
+    assert app.ingress(system, path, body, headers)[0] == 202
+    with state.connect() as connection:
+        row = connection.execute(
+            "SELECT dispatch_eligible,state FROM events WHERE event_id=?", (event_id,)
+        ).fetchone()
+    assert dict(row) == {"dispatch_eligible": 0, "state": "queued"}
+    assert app.dispatch_once() == 0
+
+
 class HttpResponse:
-    def __init__(self, status: int = 202, body: bytes = b'{"accepted":true}'):
+    def __init__(self, status: int = 202, body: bytes = b"{}"):
         self.status = status
         self.body = body
 
@@ -402,6 +538,20 @@ class HttpResponse:
         return self.body if limit is None else self.body[:limit]
 
 
+def dispatch_receipt(request, *, status: int = 202, duplicate: bool = False):
+    headers = {key.lower(): value for key, value in request.header_items()}
+    body = json.dumps(
+        {
+            "event_id": headers["x-event-id"],
+            "correlation_id": "receipt-correlation",
+            "duplicate": duplicate,
+            "state": "queued",
+        },
+        separators=(",", ":"),
+    ).encode()
+    return HttpResponse(status, body)
+
+
 def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -412,7 +562,7 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
 
     def urlopen(request, **_kwargs):
         requests.append(request)
-        return HttpResponse()
+        return dispatch_receipt(request)
 
     state = store(tmp_path)
     app = gateway.Gateway(
@@ -469,6 +619,194 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     assert dict(row) == {"state": "delivered", "attempts": 0}
 
 
+def test_unrelated_success_response_cannot_mark_event_delivered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "downstream-key")
+    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "downstream-secret")
+    state = store(tmp_path)
+    payload = json.dumps({"tenant_id": "tenant-a"}, separators=(",", ":"))
+    assert state.insert_event(
+        "event-untrusted-2xx",
+        "klyrow",
+        "/api/v1/klyrow/events",
+        None,
+        payload,
+        now,
+        True,
+    ) == "accepted"
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=lambda *_args, **_kwargs: HttpResponse(202, b'{"accepted":true}'),
+    )
+    assert app.dispatch_once() == 1
+    with state.connect() as connection:
+        row = connection.execute(
+            "SELECT state,attempts,last_error FROM events WHERE event_id=?",
+            ("event-untrusted-2xx",),
+        ).fetchone()
+    assert dict(row) == {
+        "state": "queued",
+        "attempts": 1,
+        "last_error": "RuntimeError",
+    }
+
+    with pytest.raises(RuntimeError, match="invalid_downstream_receipt"):
+        gateway.verify_dispatch_receipt(
+            202,
+            b'{"event_id":"event-untrusted-2xx","correlation_id":"receipt",'
+            b'"duplicate":false,"state":[]}',
+            "event-untrusted-2xx",
+            0,
+            None,
+        )
+
+
+def test_authenticated_replay_receipt_reconciles_only_after_unknown_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    with pytest.raises(RuntimeError, match="downstream_receipt_rejected"):
+        gateway.verify_dispatch_receipt(
+            409,
+            b'{"error":"replayed_event_id"}',
+            "event-lost-receipt",
+            0,
+            None,
+        )
+    with pytest.raises(RuntimeError, match="downstream_receipt_rejected"):
+        gateway.verify_dispatch_receipt(
+            409,
+            b'{"error":"replayed_event_id"}',
+            "event-lost-receipt",
+            1,
+            "RuntimeError",
+        )
+    now = [2_000_000_000.0]
+    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "downstream-key")
+    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "downstream-secret")
+    state = store(tmp_path)
+    payload = json.dumps({"tenant_id": "tenant-a"}, separators=(",", ":"))
+    assert state.insert_event(
+        "event-lost-receipt",
+        "klyrow",
+        "/api/v1/klyrow/events",
+        None,
+        payload,
+        now[0],
+        True,
+    ) == "accepted"
+    responses = ["lost", "replay"]
+
+    def urlopen(request, **_kwargs):
+        if responses.pop(0) == "lost":
+            raise TimeoutError("response lost after receiver commit")
+        raise urllib.error.HTTPError(
+            request.full_url,
+            409,
+            "Conflict",
+            {},
+            BytesIO(b'{"error":"replayed_event_id"}'),
+        )
+
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now[0],
+        urlopen=urlopen,
+    )
+    assert app.dispatch_once() == 1
+    now[0] += 3
+    assert app.dispatch_once() == 1
+    with state.connect() as connection:
+        row = connection.execute(
+            "SELECT state,attempts,last_error FROM events WHERE event_id=?",
+            ("event-lost-receipt",),
+        ).fetchone()
+    assert dict(row) == {"state": "delivered", "attempts": 1, "last_error": None}
+    assert responses == []
+
+
+def test_lost_receipt_body_is_reconciled_by_the_exact_replay_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    class LostBody(HttpResponse):
+        def read(self, _limit=None):
+            raise OSError("response body lost after receiver commit")
+
+    now = [2_000_000_000.0]
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "downstream-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "downstream-secret")
+    state = store(tmp_path)
+    payload = json.dumps({"tenant_id": "tenant-a"}, separators=(",", ":"))
+    assert state.insert_event(
+        "event-lost-body",
+        "telnexa",
+        "/api/v1/telnexa/dlr",
+        None,
+        payload,
+        now[0],
+        True,
+    ) == "accepted"
+    responses = [LostBody(), "replay"]
+
+    def urlopen(request, **_kwargs):
+        response = responses.pop(0)
+        if response == "replay":
+            raise urllib.error.HTTPError(
+                request.full_url,
+                409,
+                "Conflict",
+                {},
+                BytesIO(b'{"error":"replayed_event_id"}'),
+            )
+        return response
+
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now[0],
+        urlopen=urlopen,
+    )
+    assert app.dispatch_once() == 1
+    with state.connect() as connection:
+        first_attempt = connection.execute(
+            "SELECT state,attempts,last_error FROM events WHERE event_id=?",
+            ("event-lost-body",),
+        ).fetchone()
+    assert dict(first_attempt) == {
+        "state": "queued",
+        "attempts": 1,
+        "last_error": "DispatchOutcomeUnknown",
+    }
+    now[0] += 3
+    assert app.dispatch_once() == 1
+    with state.connect() as connection:
+        row = connection.execute(
+            "SELECT state,attempts,last_error FROM events WHERE event_id=?",
+            ("event-lost-body",),
+        ).fetchone()
+    assert dict(row) == {"state": "delivered", "attempts": 1, "last_error": None}
+    assert responses == []
+
+
 def test_dispatch_uses_each_selected_source_identity_and_contracted_event_type(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -494,7 +832,7 @@ def test_dispatch_uses_each_selected_source_identity_and_contracted_event_type(
 
     def urlopen(request, **_kwargs):
         requests.append(request)
-        return HttpResponse()
+        return dispatch_receipt(request)
 
     state = store(tmp_path)
     for source, path in source_paths.items():
@@ -587,7 +925,7 @@ def test_dispatch_failures_are_bounded_and_dead_lettered(
     assert dict(row) == {
         "state": "dead_letter",
         "attempts": 5,
-        "last_error": "TimeoutError",
+        "last_error": "DispatchOutcomeUnknown",
     }
     assert app.dispatch_once() == 0
 
@@ -730,8 +1068,7 @@ def test_crash_after_reservation_is_lease_resumable_before_carrier_submission(
     configure_tenant(monkeypatch)
     monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
     monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
-    monkeypatch.setenv("JASMIN_API_USER", "test-user")
-    monkeypatch.setenv("JASMIN_API_PASSWORD", "test-password")
+    configure_jasmin_route(monkeypatch)
     calls = {"ping": 0, "send": 0}
 
     def urlopen(url, **_kwargs):
@@ -830,8 +1167,7 @@ def test_live_idempotency_is_reserved_before_concurrent_carrier_submission(
     configure_tenant(monkeypatch)
     monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
     monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
-    monkeypatch.setenv("JASMIN_API_USER", "test-user")
-    monkeypatch.setenv("JASMIN_API_PASSWORD", "test-password")
+    configure_jasmin_route(monkeypatch)
     carrier_started = threading.Event()
     release_carrier = threading.Event()
     calls = {"ping": 0, "send": 0}
