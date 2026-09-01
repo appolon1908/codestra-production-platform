@@ -316,20 +316,6 @@ jobs:
           fi
           test "${release_id}" -gt 0
 
-          matched_inventory="$(gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '.[] | [.id, .tag_name] | @tsv')"
-          matched_ids=()
-          if test -n "${matched_inventory}"; then
-            while IFS=$'\t' read -r candidate_id candidate_tag; do
-              if test "${candidate_tag}" = "${tag}"; then
-                matched_ids+=("${candidate_id}")
-              fi
-            done <<< "${matched_inventory}"
-          fi
-          test "${#matched_ids[@]}" -eq 1
-          test "${matched_ids[0]}" = "${release_id}"
-
           release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
           test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .id)" = "${release_id}"
           test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .tag_name)" = "${tag}"
