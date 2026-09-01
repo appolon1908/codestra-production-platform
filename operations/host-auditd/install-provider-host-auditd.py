@@ -78,6 +78,15 @@ SNAPSHOT_NAMES = {
     VALIDATOR_LAUNCHER_TARGET: "validator.launcher",
     INSTALLATION_RECORD: "installation.record",
 }
+ROLLBACK_RESULT_NAME = "rollback-result.json"
+ROLLBACK_MUTATION_SCOPE = (
+    str(RULE_TARGET),
+    str(AGGREGATE_TARGET),
+    str(VALIDATOR_TARGET),
+    str(VALIDATOR_LAUNCHER_TARGET),
+    str(INSTALLATION_RECORD),
+    "auditd.service-state",
+)
 
 
 class InstallError(RuntimeError):
@@ -861,7 +870,11 @@ def snapshot_before(source_sha: str, state: dict[str, bool]) -> tuple[str, Path,
 
 
 def validate_rollback_checkpoint(
-    checkpoint: Path, expected_source_sha: str, expected_stamp: str
+    checkpoint: Path,
+    expected_source_sha: str,
+    expected_stamp: str,
+    *,
+    allow_completed_result: bool = False,
 ) -> dict[str, object]:
     """Authenticate one complete root-only checkpoint before any restoration."""
 
@@ -873,8 +886,20 @@ def validate_rollback_checkpoint(
         raise InstallError("rollback checkpoint identity rejected")
     manifest_path = checkpoint / "rollback.json"
     checksums_path = checkpoint / "SHA256SUMS"
+    result_path = checkpoint / ROLLBACK_RESULT_NAME
+    try:
+        result_info = result_path.lstat()
+    except FileNotFoundError:
+        result_info = None
+    except OSError as exc:
+        raise InstallError("rollback result authority read failed") from exc
+    if result_info is not None and not allow_completed_result:
+        raise InstallError("rollback checkpoint contains unexpected files")
+    initial_files = {manifest_path, checksums_path}
+    if result_info is not None:
+        initial_files.add(result_path)
     initial_paths = path_authority_chain(
-        [BACKUP_ROOT, checkpoint, manifest_path, checksums_path]
+        [BACKUP_ROOT, checkpoint, *initial_files]
     )
     for path in initial_paths:
         try:
@@ -883,7 +908,7 @@ def validate_rollback_checkpoint(
             raise InstallError("rollback checkpoint authority is incomplete") from exc
         if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_gid != 0:
             raise InstallError("rollback checkpoint authority rejected")
-        if path in {manifest_path, checksums_path}:
+        if path in initial_files:
             if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
                 raise InstallError("rollback checkpoint file metadata rejected")
         elif not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o022:
@@ -972,6 +997,8 @@ def validate_rollback_checkpoint(
     if paths != set(SNAPSHOT_NAMES):
         raise InstallError("rollback target set rejected")
     expected_children = {manifest_path, checksums_path, *snapshots}
+    if result_info is not None:
+        expected_children.add(result_path)
     try:
         observed_children = set(checkpoint.iterdir())
     except OSError as exc:
@@ -989,6 +1016,61 @@ def validate_rollback_checkpoint(
         if sha256_bytes(value) != item["sha256"]:
             raise InstallError("rollback snapshot checksum mismatch")
     return record
+
+
+def completed_rollback_result(
+    checkpoint: Path, expected_source_sha: str, expected_stamp: str
+) -> dict[str, object] | None:
+    """Return one authenticated completed rollback without repeating mutation."""
+
+    result_path = checkpoint / ROLLBACK_RESULT_NAME
+    try:
+        result_path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise InstallError("rollback result authority read failed") from exc
+    checkpoint_record = validate_rollback_checkpoint(
+        checkpoint,
+        expected_source_sha,
+        expected_stamp,
+        allow_completed_result=True,
+    )
+    payload = checked_root_regular_exact(result_path, 0o600)
+    try:
+        result = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise InstallError("rollback result JSON rejected") from exc
+    if (
+        not isinstance(result, dict)
+        or set(result)
+        != {
+            "schema",
+            "source_sha",
+            "rollback_stamp",
+            "completed_at_utc",
+            "restored",
+            "mutation_scope",
+        }
+        or result.get("schema") != "codestra.host-auditd.rollback-result.v1"
+        or result.get("source_sha") != expected_source_sha
+        or result.get("rollback_stamp") != expected_stamp
+        or result.get("mutation_scope") != list(ROLLBACK_MUTATION_SCOPE)
+    ):
+        raise InstallError("rollback result identity rejected")
+    completed_at = result.get("completed_at_utc")
+    if not isinstance(completed_at, str) or not completed_at.endswith("Z"):
+        raise InstallError("rollback result timestamp rejected")
+    try:
+        parsed_time = dt.datetime.fromisoformat(completed_at[:-1] + "+00:00")
+    except ValueError as exc:
+        raise InstallError("rollback result timestamp rejected") from exc
+    if parsed_time.tzinfo != dt.timezone.utc:
+        raise InstallError("rollback result timestamp rejected")
+    observed = restored_checkpoint_evidence(checkpoint_record)
+    if result.get("restored") != observed:
+        raise InstallError("rollback result read-back differs from checkpoint")
+    return result
 
 
 def managed_keys(value: str) -> set[str]:
@@ -1343,6 +1425,11 @@ def rollback(args: argparse.Namespace) -> dict[str, object]:
     if not SHA_RE.fullmatch(args.expected_source_sha) or not STAMP_RE.fullmatch(args.backup_stamp):
         raise InstallError("rollback identity rejected")
     checkpoint = BACKUP_ROOT / args.backup_stamp
+    completed = completed_rollback_result(
+        checkpoint, args.expected_source_sha, args.backup_stamp
+    )
+    if completed is not None:
+        return completed
     restored = restore_checkpoint(
         checkpoint, args.expected_source_sha, args.backup_stamp
     )
@@ -1352,17 +1439,10 @@ def rollback(args: argparse.Namespace) -> dict[str, object]:
         "rollback_stamp": args.backup_stamp,
         "completed_at_utc": utc_now().isoformat().replace("+00:00", "Z"),
         "restored": restored,
-        "mutation_scope": [
-            str(RULE_TARGET),
-            str(AGGREGATE_TARGET),
-            str(VALIDATOR_TARGET),
-            str(VALIDATOR_LAUNCHER_TARGET),
-            str(INSTALLATION_RECORD),
-            "auditd.service-state",
-        ],
+        "mutation_scope": list(ROLLBACK_MUTATION_SCOPE),
     }
     payload = json.dumps(result, sort_keys=True, separators=(",", ":")).encode() + b"\n"
-    atomic_write(checkpoint / "rollback-result.json", payload, 0o600)
+    atomic_write(checkpoint / ROLLBACK_RESULT_NAME, payload, 0o600)
     return result
 
 

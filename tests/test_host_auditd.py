@@ -453,6 +453,10 @@ def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch) -> N
 
 
 def test_root_only_launcher_verifies_target_before_executing_it(tmp_path: Path) -> None:
+    try:
+        pwd.getpwnam("codestra-admin")
+    except KeyError:
+        pytest.skip("codestra-admin unavailable for host-identity execution test")
     source_sha = "a" * 40
     validator = tmp_path / "validator"
     launcher = tmp_path / "launcher"
@@ -732,7 +736,7 @@ def test_rollback_pass_record_follows_post_restore_readback() -> None:
     restore = source.index("restored = restore_checkpoint(")
     completion = source.index('"completed_at_utc"', restore)
     evidence = source.index('"restored": restored', completion)
-    write = source.index('atomic_write(checkpoint / "rollback-result.json"', evidence)
+    write = source.index("atomic_write(checkpoint / ROLLBACK_RESULT_NAME", evidence)
     assert restore < completion < evidence < write
 
 
@@ -786,6 +790,7 @@ def test_rollback_authenticates_complete_root_only_checkpoint_before_restore(
         )
 
     monkeypatch.setattr(INSTALLER, "path_authority_chain", local_authorities)
+    monkeypatch.setattr(INSTALLER, "operator_cannot_modify", lambda paths: True)
     assert (
         INSTALLER.validate_rollback_checkpoint(checkpoint, source_sha, stamp)
         == record
@@ -793,7 +798,7 @@ def test_rollback_authenticates_complete_root_only_checkpoint_before_restore(
 
     displaced = checkpoint / items[0]["snapshot"]
     displaced.chmod(0o666)
-    with pytest.raises(INSTALLER.InstallError, match="modify rollback snapshots"):
+    with pytest.raises(INSTALLER.InstallError, match="unsafe exact root metadata"):
         INSTALLER.validate_rollback_checkpoint(checkpoint, source_sha, stamp)
     displaced.chmod(0o600)
     unexpected = checkpoint / "attacker-extra"
@@ -801,6 +806,56 @@ def test_rollback_authenticates_complete_root_only_checkpoint_before_restore(
     unexpected.chmod(0o600)
     with pytest.raises(INSTALLER.InstallError, match="unexpected files"):
         INSTALLER.validate_rollback_checkpoint(checkpoint, source_sha, stamp)
+
+
+def test_completed_rollback_result_is_verified_and_reused_without_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stamp = "20260901T120000Z"
+    source_sha = "a" * 40
+    checkpoint = tmp_path / stamp
+    checkpoint.mkdir()
+    restored = {
+        "files": [{"path": str(INSTALLER.RULE_TARGET), "present": False}],
+        "service": {"enabled": False, "active": False},
+    }
+    result = {
+        "schema": "codestra.host-auditd.rollback-result.v1",
+        "source_sha": source_sha,
+        "rollback_stamp": stamp,
+        "completed_at_utc": "2026-09-01T12:00:00Z",
+        "restored": restored,
+        "mutation_scope": list(INSTALLER.ROLLBACK_MUTATION_SCOPE),
+    }
+    result_path = checkpoint / INSTALLER.ROLLBACK_RESULT_NAME
+    result_path.write_text(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")
+    result_path.chmod(0o600)
+    checkpoint_record = {"files": [], "service_before": {}}
+    monkeypatch.setattr(
+        INSTALLER,
+        "validate_rollback_checkpoint",
+        lambda *args, **kwargs: checkpoint_record,
+    )
+    monkeypatch.setattr(
+        INSTALLER, "restored_checkpoint_evidence", lambda record: restored
+    )
+    assert INSTALLER.completed_rollback_result(checkpoint, source_sha, stamp) == result
+
+    monkeypatch.setattr(INSTALLER, "BACKUP_ROOT", tmp_path)
+    monkeypatch.setattr(INSTALLER, "require_prerequisites", lambda: None)
+    monkeypatch.setattr(
+        INSTALLER,
+        "restore_checkpoint",
+        lambda *args: pytest.fail("completed rollback must not mutate again"),
+    )
+    args = argparse.Namespace(expected_source_sha=source_sha, backup_stamp=stamp)
+    assert INSTALLER.rollback(args) == result
+
+    changed = dict(result)
+    changed["source_sha"] = "b" * 40
+    result_path.write_text(json.dumps(changed, sort_keys=True, separators=(",", ":")) + "\n")
+    with pytest.raises(INSTALLER.InstallError, match="rollback result identity"):
+        INSTALLER.completed_rollback_result(checkpoint, source_sha, stamp)
 
 
 def test_restore_reauthenticates_checkpoint_before_first_target_mutation() -> None:
