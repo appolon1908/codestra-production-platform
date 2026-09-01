@@ -1,0 +1,26 @@
+name: source-authority-evidence
+
+on:
+  pull_request:
+    paths:
+      - reports/CONTROL_PLANE_SOURCE_AUTHORITY_RECONCILIATION_20260901.md
+      - scripts/validate_control_plane_authority_evidence.py
+      - .github/workflows/source-authority-evidence.yml
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate-control-plane-reconciliation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch origin agent/middleware-n8n-control-plane
+      - run: python3 scripts/validate_control_plane_authority_evidence.py
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
