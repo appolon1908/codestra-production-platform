@@ -11,6 +11,10 @@ spool="${CODESTRA_SHARED_WAL_ARCHIVE:-/opt/codestra/backups/postgresql-shared/wa
 recipient="$(<"$authority/archive-recipient")"
 retention_days="$(<"$authority/wal-retention-days")"
 [[ "$retention_days" =~ ^[1-9][0-9]*$ ]]
+max_files="${CODESTRA_SHARED_WAL_MAX_FILES_PER_RUN:-16}"
+pause_percent="${CODESTRA_SHARED_WAL_PAUSE_PERCENT:-82}"
+[[ "$max_files" =~ ^[1-9][0-9]*$ && "$pause_percent" =~ ^[1-9][0-9]*$ ]]
+(( max_files <= 512 && pause_percent >= 75 && pause_percent < 90 ))
 mkdir -p "$spool"
 chmod 0700 "$spool"
 metrics_state="${CODESTRA_SHARED_POSTGRES_STATE:-/var/lib/codestra-shared-postgresql}"
@@ -33,7 +37,15 @@ if [[ -f "$authority/object-access-key-id" ]]; then AWS_ACCESS_KEY_ID="$(<"$auth
 if [[ -f "$authority/object-secret-access-key" ]]; then AWS_SECRET_ACCESS_KEY="$(<"$authority/object-secret-access-key")"; export AWS_SECRET_ACCESS_KEY; fi
 if [[ -f "$authority/object-region" ]]; then AWS_DEFAULT_REGION="$(<"$authority/object-region")"; export AWS_DEFAULT_REGION; fi
 shopt -s nullglob
+processed=0
 for source_path in "$stage"/[0-9A-F]*; do
+  (( processed < max_files )) || break
+  current_used="$(df -P "$stage" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+  [[ "$current_used" =~ ^[0-9]+$ ]]
+  if (( current_used >= pause_percent )); then
+    printf 'WAL offload paused at filesystem safety threshold: %s%%\n' "$current_used" >&2
+    break
+  fi
   [[ -f "$source_path" && ! -L "$source_path" ]]
   [[ "$source_path" == *.offhost ]] && continue
   wal_name="${source_path##*/}"
@@ -91,6 +103,7 @@ EOF
   mv "$marker_tmp" "$marker"
   sync -d "$stage"
   touch "$spool/LAST_OFFHOST_SUCCESS"
+  processed=$((processed + 1))
 done
 
 prune_helper="${CODESTRA_SHARED_POSTGRES_PRUNE_HELPER:-/usr/local/sbin/codestra-shared-postgres-prune-wal.sh}"
