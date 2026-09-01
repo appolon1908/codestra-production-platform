@@ -10,5 +10,5 @@ ExecStart=/opt/codestra/operations/database-certification/restore-all-databases.
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/codestra/evidence/database-restore /var/lib/docker
+ReadWritePaths=/opt/codestra/evidence/database-restore /var/lib/docker /etc/codestra/backup-gpg
 NoNewPrivileges=true

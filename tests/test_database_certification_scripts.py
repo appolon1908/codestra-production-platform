@@ -7,6 +7,7 @@ RESTORE = (ROOT / "operations/database-certification/restore-all-databases.sh").
 METRICS = (ROOT / "operations/monitoring/exporters/database_certification_metrics.sh").read_text()
 RULES = (ROOT / "operations/monitoring/rules/database-certification.rules.yml").read_text()
 RUNTIME = (ROOT / "operations/monitoring/exporters/database_runtime_metrics.sh").read_text()
+RESTORE_SERVICE = (ROOT / "operations/systemd/codestra-database-certification-restore.service").read_text()
 
 
 def test_backup_covers_every_discovered_database_authority():
@@ -33,6 +34,9 @@ def test_restore_is_isolated_and_cleans_up():
     assert "--exit-on-error" in RESTORE
     assert "PRAGMA integrity_check" in RESTORE
     assert "RESTORE_PUBLIC_PORTS=0" in RESTORE
+    assert "ProtectSystem=strict" in RESTORE_SERVICE
+    assert "ReadWritePaths=" in RESTORE_SERVICE
+    assert "/etc/codestra/backup-gpg" in RESTORE_SERVICE
 
 
 def test_offhost_is_fail_closed_not_falsely_certified():

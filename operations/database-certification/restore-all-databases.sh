@@ -42,18 +42,24 @@ PY
 image=$(docker inspect codestra-postgres-1 -f '{{.Config.Image}}')
 docker volume create "$volume" >/dev/null
 docker run -d --name "$container" -e POSTGRES_HOST_AUTH_METHOD=trust -v "$volume:/var/lib/postgresql/data" "$image" >/dev/null
-for _ in $(seq 1 60); do docker exec "$container" pg_isready -U postgres >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$container" pg_isready -U postgres >/dev/null
-
-count=0
-for archive in "$work"/*.dump; do
-  name=$(basename "$archive" .dump | tr -c 'a-zA-Z0-9_' '_')
-  docker exec "$container" createdb -U postgres "$name"
-  docker cp "$archive" "$container:/tmp/restore.dump" >/dev/null
-  docker exec "$container" pg_restore -U postgres --no-owner --no-privileges --exit-on-error -d "$name" /tmp/restore.dump
-  docker exec "$container" psql -X -U postgres -d "$name" -At -v ON_ERROR_STOP=1 -c 'select 1' | grep -qx 1
-  count=$((count+1))
+for _ in $(seq 1 60); do
+  docker run --rm --network "container:$container" "$image" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1 && break
+  sleep 1
 done
+docker run --rm --network "container:$container" "$image" pg_isready -h 127.0.0.1 -U postgres >/dev/null
+
+count=$(docker run --rm --network "container:$container" -v "$work:/restore:ro" "$image" sh -c '
+  set -eu
+  count=0
+  for archive in /restore/*.dump; do
+    name=$(basename "$archive" .dump | tr -c "a-zA-Z0-9_" "_")
+    createdb -h 127.0.0.1 -U postgres "$name"
+    pg_restore -h 127.0.0.1 -U postgres --no-owner --no-privileges --exit-on-error -d "$name" "$archive"
+    test "$(psql -X -h 127.0.0.1 -U postgres -d "$name" -At -v ON_ERROR_STOP=1 -c "select 1")" = 1
+    count=$((count+1))
+  done
+  printf "%s\n" "$count"
+')
 test "$count" -eq 10
 rto=$(( $(date +%s) - started ))
 cat > "$final/RESTORE-RESULT.txt" <<EOF
