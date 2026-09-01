@@ -98,6 +98,7 @@ def test_unknown_safety_value_is_not_echoed() -> None:
 def test_all_operational_write_gates_are_allowlisted_and_normalized() -> None:
     required = {
         "CALLBACK_DELIVERY_ENABLED",
+        "CALLBACK_EMAIL_COMMAND_ENABLED",
         "CALLBACK_DISPATCH",
         "CALLBACK_DISPATCH_ENABLED",
         "ENABLE_EXTERNAL_DELIVERY",
