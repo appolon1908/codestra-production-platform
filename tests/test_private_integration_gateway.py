@@ -117,15 +117,18 @@ def test_live_delivery_requires_second_gate_and_change_id(tmp_path: Path):
         )
 
 
-def test_middleware_forwarding_is_explicit_and_mode_bounded(tmp_path: Path):
-    with pytest.raises(ValueError, match="middleware mode"):
-        settings(tmp_path, middleware_forwarding_enabled=True)
+def test_middleware_forwarding_is_explicit_https_and_source_bounded(tmp_path: Path):
     with pytest.raises(ValueError, match="MIDDLEWARE_EVENTS_URL"):
-        settings(
-            tmp_path,
-            mode="middleware",
-            middleware_forwarding_enabled=True,
-        )
+        settings(tmp_path, middleware_forwarding_enabled=True)
+    shared = settings(
+        tmp_path,
+        middleware_forwarding_enabled=True,
+        downstream_url="https://middleware.invalid/v1/events",
+    )
+    assert shared.middleware_forwarding_enabled is True
+    assert gateway.Gateway(shared, store(tmp_path)).forwarding_systems() == {
+        "telnexa"
+    }
     value = settings(
         tmp_path,
         mode="middleware",
@@ -1367,6 +1370,21 @@ def test_dispatcher_startup_requires_credentials_and_starts_daemon(
     assert started[0]["args"] == (app,)
     assert started[0]["daemon"] is True
 
+    for source in ("kyqra", "klyrow"):
+        monkeypatch.delenv(f"{source.upper()}_MIDDLEWARE_API_KEY")
+        monkeypatch.delenv(f"{source.upper()}_WEBHOOK_SECRET")
+    shared_app = gateway.Gateway(
+        settings(
+            tmp_path,
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        store(tmp_path),
+    )
+    gateway.start_dispatcher(shared_app)
+    assert len(started) == 2
+    assert started[1]["args"] == (shared_app,)
+
 
 class HealthyJasmin:
     status = 200
@@ -1747,7 +1765,7 @@ def test_attempt_bound_rejection_dlr_supersedes_synchronous_success(
     app = gateway.Gateway(
         settings(
             tmp_path,
-            mode="middleware",
+            mode="shared",
             live_submission_enabled=True,
             production_delivery_authorized=True,
             production_change_id="CHG-JASMIN-LATE-REJECTION",
@@ -2215,6 +2233,96 @@ def test_attempt_bound_dlr_wins_race_with_ambiguous_carrier_response(
     assert completed["operation_token"] is None
 
 
+def test_shared_http_submission_forwards_sms_c_ack_as_submitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    configure_jasmin_route(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    send_urls: list[str] = []
+    middleware_requests: list[urllib.request.Request] = []
+
+    def urlopen(target, **_kwargs):
+        if isinstance(target, urllib.request.Request):
+            middleware_requests.append(target)
+            return dispatch_receipt(target)
+        if target.endswith("/ping"):
+            return HealthyJasmin()
+        send_urls.append(target)
+        return HealthyJasmin()
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="shared",
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-SHARED-DLR-FORWARDING",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    server = gateway.ThreadingHTTPServer(("127.0.0.1", 0), gateway.handler_for(app))
+    server.daemon_threads = True
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+        headers = outbound_headers(body, now, "nonce-shared-http-0001")
+        headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/v1/messages",
+            data=body,
+            method="POST",
+            headers=headers,
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            result = json.loads(response.read())
+        assert result["state"] == "submitted"
+
+        callback = urllib.parse.urlsplit(
+            urllib.parse.parse_qs(urllib.parse.urlsplit(send_urls[0]).query)[
+                "dlr-url"
+            ][0]
+        )
+        dlr = urllib.parse.urlencode(
+            {
+                "id": "07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+                "message_status": "ESME_ROK",
+                "level": "1",
+                "connector": "smpp-prod-1",
+            }
+        ).encode()
+        callback_request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}{callback.path}?{callback.query}",
+            data=dlr,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(callback_request, timeout=5) as response:
+            assert response.status == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+
+    with state.connect() as connection:
+        event = connection.execute("SELECT * FROM events").fetchone()
+    assert event["dispatch_eligible"] == 1
+    assert json.loads(event["payload"])["status"] == "submitted"
+    assert app.dispatch_once() == 1
+    assert len(middleware_requests) == 1
+    envelope = json.loads(middleware_requests[0].data)
+    assert envelope["event_type"] == "telnexa.sms.submitted"
+    assert envelope["payload"]["status"] == "submitted"
+
+
 def test_crashed_submitting_row_reconciles_only_from_production_dlr_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -2225,8 +2333,12 @@ def test_crashed_submitting_row_reconciles_only_from_production_dlr_path(
     monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
 
     send_urls: list[str] = []
+    middleware_requests: list[urllib.request.Request] = []
 
     def urlopen(url, **_kwargs):
+        if isinstance(url, urllib.request.Request):
+            middleware_requests.append(url)
+            return dispatch_receipt(url)
         if url.endswith("/ping"):
             return HealthyJasmin()
         send_urls.append(url)
@@ -2239,6 +2351,8 @@ def test_crashed_submitting_row_reconciles_only_from_production_dlr_path(
             live_submission_enabled=True,
             production_delivery_authorized=True,
             production_change_id="CHG-JASMIN-CRASH-READBACK",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
         ),
         state,
         clock=lambda: now,
@@ -2283,10 +2397,19 @@ def test_crashed_submitting_row_reconciles_only_from_production_dlr_path(
         worker.join(timeout=5)
     with state.connect() as connection:
         completed = connection.execute("SELECT * FROM sms_transactions").fetchone()
+        event = connection.execute("SELECT * FROM events").fetchone()
     assert completed["state"] == "submitted"
     assert completed["provider_message_id"] == "3f08d4cb-fc4b-4474-95c1-0d305af3a679"
     assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
     assert completed["operation_token"] is None
+    assert event["path"] == "/api/v1/telnexa/dlr"
+    assert event["dispatch_eligible"] == 1
+    assert json.loads(event["payload"])["status"] == "submitted"
+    assert app.dispatch_once() == 1
+    assert len(middleware_requests) == 1
+    envelope = json.loads(middleware_requests[0].data)
+    assert envelope["event_type"] == "telnexa.sms.submitted"
+    assert envelope["payload"]["status"] == "submitted"
 
 
 def test_request_body_read_timeout_and_short_read_fail_closed(
@@ -2566,7 +2689,7 @@ def test_compose_is_digest_only_nonroot_and_fail_closed():
     )
     assert service["environment"]["LIVE_SUBMISSION_ENABLED"] == "false"
     assert service["environment"]["PRODUCTION_DELIVERY_AUTHORIZED"] == "false"
-    assert service["environment"]["MIDDLEWARE_FORWARDING_ENABLED"] == "false"
+    assert service["environment"]["MIDDLEWARE_FORWARDING_ENABLED"] == "true"
     assert compose["networks"]["private_api"]["internal"] is True
     assert "/etc/kyqra-telnexa-integration/shared.env" in service["env_file"][0]
 

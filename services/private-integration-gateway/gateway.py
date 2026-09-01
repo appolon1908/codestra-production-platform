@@ -73,7 +73,7 @@ EVENT_TYPES = {
     "/api/v1/kyqra/progress": "kyqra.job.completed",
     "/api/v1/kyqra/failures": "kyqra.job.failed",
     "/api/v1/telnexa/inbound": "telnexa.sms.received",
-    "/api/v1/telnexa/dlr": "telnexa.sms.delivered",
+    "/api/v1/telnexa/dlr": "telnexa.sms.submitted",
     "/api/v1/telnexa/failure": "telnexa.sms.failed",
     "/api/v1/klyrow/events": "klyrow.email.event",
     "/api/v1/klyrow/bounces": "klyrow.email.bounced",
@@ -445,8 +445,6 @@ class Settings:
             raise ValueError(
                 "live submission requires production authorization and a change ID"
             )
-        if self.middleware_forwarding_enabled and self.mode != "middleware":
-            raise ValueError("middleware forwarding requires middleware mode")
         if self.middleware_forwarding_enabled and not self.downstream_url:
             raise ValueError("middleware forwarding requires MIDDLEWARE_EVENTS_URL")
         if self.downstream_url and not self.downstream_url.startswith("https://"):
@@ -1102,7 +1100,7 @@ class Store:
                 .replace("+00:00", "Z"),
                 "provider_message_id": provider_message_id,
                 "status": (
-                    "delivery_success"
+                    "submitted"
                     if row["state"] == "submitted"
                     else "delivery_failed"
                 ),
@@ -1150,13 +1148,29 @@ class Store:
             raise RuntimeError("SMS DLR reconciliation read-back failed")
         return row
 
-    def pending_events(self, now: float, limit: int = 20) -> list[sqlite3.Row]:
-        with self.connect() as connection:
-            return connection.execute(
-                """SELECT * FROM events
+    def pending_events(
+        self,
+        now: float,
+        limit: int = 20,
+        systems: frozenset[str] | None = None,
+    ) -> list[sqlite3.Row]:
+        selected = frozenset(SYSTEMS) if systems is None else systems
+        if selected == frozenset({"telnexa"}):
+            query = """SELECT * FROM events
                 WHERE state IN ('queued','dispatching')
                   AND dispatch_eligible=1 AND next_attempt<=?
-                ORDER BY created_at,event_id LIMIT ?""",
+                  AND system='telnexa'
+                ORDER BY created_at,event_id LIMIT ?"""
+        elif selected == frozenset(SYSTEMS):
+            query = """SELECT * FROM events
+                WHERE state IN ('queued','dispatching')
+                  AND dispatch_eligible=1 AND next_attempt<=?
+                ORDER BY created_at,event_id LIMIT ?"""
+        else:
+            raise ValueError("invalid forwarding system selection")
+        with self.connect() as connection:
+            return connection.execute(
+                query,
                 (now, limit),
             ).fetchall()
 
@@ -1598,7 +1612,9 @@ class Gateway:
 
         if not self.settings.middleware_forwarding_enabled:
             return 0
-        rows = self.store.pending_events(self.clock())
+        rows = self.store.pending_events(
+            self.clock(), systems=self.forwarding_systems()
+        )
         for row in rows:
             previous_attempts = int(row["attempts"])
             previous_error = row["last_error"]
@@ -1712,6 +1728,13 @@ class Gateway:
                     type(error).__name__,
                 )
         return len(rows)
+
+    def forwarding_systems(self) -> frozenset[str]:
+        """Limit shared-mode forwarding to the Telnexa events it can produce."""
+
+        if self.settings.mode == "shared":
+            return frozenset({"telnexa"})
+        return frozenset(SYSTEMS)
 
     def authenticate_key(self, system: str, supplied: str) -> bool:
         key_name, _, _ = SYSTEMS[system]
@@ -2241,7 +2264,10 @@ def dispatch_worker(gateway: Gateway) -> None:
 def start_dispatcher(gateway: Gateway) -> threading.Thread:
     """Validate downstream authority before starting the isolated worker."""
 
-    for api_key_name, hmac_secret_name, _ in SYSTEMS.values():
+    for source in SYSTEMS:
+        if source not in gateway.forwarding_systems():
+            continue
+        api_key_name, hmac_secret_name, _ = SYSTEMS[source]
         for name in (api_key_name, hmac_secret_name):
             if not read_secret(name):
                 raise RuntimeError(f"{name} is unavailable")

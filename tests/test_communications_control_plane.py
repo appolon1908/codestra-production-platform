@@ -88,6 +88,29 @@ class CommunicationsTests(unittest.TestCase):
         self.assertEqual(projected["provider_message_id"],"carrier-message-1")
         self.assertEqual(projected["provider_error_code"],"ESME_RSUBMITFAIL")
 
+    def test_sms_c_acknowledgement_is_accepted_not_delivered(self):
+        message,_=self.store.create_message(request())
+        event_id="telnexa-dlr-" + "b" * 64
+        env=validate_envelope({
+            "event_type":"telnexa.sms.submitted",
+            "event_version":"1.0",
+            "occurred_at":"2026-09-01T18:00:00Z",
+            "tenant_id":"tenant-a",
+            "customer_id":"customer-1",
+            "correlation_id":"correlation-1",
+            "idempotency_key":event_id,
+            "payload":{
+                "message_id":message["message_id"],
+                "provider_message_id":"carrier-message-1",
+                "status":"submitted",
+            },
+        },"telnexa",event_id)
+        self.assertTrue(self.store.apply_provider_event("telnexa",env))
+        projected=self.store.get_message(message["message_id"],"tenant-a")
+        self.assertEqual(projected["status"],"accepted")
+        self.assertEqual(projected["raw_provider_status"],"submitted")
+        self.assertIsNone(projected["delivered_at"])
+
     def test_sms_stop_optout(self):
         message,_=self.store.create_message(request()); env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"stop-1","payload":{"message_id":message["message_id"],"status":"received","text":"STOP"}},"telnexa","stop-1")
         self.store.apply_provider_event("telnexa",env); self.assertFalse(self.store.preference_allows("tenant-a","customer-1","sms"))

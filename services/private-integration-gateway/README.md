@@ -27,8 +27,11 @@ fail before SMS reservation or any Jasmin request.
 
 Middleware forwarding is independently fail-closed. New authenticated ingress
 events become dispatch-eligible only when `MIDDLEWARE_FORWARDING_ENABLED=true`
-in `middleware` mode and an HTTPS `MIDDLEWARE_EVENTS_URL` plus the dedicated
-per-source API-key and HMAC authorities are present. Existing database rows migrate with
+and an HTTPS `MIDDLEWARE_EVENTS_URL` plus the dedicated per-source API-key and
+HMAC authorities are present. Middleware mode can forward every governed
+provider source. Shared mode can forward only the Telnexa DLR/failure events it
+produces; it neither exposes the general provider-ingress routes nor consumes
+credentials for other provider identities. Existing database rows migrate with
 `dispatch_eligible=0`; the dispatcher never replays that historical quarantine.
 Ingress paths without an exact governed `EVENT_TYPES` mapping also remain
 dispatch-ineligible, even when forwarding is enabled.
@@ -42,7 +45,8 @@ exact `replayed_event_id` response reconciles a lost receipt only after a prior
 attempt reached an unknown result; it cannot authorize a first attempt. Every
 attempt is durably claimed as outcome-unknown before network I/O, and an
 expired claim is retryable after restart without overlapping a live request. The
-committed shared-mode Compose contract explicitly keeps forwarding disabled.
+committed shared-mode Compose contract enables only this source-scoped status
+forwarding while keeping both carrier-delivery authorization gates disabled.
 
 Outbound SMS idempotency is reserved before any Jasmin interaction. A short
 preflight lease permits safe recovery after a crash or dependency failure only
@@ -60,6 +64,10 @@ Carrier HTTP 5xx responses and other ambiguity-preserving statuses remain
 `outcome_unknown` with their bounded response digest and attempt capability;
 they can become terminal only through the exact attempt-bound DLR and block a
 replacement idempotency key in the interim.
+An `ESME_ROK` level-one receipt means only that the SMS-C accepted the submit;
+it projects `telnexa.sms.submitted` / `status=submitted` and never claims handset
+delivery. A separate delivery-level authority is required before any delivered
+state may be emitted.
 The gateway strips callback query material from its HTTP logs. Live startup also
 requires a distinct `JASMIN_RECONCILIATION_SECRET` of at least 32 bytes.
 

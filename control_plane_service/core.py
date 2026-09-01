@@ -24,6 +24,7 @@ EVENT_PREFIXES = {
 }
 CHANNEL_EVENTS = {
     "telnexa.sms.received": "sms",
+    "telnexa.sms.submitted": "sms",
     "telnexa.sms.delivered": "sms",
     "telnexa.sms.failed": "sms",
     "klyrow.email.sent": "email",
