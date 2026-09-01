@@ -105,6 +105,7 @@ DELIVERY_TIME = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 DELIVERY_TIMEZONE = re.compile(r"([+-])([0-9]{2}):([0-9]{2})")
 AMBIGUOUS_CARRIER_HTTP_STATUSES = {408, 409, 425, 429}
 REQUEST_IO_TIMEOUT_SECONDS = 10.0
+REQUEST_BODY_DEADLINE_SECONDS = 10.0
 
 
 class DispatchOutcomeUnknown(RuntimeError):
@@ -1185,7 +1186,7 @@ def validate_delivery_window(
         offset_minutes = 0
     else:
         timezone_match = DELIVERY_TIMEZONE.fullmatch(timezone_name)
-        if timezone_match is None:
+        if timezone_match is None or timezone_name == "-00:00":
             raise PermissionError("delivery_window_policy_invalid")
         offset_hours = int(timezone_match.group(2))
         offset_remainder = int(timezone_match.group(3))
@@ -1896,6 +1897,29 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(raw)
 
+        def read_request_body(self, length: int) -> bytes:
+            deadline = time.monotonic() + REQUEST_BODY_DEADLINE_SECONDS
+            chunks: list[bytes] = []
+            remaining_bytes = length
+            try:
+                while remaining_bytes:
+                    remaining_time = deadline - time.monotonic()
+                    if remaining_time <= 0:
+                        raise TimeoutError("absolute request-body deadline exceeded")
+                    self.connection.settimeout(
+                        max(0.001, min(REQUEST_IO_TIMEOUT_SECONDS, remaining_time))
+                    )
+                    block = self.rfile.read1(min(65536, remaining_bytes))
+                    if not block:
+                        break
+                    chunks.append(block)
+                    remaining_bytes -= len(block)
+                if time.monotonic() > deadline:
+                    raise TimeoutError("absolute request-body deadline exceeded")
+                return b"".join(chunks)
+            finally:
+                self.connection.settimeout(REQUEST_IO_TIMEOUT_SECONDS)
+
         def do_GET(self) -> None:
             if self.path in {"/health", "/ready", "/version"}:
                 ready = gateway.store.ready()
@@ -1938,7 +1962,7 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
             if length <= 0 or length > maximum:
                 return self.send_json(413, {"detail": "invalid body size"})
             try:
-                body = self.rfile.read(length)
+                body = self.read_request_body(length)
             except (TimeoutError, socket.timeout):
                 self.close_connection = True
                 return self.send_json(408, {"detail": "request body timeout"})

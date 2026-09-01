@@ -348,6 +348,7 @@ def test_customer_timezone_delivery_window_blocks_before_sms_reservation(
         {"timezone": "Z", "start": "9:00", "end": "17:00"},
         {"timezone": "+13:99", "start": "09:00", "end": "17:00"},
         {"timezone": "-14:01", "start": "09:00", "end": "17:00"},
+        {"timezone": "-00:00", "start": "09:00", "end": "17:00"},
     ],
 )
 def test_enabled_customer_delivery_window_configuration_fails_closed(
@@ -2143,6 +2144,39 @@ def test_request_body_read_timeout_and_short_read_fail_closed(
             client.shutdown(socket.SHUT_WR)
             short_response = client.recv(4096)
         assert b" 400 " in short_response.split(b"\r\n", 1)[0]
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+
+
+def test_request_body_deadline_rejects_continuous_byte_drip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(gateway, "REQUEST_IO_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(gateway, "REQUEST_BODY_DEADLINE_SECONDS", 0.15)
+    app = gateway.Gateway(settings(tmp_path), store(tmp_path))
+    server = gateway.ThreadingHTTPServer(("127.0.0.1", 0), gateway.handler_for(app))
+    server.daemon_threads = True
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        started = time.monotonic()
+        with socket.create_connection(("127.0.0.1", server.server_port), timeout=2) as client:
+            client.settimeout(2)
+            client.sendall(
+                b"POST /api/v1/kyqra/jobs HTTP/1.1\r\n"
+                b"Host: localhost\r\nContent-Length: 16\r\n\r\n"
+            )
+            for _ in range(10):
+                try:
+                    client.sendall(b"x")
+                except OSError:
+                    break
+                time.sleep(0.05)
+            response = client.recv(4096)
+        assert time.monotonic() - started < 1.0
+        assert b" 408 " in response.split(b"\r\n", 1)[0]
     finally:
         server.shutdown()
         server.server_close()
