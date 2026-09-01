@@ -229,6 +229,28 @@ def forwarding_tenant(payload: dict[str, Any]) -> str:
     return tenant_id
 
 
+def forwarding_inbound_sms_identity(payload: dict[str, Any]) -> tuple[str, str]:
+    """Return the exact receiver identities for a newly created inbound SMS."""
+
+    customer_id = payload.get("customer_id")
+    sender = payload.get("from")
+    if (
+        not isinstance(customer_id, str)
+        or not customer_id
+        or customer_id != customer_id.strip()
+        or len(customer_id) > 128
+        or not isinstance(sender, str)
+    ):
+        raise ValueError("inbound_identity_required")
+    try:
+        normalized_sender = normalize_destination(sender)
+    except ValueError as error:
+        raise ValueError("inbound_identity_required") from error
+    if sender != normalized_sender:
+        raise ValueError("inbound_identity_required")
+    return customer_id, normalized_sender
+
+
 def parse_jasmin_success_receipt(raw: bytes) -> str:
     """Return only the UUID from Jasmin's exact bounded success receipt."""
 
@@ -672,16 +694,49 @@ class Store:
                     "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
                     (adapter_message_id,),
                 ).fetchone()
-                if not (
+                terminal_dlr_won = (
                     expected_state == "submitting"
                     and reconciled is not None
-                    and reconciled["state"] == state
-                    and bool(reconciled["carrier_submitted"]) == carrier_submitted
-                    and reconciled["provider_message_id"] == provider_message_id
+                    and reconciled["state"] in {"submitted", "rejected"}
+                    and reconciled["operation_token"] is None
                     and reconciled["reconciliation_proof_sha256"]
                     and reconciled["carrier_dlr_sha256"]
-                ):
+                    and (
+                        provider_message_id is None
+                        or reconciled["provider_message_id"] == provider_message_id
+                    )
+                )
+                if not terminal_dlr_won:
                     raise RuntimeError("SMS completion lost its pending reservation")
+                existing_response_sha256 = reconciled["provider_response_sha256"]
+                if (
+                    existing_response_sha256 is not None
+                    and existing_response_sha256 != provider_response_sha256
+                ):
+                    raise RuntimeError(
+                        "SMS carrier response conflicts with terminal DLR"
+                    )
+                if (
+                    provider_response_sha256 is not None
+                    and existing_response_sha256 is None
+                ):
+                    preserved = connection.execute(
+                        """UPDATE sms_transactions SET provider_response_sha256=?
+                        WHERE adapter_message_id=? AND state=?
+                          AND operation_token IS NULL
+                          AND reconciliation_proof_sha256=?
+                          AND carrier_dlr_sha256=?
+                          AND provider_response_sha256 IS NULL""",
+                        (
+                            provider_response_sha256,
+                            adapter_message_id,
+                            reconciled["state"],
+                            reconciled["reconciliation_proof_sha256"],
+                            reconciled["carrier_dlr_sha256"],
+                        ),
+                    )
+                    if preserved.rowcount != 1:
+                        raise RuntimeError("SMS DLR result changed concurrently")
             row = connection.execute(
                 "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
                 (adapter_message_id,),
@@ -1475,6 +1530,15 @@ class Gateway:
                 not in KLYROW_FORWARDED_EMAIL_STATUS_EVENTS
             ):
                 return 422, {"detail": "unsupported_klyrow_email_status"}
+            if (
+                system == "telnexa"
+                and path == "/api/v1/telnexa/inbound"
+                and not payload.get("message_id")
+            ):
+                try:
+                    forwarding_inbound_sms_identity(payload)
+                except ValueError:
+                    return 422, {"detail": "inbound_identity_required"}
         entity_key = str(
             payload.get("record_id")
             if system == "kyqra" and path == "/api/v1/kyqra/results"
@@ -1687,8 +1751,8 @@ class Gateway:
             adapter_message_id,
             hashlib.sha256(idempotency_key.encode()).hexdigest(),
             customer,
-            state,
-            carrier_submitted,
+            completed["state"],
+            bool(completed["carrier_submitted"]),
         )
         return 202, {
             "accepted": True,

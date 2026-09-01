@@ -1535,8 +1535,19 @@ def test_carrier_timeout_remains_unknown_until_attempt_bound_dlr_reconciles(
     assert completed["operation_token"] is None
 
 
-def test_attempt_bound_dlr_and_synchronous_receipt_race_is_idempotent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("message_status", "expected_state", "carrier_submitted"),
+    [
+        ("ESME_ROK", "submitted", True),
+        ("ESME_RSUBMITFAIL", "rejected", False),
+    ],
+)
+def test_attempt_bound_terminal_dlr_wins_race_with_synchronous_success_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    message_status: str,
+    expected_state: str,
+    carrier_submitted: bool,
 ):
     now = 2_000_000_000
     configure_tenant(monkeypatch)
@@ -1548,7 +1559,7 @@ def test_attempt_bound_dlr_and_synchronous_receipt_race_is_idempotent(
     dlr = urllib.parse.urlencode(
         {
             "id": provider_id,
-            "message_status": "ESME_ROK",
+            "message_status": message_status,
             "level": "1",
             "connector": "smpp-prod-1",
         }
@@ -1587,12 +1598,106 @@ def test_attempt_bound_dlr_and_synchronous_receipt_race_is_idempotent(
         body, outbound_headers(body, now, "nonce-dlr-race-0001")
     )
     assert code == 202
-    assert result["state"] == "submitted"
-    assert result["carrier_submitted"] is True
+    assert result["state"] == expected_state
+    assert result["carrier_submitted"] is carrier_submitted
     with state.connect() as connection:
         completed = connection.execute("SELECT * FROM sms_transactions").fetchone()
     assert completed["provider_message_id"] == provider_id
     assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
+    assert completed["provider_response_sha256"] == hashlib.sha256(
+        f'Success "{provider_id}"'.encode()
+    ).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"tenant_id": "tenant-a", "from": "+18095550123"},
+        {"tenant_id": "tenant-a", "customer_id": "customer-1"},
+        {
+            "tenant_id": "tenant-a",
+            "customer_id": " customer-1",
+            "from": "+18095550123",
+        },
+        {
+            "tenant_id": "tenant-a",
+            "customer_id": "customer-1",
+            "from": "18095550123",
+        },
+    ],
+)
+def test_new_inbound_sms_requires_receiver_identities_before_acknowledgement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, str],
+):
+    now = 2_000_000_000
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=lambda *_args, **_kwargs: pytest.fail("invalid event dispatched"),
+    )
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    event_id = "event-invalid-inbound-" + hashlib.sha256(body).hexdigest()[:16]
+    code, result = app.ingress(
+        "telnexa",
+        "/api/v1/telnexa/inbound",
+        body,
+        signed_headers("telnexa", body, now, event_id),
+    )
+    assert (code, result) == (422, {"detail": "inbound_identity_required"})
+    with state.connect() as connection:
+        assert connection.execute(
+            "SELECT 1 FROM events WHERE event_id=?", (event_id,)
+        ).fetchone() is None
+
+
+def test_new_inbound_sms_with_exact_receiver_identities_is_dispatch_eligible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+    )
+    payload = {
+        "tenant_id": "tenant-a",
+        "customer_id": "customer-1",
+        "from": "+18095550123",
+        "text": "HELP",
+    }
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    event_id = "event-valid-inbound-identity"
+    code, result = app.ingress(
+        "telnexa",
+        "/api/v1/telnexa/inbound",
+        body,
+        signed_headers("telnexa", body, now, event_id),
+    )
+    assert code == 202 and result["accepted"] is True
+    with state.connect() as connection:
+        accepted = connection.execute(
+            "SELECT dispatch_eligible,state FROM events WHERE event_id=?", (event_id,)
+        ).fetchone()
+    assert dict(accepted) == {"dispatch_eligible": 1, "state": "queued"}
 
 
 @pytest.mark.parametrize(
