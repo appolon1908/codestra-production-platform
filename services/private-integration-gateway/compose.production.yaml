@@ -11,6 +11,7 @@ services:
     environment:
       SOURCE_COMMIT_SHA: ${PRIVATE_INTEGRATION_GATEWAY_SOURCE_SHA:?set the exact protected source SHA}
       GATEWAY_MODE: shared
+      JASMIN_DLR_CALLBACK_URL: http://gateway:8080/internal/v1/jasmin/dlr
       LIVE_SUBMISSION_ENABLED: "false"
       PRODUCTION_DELIVERY_AUTHORIZED: "false"
       MIDDLEWARE_FORWARDING_ENABLED: "false"

@@ -85,6 +85,14 @@ JASMIN_SUCCESS_RECEIPT = re.compile(
     r'Success "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
     r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"'
 )
+UUID_VALUE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+JASMIN_DLR_STATUS = re.compile(r"ESME_[A-Z0-9_]{2,64}")
+JASMIN_DLR_CONNECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+JASMIN_DLR_FIELDS = {"id", "message_status", "level", "connector"}
+JASMIN_DLR_PATH = "/internal/v1/jasmin/dlr"
 DISPATCH_RECEIPT_STATES = {"queued", "retrying", "delivered", "dead_letter"}
 DISPATCH_LEASE_SECONDS = 30
 
@@ -230,6 +238,58 @@ def parse_jasmin_success_receipt(raw: bytes) -> str:
     return match.group(1).lower()
 
 
+def jasmin_reconciliation_proof(
+    secret: str,
+    adapter_message_id: str,
+    operation_token: str,
+    effect_sha256: str,
+) -> str:
+    """Bind a private DLR capability to one exact carrier attempt and effect."""
+
+    if len(secret.encode()) < 32:
+        raise ValueError("JASMIN_RECONCILIATION_SECRET must be at least 32 bytes")
+    canonical = "\n".join(
+        (
+            "codestra-jasmin-dlr-v1",
+            adapter_message_id,
+            operation_token,
+            effect_sha256,
+        )
+    ).encode()
+    return hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
+
+
+def parse_jasmin_dlr(raw: bytes) -> tuple[str, str, str]:
+    """Parse only Jasmin's bounded level-one SMS-C receipt form."""
+
+    if not raw or len(raw) > 2048:
+        raise ValueError("invalid_jasmin_dlr")
+    try:
+        pairs = urllib.parse.parse_qsl(
+            raw.decode("ascii"),
+            keep_blank_values=True,
+            strict_parsing=True,
+        )
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ValueError("invalid_jasmin_dlr") from error
+    if len(pairs) != len(JASMIN_DLR_FIELDS):
+        raise ValueError("invalid_jasmin_dlr")
+    values = dict(pairs)
+    if len(values) != len(pairs) or set(values) != JASMIN_DLR_FIELDS:
+        raise ValueError("invalid_jasmin_dlr")
+    provider_message_id = values["id"]
+    message_status = values["message_status"]
+    connector = values["connector"]
+    if (
+        UUID_VALUE.fullmatch(provider_message_id) is None
+        or JASMIN_DLR_STATUS.fullmatch(message_status) is None
+        or values["level"] != "1"
+        or JASMIN_DLR_CONNECTOR.fullmatch(connector) is None
+    ):
+        raise ValueError("invalid_jasmin_dlr")
+    return provider_message_id.lower(), message_status, connector
+
+
 @dataclass(frozen=True)
 class Settings:
     database_path: Path
@@ -244,6 +304,7 @@ class Settings:
     middleware_forwarding_enabled: bool
     downstream_url: str
     jasmin_url: str
+    jasmin_dlr_callback_url: str
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -264,6 +325,10 @@ class Settings:
             ),
             downstream_url=os.getenv("MIDDLEWARE_EVENTS_URL", "").strip(),
             jasmin_url=os.getenv("JASMIN_HTTP_URL", "http://jasmin:1401").rstrip("/"),
+            jasmin_dlr_callback_url=os.getenv(
+                "JASMIN_DLR_CALLBACK_URL",
+                "http://gateway:8080/internal/v1/jasmin/dlr",
+            ).strip(),
         )
         settings.validate()
         return settings
@@ -297,6 +362,20 @@ class Settings:
         parsed = urllib.parse.urlsplit(self.jasmin_url)
         if parsed.scheme != "http" or not parsed.hostname or parsed.hostname != "jasmin":
             raise ValueError("JASMIN_HTTP_URL must be the private http://jasmin endpoint")
+        callback = urllib.parse.urlsplit(self.jasmin_dlr_callback_url)
+        if (
+            callback.scheme != "http"
+            or callback.hostname != "gateway"
+            or callback.port != 8080
+            or callback.path != JASMIN_DLR_PATH
+            or callback.username is not None
+            or callback.password is not None
+            or callback.query
+            or callback.fragment
+        ):
+            raise ValueError(
+                "JASMIN_DLR_CALLBACK_URL must be the exact private gateway callback"
+            )
 
 
 class Store:
@@ -387,6 +466,8 @@ class Store:
                     provider_response TEXT,
                     provider_response_sha256 TEXT,
                     operation_token TEXT,
+                    reconciliation_proof_sha256 TEXT,
+                    carrier_dlr_sha256 TEXT,
                     lease_expires_at REAL NOT NULL DEFAULT 0,
                     created_at REAL NOT NULL,
                     UNIQUE(customer_id, idempotency_key)
@@ -438,6 +519,14 @@ class Store:
                             row["adapter_message_id"],
                         ),
                     )
+            if "reconciliation_proof_sha256" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN reconciliation_proof_sha256 TEXT"
+                )
+            if "carrier_dlr_sha256" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN carrier_dlr_sha256 TEXT"
+                )
         if self.path.exists():
             self.path.chmod(0o600)
 
@@ -514,6 +603,15 @@ class Store:
                 (customer_id, idempotency_key),
             ).fetchone()
 
+    def sms_by_adapter_message_id(
+        self, adapter_message_id: str
+    ) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return connection.execute(
+                "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                (adapter_message_id,),
+            ).fetchone()
+
     def reserve_sms(self, values: tuple[Any, ...]) -> tuple[bool, sqlite3.Row]:
         try:
             with self.connect() as connection:
@@ -564,7 +662,20 @@ class Store:
                 ),
             )
             if cursor.rowcount != 1:
-                raise RuntimeError("SMS completion lost its pending reservation")
+                reconciled = connection.execute(
+                    "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                    (adapter_message_id,),
+                ).fetchone()
+                if not (
+                    expected_state == "submitting"
+                    and reconciled is not None
+                    and reconciled["state"] == state
+                    and bool(reconciled["carrier_submitted"]) == carrier_submitted
+                    and reconciled["provider_message_id"] == provider_message_id
+                    and reconciled["reconciliation_proof_sha256"]
+                    and reconciled["carrier_dlr_sha256"]
+                ):
+                    raise RuntimeError("SMS completion lost its pending reservation")
             row = connection.execute(
                 "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
                 (adapter_message_id,),
@@ -636,16 +747,24 @@ class Store:
         return row
 
     def begin_sms_submission(
-        self, adapter_message_id: str, operation_token: str
+        self,
+        adapter_message_id: str,
+        operation_token: str,
+        reconciliation_proof_sha256: str,
     ) -> None:
         """Cross the fail-closed boundary immediately before the carrier call."""
 
         with self.connect() as connection:
             cursor = connection.execute(
                 """UPDATE sms_transactions
-                SET state='submitting',jasmin_dependency='reachable',lease_expires_at=0
+                SET state='submitting',jasmin_dependency='reachable',lease_expires_at=0,
+                    reconciliation_proof_sha256=?,carrier_dlr_sha256=NULL
                 WHERE adapter_message_id=? AND state='preflight' AND operation_token=?""",
-                (adapter_message_id, operation_token),
+                (
+                    reconciliation_proof_sha256,
+                    adapter_message_id,
+                    operation_token,
+                ),
             )
         if cursor.rowcount != 1:
             raise RuntimeError("SMS submission lost preflight ownership")
@@ -674,36 +793,85 @@ class Store:
             raise RuntimeError("SMS unknown-outcome transition lost ownership")
         return row
 
-    def reconcile_sms_outcome(
+    def reconcile_sms_dlr(
         self,
         adapter_message_id: str,
-        operation_token: str,
-        carrier_readback: bytes,
+        reconciliation_proof_sha256: str,
+        carrier_dlr: bytes,
     ) -> sqlite3.Row:
-        """Finalize an ambiguous attempt only from an exact carrier read-back."""
+        """Apply an exact, attempt-bound Jasmin SMS-C receipt idempotently."""
 
-        provider_message_id = parse_jasmin_success_receipt(carrier_readback)
+        provider_message_id, message_status, _connector = parse_jasmin_dlr(
+            carrier_dlr
+        )
+        state = "submitted" if message_status == "ESME_ROK" else "rejected"
+        carrier_submitted = state == "submitted"
+        carrier_dlr_sha256 = hashlib.sha256(carrier_dlr).hexdigest()
         with self.connect() as connection:
             pending = connection.execute(
-                """SELECT state FROM sms_transactions
-                WHERE adapter_message_id=? AND operation_token=?""",
-                (adapter_message_id, operation_token),
+                "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                (adapter_message_id,),
             ).fetchone()
-        if pending is None or pending["state"] not in {
-            "submitting",
-            "outcome_unknown",
-        }:
-            raise RuntimeError("SMS carrier read-back has no ambiguous reservation")
-        return self.complete_sms(
-            adapter_message_id,
-            operation_token=operation_token,
-            expected_state=pending["state"],
-            state="submitted",
-            jasmin_dependency="reachable",
-            carrier_submitted=True,
-            provider_message_id=provider_message_id,
-            provider_response_sha256=hashlib.sha256(carrier_readback).hexdigest(),
-        )
+            if pending is None or not hmac.compare_digest(
+                pending["reconciliation_proof_sha256"] or "",
+                reconciliation_proof_sha256,
+            ):
+                raise PermissionError("invalid_jasmin_dlr_proof")
+            if pending["state"] in {"submitting", "outcome_unknown"}:
+                cursor = connection.execute(
+                    """UPDATE sms_transactions
+                    SET state=?,jasmin_dependency='reachable',carrier_submitted=?,
+                        provider_message_id=?,carrier_dlr_sha256=?,operation_token=NULL,
+                        lease_expires_at=0
+                    WHERE adapter_message_id=? AND state=?
+                      AND reconciliation_proof_sha256=?""",
+                    (
+                        state,
+                        int(carrier_submitted),
+                        provider_message_id,
+                        carrier_dlr_sha256,
+                        adapter_message_id,
+                        pending["state"],
+                        reconciliation_proof_sha256,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("SMS DLR reconciliation changed concurrently")
+            elif pending["state"] in {"submitted", "rejected"}:
+                if (
+                    pending["state"] != state
+                    or pending["provider_message_id"] != provider_message_id
+                    or (
+                        pending["carrier_dlr_sha256"] is not None
+                        and pending["carrier_dlr_sha256"] != carrier_dlr_sha256
+                    )
+                ):
+                    raise RuntimeError("SMS DLR conflicts with terminal result")
+                if pending["carrier_dlr_sha256"] is None:
+                    cursor = connection.execute(
+                        """UPDATE sms_transactions SET carrier_dlr_sha256=?
+                        WHERE adapter_message_id=? AND state=?
+                          AND provider_message_id=? AND carrier_dlr_sha256 IS NULL
+                          AND reconciliation_proof_sha256=?""",
+                        (
+                            carrier_dlr_sha256,
+                            adapter_message_id,
+                            state,
+                            provider_message_id,
+                            reconciliation_proof_sha256,
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError("SMS DLR record changed concurrently")
+            else:
+                raise RuntimeError("SMS DLR has no submitted carrier attempt")
+            row = connection.execute(
+                "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                (adapter_message_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("SMS DLR reconciliation read-back failed")
+        return row
 
     def pending_events(self, now: float, limit: int = 20) -> list[sqlite3.Row]:
         with self.connect() as connection:
@@ -893,6 +1061,8 @@ def validate_live_route_authorities() -> None:
         route_usernames.add(username)
     if not enabled_routes:
         raise RuntimeError("no enabled customer route authority is configured")
+    if len(read_secret("JASMIN_RECONCILIATION_SECRET").encode()) < 32:
+        raise RuntimeError("Jasmin reconciliation authority is unavailable")
 
 
 def validate_outbound(payload: dict[str, Any]) -> tuple[str, str, str, str, str | None]:
@@ -946,13 +1116,26 @@ class Gateway:
             return "unreachable"
 
     def submit_to_jasmin(
-        self, route: str, sender: str, destination: str, message: str
+        self,
+        route: str,
+        sender: str,
+        destination: str,
+        message: str,
+        adapter_message_id: str,
+        reconciliation_proof: str,
     ) -> tuple[str, str | None, str | None]:
         username_name, password_name = jasmin_route_secret_names(route)
         username = read_secret(username_name)
         password = read_secret(password_name)
         if not username or not password:
             return "not_submitted", None, None
+        callback_query = urllib.parse.urlencode(
+            {
+                "adapter_message_id": adapter_message_id,
+                "proof": reconciliation_proof,
+            }
+        )
+        callback_url = self.settings.jasmin_dlr_callback_url + "?" + callback_query
         query = urllib.parse.urlencode(
             {
                 "username": username,
@@ -960,6 +1143,10 @@ class Gateway:
                 "from": sender,
                 "to": destination,
                 "content": message,
+                "dlr": "yes",
+                "dlr-level": "1",
+                "dlr-method": "POST",
+                "dlr-url": callback_url,
             }
         )
         try:
@@ -994,6 +1181,62 @@ class Gateway:
         except ValueError:
             return "outcome_unknown", None, digest
         return "accepted", provider_message_id, digest
+
+    def reconcile_jasmin_dlr(
+        self, callback_query: str, carrier_dlr: bytes
+    ) -> sqlite3.Row:
+        """Authenticate a production Jasmin callback and reconcile one attempt."""
+
+        if not callback_query or len(callback_query) > 512:
+            raise PermissionError("invalid_jasmin_dlr_proof")
+        try:
+            pairs = urllib.parse.parse_qsl(
+                callback_query,
+                keep_blank_values=True,
+                strict_parsing=True,
+            )
+        except ValueError as error:
+            raise PermissionError("invalid_jasmin_dlr_proof") from error
+        if len(pairs) != 2 or len(dict(pairs)) != 2:
+            raise PermissionError("invalid_jasmin_dlr_proof")
+        values = dict(pairs)
+        if set(values) != {"adapter_message_id", "proof"}:
+            raise PermissionError("invalid_jasmin_dlr_proof")
+        adapter_message_id = values["adapter_message_id"]
+        supplied_proof = values["proof"]
+        if (
+            UUID_VALUE.fullmatch(adapter_message_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", supplied_proof) is None
+        ):
+            raise PermissionError("invalid_jasmin_dlr_proof")
+        row = self.store.sms_by_adapter_message_id(adapter_message_id.lower())
+        if row is None or not row["operation_token"]:
+            if row is None or row["state"] not in {"submitted", "rejected"}:
+                raise PermissionError("invalid_jasmin_dlr_proof")
+        if row is None:
+            raise PermissionError("invalid_jasmin_dlr_proof")
+        stored_proof_sha256 = row["reconciliation_proof_sha256"] or ""
+        supplied_proof_sha256 = hashlib.sha256(supplied_proof.encode()).hexdigest()
+        if not hmac.compare_digest(stored_proof_sha256, supplied_proof_sha256):
+            raise PermissionError("invalid_jasmin_dlr_proof")
+        if row["operation_token"]:
+            expected_proof = jasmin_reconciliation_proof(
+                read_secret("JASMIN_RECONCILIATION_SECRET"),
+                row["adapter_message_id"],
+                row["operation_token"],
+                row["effect_hash"],
+            )
+            if not hmac.compare_digest(expected_proof, supplied_proof):
+                raise PermissionError("invalid_jasmin_dlr_proof")
+        completed = self.store.reconcile_sms_dlr(
+            row["adapter_message_id"], supplied_proof_sha256, carrier_dlr
+        )
+        LOG.info(
+            "system=telnexa adapter_message_id=%s reconciliation=jasmin_dlr state=%s",
+            completed["adapter_message_id"],
+            completed["state"],
+        )
+        return completed
 
     def dispatch_once(self) -> int:
         """Deliver only new, explicitly eligible events with bounded retries."""
@@ -1331,9 +1574,24 @@ class Gateway:
         provider_message_id = None
         provider_response_sha256 = None
         if self.settings.live_submission_enabled:
-            self.store.begin_sms_submission(adapter_message_id, operation_token)
+            reconciliation_proof = jasmin_reconciliation_proof(
+                read_secret("JASMIN_RECONCILIATION_SECRET"),
+                adapter_message_id,
+                operation_token,
+                effect_sha256,
+            )
+            self.store.begin_sms_submission(
+                adapter_message_id,
+                operation_token,
+                hashlib.sha256(reconciliation_proof.encode()).hexdigest(),
+            )
             mapped, provider_message_id, provider_response_sha256 = self.submit_to_jasmin(
-                route, sender, destination, message
+                route,
+                sender,
+                destination,
+                message,
+                adapter_message_id,
+                reconciliation_proof,
             )
             state = {
                 "accepted": "submitted",
@@ -1393,13 +1651,26 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "CodestraPrivateIntegrationGateway/2"
 
-        def log_message(self, format_string: str, *arguments: Any) -> None:
-            LOG.info("system=http client=%s " + format_string, self.client_address[0], *arguments)
+        def log_message(self, _format_string: str, *_arguments: Any) -> None:
+            LOG.info(
+                "system=http client=%s method=%s path=%s",
+                self.client_address[0],
+                self.command,
+                urllib.parse.urlsplit(self.path).path,
+            )
 
         def send_json(self, code: int, value: dict[str, Any]) -> None:
             raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def send_text(self, code: int, raw: bytes) -> None:
+            self.send_response(code)
+            self.send_header("Content-Type", "text/plain; charset=us-ascii")
             self.send_header("Content-Length", str(len(raw)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
@@ -1433,14 +1704,33 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
             return self.send_json(404, {"detail": "not found"})
 
         def do_POST(self) -> None:
+            parsed_path = urllib.parse.urlsplit(self.path)
             raw_length = self.headers.get("Content-Length", "")
             try:
                 length = int(raw_length)
             except ValueError:
                 return self.send_json(411, {"detail": "content length required"})
-            if length <= 0 or length > gateway.settings.max_body_bytes:
+            maximum = (
+                2048
+                if parsed_path.path == JASMIN_DLR_PATH
+                else gateway.settings.max_body_bytes
+            )
+            if length <= 0 or length > maximum:
                 return self.send_json(413, {"detail": "invalid body size"})
             body = self.rfile.read(length)
+            if parsed_path.path == JASMIN_DLR_PATH:
+                content_type = self.headers.get("Content-Type", "").split(";", 1)[0]
+                if content_type.strip().lower() != "application/x-www-form-urlencoded":
+                    return self.send_json(415, {"detail": "unsupported media type"})
+                try:
+                    gateway.reconcile_jasmin_dlr(parsed_path.query, body)
+                except PermissionError:
+                    return self.send_json(403, {"detail": "invalid callback authority"})
+                except ValueError:
+                    return self.send_json(422, {"detail": "invalid carrier receipt"})
+                except RuntimeError:
+                    return self.send_json(409, {"detail": "carrier receipt conflict"})
+                return self.send_text(200, b"ACK/Jasmin")
             headers = {key: value for key, value in self.headers.items()}
             if gateway.settings.mode == "shared" and self.path == "/v1/messages":
                 code, value = gateway.outbound(body, headers)

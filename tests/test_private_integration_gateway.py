@@ -9,6 +9,7 @@ import sys
 import threading
 import urllib.error
 import urllib.parse
+import urllib.request
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -41,6 +42,9 @@ def clean_gateway_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "MIDDLEWARE_FORWARDING_ENABLED",
         "MIDDLEWARE_EVENTS_URL",
         "JASMIN_HTTP_URL",
+        "JASMIN_DLR_CALLBACK_URL",
+        "JASMIN_RECONCILIATION_SECRET",
+        "JASMIN_RECONCILIATION_SECRET_FILE",
         "TELNEXA_CUSTOMER_POLICY_JSON",
         "TELNEXA_CUSTOMER_POLICY_JSON_FILE",
         "TELNEXA_MIDDLEWARE_API_KEY",
@@ -78,6 +82,7 @@ def settings(tmp_path: Path, **changes):
         "middleware_forwarding_enabled": False,
         "downstream_url": "",
         "jasmin_url": "http://jasmin:1401",
+        "jasmin_dlr_callback_url": "http://gateway:8080/internal/v1/jasmin/dlr",
     }
     values.update(changes)
     value = gateway.Settings(**values)
@@ -132,6 +137,11 @@ def test_only_private_jasmin_service_is_accepted(tmp_path: Path):
         settings(tmp_path, jasmin_url="https://example.invalid")
     with pytest.raises(ValueError, match="private"):
         settings(tmp_path, jasmin_url="http://127.0.0.1:1401")
+    with pytest.raises(ValueError, match="exact private gateway callback"):
+        settings(
+            tmp_path,
+            jasmin_dlr_callback_url="https://public.example/internal/v1/jasmin/dlr",
+        )
 
 
 def test_secret_file_must_be_regular_and_not_writable(
@@ -194,6 +204,7 @@ def configure_jasmin_route(
     stem = "JASMIN_ROUTE_" + route.upper().replace("-", "_")
     monkeypatch.setenv(stem + "_API_USER", username)
     monkeypatch.setenv(stem + "_API_PASSWORD", password)
+    monkeypatch.setenv("JASMIN_RECONCILIATION_SECRET", "r" * 64)
 
 
 def valid_payload(**changes):
@@ -428,6 +439,8 @@ def test_existing_live_database_schema_is_migrated_without_data_loss(tmp_path: P
     assert "operation_token" in sms_columns
     assert "lease_expires_at" in sms_columns
     assert "effect_hash" in sms_columns
+    assert "reconciliation_proof_sha256" in sms_columns
+    assert "carrier_dlr_sha256" in sms_columns
 
 
 def test_ingress_rejects_stale_and_invalid_signatures(
@@ -1248,6 +1261,63 @@ def test_jasmin_acceptance_requires_exact_success_receipt(raw: bytes):
     ) == "07033084-5cfd-4812-90a4-e4d24ffb6e3d"
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"",
+        b"id=07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+        b"id=not-a-uuid&message_status=ESME_ROK&level=1&connector=smpp-1",
+        b"id=07033084-5cfd-4812-90a4-e4d24ffb6e3d&message_status=ESME_ROK&level=2&connector=smpp-1",
+        b"id=07033084-5cfd-4812-90a4-e4d24ffb6e3d&message_status=OK&level=1&connector=smpp-1",
+        b"id=07033084-5cfd-4812-90a4-e4d24ffb6e3d&message_status=ESME_ROK&level=1&connector=smpp-1&extra=x",
+    ],
+)
+def test_jasmin_dlr_requires_exact_level_one_receipt(raw: bytes):
+    with pytest.raises(ValueError, match="invalid_jasmin_dlr"):
+        gateway.parse_jasmin_dlr(raw)
+    valid = urllib.parse.urlencode(
+        {
+            "id": "07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+            "message_status": "ESME_ROK",
+            "level": "1",
+            "connector": "smpp-prod-1",
+        }
+    ).encode()
+    assert gateway.parse_jasmin_dlr(valid) == (
+        "07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+        "ESME_ROK",
+        "smpp-prod-1",
+    )
+
+
+def test_jasmin_reconciliation_proof_binds_exact_attempt_and_effect():
+    secret = "r" * 64
+    base = gateway.jasmin_reconciliation_proof(
+        secret,
+        "07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+        "3f08d4cb-fc4b-4474-95c1-0d305af3a679",
+        "a" * 64,
+    )
+    assert base != gateway.jasmin_reconciliation_proof(
+        secret,
+        "07033084-5cfd-4812-90a4-e4d24ffb6e3e",
+        "3f08d4cb-fc4b-4474-95c1-0d305af3a679",
+        "a" * 64,
+    )
+    assert base != gateway.jasmin_reconciliation_proof(
+        secret,
+        "07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+        "3f08d4cb-fc4b-4474-95c1-0d305af3a680",
+        "a" * 64,
+    )
+    assert base != gateway.jasmin_reconciliation_proof(
+        secret,
+        "07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+        "3f08d4cb-fc4b-4474-95c1-0d305af3a679",
+        "b" * 64,
+    )
+
+
 def test_unrelated_2xx_jasmin_response_is_never_recorded_as_submitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1285,7 +1355,7 @@ def test_unrelated_2xx_jasmin_response_is_never_recorded_as_submitted(
     assert row["operation_token"]
 
 
-def test_carrier_timeout_remains_unknown_until_exact_readback_reconciles(
+def test_carrier_timeout_remains_unknown_until_attempt_bound_dlr_reconciles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     now = 2_000_000_000
@@ -1294,12 +1364,14 @@ def test_carrier_timeout_remains_unknown_until_exact_readback_reconciles(
     monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
     monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
     calls = {"ping": 0, "send": 0}
+    send_urls: list[str] = []
 
     def urlopen(url, **_kwargs):
         if url.endswith("/ping"):
             calls["ping"] += 1
             return HealthyJasmin()
         calls["send"] += 1
+        send_urls.append(url)
         return JasminReceiptTimeout()
 
     state = store(tmp_path)
@@ -1338,22 +1410,105 @@ def test_carrier_timeout_remains_unknown_until_exact_readback_reconciles(
     with state.connect() as connection:
         pending = connection.execute("SELECT * FROM sms_transactions").fetchone()
     assert pending["operation_token"]
-    with pytest.raises(ValueError, match="invalid_jasmin_receipt"):
-        state.reconcile_sms_outcome(
-            pending["adapter_message_id"], pending["operation_token"], b"OK"
-        )
-    readback = b'Success "07033084-5cfd-4812-90a4-e4d24ffb6e3d"'
-    completed = state.reconcile_sms_outcome(
-        pending["adapter_message_id"], pending["operation_token"], readback
+    send_parameters = urllib.parse.parse_qs(urllib.parse.urlsplit(send_urls[0]).query)
+    assert send_parameters["dlr"] == ["yes"]
+    assert send_parameters["dlr-level"] == ["1"]
+    assert send_parameters["dlr-method"] == ["POST"]
+    callback = urllib.parse.urlsplit(send_parameters["dlr-url"][0])
+    assert callback.path == gateway.JASMIN_DLR_PATH
+    dlr = urllib.parse.urlencode(
+        {
+            "id": "07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+            "message_status": "ESME_ROK",
+            "level": "1",
+            "connector": "smpp-prod-1",
+        }
+    ).encode()
+    invalid_query = urllib.parse.urlencode(
+        {
+            "adapter_message_id": pending["adapter_message_id"],
+            "proof": "0" * 64,
+        }
     )
+    with pytest.raises(PermissionError, match="invalid_jasmin_dlr_proof"):
+        app.reconcile_jasmin_dlr(invalid_query, dlr)
+    completed = app.reconcile_jasmin_dlr(callback.query, dlr)
+    replay = app.reconcile_jasmin_dlr(callback.query, dlr)
+    assert replay["adapter_message_id"] == completed["adapter_message_id"]
+    conflicting_dlr = dlr.replace(
+        b"07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+        b"3f08d4cb-fc4b-4474-95c1-0d305af3a679",
+    )
+    with pytest.raises(RuntimeError, match="conflicts with terminal result"):
+        app.reconcile_jasmin_dlr(callback.query, conflicting_dlr)
     assert completed["state"] == "submitted"
     assert completed["carrier_submitted"] == 1
     assert completed["provider_message_id"] == "07033084-5cfd-4812-90a4-e4d24ffb6e3d"
-    assert completed["provider_response_sha256"] == hashlib.sha256(readback).hexdigest()
+    assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
     assert completed["operation_token"] is None
 
 
-def test_crashed_submitting_row_reconciles_only_from_exact_carrier_readback(
+def test_attempt_bound_dlr_and_synchronous_receipt_race_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    configure_jasmin_route(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    app_reference: dict[str, gateway.Gateway] = {}
+    provider_id = "3f08d4cb-fc4b-4474-95c1-0d305af3a679"
+    dlr = urllib.parse.urlencode(
+        {
+            "id": provider_id,
+            "message_status": "ESME_ROK",
+            "level": "1",
+            "connector": "smpp-prod-1",
+        }
+    ).encode()
+
+    class ReceiptAfterCallback(HealthyJasmin):
+        def __init__(self, callback_query: str):
+            self.callback_query = callback_query
+
+        def read(self, _limit=None):
+            app_reference["app"].reconcile_jasmin_dlr(self.callback_query, dlr)
+            return f'Success "{provider_id}"'.encode()
+
+    def urlopen(url, **_kwargs):
+        if url.endswith("/ping"):
+            return HealthyJasmin()
+        parameters = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        callback = urllib.parse.urlsplit(parameters["dlr-url"][0])
+        return ReceiptAfterCallback(callback.query)
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-JASMIN-DLR-RACE",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    app_reference["app"] = app
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    code, result = app.outbound(
+        body, outbound_headers(body, now, "nonce-dlr-race-0001")
+    )
+    assert code == 202
+    assert result["state"] == "submitted"
+    assert result["carrier_submitted"] is True
+    with state.connect() as connection:
+        completed = connection.execute("SELECT * FROM sms_transactions").fetchone()
+    assert completed["provider_message_id"] == provider_id
+    assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
+
+
+def test_crashed_submitting_row_reconciles_only_from_production_dlr_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     now = 2_000_000_000
@@ -1362,9 +1517,12 @@ def test_crashed_submitting_row_reconciles_only_from_exact_carrier_readback(
     monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
     monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
 
+    send_urls: list[str] = []
+
     def urlopen(url, **_kwargs):
         if url.endswith("/ping"):
             return HealthyJasmin()
+        send_urls.append(url)
         raise RuntimeError("synthetic process termination after durable claim")
 
     state = store(tmp_path)
@@ -1386,16 +1544,41 @@ def test_crashed_submitting_row_reconciles_only_from_exact_carrier_readback(
         pending = connection.execute("SELECT * FROM sms_transactions").fetchone()
     assert pending["state"] == "submitting"
     assert pending["operation_token"]
-    with pytest.raises(ValueError, match="invalid_jasmin_receipt"):
-        state.reconcile_sms_outcome(
-            pending["adapter_message_id"], pending["operation_token"], b"untrusted"
-        )
-    readback = b'Success "3f08d4cb-fc4b-4474-95c1-0d305af3a679"'
-    completed = state.reconcile_sms_outcome(
-        pending["adapter_message_id"], pending["operation_token"], readback
+    send_parameters = urllib.parse.parse_qs(urllib.parse.urlsplit(send_urls[0]).query)
+    callback = urllib.parse.urlsplit(send_parameters["dlr-url"][0])
+    dlr = urllib.parse.urlencode(
+        {
+            "id": "3f08d4cb-fc4b-4474-95c1-0d305af3a679",
+            "message_status": "ESME_ROK",
+            "level": "1",
+            "connector": "smpp-prod-1",
+        }
+    ).encode()
+    server = gateway.ThreadingHTTPServer(
+        ("127.0.0.1", 0), gateway.handler_for(app)
     )
+    server.daemon_threads = True
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}{callback.path}?{callback.query}",
+            data=dlr,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 200
+            assert response.read() == b"ACK/Jasmin"
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+    with state.connect() as connection:
+        completed = connection.execute("SELECT * FROM sms_transactions").fetchone()
     assert completed["state"] == "submitted"
     assert completed["provider_message_id"] == "3f08d4cb-fc4b-4474-95c1-0d305af3a679"
+    assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
     assert completed["operation_token"] is None
 
 
@@ -1569,6 +1752,9 @@ def test_compose_is_digest_only_nonroot_and_fail_closed():
     assert service["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in service["security_opt"]
     assert service["ports"] == ["127.0.0.1:18443:8080"]
+    assert service["environment"]["JASMIN_DLR_CALLBACK_URL"] == (
+        "http://gateway:8080/internal/v1/jasmin/dlr"
+    )
     assert service["environment"]["LIVE_SUBMISSION_ENABLED"] == "false"
     assert service["environment"]["PRODUCTION_DELIVERY_AUTHORIZED"] == "false"
     assert service["environment"]["MIDDLEWARE_FORWARDING_ENABLED"] == "false"

@@ -41,6 +41,15 @@ preflight lease permits safe recovery after a crash or dependency failure only
 while carrier submission is demonstrably unstarted. The row crosses to
 `submitting` immediately before the carrier call; that ambiguous state is never
 automatically reclaimed, preventing a retry from creating a duplicate message.
+Every live `/send` request asks Jasmin for a level-one SMS-C DLR at the private
+`/internal/v1/jasmin/dlr` route. Its callback URL carries a one-attempt HMAC
+capability bound to the adapter message ID, durable operation token, and exact
+customer/sender/destination/route/content effect digest. Only the exact bounded
+Jasmin DLR form presented through that private production handler can reconcile
+`submitting` or `outcome_unknown`; unrelated receipts, altered capabilities,
+terminal conflicts, duplicate form fields, and public callback URLs fail closed.
+The gateway strips callback query material from its HTTP logs. Live startup also
+requires a distinct `JASMIN_RECONCILIATION_SECRET` of at least 32 bytes.
 
 ## Release and installation contract
 
