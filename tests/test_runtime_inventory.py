@@ -141,6 +141,7 @@ def test_all_operational_write_gates_are_allowlisted_and_normalized() -> None:
         "ODOO_DELIVERY_ENABLED",
         "ODOO_WRITE",
         "ODOO_WRITE_ENABLED",
+        "POSTAL_INBOUND_ENABLED",
         "PRODUCTION_DIALING",
         "SEND_EVENTS",
         "SMS_PRODUCTION",
