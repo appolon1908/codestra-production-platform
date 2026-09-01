@@ -789,7 +789,46 @@ class Store:
                 "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
                 (adapter_message_id,),
             ).fetchone()
-        if cursor.rowcount != 1 or row is None:
+            if (
+                cursor.rowcount != 1
+                and row is not None
+                and row["state"] in {"submitted", "rejected"}
+                and row["operation_token"] is None
+                and row["reconciliation_proof_sha256"]
+                and row["carrier_dlr_sha256"]
+                and provider_response_sha256 is not None
+                and row["provider_response_sha256"] is None
+            ):
+                preserved = connection.execute(
+                    """UPDATE sms_transactions SET provider_response_sha256=?
+                    WHERE adapter_message_id=? AND state=?
+                      AND operation_token IS NULL
+                      AND reconciliation_proof_sha256=?
+                      AND carrier_dlr_sha256=?
+                      AND provider_response_sha256 IS NULL""",
+                    (
+                        provider_response_sha256,
+                        adapter_message_id,
+                        row["state"],
+                        row["reconciliation_proof_sha256"],
+                        row["carrier_dlr_sha256"],
+                    ),
+                )
+                if preserved.rowcount != 1:
+                    raise RuntimeError("SMS DLR result changed concurrently")
+                row = connection.execute(
+                    "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                    (adapter_message_id,),
+                ).fetchone()
+        if cursor.rowcount == 1 and row is not None:
+            return row
+        if not (
+            row is not None
+            and row["state"] in {"submitted", "rejected"}
+            and row["operation_token"] is None
+            and row["reconciliation_proof_sha256"]
+            and row["carrier_dlr_sha256"]
+        ):
             raise RuntimeError("SMS unknown-outcome transition lost ownership")
         return row
 
