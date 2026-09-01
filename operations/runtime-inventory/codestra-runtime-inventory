@@ -14,6 +14,10 @@ from typing import Any
 DOCKER = "/usr/bin/docker"
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+RELEASE_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$")
+SOURCE_RE = re.compile(
+    r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$"
+)
 APPROVED_METADATA_LABELS = {
     "org.opencontainers.image.revision": "git_sha",
     "org.opencontainers.image.version": "version",
@@ -140,6 +144,13 @@ def release_metadata(labels: dict[str, str] | None) -> dict[str, str | None]:
     revision = metadata["git_sha"]
     if revision is not None and not GIT_SHA_RE.fullmatch(revision):
         metadata["git_sha"] = None
+    for field in ("version", "release_id"):
+        value = metadata[field]
+        if value is not None and not RELEASE_VALUE_RE.fullmatch(value):
+            metadata[field] = None
+    source = metadata["source"]
+    if source is not None and not SOURCE_RE.fullmatch(source):
+        metadata["source"] = None
     return metadata
 
 

@@ -162,6 +162,23 @@ def test_source_revision_comes_from_runtime_image_not_container(monkeypatch) -> 
     assert workload["release"]["git_sha"] == "c" * 40
 
 
+def test_release_metadata_rejects_arbitrary_or_credential_bearing_values() -> None:
+    labels = {
+        "org.opencontainers.image.revision": "not-a-sha:secret",
+        "org.opencontainers.image.version": "version with secret material",
+        "org.opencontainers.image.source": "https://user:token@github.com/org/repo",
+        "com.codestra.release.id": "release\nsecret",
+    }
+    result = MODULE.release_metadata(labels)
+    assert result == {
+        "git_sha": None,
+        "version": None,
+        "source": None,
+        "release_id": None,
+    }
+    assert "secret" not in json.dumps(result)
+
+
 def test_arguments_and_non_root_execution_fail_closed(monkeypatch) -> None:
     monkeypatch.setattr(os, "geteuid", lambda: 1000)
     assert MODULE.main([]) == 2
