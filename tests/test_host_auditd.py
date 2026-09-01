@@ -839,6 +839,39 @@ def test_rollback_pass_record_follows_post_restore_readback() -> None:
     assert restore < completion < evidence < write < readback < returned
 
 
+def test_snapshot_persists_new_backup_ancestry_before_first_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup_root = tmp_path / "new-parent" / "host-auditd"
+    stamp = "20260902T001500Z"
+    events: list[tuple[str, Path]] = []
+    real_fsync_directory = INSTALLER.fsync_directory
+
+    def fsync_directory(path: Path) -> None:
+        events.append(("fsync", Path(path)))
+        real_fsync_directory(path)
+
+    def snapshot_file(path: Path, destination: Path) -> dict[str, object]:
+        events.append(("snapshot", destination))
+        return {"path": str(path), "present": False}
+
+    monkeypatch.setattr(INSTALLER, "BACKUP_ROOT", backup_root)
+    monkeypatch.setattr(INSTALLER, "stamp_now", lambda: stamp)
+    monkeypatch.setattr(INSTALLER, "fsync_directory", fsync_directory)
+    monkeypatch.setattr(INSTALLER, "snapshot_file", snapshot_file)
+    returned_stamp, destination, _record = INSTALLER.snapshot_before(
+        "a" * 40, {"enabled": False, "active": False}
+    )
+    assert returned_stamp == stamp
+    assert destination == backup_root / stamp
+    first_snapshot = next(
+        index for index, event in enumerate(events) if event[0] == "snapshot"
+    )
+    assert ("fsync", backup_root.parent) in events[:first_snapshot]
+    assert ("fsync", backup_root) in events[:first_snapshot]
+    assert ("fsync", destination) in events[:first_snapshot]
+
+
 def test_rollback_rejects_failed_durable_completion_readback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1010,6 +1043,26 @@ def test_validation_evidence_completes_partial_writes_before_readback(tmp_path, 
     assert target.read_bytes() == payload
     assert size == len(payload)
     assert len(digest) == 64
+
+
+def test_validation_persists_new_evidence_directory_before_file_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_root = tmp_path / "state"
+    state_root.mkdir(mode=0o700)
+    evidence_root = state_root / "evidence"
+    target = evidence_root / "correlation.json"
+    events: list[Path] = []
+    real_fsync_directory = VALIDATOR.fsync_directory
+
+    def fsync_directory(path: Path) -> None:
+        events.append(Path(path))
+        real_fsync_directory(path)
+
+    monkeypatch.setattr(VALIDATOR, "fsync_directory", fsync_directory)
+    VALIDATOR.durable_evidence(target, b'{"result":"PASS"}\n')
+    assert events[:2] == [evidence_root, state_root]
+    assert events[-1] == evidence_root
 
 
 def test_validation_pass_is_emitted_only_after_durable_evidence() -> None:

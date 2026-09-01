@@ -116,6 +116,17 @@ def write_all(descriptor: int, value: bytes) -> None:
         view = view[written:]
 
 
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(
+        path,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+    )
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def durable_evidence(path: Path, value: bytes) -> tuple[str, int]:
     parent = path.parent.parent
     parent_info = parent.lstat()
@@ -127,7 +138,8 @@ def durable_evidence(path: Path, value: bytes) -> tuple[str, int]:
         or stat.S_IMODE(parent_info.st_mode) & 0o022
     ):
         raise ValidationError("unsafe evidence parent")
-    if path.parent.exists():
+    evidence_directory_created = not path.parent.exists()
+    if not evidence_directory_created:
         info = path.parent.lstat()
         if (
             stat.S_ISLNK(info.st_mode)
@@ -141,6 +153,9 @@ def durable_evidence(path: Path, value: bytes) -> tuple[str, int]:
         path.parent.mkdir(mode=0o700)
         os.chown(path.parent, 0, 0)
     os.chmod(path.parent, 0o700)
+    if evidence_directory_created:
+        fsync_directory(path.parent)
+        fsync_directory(parent)
     temporary = path.parent / f".{path.name}.{os.getpid()}.tmp"
     descriptor = os.open(
         temporary,
@@ -158,11 +173,7 @@ def durable_evidence(path: Path, value: bytes) -> tuple[str, int]:
         raise
     os.close(descriptor)
     os.replace(temporary, path)
-    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    fsync_directory(path.parent)
     persisted = checked_regular(path)
     if persisted != value:
         raise ValidationError("evidence read-back mismatch")

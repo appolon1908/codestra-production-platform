@@ -478,6 +478,17 @@ def atomic_write(path: Path, value: bytes, mode: int) -> None:
         os.close(directory)
 
 
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(
+        path,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+    )
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def secure_directory(path: Path, mode: int = 0o700) -> None:
     missing: list[Path] = []
     cursor = path
@@ -490,6 +501,8 @@ def secure_directory(path: Path, mode: int = 0o700) -> None:
         directory.mkdir(mode=mode)
         os.chown(directory, 0, 0)
         os.chmod(directory, mode)
+        fsync_directory(directory)
+        fsync_directory(directory.parent)
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0:
         raise InstallError(f"unsafe root directory: {path}")
@@ -886,6 +899,9 @@ def snapshot_before(source_sha: str, state: dict[str, bool]) -> tuple[str, Path,
     destination = BACKUP_ROOT / stamp
     destination.mkdir(parents=True, exist_ok=False, mode=0o700)
     os.chown(destination, 0, 0)
+    os.chmod(destination, 0o700)
+    fsync_directory(destination)
+    fsync_directory(BACKUP_ROOT)
     record: dict[str, object] = {
         "schema": "codestra.host-auditd.rollback.v1",
         "stamp": stamp,
