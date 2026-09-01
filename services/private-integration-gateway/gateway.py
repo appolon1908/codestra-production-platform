@@ -180,6 +180,19 @@ def verify_dispatch_receipt(
     raise RuntimeError("downstream_receipt_rejected")
 
 
+def forwarding_tenant(payload: dict[str, Any]) -> str:
+    """Return the exact bounded tenant required by the forwarding contract."""
+
+    tenant_id = payload.get("tenant_id")
+    if (
+        not isinstance(tenant_id, str)
+        or not tenant_id.strip()
+        or len(tenant_id) > 128
+    ):
+        raise ValueError("tenant_id_required")
+    return tenant_id
+
+
 @dataclass(frozen=True)
 class Settings:
     database_path: Path
@@ -820,9 +833,7 @@ class Gateway:
                 if not api_key or not hmac_secret:
                     raise RuntimeError("source forwarding credentials are unavailable")
                 payload = json.loads(row["payload"])
-                tenant_id = payload.get("tenant_id")
-                if not isinstance(tenant_id, str) or not tenant_id:
-                    raise ValueError("tenant_id_required")
+                tenant_id = forwarding_tenant(payload)
                 occurred_at = payload.get("occurred_at")
                 if not isinstance(occurred_at, str) or not occurred_at:
                     occurred_at = datetime.fromtimestamp(
@@ -981,12 +992,9 @@ class Gateway:
             self.settings.middleware_forwarding_enabled and path in EVENT_TYPES
         )
         if dispatch_eligible:
-            tenant_id = payload.get("tenant_id")
-            if (
-                not isinstance(tenant_id, str)
-                or not tenant_id.strip()
-                or len(tenant_id) > 128
-            ):
+            try:
+                forwarding_tenant(payload)
+            except ValueError:
                 return 422, {"detail": "tenant_id_required"}
         entity_key = str(
             payload.get("record_id")
