@@ -13,7 +13,11 @@ services:
       - ./rules:/etc/prometheus/rules:ro
       - /etc/codestra/secrets/monitoring-runtime/staging_metrics_client_secret:/run/secrets/staging_metrics_client_secret:ro
       - prometheus_data:/prometheus
-    networks: [monitoring, backend]
+    networks:
+      monitoring: {}
+      backend: {}
+      alerting:
+        ipv4_address: 10.253.127.2
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
@@ -38,7 +42,10 @@ services:
       - /etc/codestra/secrets/monitoring/recovery_receiver_url:/run/secrets/alertmanager_recovery_receiver_url:ro
       - /etc/codestra/secrets/monitoring/rejected_route_url:/run/secrets/alertmanager_rejected_route_url:ro
       - alertmanager_data:/alertmanager
-    networks: [monitoring]
+    networks:
+      monitoring: {}
+      alerting:
+        ipv4_address: 10.253.127.3
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
@@ -145,6 +152,11 @@ services:
 networks:
   monitoring:
     internal: false
+  alerting:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.253.127.0/29
   backend:
     external: true
     name: codestra_backend

@@ -11,7 +11,7 @@ rule_files:
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: [alertmanager:9093]
+        - targets: [10.253.127.3:9093]
 
 scrape_configs:
   - job_name: prometheus
