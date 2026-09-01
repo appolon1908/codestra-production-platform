@@ -9,6 +9,9 @@ Human review is required before any local implementation is adopted.
 ## `codestra-beyvra-email-api-1`
 
 - Candidate repository: `Codestra-SRL/codestra-middleware`
+- Reviewed clean snapshot: PR `Codestra-SRL/codestra-middleware#277`, commit
+  `39c153037f3b049b01a84cc3fb0940c08aa5346c`, tree
+  `137aa59f4bd2a8eb1201a85747a2c77bdc1d467d`
 - Local evidence root: `/root/beyvra-email-middleware`
 - Local-only files: none reported by Git
 - Protected-only files: all subsequent protected-main changes outside the
@@ -23,6 +26,9 @@ Human review is required before any local implementation is adopted.
 ## `codestra-email-reseller-api-1`
 
 - Candidate repository: `appolon1908-hue/codestra-production-platform`
+- Reviewed clean snapshot: PR `appolon1908-hue/codestra-production-platform#171`,
+  commit `fa752031b302f3ce7eaa746acc67e8c87143f27a`, tree
+  `f92cfcab89668dd1e7de4cd15c17b482beddf975`
 - Local evidence root: `/root/codestra-odoo-middleware-functional`
 - Local-only files: `deploy/email-reseller/`, `email_reseller_service/`, and
   related tests/reports
@@ -38,6 +44,9 @@ Human review is required before any local implementation is adopted.
 ## `codestra-mail-api-mail-api-1`
 
 - Candidate repository: `appolon1908-hue/codestra-production-platform`
+- Reviewed clean snapshot: PR `appolon1908-hue/codestra-production-platform#173`,
+  commit `e1b412799701a6d88d7bef6e38fc52e7c7e7acf3`, tree
+  `c54d26503e1f0aa1dad32272a3ad8a3e0de43934`
 - Local evidence root: `/root/codestra-production-completion`
 - Local-only files: mail API Dockerfile and Compose plus reviewed Keycloak/Kong
   declarative configuration and n8n workflow definitions
@@ -52,6 +61,9 @@ Human review is required before any local implementation is adopted.
 ## `codestra-provisioning-service-provisioning-service-1`
 
 - Candidate repository: `appolon1908-hue/codestra-provisioning-service`
+- Reviewed clean snapshot: PR `appolon1908-hue/codestra-provisioning-service#18`,
+  commit `a82d191789006a701f78c8a3bf0c10357ddfbb00`, tree
+  `17f8375e7e1354928d83bead2cc7e10dc8351d74`
 - Protected branch: `main`
 - Protected head at comparison: `0a1998aa7bbe8b38481ac07fe036055c6191c5c5`
 - Local evidence root: `/root/codestra-provisioning-running-source-20260819`
@@ -68,6 +80,9 @@ Human review is required before any local implementation is adopted.
 ## `codestra-reseller-portal-portal-1`
 
 - Candidate repository: `appolon1908-hue/codestra-production-platform`
+- Reviewed clean snapshot: PR `appolon1908-hue/codestra-production-platform#172`,
+  commit `74bef6f721ca76db3b21d5db679e5a2d4c11a396`, tree
+  `3a7288f397cfd5b624593cd525c44f8381162f5d`
 - Local evidence root: `/root/codestra-odoo-middleware-functional`
 - Local-only files: `deploy/reseller-portal/`, `reseller_portal/`, and related
   tests/reports

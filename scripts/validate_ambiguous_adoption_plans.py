@@ -16,6 +16,9 @@ assert text.count("Local-only files:") == 5
 assert text.count("Protected-only files:") == 5
 assert text.count("Conflicts:") == 5
 assert text.count("Secret-bearing files excluded:") == 5
+assert text.count("Reviewed clean snapshot:") == 5
+assert len(re.findall(r"commit\n?\s*`[0-9a-f]{40}`", text)) == 5
+assert len(re.findall(r"tree\n?\s*`[0-9a-f]{40}`", text)) == 5
 assert "runtime equivalence unproven" in text
 assert "Do not copy the dirty worktree" in text
 assert "No dirty worktree was pushed" in text
