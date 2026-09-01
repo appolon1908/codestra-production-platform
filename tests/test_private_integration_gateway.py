@@ -170,6 +170,9 @@ def configure_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
                     "senders": ["TEST"],
                     "destination_prefixes": ["+49155"],
                     "route": "synthetic",
+                    "approved_recipients": ["+4915512345678"],
+                    "consented_recipients": ["+4915512345678"],
+                    "suppressed_recipients": [],
                 },
                 "tenant-disabled": {
                     "enabled": False,
@@ -239,6 +242,28 @@ def test_outbound_policy_accepts_exact_sender_destination_and_route(
     )
 
 
+@pytest.mark.parametrize(
+    ("policy_change", "detail"),
+    [
+        ({"approved_recipients": []}, "recipient_not_approved"),
+        ({"consented_recipients": []}, "recipient_consent_required"),
+        ({"suppressed_recipients": ["+4915512345678"]}, "recipient_suppressed"),
+        ({"approved_recipients": [" +4915512345678"]}, "recipient_policy_invalid"),
+    ],
+)
+def test_outbound_requires_approved_consented_unsuppressed_recipient(
+    monkeypatch: pytest.MonkeyPatch,
+    policy_change: dict[str, list[str]],
+    detail: str,
+):
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["tenant-a"].update(policy_change)
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    with pytest.raises(PermissionError, match=detail):
+        gateway.validate_outbound(valid_payload())
+
+
 def test_live_submission_uses_the_customer_route_specific_jasmin_authority(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -252,12 +277,18 @@ def test_live_submission_uses_the_customer_route_specific_jasmin_authority(
                     "senders": ["TEST"],
                     "destination_prefixes": ["+49155"],
                     "route": "synthetic",
+                    "approved_recipients": ["+4915512345678"],
+                    "consented_recipients": ["+4915512345678"],
+                    "suppressed_recipients": [],
                 },
                 "tenant-b": {
                     "enabled": True,
                     "senders": ["TEST"],
                     "destination_prefixes": ["+49155"],
                     "route": "alternate",
+                    "approved_recipients": ["+4915512345678"],
+                    "consented_recipients": ["+4915512345678"],
+                    "suppressed_recipients": [],
                 },
             }
         ),
@@ -396,6 +427,7 @@ def test_existing_live_database_schema_is_migrated_without_data_loss(tmp_path: P
     assert "provider_response_sha256" in sms_columns
     assert "operation_token" in sms_columns
     assert "lease_expires_at" in sms_columns
+    assert "effect_hash" in sms_columns
 
 
 def test_ingress_rejects_stale_and_invalid_signatures(
@@ -523,7 +555,9 @@ def test_unmapped_ingress_contracts_remain_dispatch_quarantined(
     assert app.dispatch_once() == 0
 
 
-@pytest.mark.parametrize("tenant_id", [None, "", "   ", "x" * 129])
+@pytest.mark.parametrize(
+    "tenant_id", [None, "", "   ", " tenant-a", "tenant-a ", "x" * 129]
+)
 def test_mapped_forwarding_callback_requires_tenant_before_acknowledgement(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1099,7 +1133,20 @@ class HealthyJasmin:
         return False
 
     def read(self, _limit=None):
-        return b"Success:provider-test-id"
+        return b'Success "07033084-5cfd-4812-90a4-e4d24ffb6e3d"'
+
+
+class JasminResponse(HealthyJasmin):
+    def __init__(self, body: bytes):
+        self.body = body
+
+    def read(self, _limit=None):
+        return self.body
+
+
+class JasminReceiptTimeout(HealthyJasmin):
+    def read(self, _limit=None):
+        raise TimeoutError("synthetic timeout after carrier request")
 
 
 def outbound_headers(body: bytes, now: int, nonce: str):
@@ -1180,6 +1227,130 @@ def test_dependency_failure_reservation_is_resumed_without_duplicate_effect(
     assert second_result["adapter_message_id"] == reserved["adapter_message_id"]
     assert second_result["state"] == "mock_accepted"
     assert probes == []
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"",
+        b"OK",
+        b"Success",
+        b"Success:provider-test-id",
+        b'Success "not-a-uuid"',
+        b'prefix Success "07033084-5cfd-4812-90a4-e4d24ffb6e3d"',
+    ],
+)
+def test_jasmin_acceptance_requires_exact_success_receipt(raw: bytes):
+    with pytest.raises(ValueError, match="invalid_jasmin_receipt"):
+        gateway.parse_jasmin_success_receipt(raw)
+    assert gateway.parse_jasmin_success_receipt(
+        b'Success "07033084-5cfd-4812-90a4-e4d24ffb6e3d"\r\n'
+    ) == "07033084-5cfd-4812-90a4-e4d24ffb6e3d"
+
+
+def test_unrelated_2xx_jasmin_response_is_never_recorded_as_submitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    configure_jasmin_route(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+
+    def urlopen(url, **_kwargs):
+        return HealthyJasmin() if url.endswith("/ping") else JasminResponse(b"")
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-INVALID-JASMIN-RECEIPT",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    code, result = app.outbound(
+        body, outbound_headers(body, now, "nonce-invalid-receipt-1")
+    )
+    assert code == 202
+    assert result["state"] == "outcome_unknown"
+    assert result["carrier_submitted"] is False
+    with state.connect() as connection:
+        row = connection.execute("SELECT * FROM sms_transactions").fetchone()
+    assert row["provider_message_id"] is None
+    assert row["operation_token"]
+
+
+def test_carrier_timeout_remains_unknown_until_exact_readback_reconciles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    configure_jasmin_route(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    calls = {"ping": 0, "send": 0}
+
+    def urlopen(url, **_kwargs):
+        if url.endswith("/ping"):
+            calls["ping"] += 1
+            return HealthyJasmin()
+        calls["send"] += 1
+        return JasminReceiptTimeout()
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-JASMIN-READBACK",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    code, result = app.outbound(
+        body, outbound_headers(body, now, "nonce-timeout-receipt-1")
+    )
+    assert code == 202 and result["state"] == "outcome_unknown"
+    code, replay = app.outbound(
+        body, outbound_headers(body, now, "nonce-timeout-receipt-2")
+    )
+    assert code == 202 and replay["duplicate"] is True
+    assert replay["state"] == "outcome_unknown"
+    second_body = json.dumps(
+        valid_payload(idempotency_key="idem-timeout-replacement"),
+        separators=(",", ":"),
+    ).encode()
+    blocked_code, blocked = app.outbound(
+        second_body,
+        outbound_headers(second_body, now, "nonce-timeout-receipt-3"),
+    )
+    assert blocked_code == 409
+    assert blocked["detail"] == "carrier_outcome_pending"
+    assert calls == {"ping": 1, "send": 1}
+    with state.connect() as connection:
+        pending = connection.execute("SELECT * FROM sms_transactions").fetchone()
+    assert pending["operation_token"]
+    with pytest.raises(ValueError, match="invalid_jasmin_receipt"):
+        state.reconcile_sms_outcome(
+            pending["adapter_message_id"], pending["operation_token"], b"OK"
+        )
+    readback = b'Success "07033084-5cfd-4812-90a4-e4d24ffb6e3d"'
+    completed = state.reconcile_sms_outcome(
+        pending["adapter_message_id"], pending["operation_token"], readback
+    )
+    assert completed["state"] == "submitted"
+    assert completed["carrier_submitted"] == 1
+    assert completed["provider_message_id"] == "07033084-5cfd-4812-90a4-e4d24ffb6e3d"
+    assert completed["provider_response_sha256"] == hashlib.sha256(readback).hexdigest()
+    assert completed["operation_token"] is None
 
 
 def test_crash_after_reservation_is_lease_resumable_before_carrier_submission(

@@ -81,12 +81,33 @@ EVENT_TYPES = {
     "/api/v1/klyrow/unsubscribes": "klyrow.email.unsubscribed",
 }
 ROUTE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+JASMIN_SUCCESS_RECEIPT = re.compile(
+    r'Success "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+    r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"'
+)
 DISPATCH_RECEIPT_STATES = {"queued", "retrying", "delivered", "dead_letter"}
 DISPATCH_LEASE_SECONDS = 30
 
 
 class DispatchOutcomeUnknown(RuntimeError):
     """The receiver may have committed the request before transport failed."""
+
+
+def sms_effect_sha256(
+    customer_id: str,
+    sender: str,
+    destination: str,
+    route: str,
+    message: str,
+) -> str:
+    """Identify the carrier effect independently of caller idempotency metadata."""
+
+    value = json.dumps(
+        [customer_id, sender, destination, route, message],
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -187,10 +208,26 @@ def forwarding_tenant(payload: dict[str, Any]) -> str:
     if (
         not isinstance(tenant_id, str)
         or not tenant_id.strip()
+        or tenant_id != tenant_id.strip()
         or len(tenant_id) > 128
     ):
         raise ValueError("tenant_id_required")
     return tenant_id
+
+
+def parse_jasmin_success_receipt(raw: bytes) -> str:
+    """Return only the UUID from Jasmin's exact bounded success receipt."""
+
+    if not raw or len(raw) > 2048:
+        raise ValueError("invalid_jasmin_receipt")
+    try:
+        value = raw.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise ValueError("invalid_jasmin_receipt") from error
+    match = JASMIN_SUCCESS_RECEIPT.fullmatch(value.rstrip("\r\n"))
+    if match is None:
+        raise ValueError("invalid_jasmin_receipt")
+    return match.group(1).lower()
 
 
 @dataclass(frozen=True)
@@ -336,6 +373,7 @@ class Store:
                     customer_id TEXT NOT NULL,
                     idempotency_key TEXT NOT NULL,
                     payload_hash TEXT NOT NULL,
+                    effect_hash TEXT NOT NULL,
                     payload TEXT NOT NULL,
                     correlation_id TEXT,
                     sender TEXT NOT NULL,
@@ -372,6 +410,34 @@ class Store:
                 connection.execute(
                     "ALTER TABLE sms_transactions ADD COLUMN lease_expires_at REAL NOT NULL DEFAULT 0"
                 )
+            if "effect_hash" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN effect_hash TEXT"
+                )
+                for row in connection.execute(
+                    """SELECT adapter_message_id,customer_id,sender,destination,
+                    logical_route,payload FROM sms_transactions"""
+                ).fetchall():
+                    try:
+                        payload = json.loads(row["payload"])
+                    except json.JSONDecodeError as error:
+                        raise RuntimeError("existing SMS payload is invalid") from error
+                    message = payload.get("body") if isinstance(payload, dict) else None
+                    if not isinstance(message, str):
+                        raise RuntimeError("existing SMS payload body is invalid")
+                    connection.execute(
+                        "UPDATE sms_transactions SET effect_hash=? WHERE adapter_message_id=?",
+                        (
+                            sms_effect_sha256(
+                                row["customer_id"],
+                                row["sender"],
+                                row["destination"],
+                                row["logical_route"],
+                                message,
+                            ),
+                            row["adapter_message_id"],
+                        ),
+                    )
         if self.path.exists():
             self.path.chmod(0o600)
 
@@ -453,11 +519,11 @@ class Store:
             with self.connect() as connection:
                 connection.execute(
                     """INSERT INTO sms_transactions(
-                    adapter_message_id,customer_id,idempotency_key,payload_hash,
+                    adapter_message_id,customer_id,idempotency_key,payload_hash,effect_hash,
                     payload,correlation_id,sender,destination,logical_route,
                     validation_result,jasmin_dependency,state,carrier_submitted,
                     provider_message_id,provider_response,provider_response_sha256,created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     values,
                 )
             created = True
@@ -511,6 +577,8 @@ class Store:
         self,
         adapter_message_id: str,
         payload_hash: str,
+        customer_id: str,
+        effect_hash: str,
         operation_token: str,
         now: float,
     ) -> tuple[bool, sqlite3.Row]:
@@ -523,6 +591,11 @@ class Store:
                 WHERE adapter_message_id=? AND payload_hash=? AND (
                     state IN ('reserved','dependency_unavailable') OR
                     (state='preflight' AND lease_expires_at<=?)
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM sms_transactions AS active
+                    WHERE active.adapter_message_id<>?
+                      AND active.customer_id=? AND active.effect_hash=?
+                      AND active.state IN ('preflight','submitting','outcome_unknown')
                 )""",
                 (
                     operation_token,
@@ -530,6 +603,9 @@ class Store:
                     adapter_message_id,
                     payload_hash,
                     now,
+                    adapter_message_id,
+                    customer_id,
+                    effect_hash,
                 ),
             )
             row = connection.execute(
@@ -573,6 +649,50 @@ class Store:
             )
         if cursor.rowcount != 1:
             raise RuntimeError("SMS submission lost preflight ownership")
+
+    def mark_sms_outcome_unknown(
+        self,
+        adapter_message_id: str,
+        operation_token: str,
+        provider_response_sha256: str | None,
+    ) -> sqlite3.Row:
+        """Preserve reconciliation ownership when the carrier result is ambiguous."""
+
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE sms_transactions
+                SET state='outcome_unknown',jasmin_dependency='outcome_unknown',
+                    provider_response_sha256=?,lease_expires_at=0
+                WHERE adapter_message_id=? AND state='submitting' AND operation_token=?""",
+                (provider_response_sha256, adapter_message_id, operation_token),
+            )
+            row = connection.execute(
+                "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                (adapter_message_id,),
+            ).fetchone()
+        if cursor.rowcount != 1 or row is None:
+            raise RuntimeError("SMS unknown-outcome transition lost ownership")
+        return row
+
+    def reconcile_sms_outcome(
+        self,
+        adapter_message_id: str,
+        operation_token: str,
+        carrier_readback: bytes,
+    ) -> sqlite3.Row:
+        """Finalize an ambiguous attempt only from an exact carrier read-back."""
+
+        provider_message_id = parse_jasmin_success_receipt(carrier_readback)
+        return self.complete_sms(
+            adapter_message_id,
+            operation_token=operation_token,
+            expected_state="outcome_unknown",
+            state="submitted",
+            jasmin_dependency="reachable",
+            carrier_submitted=True,
+            provider_message_id=provider_message_id,
+            provider_response_sha256=hashlib.sha256(carrier_readback).hexdigest(),
+        )
 
     def pending_events(self, now: float, limit: int = 20) -> list[sqlite3.Row]:
         with self.connect() as connection:
@@ -706,6 +826,40 @@ def customer_policy() -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def policy_recipient_set(policy: dict[str, Any], field: str) -> set[str]:
+    """Read an exact, canonical recipient set from the protected policy."""
+
+    values = policy.get(field)
+    if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
+        raise PermissionError("recipient_policy_invalid")
+    recipients: set[str] = set()
+    for item in values:
+        try:
+            normalized = normalize_destination(item)
+        except ValueError as error:
+            raise PermissionError("recipient_policy_invalid") from error
+        if item != normalized or item in recipients:
+            raise PermissionError("recipient_policy_invalid")
+        recipients.add(item)
+    return recipients
+
+
+def validate_recipient_authorization(
+    policy: dict[str, Any], destination: str
+) -> None:
+    """Require independent approval, positive consent, and suppression clearance."""
+
+    approved = policy_recipient_set(policy, "approved_recipients")
+    consented = policy_recipient_set(policy, "consented_recipients")
+    suppressed = policy_recipient_set(policy, "suppressed_recipients")
+    if destination not in approved:
+        raise PermissionError("recipient_not_approved")
+    if destination in suppressed:
+        raise PermissionError("recipient_suppressed")
+    if destination not in consented:
+        raise PermissionError("recipient_consent_required")
+
+
 def validate_live_route_authorities() -> None:
     """Require a distinct credential authority for every enabled policy route."""
 
@@ -746,6 +900,7 @@ def validate_outbound(payload: dict[str, Any]) -> tuple[str, str, str, str, str 
         raise PermissionError("destination_route_not_authorized")
     if not any(destination.startswith(prefix) for prefix in prefixes):
         raise PermissionError("destination_route_not_authorized")
+    validate_recipient_authorization(policy, destination)
     route = policy.get("route")
     if not isinstance(route, str) or not route:
         raise PermissionError("route_not_authorized")
@@ -781,12 +936,12 @@ class Gateway:
 
     def submit_to_jasmin(
         self, route: str, sender: str, destination: str, message: str
-    ) -> tuple[str, str | None]:
+    ) -> tuple[str, str | None, str | None]:
         username_name, password_name = jasmin_route_secret_names(route)
         username = read_secret(username_name)
         password = read_secret(password_name)
         if not username or not password:
-            return "transport_error", "jasmin_credentials_unavailable"
+            return "not_submitted", None, None
         query = urllib.parse.urlencode(
             {
                 "username": username,
@@ -800,16 +955,34 @@ class Gateway:
             with self.urlopen(
                 f"{self.settings.jasmin_url}/send?{query}", timeout=5
             ) as response:
-                raw = response.read(2048)
-                state = "accepted" if response.status < 300 else "rejected"
+                raw = response.read(2049)
+                status = response.status
         except urllib.error.HTTPError as error:
-            raw = error.read(2048)
-            state = "rejected"
-        except TimeoutError:
-            return "timeout", None
-        except Exception as error:
-            return "transport_error", type(error).__name__
-        return state, raw.decode(errors="replace")
+            raw = error.read(2049)
+            digest = hashlib.sha256(raw).hexdigest() if len(raw) <= 2048 else None
+            return "rejected", None, digest
+        except (
+            TimeoutError,
+            urllib.error.URLError,
+            ConnectionError,
+            http.client.HTTPException,
+            OSError,
+        ):
+            return "outcome_unknown", None, None
+        if len(raw) > 2048:
+            return "outcome_unknown", None, None
+        digest = hashlib.sha256(raw).hexdigest()
+        if status != 200:
+            return (
+                "outcome_unknown" if 200 <= status < 300 else "rejected",
+                None,
+                digest,
+            )
+        try:
+            provider_message_id = parse_jasmin_success_receipt(raw)
+        except ValueError:
+            return "outcome_unknown", None, digest
+        return "accepted", provider_message_id, digest
 
     def dispatch_once(self) -> int:
         """Deliver only new, explicitly eligible events with bounded retries."""
@@ -1082,6 +1255,9 @@ class Gateway:
             return 403, {"detail": str(error)}
         canonical_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         payload_sha256 = hashlib.sha256(canonical_payload.encode()).hexdigest()
+        effect_sha256 = sms_effect_sha256(
+            customer, sender, destination, route, message
+        )
         adapter_message_id = str(uuid.uuid4())
         created, reserved = self.store.reserve_sms(
             (
@@ -1089,6 +1265,7 @@ class Gateway:
                 customer,
                 idempotency_key,
                 payload_sha256,
+                effect_sha256,
                 canonical_payload,
                 correlation,
                 sender,
@@ -1110,10 +1287,20 @@ class Gateway:
         claimed, reservation = self.store.claim_sms(
             reserved["adapter_message_id"],
             payload_sha256,
+            customer,
+            effect_sha256,
             operation_token,
             now,
         )
         if not claimed:
+            if created and reservation["state"] == "reserved":
+                return 409, {
+                    "accepted": False,
+                    "detail": "carrier_outcome_pending",
+                    "adapter_message_id": reservation["adapter_message_id"],
+                    "carrier_submitted": False,
+                    "state": reservation["state"],
+                }
             return 202, {
                 "accepted": True,
                 "duplicate": True,
@@ -1134,21 +1321,33 @@ class Gateway:
         provider_response_sha256 = None
         if self.settings.live_submission_enabled:
             self.store.begin_sms_submission(adapter_message_id, operation_token)
-            mapped, provider_response = self.submit_to_jasmin(
+            mapped, provider_message_id, provider_response_sha256 = self.submit_to_jasmin(
                 route, sender, destination, message
             )
             state = {
                 "accepted": "submitted",
                 "rejected": "rejected",
-                "timeout": "failed",
-                "transport_error": "failed",
+                "not_submitted": "dependency_unavailable",
+                "outcome_unknown": "outcome_unknown",
             }[mapped]
             carrier_submitted = mapped == "accepted"
-            if provider_response is not None:
-                provider_response_sha256 = hashlib.sha256(
-                    provider_response.encode()
-                ).hexdigest()
-            provider_message_id = provider_response if carrier_submitted else None
+            if mapped == "outcome_unknown":
+                completed = self.store.mark_sms_outcome_unknown(
+                    adapter_message_id,
+                    operation_token,
+                    provider_response_sha256,
+                )
+                LOG.warning(
+                    "system=telnexa adapter_message_id=%s state=outcome_unknown",
+                    adapter_message_id,
+                )
+                return 202, {
+                    "accepted": True,
+                    "duplicate": not created,
+                    "adapter_message_id": adapter_message_id,
+                    "carrier_submitted": bool(completed["carrier_submitted"]),
+                    "state": completed["state"],
+                }
         completed = self.store.complete_sms(
             adapter_message_id,
             operation_token=operation_token,
