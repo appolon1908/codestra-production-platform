@@ -6,8 +6,8 @@ change SSH configuration, touch containers, or change application state.
 
 The rule set records:
 
-- changes to SSH, sudo, audit, Codestra operator, and `codestra-admin` key
-  authority paths;
+- changes to SSH, sudo, audit, release-trust, Codestra operator, and
+  `codestra-admin` key authority paths;
 - root-session and non-root-to-root command execution; and
 - changes to root-owned Codestra validation state.
 
@@ -73,9 +73,11 @@ python3 -I /usr/local/sbin/validate-codestra-provider-host-auditd \
 ```
 
 Validation requires an enabled and active daemon, kernel auditing enabled,
-zero lost records, all managed keys active, protected root-owned files, and a
-bounded synthetic audit record that is read back from the audit log. PASS is
-printed only after root-owned evidence is completely written and synced.
+zero lost records, all managed keys active, exact read-back of both the managed
+rule and installed validator against the signed installation record, protected
+root-owned files, and a bounded synthetic audit record that is read back from
+the audit log. PASS is printed only after root-owned evidence is completely
+written and synced.
 
 ## Roll back the managed rule
 

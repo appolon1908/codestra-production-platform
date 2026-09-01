@@ -3,6 +3,7 @@
 -w /etc/sudoers -p wa -k codestra_sudo_authority
 -w /etc/sudoers.d -p wa -k codestra_sudo_authority
 -w /etc/audit -p wa -k codestra_audit_authority
+-w /etc/codestra/release -p wa -k codestra_release_trust
 -w /home/codestra-admin -p wa -k codestra_operator_key
 -w /usr/local -p wa -k codestra_operator_code
 -w /opt/codestra -p wa -k codestra_operator_state

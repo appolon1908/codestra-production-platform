@@ -144,6 +144,7 @@ def test_managed_rules_are_additive_and_cover_operator_authorities() -> None:
     assert "\n-e 2" not in rules
     assert "-w /etc/ssh -p wa -k codestra_ssh_authority" in rules
     assert "-w /etc/sudoers.d -p wa -k codestra_sudo_authority" in rules
+    assert "-w /etc/codestra/release -p wa -k codestra_release_trust" in rules
     assert "-w /home/codestra-admin -p wa -k codestra_operator_key" in rules
     assert "-w /opt/codestra -p wa -k codestra_operator_state" in rules
     assert "-w /var/lib/codestra -p wa -k codestra_operator_state" in rules
@@ -370,6 +371,40 @@ def test_installed_validator_is_read_back_before_service_mutation(
     monkeypatch.setattr(INSTALLER, "VALIDATOR_TARGET", validator_target)
     with pytest.raises(INSTALLER.InstallError, match="validator differs"):
         INSTALLER.installed_payloads(b"signed rule\n", b"signed validator\n")
+
+
+def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch) -> None:
+    rule_path = Path("/test/managed.rules")
+    validator_path = Path("/test/validator")
+    record_path = Path("/test/installation.json")
+    source_sha = "a" * 40
+    rule = b"signed rule\n"
+    validator = b"signed validator\n"
+    record = json.dumps(
+        {
+            "source_sha": source_sha,
+            "rule_sha256": hashlib.sha256(rule).hexdigest(),
+            "validator_sha256": hashlib.sha256(validator).hexdigest(),
+        }
+    ).encode()
+    payloads = {rule_path: rule, validator_path: validator, record_path: record}
+    monkeypatch.setattr(VALIDATOR, "RULE_TARGET", rule_path)
+    monkeypatch.setattr(VALIDATOR, "VALIDATOR_TARGET", validator_path)
+    monkeypatch.setattr(VALIDATOR, "INSTALLATION_RECORD", record_path)
+    monkeypatch.setattr(
+        VALIDATOR,
+        "checked_regular",
+        lambda path, max_bytes=1024 * 1024: payloads[path],
+    )
+
+    assert VALIDATOR.installed_release_binding(source_sha) == (
+        rule,
+        hashlib.sha256(rule).hexdigest(),
+        hashlib.sha256(validator).hexdigest(),
+    )
+    payloads[validator_path] = b"valid Python but displaced validator\n"
+    with pytest.raises(VALIDATOR.ValidationError, match="validator binding"):
+        VALIDATOR.installed_release_binding(source_sha)
 
 
 def test_rollback_revalidates_restored_files_and_service_before_completion(

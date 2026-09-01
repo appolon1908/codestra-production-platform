@@ -19,6 +19,7 @@ from pathlib import Path
 
 
 RULE_TARGET = Path("/etc/audit/rules.d/60-codestra-provider-host.rules")
+VALIDATOR_TARGET = Path("/usr/local/sbin/validate-codestra-provider-host-auditd")
 INSTALLATION_RECORD = Path("/var/lib/codestra/host-auditd/installation.json")
 EVIDENCE_ROOT = Path("/var/lib/codestra/host-auditd/evidence")
 AUDIT_CONFIG = Path("/etc/audit/auditd.conf")
@@ -27,6 +28,7 @@ REQUIRED_KEYS = {
     "codestra_ssh_authority",
     "codestra_sudo_authority",
     "codestra_audit_authority",
+    "codestra_release_trust",
     "codestra_operator_key",
     "codestra_operator_code",
     "codestra_operator_state",
@@ -267,6 +269,26 @@ def operator_cannot_modify(paths: list[Path]) -> bool:
     return True
 
 
+def installed_release_binding(expected_source_sha: str) -> tuple[bytes, str, str]:
+    installed_rule = checked_regular(RULE_TARGET)
+    installed_validator = checked_regular(
+        VALIDATOR_TARGET, max_bytes=2 * 1024 * 1024
+    )
+    installation = json.loads(checked_regular(INSTALLATION_RECORD))
+    if not isinstance(installation, dict):
+        raise ValidationError("installation record rejected")
+    rule_sha = hashlib.sha256(installed_rule).hexdigest()
+    validator_sha = hashlib.sha256(installed_validator).hexdigest()
+    if (
+        installation.get("source_sha") != expected_source_sha
+        or installation.get("rule_sha256") != rule_sha
+    ):
+        raise ValidationError("installation source binding mismatch")
+    if installation.get("validator_sha256") != validator_sha:
+        raise ValidationError("installation validator binding mismatch")
+    return installed_rule, rule_sha, validator_sha
+
+
 def validate(expected_source_sha: str) -> dict[str, object]:
     if os.geteuid() != 0:
         raise ValidationError("validator must run as root")
@@ -281,11 +303,7 @@ def validate(expected_source_sha: str) -> dict[str, object]:
         raise ValidationError("audit kernel state rejected")
     if status["backlog"] >= status["backlog_limit"]:
         raise ValidationError("audit kernel backlog exhausted")
-    installed = checked_regular(RULE_TARGET)
-    installation = json.loads(checked_regular(INSTALLATION_RECORD))
-    rule_sha = hashlib.sha256(installed).hexdigest()
-    if installation.get("source_sha") != expected_source_sha or installation.get("rule_sha256") != rule_sha:
-        raise ValidationError("installation source binding mismatch")
+    installed, rule_sha, validator_sha = installed_release_binding(expected_source_sha)
     active_rules = run(["/usr/sbin/auditctl", "-l"])
     active_keys = rule_keys(active_rules)
     if not REQUIRED_KEYS <= active_keys:
@@ -330,6 +348,7 @@ def validate(expected_source_sha: str) -> dict[str, object]:
         "backlog": status["backlog"],
         "backlog_limit": status["backlog_limit"],
         "rule_sha256": rule_sha,
+        "validator_sha256": validator_sha,
         "managed_keys": sorted(REQUIRED_KEYS),
         "audit_log": str(audit_log),
         "audit_log_root_owned": True,
