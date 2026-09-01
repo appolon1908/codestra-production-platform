@@ -25,6 +25,61 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(OPERATOR)
 
 
+def _model_root_owned_test_files(monkeypatch) -> None:
+    """Model root-owned fixtures without requiring pytest itself to run as root."""
+    real_lstat = OPERATOR.Path.lstat
+
+    def root_owned(info):
+        values = list(info)
+        values[4] = 0
+        values[5] = 0
+        return os.stat_result(values)
+
+    def checked_root_fixture_bytes(path, *, expected_mode=0o600):
+        try:
+            descriptor = os.open(
+                path,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            )
+        except OSError as error:
+            if error.errno == OPERATOR.errno.ELOOP:
+                raise OPERATOR.OperatorError(f"unsafe file type: {path}") from error
+            raise OPERATOR.OperatorError(
+                f"required root file unavailable: {path}"
+            ) from error
+        with os.fdopen(descriptor, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not OPERATOR.stat.S_ISREG(info.st_mode):
+                raise OPERATOR.OperatorError(f"unsafe file type: {path}")
+            if info.st_uid != os.geteuid() or info.st_gid != os.getegid():
+                raise OPERATOR.OperatorError(f"unsafe fixture ownership: {path}")
+            if OPERATOR.stat.S_IMODE(info.st_mode) != expected_mode:
+                raise OPERATOR.OperatorError(f"unsafe mode: {path}")
+            return stream.read()
+
+    monkeypatch.setattr(OPERATOR, "checked_root_bytes", checked_root_fixture_bytes)
+    monkeypatch.setattr(
+        OPERATOR.Path,
+        "lstat",
+        lambda path: root_owned(real_lstat(path)),
+    )
+
+
+def test_root_owned_fixture_model_preserves_effective_operator_identity(
+    monkeypatch, tmp_path
+) -> None:
+    fixture = tmp_path / "ownership-model"
+    fixture.write_bytes(b"fixture")
+    fixture.chmod(0o600)
+    _model_root_owned_test_files(monkeypatch)
+
+    with fixture.open("rb") as stream:
+        info = OPERATOR.os.fstat(stream.fileno())
+    assert (info.st_uid, info.st_gid) == (os.geteuid(), os.getegid())
+    assert OPERATOR.checked_root_bytes(fixture) == b"fixture"
+    assert OPERATOR.checked_operator_bytes(fixture, expected_mode=0o600) == b"fixture"
+
+
 EXPECTED_ACTIONS = {
     "preflight",
     "backup",
@@ -349,6 +404,7 @@ def test_restore_test_records_one_stable_backup_stamp(monkeypatch):
 
 
 def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, tmp_path):
+    _model_root_owned_test_files(monkeypatch)
     root = tmp_path / "restore"
     root.mkdir(mode=0o700)
     stamp = "20260830T190000Z"
@@ -406,6 +462,7 @@ def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, 
 
 
 def test_restore_result_rejects_unadvertised_backup(monkeypatch, tmp_path):
+    _model_root_owned_test_files(monkeypatch)
     root = tmp_path / "restore"
     root.mkdir(mode=0o700)
     (root / "LAST_SUCCESS").write_text("20260830T190000Z\n")
@@ -643,6 +700,7 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
 
 
 def test_compose_layers_are_copied_before_privileged_use(monkeypatch, tmp_path):
+    _model_root_owned_test_files(monkeypatch)
     monkeypatch.setattr(
         OPERATOR.pwd,
         "getpwnam",
@@ -810,6 +868,7 @@ def test_middleware_snapshot_flushes_bundle_before_marker(monkeypatch, tmp_path)
 def test_middleware_database_clients_quiesce_and_resume_exact_prior_set(
     monkeypatch, tmp_path
 ):
+    _model_root_owned_test_files(monkeypatch)
     root = tmp_path / "middleware-backups"
     root.mkdir(mode=0o700)
     marker = root / "QUIESCED"
@@ -922,6 +981,7 @@ def test_middleware_database_client_bundle_validation_rejects_bad_replica_sets()
 
 
 def test_completed_rollback_forces_fresh_snapshot(monkeypatch, tmp_path):
+    _model_root_owned_test_files(monkeypatch)
     config = OPERATOR.load_release_config()
     stamp = "20260830T190000Z"
     backup = tmp_path / stamp
@@ -955,6 +1015,7 @@ def test_completed_rollback_forces_fresh_snapshot(monkeypatch, tmp_path):
 
 
 def test_incomplete_attempt_reuses_original_snapshot(monkeypatch, tmp_path):
+    _model_root_owned_test_files(monkeypatch)
     config = OPERATOR.load_release_config()
     stamp = "20260830T190000Z"
     backup = tmp_path / stamp
