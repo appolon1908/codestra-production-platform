@@ -4,6 +4,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/control-plane/Dockerfile
+    image: ghcr.io/appolon1908-hue/integration-control-plane@sha256:dd288a88c745d8336d2e30e7c89f986a67563ce67f916d11b3905197187ac8e6
     restart: unless-stopped
     env_file: ${CONTROL_PLANE_ENV_FILE:-/etc/codestra/secrets/control-plane.env}
     environment:
@@ -55,6 +56,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/control-plane/Dockerfile
+    image: ghcr.io/appolon1908-hue/integration-control-plane@sha256:dd288a88c745d8336d2e30e7c89f986a67563ce67f916d11b3905197187ac8e6
     command: [python, -m, control_plane_service.worker]
     restart: unless-stopped
     env_file: ${CONTROL_PLANE_ENV_FILE:-/etc/codestra/secrets/control-plane.env}

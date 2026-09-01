@@ -43,7 +43,7 @@ restore_source=$script_dir/../readiness/codestra-isolated-restore-rehearsal.sh
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
-399069961f34e4ae8b29777be94862fa4202502fe05665878eca615460494ee3  codestra-production-operator
+9bf23608d6d179137a5bb8681e334f42c992a12d62c3a6d6d0c2d943f5ed7adc  codestra-production-operator
 d806b91ae6d9ddf962883487ffebaf3ac503ed3ef79b0d9a9bdedc222e64cf8c  codestra-production-forced-command
 9023d679f923587eaaed3d0c27b5c388a136d112a9483777881b5aea002ed520  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
