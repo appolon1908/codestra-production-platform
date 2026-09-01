@@ -706,6 +706,50 @@ def test_mapped_forwarding_callback_requires_tenant_before_acknowledgement(
         ).fetchone() is None
 
 
+@pytest.mark.parametrize(
+    "correlation_id", [{"nested": "value"}, ["value"], 7, "", " value", "value ", "x" * 129]
+)
+def test_mapped_forwarding_callback_rejects_invalid_correlation_before_acknowledgement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    correlation_id,
+):
+    now = 2_000_000_000
+    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "test-klyrow-key")
+    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "test-klyrow-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=lambda *_args, **_kwargs: pytest.fail("invalid event dispatched"),
+    )
+    payload = {
+        "tenant_id": "tenant-a",
+        "message_id": "message-correlation-1",
+        "event_type": "klyrow.email.delivered",
+        "correlation_id": correlation_id,
+    }
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    event_id = "event-invalid-correlation-" + hashlib.sha256(body).hexdigest()[:16]
+    code, result = app.ingress(
+        "klyrow",
+        "/api/v1/klyrow/events",
+        body,
+        signed_headers("klyrow", body, now, event_id),
+    )
+    assert (code, result) == (422, {"detail": "invalid_correlation_id"})
+    with state.connect() as connection:
+        assert connection.execute(
+            "SELECT 1 FROM events WHERE event_id=?", (event_id,)
+        ).fetchone() is None
+
+
 class HttpResponse:
     def __init__(self, status: int = 202, body: bytes = b"{}"):
         self.status = status
@@ -1676,6 +1720,62 @@ def test_carrier_timeout_remains_unknown_until_attempt_bound_dlr_reconciles(
         app.reconcile_jasmin_dlr(callback.query, conflicting_dlr)
     assert completed["state"] == "submitted"
     assert completed["carrier_submitted"] == 1
+    assert completed["provider_message_id"] == "07033084-5cfd-4812-90a4-e4d24ffb6e3d"
+    assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
+    assert completed["operation_token"] is None
+
+
+def test_attempt_bound_rejection_dlr_supersedes_synchronous_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    configure_jasmin_route(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    send_urls: list[str] = []
+
+    def urlopen(url, **_kwargs):
+        if url.endswith("/ping"):
+            return HealthyJasmin()
+        send_urls.append(url)
+        return HealthyJasmin()
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-JASMIN-LATE-REJECTION",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    code, result = app.outbound(
+        body, outbound_headers(body, now, "nonce-late-rejection-0001")
+    )
+    assert code == 202
+    assert result["state"] == "submitted"
+    assert result["carrier_submitted"] is True
+    callback = urllib.parse.urlsplit(
+        urllib.parse.parse_qs(urllib.parse.urlsplit(send_urls[0]).query)["dlr-url"][0]
+    )
+    dlr = urllib.parse.urlencode(
+        {
+            "id": "07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+            "message_status": "ESME_RSUBMITFAIL",
+            "level": "1",
+            "connector": "smpp-prod-1",
+        }
+    ).encode()
+    completed = app.reconcile_jasmin_dlr(callback.query, dlr)
+    replay = app.reconcile_jasmin_dlr(callback.query, dlr)
+    assert replay["adapter_message_id"] == completed["adapter_message_id"]
+    assert completed["state"] == "rejected"
+    assert completed["carrier_submitted"] == 0
     assert completed["provider_message_id"] == "07033084-5cfd-4812-90a4-e4d24ffb6e3d"
     assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
     assert completed["operation_token"] is None

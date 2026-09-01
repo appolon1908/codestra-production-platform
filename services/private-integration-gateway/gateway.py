@@ -299,6 +299,22 @@ def forwarding_message_identity(payload: dict[str, Any]) -> str:
     return message_id
 
 
+def forwarding_correlation_identity(payload: dict[str, Any]) -> str | None:
+    """Return an optional correlation ID only when the receiver can persist it."""
+
+    correlation_id = payload.get("correlation_id")
+    if correlation_id is None:
+        return None
+    if (
+        not isinstance(correlation_id, str)
+        or not correlation_id
+        or correlation_id != correlation_id.strip()
+        or len(correlation_id) > 128
+    ):
+        raise ValueError("invalid_correlation_id")
+    return correlation_id
+
+
 def parse_jasmin_success_receipt(raw: bytes) -> str:
     """Return only the UUID from Jasmin's exact bounded success receipt."""
 
@@ -990,7 +1006,33 @@ class Store:
                 if cursor.rowcount != 1:
                     raise RuntimeError("SMS DLR reconciliation changed concurrently")
             elif pending["state"] in {"submitted", "rejected"}:
-                if (
+                late_rejection = (
+                    pending["state"] == "submitted"
+                    and state == "rejected"
+                    and pending["carrier_submitted"] == 1
+                    and pending["operation_token"] is None
+                    and pending["provider_message_id"] == provider_message_id
+                    and pending["carrier_dlr_sha256"] is None
+                )
+                if late_rejection:
+                    cursor = connection.execute(
+                        """UPDATE sms_transactions
+                        SET state='rejected',jasmin_dependency='reachable',
+                            carrier_submitted=0,carrier_dlr_sha256=?
+                        WHERE adapter_message_id=? AND state='submitted'
+                          AND carrier_submitted=1 AND operation_token IS NULL
+                          AND provider_message_id=? AND carrier_dlr_sha256 IS NULL
+                          AND reconciliation_proof_sha256=?""",
+                        (
+                            carrier_dlr_sha256,
+                            adapter_message_id,
+                            provider_message_id,
+                            reconciliation_proof_sha256,
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError("SMS DLR reconciliation changed concurrently")
+                elif (
                     pending["state"] != state
                     or pending["provider_message_id"] != provider_message_id
                     or (
@@ -999,7 +1041,7 @@ class Store:
                     )
                 ):
                     raise RuntimeError("SMS DLR conflicts with terminal result")
-                if pending["carrier_dlr_sha256"] is None:
+                elif pending["carrier_dlr_sha256"] is None:
                     cursor = connection.execute(
                         """UPDATE sms_transactions SET carrier_dlr_sha256=?
                         WHERE adapter_message_id=? AND state=?
@@ -1649,6 +1691,10 @@ class Gateway:
                 forwarding_tenant(payload)
             except ValueError:
                 return 422, {"detail": "tenant_id_required"}
+            try:
+                forwarding_correlation_identity(payload)
+            except ValueError:
+                return 422, {"detail": "invalid_correlation_id"}
             if (
                 system == "klyrow"
                 and path == "/api/v1/klyrow/events"
