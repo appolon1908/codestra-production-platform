@@ -18,9 +18,10 @@ The runtime application is under `control_plane_service/`, not `control_plane/`.
 The protected baseline differs from the runtime revision in eight existing
 modules and adds three modules. The earlier byte-identical conclusion was
 incorrect and is withdrawn. The checked-in
-`CONTROL_PLANE_RUNTIME_44D2_SERVICE_TREE.patch` is an inspectable reconstruction
-bundle from the named protected baseline to the exact runtime service tree; CI
-reconstructs it and compares every file byte-for-byte with the runtime commit.
+`CONTROL_PLANE_RUNTIME_44D2_SERVICE_TREE.patch.b64` is a whitespace-safe encoded
+reconstruction bundle from the named protected baseline to the exact runtime
+service tree; CI decodes it and compares every file byte-for-byte with the
+runtime commit.
 
 The histories diverge in deployment and migration material. The runtime branch
 contains older/different control-plane Compose and Dockerfile definitions and
@@ -38,7 +39,7 @@ Disposition C — partially reconciled.
   require immutable-candidate behavioral validation before any deployment.
 - Deployment and migration authority: protected head.
 - Runtime-only source: retained by the reviewed reconstruction bundle
-  `reports/CONTROL_PLANE_RUNTIME_44D2_SERVICE_TREE.patch`. CI applies it to
+  `reports/CONTROL_PLANE_RUNTIME_44D2_SERVICE_TREE.patch.b64`. CI decodes and applies it to
   protected baseline `aa3d903648d5f7c4cc10acee93e509a37ac36f76` and verifies
   the complete `control_plane_service/` file set and contents against
   `44d2addf48ae31da6eeb3c3f9ab3fe34d999042c`. This evidence survives the

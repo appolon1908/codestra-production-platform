@@ -2,6 +2,7 @@
 import pathlib
 import re
 import subprocess
+import base64
 import io
 import tarfile
 import tempfile
@@ -10,7 +11,7 @@ REPORT = pathlib.Path("reports/CONTROL_PLANE_SOURCE_AUTHORITY_RECONCILIATION_202
 text = REPORT.read_text()
 runtime = "44d2addf48ae31da6eeb3c3f9ab3fe34d999042c"
 protected = "aa3d903648d5f7c4cc10acee93e509a37ac36f76"
-runtime_patch = pathlib.Path("reports/CONTROL_PLANE_RUNTIME_44D2_SERVICE_TREE.patch")
+runtime_patch = pathlib.Path("reports/CONTROL_PLANE_RUNTIME_44D2_SERVICE_TREE.patch.b64")
 
 required = [
     "CONTROL_PLANE_RUNTIME_ONLY_CHANGES",
@@ -37,9 +38,11 @@ runtime_files = subprocess.check_output(
 ).splitlines()
 with tempfile.TemporaryDirectory() as directory:
     root = pathlib.Path(directory)
+    decoded_patch = root / "runtime-service-tree.patch"
+    decoded_patch.write_bytes(base64.b64decode(b"".join(runtime_patch.read_bytes().split()), validate=True))
     with tarfile.open(fileobj=io.BytesIO(archive)) as value:
         value.extractall(root, filter="data")
-    subprocess.run(["git", "apply", str(runtime_patch.resolve())], cwd=root, check=True)
+    subprocess.run(["git", "apply", str(decoded_patch)], cwd=root, check=True)
     reconstructed = sorted(
         str(value.relative_to(root)) for value in (root / "control_plane_service").rglob("*") if value.is_file()
     )
