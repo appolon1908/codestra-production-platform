@@ -703,6 +703,93 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     assert dict(row) == {"state": "delivered", "attempts": 1}
 
 
+@pytest.mark.parametrize(
+    "event_type",
+    [None, "", "klyrow.email.opened", "klyrow.email.complained"],
+)
+def test_unsupported_klyrow_status_is_rejected_before_persistence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event_type: str | None,
+):
+    now = 2_000_000_000
+    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "test-klyrow-key")
+    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "test-klyrow-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+    )
+    payload = {
+        "message_id": "message-unsupported",
+        "tenant_id": "tenant-a",
+        "idempotency_key": "unsupported-1",
+        "occurred_at": "2026-09-01T00:00:00Z",
+    }
+    if event_type is not None:
+        payload["event_type"] = event_type
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    code, result = app.ingress(
+        "klyrow",
+        "/api/v1/klyrow/events",
+        body,
+        signed_headers("klyrow", body, now, "event-unsupported-status"),
+    )
+    assert code == 422
+    assert result == {"detail": "unsupported_klyrow_email_status"}
+    with state.connect() as connection:
+        assert connection.execute("SELECT count(*) FROM events").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("event_type", sorted(gateway.KLYROW_FORWARDED_EMAIL_STATUS_EVENTS))
+def test_supported_klyrow_status_is_dispatch_eligible(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event_type: str,
+):
+    now = 2_000_000_000
+    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "test-klyrow-key")
+    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "test-klyrow-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+    )
+    payload = {
+        "message_id": "message-supported",
+        "event_type": event_type,
+        "tenant_id": "tenant-a",
+        "idempotency_key": "supported-1",
+        "occurred_at": "2026-09-01T00:00:00Z",
+    }
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    code, result = app.ingress(
+        "klyrow",
+        "/api/v1/klyrow/events",
+        body,
+        signed_headers("klyrow", body, now, f"event-{event_type}"),
+    )
+    assert code == 202
+    assert result["accepted"] is True
+    with state.connect() as connection:
+        row = connection.execute(
+            "SELECT dispatch_eligible,state FROM events"
+        ).fetchone()
+    assert dict(row) == {"dispatch_eligible": 1, "state": "queued"}
+
+
 def test_unrelated_success_response_cannot_mark_event_delivered(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

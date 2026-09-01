@@ -80,6 +80,12 @@ EVENT_TYPES = {
     "/api/v1/klyrow/complaints": "klyrow.email.complained",
     "/api/v1/klyrow/unsubscribes": "klyrow.email.unsubscribed",
 }
+KLYROW_FORWARDED_EMAIL_STATUS_EVENTS = {
+    "klyrow.email.delivered",
+    "klyrow.email.bounced",
+    "klyrow.email.deferred",
+    "klyrow.email.held",
+}
 ROUTE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 JASMIN_SUCCESS_RECEIPT = re.compile(
     r'Success "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
@@ -1462,6 +1468,13 @@ class Gateway:
                 forwarding_tenant(payload)
             except ValueError:
                 return 422, {"detail": "tenant_id_required"}
+            if (
+                system == "klyrow"
+                and path == "/api/v1/klyrow/events"
+                and payload.get("event_type")
+                not in KLYROW_FORWARDED_EMAIL_STATUS_EVENTS
+            ):
+                return 422, {"detail": "unsupported_klyrow_email_status"}
         entity_key = str(
             payload.get("record_id")
             if system == "kyqra" and path == "/api/v1/kyqra/results"
