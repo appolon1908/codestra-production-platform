@@ -16,6 +16,14 @@ its own `JASMIN_ROUTE_<ROUTE>_API_USER` and
 `JASMIN_ROUTE_<ROUTE>_API_PASSWORD` authority; the gateway never falls back to
 one global Jasmin account for differently authorized routes and refuses two
 logical routes that resolve to the same Jasmin username.
+Every enabled customer policy must set `enabled` to the literal JSON boolean
+`true` and define an exact `delivery_window` object with only `timezone`,
+`start`, and `end`. The timezone is a protected, customer-specific RFC 3339
+offset (`Z` or `+/-HH:MM`, bounded through `+/-14:00`) and both bounds are
+zero-padded `HH:MM` local times. The end is exclusive; an end earlier than the
+start represents an overnight window. Any seasonal offset change requires the
+normal reviewed policy update. Missing, malformed, or currently closed windows
+fail before SMS reservation or any Jasmin request.
 
 Middleware forwarding is independently fail-closed. New authenticated ingress
 events become dispatch-eligible only when `MIDDLEWARE_FORWARDING_ENABLED=true`
@@ -48,6 +56,10 @@ customer/sender/destination/route/content effect digest. Only the exact bounded
 Jasmin DLR form presented through that private production handler can reconcile
 `submitting` or `outcome_unknown`; unrelated receipts, altered capabilities,
 terminal conflicts, duplicate form fields, and public callback URLs fail closed.
+Carrier HTTP 5xx responses and other ambiguity-preserving statuses remain
+`outcome_unknown` with their bounded response digest and attempt capability;
+they can become terminal only through the exact attempt-bound DLR and block a
+replacement idempotency key in the interim.
 The gateway strips callback query material from its HTTP logs. Live startup also
 requires a distinct `JASMIN_RECONCILIATION_SECRET` of at least 32 bytes.
 

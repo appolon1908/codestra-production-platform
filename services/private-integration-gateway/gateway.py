@@ -25,7 +25,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -101,6 +101,9 @@ JASMIN_DLR_FIELDS = {"id", "message_status", "level", "connector"}
 JASMIN_DLR_PATH = "/internal/v1/jasmin/dlr"
 DISPATCH_RECEIPT_STATES = {"queued", "retrying", "delivered", "dead_letter"}
 DISPATCH_LEASE_SECONDS = 30
+DELIVERY_TIME = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
+DELIVERY_TIMEZONE = re.compile(r"([+-])([0-9]{2}):([0-9]{2})")
+AMBIGUOUS_CARRIER_HTTP_STATUSES = {408, 409, 425, 429}
 
 
 class DispatchOutcomeUnknown(RuntimeError):
@@ -1153,14 +1156,76 @@ def validate_recipient_authorization(
         raise PermissionError("recipient_consent_required")
 
 
+def validate_delivery_window(
+    policy: dict[str, Any], now_utc: float | None
+) -> None:
+    """Validate and, when a time is supplied, enforce one customer window."""
+
+    window = policy.get("delivery_window")
+    if not isinstance(window, dict) or set(window) != {"timezone", "start", "end"}:
+        raise PermissionError("delivery_window_policy_invalid")
+    timezone_name = window.get("timezone")
+    start = window.get("start")
+    end = window.get("end")
+    if (
+        not isinstance(timezone_name, str)
+        or not timezone_name
+        or timezone_name != timezone_name.strip()
+        or len(timezone_name) > 64
+        or not isinstance(start, str)
+        or not isinstance(end, str)
+    ):
+        raise PermissionError("delivery_window_policy_invalid")
+    start_match = DELIVERY_TIME.fullmatch(start)
+    end_match = DELIVERY_TIME.fullmatch(end)
+    if start_match is None or end_match is None or start == end:
+        raise PermissionError("delivery_window_policy_invalid")
+    if timezone_name == "Z":
+        offset_minutes = 0
+    else:
+        timezone_match = DELIVERY_TIMEZONE.fullmatch(timezone_name)
+        if timezone_match is None:
+            raise PermissionError("delivery_window_policy_invalid")
+        offset_hours = int(timezone_match.group(2))
+        offset_remainder = int(timezone_match.group(3))
+        if offset_hours > 14 or (offset_hours == 14 and offset_remainder != 0):
+            raise PermissionError("delivery_window_policy_invalid")
+        offset_minutes = offset_hours * 60 + offset_remainder
+        if timezone_match.group(1) == "-":
+            offset_minutes = -offset_minutes
+    delivery_zone = timezone(timedelta(minutes=offset_minutes))
+    if now_utc is None:
+        return
+    local = datetime.fromtimestamp(now_utc, timezone.utc).astimezone(delivery_zone)
+    minute = local.hour * 60 + local.minute
+    start_minute = int(start_match.group(1)) * 60 + int(start_match.group(2))
+    end_minute = int(end_match.group(1)) * 60 + int(end_match.group(2))
+    allowed = (
+        start_minute <= minute < end_minute
+        if start_minute < end_minute
+        else minute >= start_minute or minute < end_minute
+    )
+    if not allowed:
+        raise PermissionError("quiet_hours")
+
+
 def validate_live_route_authorities() -> None:
     """Require a distinct credential authority for every enabled policy route."""
 
     enabled_routes: set[str] = set()
     route_usernames: set[str] = set()
     for policy in customer_policy().values():
-        if not isinstance(policy, dict) or not policy.get("enabled", False):
+        if not isinstance(policy, dict):
+            raise RuntimeError("customer policy is invalid")
+        enabled = policy.get("enabled")
+        if enabled is not True:
+            if enabled is not False:
+                raise RuntimeError("customer enabled flag is invalid")
             continue
+        try:
+            validate_delivery_window(policy, None)
+        except PermissionError as error:
+            raise RuntimeError("enabled customer delivery window is invalid") from error
         route = policy.get("route")
         if not isinstance(route, str):
             raise RuntimeError("enabled customer route is invalid")
@@ -1179,12 +1244,14 @@ def validate_live_route_authorities() -> None:
         raise RuntimeError("Jasmin reconciliation authority is unavailable")
 
 
-def validate_outbound(payload: dict[str, Any]) -> tuple[str, str, str, str, str | None]:
+def validate_outbound(
+    payload: dict[str, Any], now_utc: float
+) -> tuple[str, str, str, str, str | None]:
     customer = payload.get("customer_id")
     if not isinstance(customer, str) or not customer:
         raise ValueError("customer_required")
     policy = customer_policy().get(customer)
-    if not isinstance(policy, dict) or not policy.get("enabled", False):
+    if not isinstance(policy, dict) or policy.get("enabled") is not True:
         raise PermissionError("customer_disabled_or_unknown")
     sender = normalize_sender(payload.get("sender", payload.get("from")))
     if sender not in policy.get("senders", []):
@@ -1196,6 +1263,7 @@ def validate_outbound(payload: dict[str, Any]) -> tuple[str, str, str, str, str 
     if not any(destination.startswith(prefix) for prefix in prefixes):
         raise PermissionError("destination_route_not_authorized")
     validate_recipient_authorization(policy, destination)
+    validate_delivery_window(policy, now_utc)
     route = policy.get("route")
     if not isinstance(route, str) or not route:
         raise PermissionError("route_not_authorized")
@@ -1270,9 +1338,15 @@ class Gateway:
                 raw = response.read(2049)
                 status = response.status
         except urllib.error.HTTPError as error:
-            raw = error.read(2049)
+            try:
+                raw = error.read(2049)
+            except Exception:
+                return "outcome_unknown", None, None
             digest = hashlib.sha256(raw).hexdigest() if len(raw) <= 2048 else None
-            return "rejected", None, digest
+            ambiguous = (
+                error.code >= 500 or error.code in AMBIGUOUS_CARRIER_HTTP_STATUSES
+            )
+            return "outcome_unknown" if ambiguous else "rejected", None, digest
         except (
             TimeoutError,
             urllib.error.URLError,
@@ -1285,8 +1359,9 @@ class Gateway:
             return "outcome_unknown", None, None
         digest = hashlib.sha256(raw).hexdigest()
         if status != 200:
+            ambiguous = status >= 500 or status in AMBIGUOUS_CARRIER_HTTP_STATUSES
             return (
-                "outcome_unknown" if 200 <= status < 300 else "rejected",
+                "outcome_unknown" if 200 <= status < 300 or ambiguous else "rejected",
                 None,
                 digest,
             )
@@ -1638,7 +1713,9 @@ class Gateway:
         if not isinstance(idempotency_key, str) or not 8 <= len(idempotency_key) <= 128:
             return 422, {"detail": "invalid_idempotency_key"}
         try:
-            customer, sender, destination, route, correlation = validate_outbound(payload)
+            customer, sender, destination, route, correlation = validate_outbound(
+                payload, now
+            )
         except ValueError as error:
             return 422, {"detail": str(error)}
         except PermissionError as error:

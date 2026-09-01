@@ -10,6 +10,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -183,6 +184,11 @@ def configure_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
                     "approved_recipients": ["+4915512345678"],
                     "consented_recipients": ["+4915512345678"],
                     "suppressed_recipients": [],
+                    "delivery_window": {
+                        "timezone": "Z",
+                        "start": "00:00",
+                        "end": "23:59",
+                    },
                 },
                 "tenant-disabled": {
                     "enabled": False,
@@ -237,14 +243,14 @@ def test_outbound_policy_rejects_invalid_or_cross_tenant_input(
 ):
     configure_tenant(monkeypatch)
     with pytest.raises(error):
-        gateway.validate_outbound(valid_payload(**changes))
+        gateway.validate_outbound(valid_payload(**changes), 2_000_000_000)
 
 
 def test_outbound_policy_accepts_exact_sender_destination_and_route(
     monkeypatch: pytest.MonkeyPatch,
 ):
     configure_tenant(monkeypatch)
-    assert gateway.validate_outbound(valid_payload()) == (
+    assert gateway.validate_outbound(valid_payload(), 2_000_000_000) == (
         "tenant-a",
         "TEST",
         "+4915512345678",
@@ -272,7 +278,85 @@ def test_outbound_requires_approved_consented_unsuppressed_recipient(
     policy["tenant-a"].update(policy_change)
     monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
     with pytest.raises(PermissionError, match=detail):
-        gateway.validate_outbound(valid_payload())
+        gateway.validate_outbound(valid_payload(), 2_000_000_000)
+
+
+@pytest.mark.parametrize("enabled", ["false", 1, 0, None])
+def test_customer_enablement_requires_literal_boolean_true(
+    monkeypatch: pytest.MonkeyPatch, enabled
+) -> None:
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["tenant-a"]["enabled"] = enabled
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    with pytest.raises(PermissionError, match="customer_disabled_or_unknown"):
+        gateway.validate_outbound(valid_payload(), 2_000_000_000)
+    with pytest.raises(RuntimeError, match="enabled flag is invalid"):
+        gateway.validate_live_route_authorities()
+
+
+def test_customer_timezone_delivery_window_blocks_before_sms_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["tenant-a"]["delivery_window"] = {
+        "timezone": "+02:00",
+        "start": "09:00",
+        "end": "17:00",
+    }
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    allowed = datetime(2026, 9, 1, 12, tzinfo=timezone.utc).timestamp()
+    blocked = datetime(2026, 9, 1, 18, tzinfo=timezone.utc).timestamp()
+    assert gateway.validate_outbound(valid_payload(), allowed)[0] == "tenant-a"
+    with pytest.raises(PermissionError, match="quiet_hours"):
+        gateway.validate_outbound(valid_payload(), blocked)
+
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    configure_jasmin_route(monkeypatch)
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-QUIET-HOURS",
+        ),
+        state,
+        clock=lambda: blocked,
+        urlopen=lambda *_args, **_kwargs: pytest.fail("carrier reached in quiet hours"),
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    code, result = app.outbound(
+        body, outbound_headers(body, int(blocked), "nonce-quiet-hours-0001")
+    )
+    assert (code, result) == (403, {"detail": "quiet_hours"})
+    with state.connect() as connection:
+        count = connection.execute("SELECT COUNT(*) FROM sms_transactions").fetchone()[0]
+    assert count == 0
+
+
+@pytest.mark.parametrize(
+    "window",
+    [
+        None,
+        {"timezone": "Europe/Berlin", "start": "09:00", "end": "17:00"},
+        {"timezone": "Z", "start": "09:00", "end": "09:00"},
+        {"timezone": "Z", "start": "9:00", "end": "17:00"},
+    ],
+)
+def test_enabled_customer_delivery_window_configuration_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, window
+) -> None:
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["tenant-a"]["delivery_window"] = window
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    with pytest.raises(PermissionError, match="delivery_window_policy_invalid"):
+        gateway.validate_outbound(valid_payload(), 2_000_000_000)
+    with pytest.raises(RuntimeError, match="delivery window is invalid"):
+        gateway.validate_live_route_authorities()
 
 
 def test_live_submission_uses_the_customer_route_specific_jasmin_authority(
@@ -291,6 +375,11 @@ def test_live_submission_uses_the_customer_route_specific_jasmin_authority(
                     "approved_recipients": ["+4915512345678"],
                     "consented_recipients": ["+4915512345678"],
                     "suppressed_recipients": [],
+                    "delivery_window": {
+                        "timezone": "Z",
+                        "start": "00:00",
+                        "end": "23:59",
+                    },
                 },
                 "tenant-b": {
                     "enabled": True,
@@ -300,6 +389,11 @@ def test_live_submission_uses_the_customer_route_specific_jasmin_authority(
                     "approved_recipients": ["+4915512345678"],
                     "consented_recipients": ["+4915512345678"],
                     "suppressed_recipients": [],
+                    "delivery_window": {
+                        "timezone": "Z",
+                        "start": "00:00",
+                        "end": "23:59",
+                    },
                 },
             }
         ),
@@ -1532,6 +1626,75 @@ def test_carrier_timeout_remains_unknown_until_attempt_bound_dlr_reconciles(
     assert completed["carrier_submitted"] == 1
     assert completed["provider_message_id"] == "07033084-5cfd-4812-90a4-e4d24ffb6e3d"
     assert completed["carrier_dlr_sha256"] == hashlib.sha256(dlr).hexdigest()
+    assert completed["operation_token"] is None
+
+
+def test_carrier_5xx_remains_unknown_until_attempt_bound_dlr_reconciles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    configure_jasmin_route(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    send_urls: list[str] = []
+    response_body = b"upstream service unavailable"
+
+    def urlopen(url, **_kwargs):
+        if url.endswith("/ping"):
+            return HealthyJasmin()
+        send_urls.append(url)
+        raise urllib.error.HTTPError(
+            url, 503, "Service Unavailable", {}, BytesIO(response_body)
+        )
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-JASMIN-5XX-READBACK",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    code, result = app.outbound(
+        body, outbound_headers(body, now, "nonce-carrier-5xx-0001")
+    )
+    assert code == 202 and result["state"] == "outcome_unknown"
+    with state.connect() as connection:
+        pending = connection.execute("SELECT * FROM sms_transactions").fetchone()
+    assert pending["operation_token"]
+    assert pending["provider_response_sha256"] == hashlib.sha256(response_body).hexdigest()
+
+    replacement = json.dumps(
+        valid_payload(idempotency_key="idem-timeout-replacement"),
+        separators=(",", ":"),
+    ).encode()
+    blocked_code, blocked = app.outbound(
+        replacement,
+        outbound_headers(replacement, now, "nonce-carrier-5xx-0002"),
+    )
+    assert (blocked_code, blocked["detail"]) == (409, "carrier_outcome_pending")
+    assert len(send_urls) == 1
+
+    callback = urllib.parse.urlsplit(
+        urllib.parse.parse_qs(urllib.parse.urlsplit(send_urls[0]).query)["dlr-url"][0]
+    )
+    dlr = urllib.parse.urlencode(
+        {
+            "id": "07033084-5cfd-4812-90a4-e4d24ffb6e3d",
+            "message_status": "ESME_ROK",
+            "level": "1",
+            "connector": "smpp-prod-1",
+        }
+    ).encode()
+    completed = app.reconcile_jasmin_dlr(callback.query, dlr)
+    assert completed["state"] == "submitted"
+    assert completed["carrier_submitted"] == 1
     assert completed["operation_token"] is None
 
 
