@@ -121,6 +121,21 @@ class EmailResellerTest(unittest.TestCase):
         with self.s.connect() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) n FROM suppressions WHERE account_id='account-a' AND kind='hard_bounce' AND active=1").fetchone()["n"], 1)
 
+    def test_late_provider_event_cannot_regress_terminal_state(self):
+        message, _ = self.create()
+        self.assertTrue(self.s.record_provider_event("account-a", message["message_id"], "provider-delivered", "delivered", "Delivered"))
+        self.assertTrue(self.s.record_provider_event("account-a", message["message_id"], "provider-sent-late", "sent", "Sent"))
+        current = self.s.get_message("consumer-a", message["message_id"])
+        self.assertEqual((current["status"], current["raw_provider_status"]), ("delivered", "Delivered"))
+
+    def test_balance_reservation_never_goes_negative(self):
+        with self.s.connect() as db:
+            db.execute("UPDATE email_accounts SET balance_minor=1 WHERE id='account-a'")
+        self.create("one")
+        self.rejected("insufficient_balance", lambda: self.create("two"))
+        with self.s.connect() as db:
+            self.assertEqual(db.execute("SELECT balance_minor FROM email_accounts WHERE id='account-a'").fetchone()["balance_minor"], 0)
+
     def test_unknown_consumer_denied(self):
         self.rejected("customer_account_not_found", lambda: self.create(consumer="missing"))
 

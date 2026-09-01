@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
-from .database import Connection
+from .database import Connection, is_postgres
 
 DB_PATH = os.getenv("EMAIL_DATABASE_PATH", "/data/email-reseller.db")
 MAX_BODY = int(os.getenv("EMAIL_MAX_REQUEST_BYTES", "262144"))
@@ -28,6 +28,14 @@ MODE = os.getenv("EMAIL_SUBMISSION_MODE", "synthetic")
 EMAIL_RE = re.compile(r"^[^\s<>@,;\r\n]+@[^\s<>@,;\r\n]+\.[^\s<>@,;\r\n]+$")
 ALLOWED_FIELDS = {"from", "to", "cc", "bcc", "subject", "text", "html", "reply_to", "client_reference"}
 STATUSES = {"accepted", "queued", "sent", "delivered", "soft_bounce", "hard_bounce", "complained", "rejected", "failed"}
+STATUS_TRANSITIONS = {
+    "accepted": {"queued", "sent", "delivered", "soft_bounce", "hard_bounce", "complained", "rejected", "failed"},
+    "queued": {"sent", "delivered", "soft_bounce", "hard_bounce", "complained", "rejected", "failed"},
+    "sent": {"delivered", "soft_bounce", "hard_bounce", "complained", "failed"},
+    "soft_bounce": {"sent", "delivered", "hard_bounce", "complained", "failed"},
+    "delivered": {"complained"},
+    "hard_bounce": set(), "complained": set(), "rejected": set(), "failed": set(),
+}
 EVENT_TYPES = {
     "accepted": "email.accepted", "queued": "email.accepted", "sent": "email.sent",
     "delivered": "email.delivered", "soft_bounce": "email.bounced",
@@ -123,8 +131,9 @@ def recipients(value: Any, field: str) -> list[str]:
     return [normalize_email(x, field) for x in values]
 
 
-def account_for(consumer: str, db: Connection) -> Any:
-    row = db.execute("SELECT * FROM email_accounts WHERE kong_consumer_id=?", (consumer,)).fetchone()
+def account_for(consumer: str, db: Connection, *, lock: bool = False) -> Any:
+    suffix = " FOR UPDATE" if lock and is_postgres() else ""
+    row = db.execute("SELECT * FROM email_accounts WHERE kong_consumer_id=?" + suffix, (consumer,)).fetchone()
     if not row:
         raise ApiError(403, "customer_account_not_found")
     if not row["enabled"]:
@@ -175,7 +184,12 @@ def create_message(consumer: str, idem: str, correlation: str, value: dict[str, 
                   "client_reference": value.get("client_reference")}
     digest = canonical_request(normalized)
     with connect() as db:
-        account = account_for(consumer, db)
+        # Serialize all reservations for an account. This makes the idempotency
+        # claim, quota check, ledger reservation, and balance decrement one
+        # atomic critical section on both supported databases.
+        if not is_postgres():
+            db.execute("BEGIN IMMEDIATE")
+        account = account_for(consumer, db, lock=True)
         previous = db.execute("SELECT * FROM email_messages WHERE account_id=? AND idempotency_key=?", (account["id"], idem)).fetchone()
         if previous:
             if previous["request_hash"] != digest:
@@ -217,7 +231,10 @@ def create_message(consumer: str, idem: str, correlation: str, value: dict[str, 
                    (event_id, account["id"], mid, "email.accepted", "accepted", raw, None, correlation, "{}", stamp))
         db.execute("INSERT INTO billing_ledger VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                    (ledger_id, account["id"], account["customer_id"], mid, len(all_recipients), limits["unit_price_minor"], total, account["currency"], "reserved", stamp, stamp))
-        db.execute("UPDATE email_accounts SET balance_minor=balance_minor-?,updated_at=? WHERE id=?", (total, stamp, account["id"]))
+        reserved = db.execute("""UPDATE email_accounts SET balance_minor=balance_minor-?,updated_at=?
+            WHERE id=? AND balance_minor>=?""", (total, stamp, account["id"], total))
+        if reserved.rowcount != 1:
+            raise ApiError(402, "insufficient_balance")
         db.execute("INSERT INTO audit_records VALUES(?,?,?,?,?,?,?,?,?)", (str(uuid.uuid4()), account["id"], consumer, "email.accepted", "email_message", mid, correlation, json.dumps({"recipient_count": len(all_recipients), "mode": MODE}), stamp))
         row = db.execute("SELECT * FROM email_messages WHERE id=?", (mid,)).fetchone()
     return public_message(row), False
@@ -255,8 +272,11 @@ def record_provider_event(account_id: str, message_id: str, provider_event_id: s
         db.execute("INSERT INTO delivery_events VALUES(?,?,?,?,?,?,?,?,?,?)",
                    (str(uuid.uuid4()), account_id, message_id, EVENT_TYPES[canonical_status], canonical_status,
                     raw_state, provider_event_id, message["correlation_id"], json.dumps(payload or {}, sort_keys=True), stamp))
-        db.execute("UPDATE email_messages SET status=?,raw_provider_status=?,updated_at=? WHERE id=? AND account_id=?",
-                   (canonical_status, raw_state, stamp, message_id, account_id))
+        current = message["status"]
+        state_changed = canonical_status != current and canonical_status in STATUS_TRANSITIONS[current]
+        if state_changed:
+            db.execute("UPDATE email_messages SET status=?,raw_provider_status=?,updated_at=? WHERE id=? AND account_id=?",
+                       (canonical_status, raw_state, stamp, message_id, account_id))
         if canonical_status in {"hard_bounce", "complained"} and recipient:
             address = normalize_email(recipient, "recipient")
             kind = "hard_bounce" if canonical_status == "hard_bounce" else "complaint"
@@ -264,7 +284,9 @@ def record_provider_event(account_id: str, message_id: str, provider_event_id: s
                        (str(uuid.uuid4()), account_id, address, kind, 1, raw_state, stamp, stamp))
         db.execute("INSERT INTO audit_records VALUES(?,?,?,?,?,?,?,?,?)",
                    (str(uuid.uuid4()), account_id, None, EVENT_TYPES[canonical_status], "email_message", message_id,
-                    message["correlation_id"], json.dumps({"provider_event_id": provider_event_id}), stamp))
+                    message["correlation_id"], json.dumps({"provider_event_id": provider_event_id,
+                                                           "state_changed": state_changed,
+                                                           "previous_status": current}), stamp))
     return True
 
 
