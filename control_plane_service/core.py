@@ -469,7 +469,7 @@ class Store:
         self.get_message(message_id,tenant)
         with self.connect() as db: return [json.loads(r["envelope"]) for r in db.execute("SELECT envelope FROM message_events WHERE message_id=? AND tenant_id=? ORDER BY created_at",(message_id,tenant))]
 
-    def transition_message(self, message_id: str, tenant: str, status: str, raw_status: str, event_id: str | None = None, provider_message_id: str | None = None, error_code: str | None = None, payload: dict[str, Any] | None = None) -> bool:
+    def transition_message(self, message_id: str, tenant: str, status: str, raw_status: str, event_id: str | None = None, provider_message_id: str | None = None, error_code: str | None = None, payload: dict[str, Any] | None = None, allow_ambiguous_reconciliation: bool = False) -> bool:
         if status not in MESSAGE_STATES: raise ControlPlaneError("invalid_message_status")
         message=self.get_message(message_id,tenant); stamp=now_iso(); timestamp_col={"accepted":"accepted_at","sent":"sent_at","delivered":"delivered_at","failed":"failed_at","rejected":"failed_at","bounced":"failed_at"}.get(status)
         with self.connect() as db:
@@ -479,7 +479,14 @@ class Store:
                   "undeliverable":6,"bounced":7,"complained":8,"unsubscribed":9,
                   "cancelled":9,"opted_out":9,"blocked":9}
             current=str(message["status"])
-            if rank.get(status,0) < rank.get(current,0):
+            reconciles_ambiguous_submission = (
+                allow_ambiguous_reconciliation
+                and current == "deferred"
+                and status == "accepted"
+                and raw_status == "submitted"
+                and bool(provider_message_id)
+            )
+            if rank.get(status,0) < rank.get(current,0) and not reconciles_ambiguous_submission:
                 return True
             sql="UPDATE messages SET status=?,raw_provider_status=?,provider_message_id=COALESCE(?,provider_message_id),provider_error_code=?"; args:list[Any]=[status,raw_status,provider_message_id,error_code]
             if timestamp_col: sql+=f",{timestamp_col}=?"; args.append(stamp)
@@ -501,7 +508,13 @@ class Store:
         payload=envelope["payload"]; message_id=str(payload.get("message_id", "")); tenant=envelope["tenant_id"]
         raw=str(payload.get("status") or envelope["event_type"].rsplit(".",1)[-1]); status=normalize_status(source,raw)
         message=self.get_message(message_id,tenant); destination=message["normalized_destination"]
-        changed=self.transition_message(message_id,tenant,status,raw,envelope["event_id"],payload.get("provider_message_id"),payload.get("error_code"),payload)
+        reconcile_ambiguous = (
+            source == "telnexa"
+            and envelope["event_type"] == "telnexa.sms.submitted"
+            and status == "accepted"
+            and raw == "submitted"
+        )
+        changed=self.transition_message(message_id,tenant,status,raw,envelope["event_id"],payload.get("provider_message_id"),payload.get("error_code"),payload,allow_ambiguous_reconciliation=reconcile_ambiguous)
         if changed and source=="telnexa" and envelope["event_type"] in {"telnexa.sms.received","telnexa.sms.opted_out"} and str(payload.get("text","")).strip().upper() in {"STOP","UNSUBSCRIBE"}:
             self.set_preference(tenant,message["customer_id"],"sms","unsubscribed","telnexa",str(payload.get("text")).upper()); self.suppress(tenant,"sms",destination,"optout","inbound_keyword","telnexa")
         if changed and source=="klyrow" and status in {"bounced","complained","unsubscribed"}:
