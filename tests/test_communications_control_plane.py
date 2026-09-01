@@ -4,6 +4,7 @@ import unittest
 
 from control_plane_service.core import ControlPlaneError, Store, normalize_destination, sms_segments, validate_envelope
 from control_plane_service.providers import ProviderError, submit, submit_crawler
+from control_plane_service.server import projection_for_exact_replay
 from control_plane_service.worker import dispatch_messages
 from control_plane_service.routing import select_channel
 
@@ -182,8 +183,7 @@ class CommunicationsTests(unittest.TestCase):
         replay=self.store.exact_event_replay(env)
         self.assertIsNotNone(replay)
         self.assertTrue(replay.duplicate)
-        self.assertTrue(self.store.apply_provider_event("telnexa",env))
-        receipt=self.store.provider_projection_receipt(event_id)
+        receipt=projection_for_exact_replay(self.store,"telnexa",env)
         self.assertEqual(receipt,{
             "event_id":event_id,
             "message_id":message["message_id"],
@@ -191,8 +191,9 @@ class CommunicationsTests(unittest.TestCase):
             "raw_status":"submitted",
             "status":"accepted",
         })
-        self.assertFalse(self.store.apply_provider_event("telnexa",env))
-        self.assertEqual(self.store.provider_projection_receipt(event_id),receipt)
+        self.assertEqual(
+            projection_for_exact_replay(self.store,"telnexa",env),receipt
+        )
 
     def test_sms_stop_optout(self):
         message,_=self.store.create_message(request()); env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"stop-1","payload":{"message_id":message["message_id"],"status":"received","text":"STOP"}},"telnexa","stop-1")

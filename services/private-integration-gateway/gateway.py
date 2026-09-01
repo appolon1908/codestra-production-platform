@@ -128,6 +128,8 @@ DISPATCH_RECEIPT_STATES = {"queued", "retrying", "delivered", "dead_letter"}
 DISPATCH_LEASE_SECONDS = 30
 DELIVERY_TIME = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 DELIVERY_TIMEZONE = re.compile(r"([+-])([0-9]{2}):([0-9]{2})")
+BILLING_PERIOD = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")
+CURRENCY = re.compile(r"[A-Z]{3}")
 AMBIGUOUS_CARRIER_HTTP_STATUSES = {408, 409, 425, 429}
 REQUEST_IO_TIMEOUT_SECONDS = 10.0
 REQUEST_HEADER_DEADLINE_SECONDS = 10.0
@@ -136,6 +138,25 @@ REQUEST_BODY_DEADLINE_SECONDS = 10.0
 
 class DispatchOutcomeUnknown(RuntimeError):
     """The receiver may have committed the request before transport failed."""
+
+
+@dataclass(frozen=True)
+class OutboundAuthorization:
+    """One immutable policy decision used for an atomic carrier reservation."""
+
+    customer_id: str
+    tenant_id: str
+    sender: str
+    destination: str
+    route: str
+    correlation_id: str | None
+    billing_period: str
+    quota_limit_segments: int
+    wallet_limit_minor: int
+    reserved_units: int
+    reserved_cost_minor: int
+    currency: str
+    authorization_sha256: str
 
 
 class AbsoluteDeadlineReader:
@@ -668,6 +689,7 @@ class Store:
                 """CREATE TABLE IF NOT EXISTS sms_transactions(
                     adapter_message_id TEXT PRIMARY KEY,
                     customer_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
                     idempotency_key TEXT NOT NULL,
                     payload_hash TEXT NOT NULL,
                     effect_hash TEXT NOT NULL,
@@ -687,6 +709,11 @@ class Store:
                     reconciliation_proof_sha256 TEXT,
                     carrier_dlr_sha256 TEXT,
                     lease_expires_at REAL NOT NULL DEFAULT 0,
+                    billing_period TEXT NOT NULL,
+                    reserved_units INTEGER NOT NULL,
+                    reserved_cost_minor INTEGER NOT NULL,
+                    currency TEXT NOT NULL,
+                    authorization_sha256 TEXT NOT NULL,
                     created_at REAL NOT NULL,
                     UNIQUE(customer_id, idempotency_key)
                 )"""
@@ -744,6 +771,49 @@ class Store:
             if "carrier_dlr_sha256" not in sms_columns:
                 connection.execute(
                     "ALTER TABLE sms_transactions ADD COLUMN carrier_dlr_sha256 TEXT"
+                )
+            if "tenant_id" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN tenant_id TEXT"
+                )
+                for row in connection.execute(
+                    "SELECT adapter_message_id,payload FROM sms_transactions"
+                ).fetchall():
+                    try:
+                        payload = json.loads(row["payload"])
+                        tenant_id = forwarding_tenant(payload)
+                    except (json.JSONDecodeError, ValueError) as error:
+                        raise RuntimeError(
+                            "existing SMS tenant identity is invalid"
+                        ) from error
+                    connection.execute(
+                        "UPDATE sms_transactions SET tenant_id=? WHERE adapter_message_id=?",
+                        (tenant_id, row["adapter_message_id"]),
+                    )
+            if "billing_period" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN billing_period TEXT "
+                    "NOT NULL DEFAULT 'legacy'"
+                )
+            if "reserved_units" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN reserved_units INTEGER "
+                    "NOT NULL DEFAULT 0"
+                )
+            if "reserved_cost_minor" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN reserved_cost_minor INTEGER "
+                    "NOT NULL DEFAULT 0"
+                )
+            if "currency" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN currency TEXT "
+                    "NOT NULL DEFAULT 'XXX'"
+                )
+            if "authorization_sha256" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN authorization_sha256 TEXT "
+                    "NOT NULL DEFAULT 'legacy'"
                 )
         if self.path.exists():
             self.path.chmod(0o600)
@@ -830,25 +900,65 @@ class Store:
                 (adapter_message_id,),
             ).fetchone()
 
-    def reserve_sms(self, values: tuple[Any, ...]) -> tuple[bool, sqlite3.Row]:
-        try:
-            with self.connect() as connection:
-                connection.execute(
-                    """INSERT INTO sms_transactions(
-                    adapter_message_id,customer_id,idempotency_key,payload_hash,effect_hash,
-                    payload,correlation_id,sender,destination,logical_route,
-                    validation_result,jasmin_dependency,state,carrier_submitted,
-                    provider_message_id,provider_response,provider_response_sha256,created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    values,
-                )
-            created = True
-        except sqlite3.IntegrityError:
-            created = False
-        row = self.sms_by_idempotency(str(values[1]), str(values[2]))
+    def reserve_sms(
+        self,
+        values: tuple[Any, ...],
+        authorization: OutboundAuthorization,
+    ) -> tuple[bool, sqlite3.Row]:
+        """Atomically reserve idempotency, quota, and wallet capacity."""
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """SELECT * FROM sms_transactions
+                WHERE customer_id=? AND idempotency_key=?""",
+                (authorization.customer_id, str(values[3])),
+            ).fetchone()
+            if existing is not None:
+                return False, existing
+            totals = connection.execute(
+                """SELECT COALESCE(SUM(reserved_units),0) AS units,
+                COALESCE(SUM(reserved_cost_minor),0) AS cost
+                FROM sms_transactions
+                WHERE customer_id=? AND tenant_id=? AND billing_period=?
+                  AND currency=?""",
+                (
+                    authorization.customer_id,
+                    authorization.tenant_id,
+                    authorization.billing_period,
+                    authorization.currency,
+                ),
+            ).fetchone()
+            if totals is None:
+                raise RuntimeError("SMS authorization totals read-back failed")
+            if (
+                int(totals["units"]) + authorization.reserved_units
+                > authorization.quota_limit_segments
+            ):
+                raise PermissionError("customer_quota_exhausted")
+            if (
+                int(totals["cost"]) + authorization.reserved_cost_minor
+                > authorization.wallet_limit_minor
+            ):
+                raise PermissionError("wallet_funds_insufficient")
+            connection.execute(
+                """INSERT INTO sms_transactions(
+                adapter_message_id,customer_id,tenant_id,idempotency_key,
+                payload_hash,effect_hash,payload,correlation_id,sender,destination,
+                logical_route,validation_result,jasmin_dependency,state,
+                carrier_submitted,provider_message_id,provider_response,
+                provider_response_sha256,billing_period,reserved_units,
+                reserved_cost_minor,currency,authorization_sha256,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                values,
+            )
+            row = connection.execute(
+                "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                (str(values[0]),),
+            ).fetchone()
         if row is None:
             raise RuntimeError("SMS reservation read-back failed")
-        return created, row
+        return True, row
 
     def complete_sms(
         self,
@@ -1217,15 +1327,32 @@ class Store:
             event_id = "telnexa-dlr-" + hashlib.sha256(
                 (adapter_message_id + "\n" + carrier_dlr_sha256).encode()
             ).hexdigest()
+            existing_event = connection.execute(
+                "SELECT payload FROM events WHERE event_id=?", (event_id,)
+            ).fetchone()
+            occurred_at = datetime.fromtimestamp(now, timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            )
+            if existing_event is not None:
+                try:
+                    existing_payload = json.loads(existing_event["payload"])
+                except json.JSONDecodeError as error:
+                    raise RuntimeError("SMS DLR prior event payload is invalid") from error
+                prior_occurred_at = (
+                    existing_payload.get("occurred_at")
+                    if isinstance(existing_payload, dict)
+                    else None
+                )
+                if not isinstance(prior_occurred_at, str) or not prior_occurred_at:
+                    raise RuntimeError("SMS DLR prior event timestamp is invalid")
+                occurred_at = prior_occurred_at
             event_payload: dict[str, Any] = {
                 "adapter_message_id": adapter_message_id,
                 "correlation_id": row["correlation_id"],
                 "customer_id": customer_id,
                 "idempotency_key": event_id,
                 "message_id": message_id,
-                "occurred_at": datetime.fromtimestamp(now, timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z"),
+                "occurred_at": occurred_at,
                 "provider_message_id": provider_message_id,
                 "status": (
                     "submitted"
@@ -1344,7 +1471,14 @@ class Store:
     def mark_event_failure(
         self, event_id: str, attempts: int, next_attempt: float, error: str
     ) -> None:
-        state = "dead_letter" if attempts >= 5 else "queued"
+        final_unknown_needs_readback = (
+            attempts == 5 and error == "DispatchOutcomeUnknown"
+        )
+        state = (
+            "dead_letter"
+            if attempts >= 5 and not final_unknown_needs_readback
+            else "queued"
+        )
         with self.connect() as connection:
             cursor = connection.execute(
                 """UPDATE events
@@ -1422,6 +1556,60 @@ def customer_policy() -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def sms_segment_count(message: str) -> int:
+    """Return a conservative, bounded GSM/UCS segment reservation."""
+
+    single, concatenated = (160, 153) if message.isascii() else (70, 67)
+    return (
+        1
+        if len(message) <= single
+        else (len(message) + concatenated - 1) // concatenated
+    )
+
+
+def billing_authorization(
+    policy: dict[str, Any], message: str
+) -> tuple[str, int, int, int, int, str, str]:
+    """Validate protected quota/wallet policy and bind one spend decision."""
+
+    billing_period = policy.get("billing_period")
+    quota_limit = policy.get("quota_limit_segments")
+    wallet_limit = policy.get("wallet_limit_minor")
+    cost_per_segment = policy.get("cost_per_segment_minor")
+    currency = policy.get("currency")
+    if (
+        not isinstance(billing_period, str)
+        or BILLING_PERIOD.fullmatch(billing_period) is None
+        or isinstance(quota_limit, bool)
+        or not isinstance(quota_limit, int)
+        or not 1 <= quota_limit <= 1_000_000_000
+        or isinstance(wallet_limit, bool)
+        or not isinstance(wallet_limit, int)
+        or not 0 <= wallet_limit <= 1_000_000_000_000
+        or isinstance(cost_per_segment, bool)
+        or not isinstance(cost_per_segment, int)
+        or not 1 <= cost_per_segment <= 1_000_000_000
+        or not isinstance(currency, str)
+        or CURRENCY.fullmatch(currency) is None
+    ):
+        raise PermissionError("billing_policy_invalid")
+    units = sms_segment_count(message)
+    cost = units * cost_per_segment
+    decision = {
+        "billing_period": billing_period,
+        "cost_per_segment_minor": cost_per_segment,
+        "currency": currency,
+        "quota_limit_segments": quota_limit,
+        "reserved_cost_minor": cost,
+        "reserved_units": units,
+        "wallet_limit_minor": wallet_limit,
+    }
+    digest = hashlib.sha256(
+        json.dumps(decision, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    return billing_period, quota_limit, wallet_limit, units, cost, currency, digest
 
 
 def policy_recipient_set(policy: dict[str, Any], field: str) -> set[str]:
@@ -1545,6 +1733,11 @@ def validate_live_route_authorities() -> None:
             raise RuntimeError("customer policy identity is invalid") from error
         if not isinstance(policy, dict):
             raise RuntimeError("customer policy is invalid")
+        policy_tenant = policy.get("tenant_id", customer)
+        try:
+            forwarding_tenant({"tenant_id": policy_tenant})
+        except ValueError as error:
+            raise RuntimeError("customer policy tenant identity is invalid") from error
         enabled = policy.get("enabled")
         if enabled is not True:
             if enabled is not False:
@@ -1558,6 +1751,10 @@ def validate_live_route_authorities() -> None:
             policy_sender_set(policy)
         except PermissionError as error:
             raise RuntimeError("enabled customer sender policy is invalid") from error
+        try:
+            billing_authorization(policy, "x")
+        except PermissionError as error:
+            raise RuntimeError("enabled customer billing policy is invalid") from error
         route = policy.get("route")
         if not isinstance(route, str):
             raise RuntimeError("enabled customer route is invalid")
@@ -1576,13 +1773,21 @@ def validate_live_route_authorities() -> None:
         raise RuntimeError("Jasmin reconciliation authority is unavailable")
 
 
-def validate_outbound(
+def validate_outbound_authorization(
     payload: dict[str, Any], now_utc: float
-) -> tuple[str, str, str, str, str | None]:
+) -> OutboundAuthorization:
     customer = canonical_customer_id(payload.get("customer_id"))
+    tenant = forwarding_tenant(payload)
     policy = customer_policy().get(customer)
     if not isinstance(policy, dict) or policy.get("enabled") is not True:
         raise PermissionError("customer_disabled_or_unknown")
+    policy_tenant = policy.get("tenant_id", customer)
+    try:
+        policy_tenant = forwarding_tenant({"tenant_id": policy_tenant})
+    except ValueError as error:
+        raise PermissionError("customer_tenant_policy_invalid") from error
+    if tenant != policy_tenant:
+        raise PermissionError("tenant_customer_policy_mismatch")
     sender = normalize_sender(payload.get("sender", payload.get("from")))
     if sender not in policy_sender_set(policy):
         raise PermissionError("sender_not_authorized")
@@ -1603,7 +1808,46 @@ def validate_outbound(
         not isinstance(correlation, str) or not 1 <= len(correlation) <= 128
     ):
         raise ValueError("invalid_correlation_id")
-    return customer, sender, destination, route, correlation
+    message = payload.get("body")
+    if not isinstance(message, str) or not message:
+        raise ValueError("invalid_body")
+    (
+        period,
+        quota_limit,
+        wallet_limit,
+        units,
+        cost,
+        currency,
+        authorization_sha256,
+    ) = billing_authorization(policy, message)
+    return OutboundAuthorization(
+        customer_id=customer,
+        tenant_id=tenant,
+        sender=sender,
+        destination=destination,
+        route=route,
+        correlation_id=correlation,
+        billing_period=period,
+        quota_limit_segments=quota_limit,
+        wallet_limit_minor=wallet_limit,
+        reserved_units=units,
+        reserved_cost_minor=cost,
+        currency=currency,
+        authorization_sha256=authorization_sha256,
+    )
+
+
+def validate_outbound(
+    payload: dict[str, Any], now_utc: float
+) -> tuple[str, str, str, str, str | None]:
+    authorization = validate_outbound_authorization(payload, now_utc)
+    return (
+        authorization.customer_id,
+        authorization.sender,
+        authorization.destination,
+        authorization.route,
+        authorization.correlation_id,
+    )
 
 
 class Gateway:
@@ -1772,6 +2016,10 @@ class Gateway:
         for row in rows:
             previous_attempts = int(row["attempts"])
             previous_error = row["last_error"]
+            reconciliation_only = (
+                previous_attempts == 5
+                and previous_error == "DispatchOutcomeUnknown"
+            )
             attempts = previous_attempts + 1
             claimed = False
             try:
@@ -1824,17 +2072,20 @@ class Gateway:
                     canonical(timestamp, row["event_id"], row["system"], body),
                     hashlib.sha256,
                 ).hexdigest()
+                request_headers = {
+                    "Authorization": "Bearer " + api_key,
+                    "Content-Type": "application/json",
+                    "X-Event-Source": row["system"],
+                    "X-Timestamp": timestamp,
+                    "X-Event-Id": row["event_id"],
+                    "X-Signature": "sha256=" + signature,
+                }
+                if reconciliation_only:
+                    request_headers["X-Reconciliation-Only"] = "true"
                 request = urllib.request.Request(
                     self.settings.downstream_url,
                     body,
-                    {
-                        "Authorization": "Bearer " + api_key,
-                        "Content-Type": "application/json",
-                        "X-Event-Source": row["system"],
-                        "X-Timestamp": timestamp,
-                        "X-Event-Id": row["event_id"],
-                        "X-Signature": "sha256=" + signature,
-                    },
+                    request_headers,
                     method="POST",
                 )
                 try:
@@ -2098,19 +2349,30 @@ class Gateway:
         terminal = self.store.sms_by_idempotency(customer_id, idempotency_key)
         if terminal is not None and terminal["state"] in {
             "mock_accepted",
+            "outcome_unknown",
             "rejected",
             "submitted",
+            "submitting",
         }:
             if terminal["payload_hash"] != payload_sha256:
                 return 409, {"detail": "idempotency_conflict"}
             if terminal["payload"] != canonical_payload:
                 raise RuntimeError("SMS terminal payload read-back mismatch")
-            expected_carrier_submitted = terminal["state"] == "submitted"
-            if (
-                bool(terminal["carrier_submitted"]) is not expected_carrier_submitted
-                or terminal["operation_token"] is not None
-            ):
-                raise RuntimeError("SMS terminal result is inconsistent")
+            if terminal["state"] in {"submitting", "outcome_unknown"}:
+                if (
+                    bool(terminal["carrier_submitted"])
+                    or terminal["operation_token"] is None
+                    or not terminal["reconciliation_proof_sha256"]
+                ):
+                    raise RuntimeError("SMS ambiguous result is inconsistent")
+            else:
+                expected_carrier_submitted = terminal["state"] == "submitted"
+                if (
+                    bool(terminal["carrier_submitted"])
+                    is not expected_carrier_submitted
+                    or terminal["operation_token"] is not None
+                ):
+                    raise RuntimeError("SMS terminal result is inconsistent")
             return 202, {
                 "accepted": True,
                 "duplicate": True,
@@ -2119,39 +2381,52 @@ class Gateway:
                 "state": terminal["state"],
             }
         try:
-            customer, sender, destination, route, correlation = validate_outbound(
-                payload, now
-            )
+            authorization = validate_outbound_authorization(payload, now)
         except ValueError as error:
             return 422, {"detail": str(error)}
         except PermissionError as error:
             return 403, {"detail": str(error)}
+        customer = authorization.customer_id
+        sender = authorization.sender
+        destination = authorization.destination
+        route = authorization.route
+        correlation = authorization.correlation_id
         effect_sha256 = sms_effect_sha256(
             customer, sender, destination, route, message
         )
         adapter_message_id = str(uuid.uuid4())
-        created, reserved = self.store.reserve_sms(
-            (
-                adapter_message_id,
-                customer,
-                idempotency_key,
-                payload_sha256,
-                effect_sha256,
-                canonical_payload,
-                correlation,
-                sender,
-                destination,
-                route,
-                "valid",
-                "unchecked",
-                "reserved",
-                0,
-                None,
-                None,
-                None,
-                now,
+        try:
+            created, reserved = self.store.reserve_sms(
+                (
+                    adapter_message_id,
+                    customer,
+                    authorization.tenant_id,
+                    idempotency_key,
+                    payload_sha256,
+                    effect_sha256,
+                    canonical_payload,
+                    correlation,
+                    sender,
+                    destination,
+                    route,
+                    "quota_wallet_reserved",
+                    "unchecked",
+                    "reserved",
+                    0,
+                    None,
+                    None,
+                    None,
+                    authorization.billing_period,
+                    authorization.reserved_units,
+                    authorization.reserved_cost_minor,
+                    authorization.currency,
+                    authorization.authorization_sha256,
+                    now,
+                ),
+                authorization,
             )
-        )
+        except PermissionError as error:
+            return 403, {"detail": str(error)}
         if reserved["payload_hash"] != payload_sha256:
             return 409, {"detail": "idempotency_conflict"}
         if (

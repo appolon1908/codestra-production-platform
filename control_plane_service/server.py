@@ -150,6 +150,26 @@ def requires_telnexa_projection(value: dict) -> bool:
     }
 
 
+def projection_for_exact_replay(
+    store: Store, source: str, value: dict
+) -> dict | None:
+    """Idempotently repair any applicable provider projection on replay."""
+
+    payload = value.get("payload")
+    metadata = value.get("metadata")
+    externally_authoritative = (
+        isinstance(metadata, dict) and metadata.get("sms_postgres_authority") is True
+    )
+    if (
+        source in {"telnexa", "klyrow"}
+        and isinstance(payload, dict)
+        and payload.get("message_id")
+        and not externally_authoritative
+    ):
+        return apply_provider_projection(store, source, value)
+    return store.provider_projection_receipt(value["event_id"])
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "CodestraControlPlane/1.0"
 
@@ -424,7 +444,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 verify_signature(secret, timestamp, event_id, source, body, signature, TTL)
                 value = validate_envelope(json.loads(body), source, event_id)
+                reconciliation_only = self.headers.get("X-Reconciliation-Only", "")
+                if reconciliation_only not in {"", "true"}:
+                    raise ControlPlaneError("invalid_reconciliation_mode")
                 if source == "telnexa" and value["event_type"] == "telnexa.sms.received" and not value["payload"].get("message_id"):
+                    if reconciliation_only:
+                        raise ControlPlaneError("reconciliation_event_missing")
                     inbound,_ = STORE.create_inbound_sms(value); value["payload"]["message_id"] = inbound["message_id"]
                 # Odoo signs a unique immutable event ID. Reject its reuse
                 # atomically; legitimate retries use a fresh event ID with the
@@ -434,6 +459,21 @@ class Handler(BaseHTTPRequestHandler):
                 # key; reusing the signed ID is a replay attack for every
                 # external producer, not only Odoo.
                 projection = None
+                if reconciliation_only:
+                    replay = STORE.exact_event_replay(value)
+                    if replay is None:
+                        return self.send_json(404, {
+                            "error": "reconciliation_event_missing",
+                            "event_id": value["event_id"],
+                        })
+                    projection = projection_for_exact_replay(STORE, source, value)
+                    if requires_telnexa_projection(value) and projection is None:
+                        raise ControlPlaneError("provider_projection_missing")
+                    return self.send_json(409, {
+                        "error": "replayed_event_id",
+                        "event_id": replay.event_id,
+                        "projection": projection,
+                    })
                 try:
                     result = STORE.ingest(
                         value,
@@ -445,12 +485,9 @@ class Handler(BaseHTTPRequestHandler):
                     replay = STORE.exact_event_replay(value)
                     if replay is None:
                         raise ControlPlaneError("idempotency_conflict") from ingest_error
-                    if requires_telnexa_projection(value):
-                        projection = apply_provider_projection(STORE, source, value)
-                        if projection is None:
-                            raise ControlPlaneError("provider_projection_missing")
-                    else:
-                        projection = STORE.provider_projection_receipt(value["event_id"])
+                    projection = projection_for_exact_replay(STORE, source, value)
+                    if requires_telnexa_projection(value) and projection is None:
+                        raise ControlPlaneError("provider_projection_missing")
                     return self.send_json(409, {
                         "error": "replayed_event_id",
                         "event_id": replay.event_id,

@@ -183,6 +183,7 @@ def configure_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
             {
                 "tenant-a": {
                     "enabled": True,
+                    "tenant_id": "tenant-a",
                     "senders": ["TEST"],
                     "destination_prefixes": ["+49155"],
                     "route": "synthetic",
@@ -194,6 +195,11 @@ def configure_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
                         "start": "00:00",
                         "end": "23:59",
                     },
+                    "billing_period": "2026-09",
+                    "quota_limit_segments": 1000,
+                    "wallet_limit_minor": 100000,
+                    "cost_per_segment_minor": 5,
+                    "currency": "EUR",
                 },
                 "tenant-disabled": {
                     "enabled": False,
@@ -266,6 +272,44 @@ def test_outbound_policy_accepts_exact_sender_destination_and_route(
         "synthetic",
         "corr-0001",
     )
+
+
+def test_outbound_policy_is_bound_to_the_exact_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["shared-customer"] = policy.pop("tenant-a")
+    policy["shared-customer"]["tenant_id"] = "tenant-a"
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    with pytest.raises(PermissionError, match="tenant_customer_policy_mismatch"):
+        gateway.validate_outbound(
+            valid_payload(customer_id="shared-customer", tenant_id="tenant-b"),
+            2_000_000_000,
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "billing_period",
+        "quota_limit_segments",
+        "wallet_limit_minor",
+        "cost_per_segment_minor",
+        "currency",
+    ],
+)
+def test_enabled_customer_requires_complete_billing_policy(
+    monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    del policy["tenant-a"][field]
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    with pytest.raises(PermissionError, match="billing_policy_invalid"):
+        gateway.validate_outbound(valid_payload(), 2_000_000_000)
+    with pytest.raises(RuntimeError, match="billing policy is invalid"):
+        gateway.validate_live_route_authorities()
 
 
 @pytest.mark.parametrize(
@@ -408,6 +452,64 @@ def test_customer_timezone_delivery_window_blocks_before_sms_reservation(
 
 
 @pytest.mark.parametrize(
+    ("policy_change", "expected_error"),
+    [
+        ({"quota_limit_segments": 1}, "customer_quota_exhausted"),
+        ({"wallet_limit_minor": 5}, "wallet_funds_insufficient"),
+    ],
+)
+def test_quota_and_wallet_are_atomically_reserved_before_carrier_effect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    policy_change: dict[str, int],
+    expected_error: str,
+) -> None:
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["tenant-a"].update(policy_change)
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    state = store(tmp_path)
+    probes = 0
+
+    def urlopen(url, **_kwargs):
+        nonlocal probes
+        probes += 1
+        return HealthyJasmin()
+
+    app = gateway.Gateway(
+        settings(tmp_path), state, clock=lambda: now, urlopen=urlopen
+    )
+    first_body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    assert app.outbound(
+        first_body,
+        outbound_headers(first_body, now, "nonce-billing-reserve-0001"),
+    )[0] == 202
+    second_body = json.dumps(
+        valid_payload(
+            idempotency_key="idem-billing-0002",
+            message_id="message-billing-0002",
+        ),
+        separators=(",", ":"),
+    ).encode()
+    assert app.outbound(
+        second_body,
+        outbound_headers(second_body, now, "nonce-billing-reserve-0002"),
+    ) == (403, {"detail": expected_error})
+    assert probes == 1
+    with state.connect() as connection:
+        rows = connection.execute(
+            """SELECT tenant_id,billing_period,reserved_units,reserved_cost_minor,
+            currency,validation_result FROM sms_transactions"""
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ("tenant-a", "2026-09", 1, 5, "EUR", "quota_wallet_reserved")
+    ]
+
+
+@pytest.mark.parametrize(
     "window",
     [
         None,
@@ -442,6 +544,7 @@ def test_live_submission_uses_the_customer_route_specific_jasmin_authority(
             {
                 "tenant-a": {
                     "enabled": True,
+                    "tenant_id": "tenant-a",
                     "senders": ["TEST"],
                     "destination_prefixes": ["+49155"],
                     "route": "synthetic",
@@ -453,9 +556,15 @@ def test_live_submission_uses_the_customer_route_specific_jasmin_authority(
                         "start": "00:00",
                         "end": "23:59",
                     },
+                    "billing_period": "2026-09",
+                    "quota_limit_segments": 1000,
+                    "wallet_limit_minor": 100000,
+                    "cost_per_segment_minor": 5,
+                    "currency": "EUR",
                 },
                 "tenant-b": {
                     "enabled": True,
+                    "tenant_id": "tenant-b",
                     "senders": ["TEST"],
                     "destination_prefixes": ["+49155"],
                     "route": "alternate",
@@ -467,6 +576,11 @@ def test_live_submission_uses_the_customer_route_specific_jasmin_authority(
                         "start": "00:00",
                         "end": "23:59",
                     },
+                    "billing_period": "2026-09",
+                    "quota_limit_segments": 1000,
+                    "wallet_limit_minor": 100000,
+                    "cost_per_segment_minor": 5,
+                    "currency": "EUR",
                 },
             }
         ),
@@ -503,6 +617,7 @@ def test_live_submission_uses_the_customer_route_specific_jasmin_authority(
         body = json.dumps(
             valid_payload(
                 customer_id=tenant,
+                tenant_id=tenant,
                 idempotency_key=f"route-idem-{index}",
             ),
             separators=(",", ":"),
@@ -1648,7 +1763,10 @@ def test_dispatch_failures_are_bounded_and_dead_lettered(
         True,
     ) == "accepted"
 
-    def unavailable(*_args, **_kwargs):
+    requests = []
+
+    def unavailable(request, **_kwargs):
+        requests.append(request)
         raise TimeoutError("synthetic timeout")
 
     app = gateway.Gateway(
@@ -1670,11 +1788,90 @@ def test_dispatch_failures_are_bounded_and_dead_lettered(
             "SELECT state,attempts,last_error FROM events WHERE event_id='event-failure-1'"
         ).fetchone()
     assert dict(row) == {
-        "state": "dead_letter",
+        "state": "queued",
         "attempts": 5,
         "last_error": "DispatchOutcomeUnknown",
     }
+    assert "X-reconciliation-only" not in requests[4].headers
+    assert app.dispatch_once() == 1
+    assert requests[5].headers["X-reconciliation-only"] == "true"
+    with state.connect() as connection:
+        row = connection.execute(
+            "SELECT state,attempts,last_error FROM events WHERE event_id='event-failure-1'"
+        ).fetchone()
+    assert dict(row) == {
+        "state": "dead_letter",
+        "attempts": 6,
+        "last_error": "DispatchOutcomeUnknown",
+    }
     assert app.dispatch_once() == 0
+
+
+def test_final_unknown_outcome_gets_one_readback_only_reconciliation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [2_000_000_000.0]
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "downstream-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "downstream-secret")
+    state = store(tmp_path)
+    payload = json.dumps(
+        {"tenant_id": "tenant-a", "message_id": "message-reconcile-final"},
+        separators=(",", ":"),
+    )
+    event_id = "event-final-reconciliation"
+    assert state.insert_event(
+        event_id,
+        "telnexa",
+        "/api/v1/telnexa/inbound",
+        "message-reconcile-final",
+        payload,
+        now[0],
+        True,
+    ) == "accepted"
+    requests = []
+
+    def urlopen(request, **_kwargs):
+        requests.append(request)
+        if len(requests) <= 5:
+            raise TimeoutError("synthetic lost response")
+        assert request.headers["X-reconciliation-only"] == "true"
+        receipt = json.dumps(
+            {
+                "error": "replayed_event_id",
+                "event_id": event_id,
+                "projection": None,
+            },
+            separators=(",", ":"),
+        ).encode()
+        raise urllib.error.HTTPError(
+            request.full_url, 409, "Conflict", {}, BytesIO(receipt)
+        )
+
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="shared",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now[0],
+        urlopen=urlopen,
+    )
+    for _ in range(6):
+        assert app.dispatch_once() == 1
+        now[0] += 1_000
+    with state.connect() as connection:
+        delivered = connection.execute(
+            "SELECT state,attempts,last_error FROM events WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+    assert dict(delivered) == {
+        "state": "delivered",
+        "attempts": 6,
+        "last_error": None,
+    }
+    assert len(requests) == 6
 
 
 def test_dispatcher_startup_requires_credentials_and_starts_daemon(
@@ -1919,6 +2116,69 @@ def test_terminal_sms_retry_is_read_back_before_mutable_policy_checks(
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize("ambiguous_state", ["submitting", "outcome_unknown"])
+def test_ambiguous_sms_retry_is_read_back_before_mutable_policy_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ambiguous_state: str,
+) -> None:
+    class SimulatedProcessExit(BaseException):
+        pass
+
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    configure_jasmin_route(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+
+    def urlopen(url, **_kwargs):
+        if url.endswith("/ping"):
+            return HealthyJasmin()
+        if ambiguous_state == "submitting":
+            raise SimulatedProcessExit
+        return JasminReceiptTimeout()
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-AMBIGUOUS-READBACK",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    if ambiguous_state == "submitting":
+        with pytest.raises(SimulatedProcessExit):
+            app.outbound(
+                body, outbound_headers(body, now, "nonce-ambiguous-readback-01")
+            )
+    else:
+        assert app.outbound(
+            body, outbound_headers(body, now, "nonce-ambiguous-readback-01")
+        )[1]["state"] == "outcome_unknown"
+    with state.connect() as connection:
+        pending = connection.execute("SELECT * FROM sms_transactions").fetchone()
+    assert pending["state"] == ambiguous_state
+    policy = gateway.customer_policy()
+    policy["tenant-a"]["enabled"] = False
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    code, replay = app.outbound(
+        body, outbound_headers(body, now, "nonce-ambiguous-readback-02")
+    )
+    assert code == 202
+    assert replay == {
+        "accepted": True,
+        "duplicate": True,
+        "adapter_message_id": pending["adapter_message_id"],
+        "carrier_submitted": False,
+        "state": ambiguous_state,
+    }
+
+
 def test_retry_rejects_changed_authorized_route_before_carrier_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2082,7 +2342,7 @@ def test_unrelated_2xx_jasmin_response_is_never_recorded_as_submitted(
 def test_carrier_timeout_remains_unknown_until_attempt_bound_dlr_reconciles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    now = 2_000_000_000
+    now = [2_000_000_000]
     configure_tenant(monkeypatch)
     configure_jasmin_route(monkeypatch)
     monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
@@ -2107,16 +2367,16 @@ def test_carrier_timeout_remains_unknown_until_attempt_bound_dlr_reconciles(
             production_change_id="CHG-JASMIN-READBACK",
         ),
         state,
-        clock=lambda: now,
+        clock=lambda: now[0],
         urlopen=urlopen,
     )
     body = json.dumps(valid_payload(), separators=(",", ":")).encode()
     code, result = app.outbound(
-        body, outbound_headers(body, now, "nonce-timeout-receipt-1")
+        body, outbound_headers(body, now[0], "nonce-timeout-receipt-1")
     )
     assert code == 202 and result["state"] == "outcome_unknown"
     code, replay = app.outbound(
-        body, outbound_headers(body, now, "nonce-timeout-receipt-2")
+        body, outbound_headers(body, now[0], "nonce-timeout-receipt-2")
     )
     assert code == 202 and replay["duplicate"] is True
     assert replay["state"] == "outcome_unknown"
@@ -2126,7 +2386,7 @@ def test_carrier_timeout_remains_unknown_until_attempt_bound_dlr_reconciles(
     ).encode()
     blocked_code, blocked = app.outbound(
         second_body,
-        outbound_headers(second_body, now, "nonce-timeout-receipt-3"),
+        outbound_headers(second_body, now[0], "nonce-timeout-receipt-3"),
     )
     assert blocked_code == 409
     assert blocked["detail"] == "carrier_outcome_pending"
@@ -2157,8 +2417,18 @@ def test_carrier_timeout_remains_unknown_until_attempt_bound_dlr_reconciles(
     with pytest.raises(PermissionError, match="invalid_jasmin_dlr_proof"):
         app.reconcile_jasmin_dlr(invalid_query, dlr)
     completed = app.reconcile_jasmin_dlr(callback.query, dlr)
+    with state.connect() as connection:
+        first_event = connection.execute(
+            "SELECT payload,payload_sha256,created_at FROM events"
+        ).fetchone()
+    now[0] += 300
     replay = app.reconcile_jasmin_dlr(callback.query, dlr)
+    with state.connect() as connection:
+        replayed_event = connection.execute(
+            "SELECT payload,payload_sha256,created_at FROM events"
+        ).fetchone()
     assert replay["adapter_message_id"] == completed["adapter_message_id"]
+    assert tuple(replayed_event) == tuple(first_event)
     conflicting_dlr = dlr.replace(
         b"07033084-5cfd-4812-90a4-e4d24ffb6e3d",
         b"3f08d4cb-fc4b-4474-95c1-0d305af3a679",
@@ -3079,9 +3349,11 @@ def test_expired_preflight_lease_is_reclaimed_but_submitting_is_fail_closed(
     assert code == 202 and result["state"] == "mock_accepted"
     with state.connect() as connection:
         connection.execute(
-            """UPDATE sms_transactions SET state='submitting',operation_token='ambiguous'
+            """UPDATE sms_transactions
+            SET state='submitting',operation_token='ambiguous',
+                reconciliation_proof_sha256=?
             WHERE adapter_message_id=?""",
-            (preflight["adapter_message_id"],),
+            ("a" * 64, preflight["adapter_message_id"]),
         )
     code, result = app.outbound(
         body, outbound_headers(body, int(now[0]), "nonce-lease-00000003")

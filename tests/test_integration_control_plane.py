@@ -3,10 +3,14 @@ import hmac
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
+import urllib.error
+import urllib.request
 
 from control_plane_service.core import ControlPlaneError, Store, canonical, credential_matches, validate_envelope, verify_signature
+from control_plane_service import server as control_server
 from control_plane_service.server import apply_provider_projection, requires_telnexa_projection
 from control_plane_service.worker import once
 
@@ -108,6 +112,117 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertFalse(requires_telnexa_projection(item))
         item["metadata"] = "invalid"
         self.assertFalse(requires_telnexa_projection(item))
+
+    def test_reconciliation_only_repairs_exact_replay_and_never_ingests_new_event(self):
+        message,_ = self.store.create_message({
+            "channel":"sms","tenant_id":"tenant-a","customer_id":"customer-a",
+            "request_id":"request-reconciliation","correlation_id":"correlation-1",
+            "idempotency_key":"message-reconciliation","sender":"CODESTRA",
+            "recipient":"+18095550101","source_application":"n8n",
+            "classification":"transactional","content_metadata":{},"content":"hello",
+            "currency":"USD",
+        })
+        event_id = "event-reconciliation-only"
+        item = validate_envelope({
+            "event_type":"telnexa.sms.submitted","event_version":"1.0",
+            "occurred_at":"2026-09-02T00:00:00Z","tenant_id":"tenant-a",
+            "customer_id":"customer-a","correlation_id":"correlation-1",
+            "idempotency_key":event_id,
+            "payload":{
+                "message_id":message["message_id"],
+                "provider_message_id":"provider-reconciliation",
+                "status":"submitted",
+            },
+        }, "telnexa", event_id)
+        self.store.ingest(item, reject_event_replay=True)
+        self.assertIsNone(self.store.provider_projection_receipt(event_id))
+
+        old_store = control_server.STORE
+        old_api_key = os.environ.get("TELNEXA_MIDDLEWARE_API_KEY")
+        old_secret = os.environ.get("TELNEXA_WEBHOOK_SECRET")
+        control_server.STORE = self.store
+        os.environ["TELNEXA_MIDDLEWARE_API_KEY"] = "test-reconciliation-key"
+        os.environ["TELNEXA_WEBHOOK_SECRET"] = "test-reconciliation-secret"
+        server = control_server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), control_server.Handler
+        )
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            producer = {
+                key: value
+                for key, value in item.items()
+                if key not in {"event_id", "source"}
+            }
+            body = json.dumps(producer, separators=(",", ":"), sort_keys=True).encode()
+            timestamp = str(int(time.time()))
+            signature = hmac.new(
+                b"test-reconciliation-secret",
+                canonical(timestamp, event_id, "telnexa", body),
+                hashlib.sha256,
+            ).hexdigest()
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/v1/events",
+                data=body,
+                method="POST",
+                headers={
+                    "Authorization":"Bearer test-reconciliation-key",
+                    "Content-Type":"application/json",
+                    "X-Event-Source":"telnexa",
+                    "X-Event-Id":event_id,
+                    "X-Timestamp":timestamp,
+                    "X-Signature":"sha256=" + signature,
+                    "X-Reconciliation-Only":"true",
+                },
+            )
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(request, timeout=5)
+            self.assertEqual(raised.exception.code, 409)
+            receipt = json.loads(raised.exception.read())
+            self.assertEqual(receipt["event_id"], event_id)
+            self.assertEqual(receipt["projection"]["status"], "accepted")
+
+            missing_id = "event-reconciliation-missing"
+            missing = dict(producer, idempotency_key=missing_id)
+            missing_body = json.dumps(
+                missing, separators=(",", ":"), sort_keys=True
+            ).encode()
+            missing_signature = hmac.new(
+                b"test-reconciliation-secret",
+                canonical(timestamp, missing_id, "telnexa", missing_body),
+                hashlib.sha256,
+            ).hexdigest()
+            missing_request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/v1/events",
+                data=missing_body,
+                method="POST",
+                headers={
+                    "Authorization":"Bearer test-reconciliation-key",
+                    "Content-Type":"application/json",
+                    "X-Event-Source":"telnexa",
+                    "X-Event-Id":missing_id,
+                    "X-Timestamp":timestamp,
+                    "X-Signature":"sha256=" + missing_signature,
+                    "X-Reconciliation-Only":"true",
+                },
+            )
+            with self.assertRaises(urllib.error.HTTPError) as missing_error:
+                urllib.request.urlopen(missing_request, timeout=5)
+            self.assertEqual(missing_error.exception.code, 404)
+            self.assertFalse(self.store.event_exists(missing_id))
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=5)
+            control_server.STORE = old_store
+            if old_api_key is None:
+                os.environ.pop("TELNEXA_MIDDLEWARE_API_KEY", None)
+            else:
+                os.environ["TELNEXA_MIDDLEWARE_API_KEY"] = old_api_key
+            if old_secret is None:
+                os.environ.pop("TELNEXA_WEBHOOK_SECRET", None)
+            else:
+                os.environ["TELNEXA_WEBHOOK_SECRET"] = old_secret
 
     def test_private_klyrow_gateway_rejects_unknown_inner_status(self):
         with self.assertRaisesRegex(ControlPlaneError, "unsupported_klyrow_email_status"):
