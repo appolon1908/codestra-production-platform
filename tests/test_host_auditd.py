@@ -8,8 +8,10 @@ import io
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tarfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -459,7 +461,10 @@ def test_root_only_launcher_verifies_target_before_executing_it(tmp_path: Path) 
     validator.chmod(0o750)
     launcher.write_bytes(
         INSTALLER.validator_launcher_bytes(
-            validator_bytes, source_sha, validator_target=validator
+            validator_bytes,
+            source_sha,
+            validator_target=validator,
+            authority_root=tmp_path,
         )
     )
     launcher.chmod(0o750)
@@ -491,6 +496,29 @@ def test_validator_operator_check_includes_executable_and_parent_authority() -> 
         "VALIDATOR_LAUNCHER",
     ):
         assert token in writability_check
+    expected = {
+        Path("/"),
+        Path("/usr"),
+        Path("/usr/local"),
+        Path("/usr/local/sbin"),
+        INSTALLER.VALIDATOR_TARGET,
+        INSTALLER.VALIDATOR_LAUNCHER_TARGET,
+    }
+    assert expected <= set(
+        INSTALLER.path_authority_chain(
+            [INSTALLER.VALIDATOR_TARGET, INSTALLER.VALIDATOR_LAUNCHER_TARGET]
+        )
+    )
+    assert expected <= set(
+        VALIDATOR.path_authority_chain(
+            [VALIDATOR.VALIDATOR_TARGET, VALIDATOR.VALIDATOR_LAUNCHER]
+        )
+    )
+    launcher_source = INSTALLER.validator_launcher_bytes(
+        b"validator\n", "a" * 40
+    ).decode()
+    assert "authority_chain(launcher) | authority_chain(VALIDATOR)" in launcher_source
+    assert "while cursor != AUTHORITY_ROOT" in launcher_source
 
 
 def test_installation_record_is_read_back_before_success(
@@ -508,6 +536,82 @@ def test_installation_record_is_read_back_before_success(
     monkeypatch.setattr(INSTALLER, "atomic_write", corrupt_write)
     with pytest.raises(INSTALLER.InstallError, match="read-back differs"):
         INSTALLER.persist_installation_record(record)
+
+
+def test_exact_root_record_metadata_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = b"{}\n"
+
+    def metadata(mode: int, uid: int = 0, gid: int = 0):
+        return SimpleNamespace(st_mode=stat.S_IFREG | mode, st_uid=uid, st_gid=gid)
+
+    monkeypatch.setattr(
+        INSTALLER,
+        "checked_regular_snapshot",
+        lambda path, max_bytes=1024 * 1024: (payload, metadata(0o600)),
+    )
+    assert INSTALLER.checked_root_regular_exact(Path("/record"), 0o600) == payload
+    for info in (metadata(0o644), metadata(0o600, uid=1000), metadata(0o600, gid=1000)):
+        monkeypatch.setattr(
+            INSTALLER,
+            "checked_regular_snapshot",
+            lambda path, max_bytes=1024 * 1024, info=info: (payload, info),
+        )
+        with pytest.raises(INSTALLER.InstallError, match="exact root metadata"):
+            INSTALLER.checked_root_regular_exact(Path("/record"), 0o600)
+
+
+def test_idempotent_install_requires_complete_canonical_record() -> None:
+    args = argparse.Namespace(
+        source_sha="a" * 40,
+        change_id="CHG-TEST-001",
+        approver="Security Owner",
+    )
+    release = {"release_archive_sha256": "b" * 64}
+    live = {
+        "service": "enabled-active",
+        "kernel_enabled": 1,
+        "kernel_lost": 0,
+        "managed_rule_sha256": "c" * 64,
+        "validator_sha256": "d" * 64,
+        "validator_launcher_sha256": "e" * 64,
+        "managed_keys": ["codestra_audit_authority"],
+    }
+    record = {
+        "schema": "codestra.host-auditd.installation.v1",
+        "source_sha": args.source_sha,
+        "change_id": args.change_id,
+        "approver": args.approver,
+        "installed_at_utc": "2026-09-01T12:00:00Z",
+        "rollback_stamp": "20260901T120000Z",
+        "rule_sha256": live["managed_rule_sha256"],
+        "validator_sha256": live["validator_sha256"],
+        "validator_launcher_sha256": live["validator_launcher_sha256"],
+        "release": release,
+        "state": live,
+    }
+    assert INSTALLER.validate_installation_record(record, args, release, live) == record
+    corruptions = {
+        "schema": "wrong",
+        "source_sha": "f" * 40,
+        "change_id": "CHG-OTHER",
+        "approver": "Other Owner",
+        "installed_at_utc": "not-a-time",
+        "rollback_stamp": "not-a-stamp",
+        "rule_sha256": "0" * 64,
+        "validator_sha256": "0" * 64,
+        "validator_launcher_sha256": "0" * 64,
+        "release": {},
+        "state": {},
+    }
+    for field, value in corruptions.items():
+        changed = dict(record)
+        changed[field] = value
+        with pytest.raises(INSTALLER.InstallError, match="installation record"):
+            INSTALLER.validate_installation_record(changed, args, release, live)
+    missing = dict(record)
+    missing.pop("validator_sha256")
+    with pytest.raises(INSTALLER.InstallError, match="schema"):
+        INSTALLER.validate_installation_record(missing, args, release, live)
 
 
 def test_rollback_revalidates_restored_files_and_service_before_completion(

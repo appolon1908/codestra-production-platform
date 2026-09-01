@@ -100,9 +100,19 @@ def validator_launcher_bytes(
     validator_bytes: bytes,
     source_sha: str,
     validator_target: Path = VALIDATOR_TARGET,
+    authority_root: Path = Path("/"),
 ) -> bytes:
     if SHA_RE.fullmatch(source_sha) is None:
         raise InstallError("launcher source SHA rejected")
+    if (
+        not authority_root.is_absolute()
+        or not validator_target.is_absolute()
+        or (
+            validator_target != authority_root
+            and authority_root not in validator_target.parents
+        )
+    ):
+        raise InstallError("launcher authority root rejected")
     expected_digest = sha256_bytes(validator_bytes)
     source = f'''#!/usr/bin/python3
 from __future__ import annotations
@@ -114,6 +124,7 @@ import sys
 from pathlib import Path
 
 VALIDATOR = Path({str(validator_target)!r})
+AUTHORITY_ROOT = Path({str(authority_root)!r})
 EXPECTED_SOURCE_SHA = {source_sha!r}
 EXPECTED_VALIDATOR_SHA256 = {expected_digest!r}
 MAX_VALIDATOR_BYTES = 2 * 1024 * 1024
@@ -128,16 +139,32 @@ if sys.argv[1:] != ["--expected-source-sha", EXPECTED_SOURCE_SHA]:
     fail()
 
 launcher = Path(__file__).absolute()
-for authority, directory in (
-    (launcher, False),
-    (launcher.parent, True),
-    (VALIDATOR.parent, True),
-):
+if AUTHORITY_ROOT not in launcher.parents or AUTHORITY_ROOT not in VALIDATOR.parents:
+    fail()
+
+
+def authority_chain(path: Path) -> set[Path]:
+    result = {{path}}
+    cursor = path
+    while cursor != AUTHORITY_ROOT:
+        parent = cursor.parent
+        if parent == cursor or (
+            parent != AUTHORITY_ROOT and AUTHORITY_ROOT not in parent.parents
+        ):
+            fail()
+        result.add(parent)
+        cursor = parent
+    return result
+
+
+file_authorities = {{launcher, VALIDATOR}}
+authorities = authority_chain(launcher) | authority_chain(VALIDATOR)
+for authority in sorted(authorities, key=lambda item: (len(item.parts), str(item))):
     try:
         info = authority.lstat()
     except OSError:
         fail()
-    expected_type = stat.S_ISDIR if directory else stat.S_ISREG
+    expected_type = stat.S_ISREG if authority in file_authorities else stat.S_ISDIR
     if (
         stat.S_ISLNK(info.st_mode)
         or not expected_type(info.st_mode)
@@ -230,6 +257,19 @@ def checked_root_regular(path: Path, *, max_bytes: int = 1024 * 1024) -> bytes:
     value, info = checked_regular_snapshot(path, max_bytes=max_bytes)
     if info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) & 0o022:
         raise InstallError(f"unsafe root trust authority: {path}")
+    return value
+
+
+def checked_root_regular_exact(
+    path: Path, mode: int, *, max_bytes: int = 1024 * 1024
+) -> bytes:
+    value, info = checked_regular_snapshot(path, max_bytes=max_bytes)
+    if (
+        info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != mode
+    ):
+        raise InstallError(f"unsafe exact root metadata: {path}")
     return value
 
 
@@ -356,6 +396,20 @@ def operator_cannot_modify(paths: list[Path]) -> bool:
         if result.returncode != 1:
             raise InstallError("operator writability check failed")
     return True
+
+
+def path_authority_chain(paths: list[Path]) -> list[Path]:
+    authorities: set[Path] = set()
+    for path in paths:
+        if not path.is_absolute():
+            raise InstallError("validator authority path must be absolute")
+        cursor = path
+        while True:
+            authorities.add(cursor)
+            if cursor == Path("/"):
+                break
+            cursor = cursor.parent
+    return sorted(authorities, key=lambda item: (len(item.parts), str(item)))
 
 
 def snapshot_release_inputs(args: argparse.Namespace) -> tuple[Path, dict[str, Path], dict[str, str]]:
@@ -606,11 +660,8 @@ def require_prerequisites() -> None:
         or stat.S_IMODE(home_info.st_mode) & 0o022
     ):
         raise InstallError("codestra-admin home authority rejected")
-    operator_paths = [VALIDATOR_TARGET.parent, VALIDATOR_LAUNCHER_TARGET.parent]
-    operator_paths.extend(
-        path
-        for path in (VALIDATOR_TARGET, VALIDATOR_LAUNCHER_TARGET)
-        if path.exists()
+    operator_paths = path_authority_chain(
+        [VALIDATOR_TARGET, VALIDATOR_LAUNCHER_TARGET]
     )
     if not operator_cannot_modify(operator_paths):
         raise InstallError("codestra-admin can modify validator execution authority")
@@ -877,7 +928,7 @@ def restore_checkpoint(checkpoint: Path, record: dict[str, object]) -> dict[str,
 def persist_installation_record(record: dict[str, object]) -> dict[str, object]:
     payload = json.dumps(record, sort_keys=True, separators=(",", ":")).encode() + b"\n"
     atomic_write(INSTALLATION_RECORD, payload, 0o600)
-    persisted = checked_root_regular(INSTALLATION_RECORD)
+    persisted = checked_root_regular_exact(INSTALLATION_RECORD, 0o600)
     if persisted != payload:
         raise InstallError("installation record read-back differs from written bytes")
     try:
@@ -887,6 +938,54 @@ def persist_installation_record(record: dict[str, object]) -> dict[str, object]:
     if readback != record:
         raise InstallError("installation record semantic read-back mismatch")
     return readback
+
+
+def validate_installation_record(
+    record: object,
+    args: argparse.Namespace,
+    release_binding: dict[str, object],
+    live: dict[str, object],
+) -> dict[str, object]:
+    if not isinstance(record, dict) or set(record) != {
+        "schema",
+        "source_sha",
+        "change_id",
+        "approver",
+        "installed_at_utc",
+        "rollback_stamp",
+        "rule_sha256",
+        "validator_sha256",
+        "validator_launcher_sha256",
+        "release",
+        "state",
+    }:
+        raise InstallError("installation record schema rejected")
+    installed_at = record.get("installed_at_utc")
+    if not isinstance(installed_at, str) or not installed_at.endswith("Z"):
+        raise InstallError("installation record timestamp rejected")
+    try:
+        parsed_time = dt.datetime.fromisoformat(installed_at[:-1] + "+00:00")
+    except ValueError as exc:
+        raise InstallError("installation record timestamp rejected") from exc
+    if parsed_time.tzinfo != dt.timezone.utc:
+        raise InstallError("installation record timestamp rejected")
+    expected = {
+        "schema": "codestra.host-auditd.installation.v1",
+        "source_sha": args.source_sha,
+        "change_id": args.change_id,
+        "approver": args.approver,
+        "rule_sha256": live["managed_rule_sha256"],
+        "validator_sha256": live["validator_sha256"],
+        "validator_launcher_sha256": live["validator_launcher_sha256"],
+        "release": release_binding,
+        "state": live,
+    }
+    if any(record.get(key) != value for key, value in expected.items()):
+        raise InstallError("installation record binding mismatch")
+    rollback_stamp = record.get("rollback_stamp")
+    if not isinstance(rollback_stamp, str) or STAMP_RE.fullmatch(rollback_stamp) is None:
+        raise InstallError("installation record rollback identity rejected")
+    return record
 
 
 def install(args: argparse.Namespace) -> dict[str, object]:
@@ -911,18 +1010,18 @@ def install(args: argparse.Namespace) -> dict[str, object]:
             and VALIDATOR_TARGET.exists()
             and VALIDATOR_LAUNCHER_TARGET.exists()
         ):
-            existing_record = json.loads(checked_regular(INSTALLATION_RECORD))
+            existing_record = json.loads(
+                checked_root_regular_exact(INSTALLATION_RECORD, 0o600)
+            )
             if (
                 checked_regular(RULE_TARGET) == rule_bytes
                 and checked_regular(VALIDATOR_TARGET) == validator_bytes
                 and checked_regular(VALIDATOR_LAUNCHER_TARGET) == launcher_bytes
-                and existing_record.get("source_sha") == args.source_sha
-                and existing_record.get("change_id") == args.change_id
-                and existing_record.get("approver") == args.approver
-                and existing_record.get("release") == release_binding
             ):
-                validate_live(rule_bytes, validator_bytes, launcher_bytes)
-                return existing_record
+                live = validate_live(rule_bytes, validator_bytes, launcher_bytes)
+                return validate_installation_record(
+                    existing_record, args, release_binding, live
+                )
         if status_before["enabled"] == 2:
             raise InstallError("immutable kernel audit policy blocks this exact change")
         before = service_state()

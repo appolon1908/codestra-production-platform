@@ -275,6 +275,20 @@ def operator_cannot_modify(paths: list[Path]) -> bool:
     return True
 
 
+def path_authority_chain(paths: list[Path]) -> list[Path]:
+    authorities: set[Path] = set()
+    for path in paths:
+        if not path.is_absolute():
+            raise ValidationError("audit authority path must be absolute")
+        cursor = path
+        while True:
+            authorities.add(cursor)
+            if cursor == Path("/"):
+                break
+            cursor = cursor.parent
+    return sorted(authorities, key=lambda item: (len(item.parts), str(item)))
+
+
 def installed_release_binding(
     expected_source_sha: str,
 ) -> tuple[bytes, str, str, str]:
@@ -330,7 +344,8 @@ def validate(expected_source_sha: str) -> dict[str, object]:
         raise ValidationError("managed audit rule semantics differ from source")
     audit_log = log_path()
     if not operator_cannot_modify(
-        [
+        path_authority_chain(
+            [
             RULE_TARGET.parent,
             RULE_TARGET,
             VALIDATOR_TARGET.parent,
@@ -341,7 +356,8 @@ def validate(expected_source_sha: str) -> dict[str, object]:
             INSTALLATION_RECORD,
             audit_log.parent,
             audit_log,
-        ]
+            ]
+        )
     ):
         raise ValidationError("codestra-admin can modify audit authority")
     correlation = uuid.uuid4().hex
