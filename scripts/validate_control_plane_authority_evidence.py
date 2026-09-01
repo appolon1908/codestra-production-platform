@@ -25,4 +25,3 @@ subprocess.run(["git", "cat-file", "-e", f"{runtime}^{{commit}}"], check=True)
 subprocess.run(["git", "diff", "--quiet", runtime, "HEAD", "--", "control_plane"], check=True)
 assert "authorize a production build" not in text.lower()
 print("CONTROL_PLANE_RECONCILIATION_EVIDENCE=PASS")
-
