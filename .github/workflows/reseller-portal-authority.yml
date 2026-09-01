@@ -1,0 +1,26 @@
+name: reseller-portal-authority
+on:
+  pull_request:
+    paths: [reseller_portal/**, deploy/reseller-portal/**, tests/test_reseller_portal.py, .github/workflows/reseller-portal-authority.yml]
+permissions: {contents: read, pull-requests: read}
+jobs:
+  validate-reseller-portal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m compileall -q reseller_portal
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/reseller-portal/Dockerfile
+          load: true
+          tags: codestra/reseller-portal:${{ github.sha }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.sha }}
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with: {image-ref: 'codestra/reseller-portal:${{ github.sha }}', severity: 'CRITICAL,HIGH', ignore-unfixed: true, exit-code: '1'}
+      - uses: gitleaks/gitleaks-action@v2
+        env: {GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
+
