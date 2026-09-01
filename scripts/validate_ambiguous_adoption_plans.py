@@ -24,4 +24,3 @@ for value in re.findall(r"`([0-9a-f]+)`", text):
 for forbidden in ("BEGIN PRIVATE KEY", "ghp_", "github_pat_", "password="):
     assert forbidden.lower() not in text.lower()
 print("AMBIGUOUS_ADOPTION_PLANS=5/5")
-
