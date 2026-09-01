@@ -84,6 +84,56 @@ class BackupOperationsTests(unittest.TestCase):
         self.assertIn("DEFAULT_PRIVILEGES_RESTORED=PASS", source)
         self.assertIn("PRODUCTION_ROLE_PRIVILEGES_UNCHANGED=PASS", source)
 
+    def test_restore_rehearsal_uses_advertised_backup_and_publishes_bound_result(self) -> None:
+        source = (
+            ROOT
+            / "operations"
+            / "readiness"
+            / "codestra-isolated-restore-rehearsal.sh"
+        ).read_text()
+        self.assertIn('backup_stamp=$(python3 - "$backup_root/LAST_SUCCESS"', source)
+        self.assertIn('backup_dir="${backup_root}/${backup_stamp}"', source)
+        self.assertNotIn("find \"$backup_root\" -mindepth 2", source)
+        self.assertIn("RESTORE_BACKUP_STAMP=${backup_stamp}", source)
+        checksum = source.index("sha256sum RESTORE-RESULT.txt")
+        marker = source.index(
+            'mv "$evidence_root/.LAST_SUCCESS-${stamp}" "$evidence_root/LAST_SUCCESS"'
+        )
+        self.assertGreater(marker, checksum)
+        self.assertIn('sync -d "$evidence_root"', source)
+
+    def test_restore_rehearsal_migrates_exact_candidate_on_internal_network(self) -> None:
+        source = (
+            ROOT
+            / "operations"
+            / "readiness"
+            / "codestra-isolated-restore-rehearsal.sh"
+        ).read_text()
+        self.assertIn(
+            "middleware_source_sha=f199b6c40f4e467979e9a8b255a0e686321a182d",
+            source,
+        )
+        self.assertIn("middleware_required_head=0056_klyrow_delivery_events", source)
+        self.assertIn('middleware_image="${middleware_repository}@${release_values[0]}"', source)
+        self.assertIn('"${middleware_container_args[@]}" "$middleware_image"', source)
+        self.assertIn("alembic upgrade head", source)
+        self.assertIn("alembic current", source)
+        self.assertIn("MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS", source)
+        self.assertIn("MIDDLEWARE_SCHEMA_TABLE_COUNT=${middleware_schema_table_count}", source)
+        self.assertIn(
+            "postgresql+asyncpg://mw_integration_api:%s@postgres:5432/codestra_middleware",
+            source,
+        )
+        self.assertIn("MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api", source)
+        self.assertIn("MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS", source)
+        self.assertIn("python -m app.entrypoints.integration_api", source)
+        self.assertIn('urlopen("http://middleware-candidate:8095/healthz"', source)
+        self.assertIn('urlopen("http://middleware-candidate:8095/readyz"', source)
+        self.assertIn("MIDDLEWARE_CANDIDATE_DATABASE_READINESS=PASS", source)
+        self.assertIn('docker network create --internal', source)
+        self.assertNotIn("--publish", source)
+        self.assertNotIn("--publish-all", source)
+
     def test_readiness_backup_validates_exact_root_owned_owner_waiver(self) -> None:
         source = (ROOT / "operations" / "readiness" / "codestra-local-consistency-backup.sh").read_text()
         self.assertIn("os.O_NOFOLLOW", source)

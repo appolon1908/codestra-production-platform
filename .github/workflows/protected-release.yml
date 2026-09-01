@@ -37,10 +37,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends nats-server
           python -m pip install --upgrade "setuptools==83.0.0"
-          python -m pip install pytest pytest-subtests PyYAML requests pip-audit "nats-py==2.15.0" \
+          python -m pip install pytest pytest-subtests PyYAML requests pip-audit "bandit==1.9.4" "nats-py==2.15.0" \
             "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9"
           python -m pip install -e 'vicidial[test]'
-          python -m pytest -q
+          sudo --preserve-env=PATH \
+            "$(command -v python)" -m pytest -q
           python -m pytest -q \
             deploy/kong-production-standby/auth-middleware/test_token_validation.py
           python -m pip_audit --local
