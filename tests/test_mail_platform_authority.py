@@ -26,7 +26,7 @@ class MailPlatformAuthorityTests(unittest.TestCase):
     def message(self, **changes):
         values = dict(tenant="tenant-a", direction="OUTBOUND", sender="alice@example.test",
                       recipients=["outside@example.net"], correlation_id="correlation-1",
-                      idempotency_key="idempotency-1", actor_uuid=self.alice)
+                      idempotency_key="idempotency-1", actor_uuid=self.alice)  # gitleaks:allow test fixture
         values.update(changes)
         return self.registry.register_message(**values)
 
@@ -62,7 +62,7 @@ class MailPlatformAuthorityTests(unittest.TestCase):
         message = self.registry.register_message(
             tenant="tenant-a", direction="INBOUND", sender="outside@example.net",
             recipients=["team@example.test"], correlation_id="correlation-2",
-            idempotency_key="idempotency-2",
+            idempotency_key="idempotency-2",  # gitleaks:allow test fixture
         )
         self.assertEqual(mailbox, message["mailbox_uuid"])
         self.assertEqual(1, len(self.registry.messages_for_user(tenant="tenant-a", mail_user_uuid=self.bob)))
