@@ -1,0 +1,23 @@
+name: adoption-plan-evidence
+
+on:
+  pull_request:
+    paths:
+      - reports/AMBIGUOUS_WORKLOAD_ADOPTION_PLANS_20260901.md
+      - scripts/validate_ambiguous_adoption_plans.py
+      - .github/workflows/adoption-plan-evidence.yml
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate-adoption-plans:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/validate_ambiguous_adoption_plans.py
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
