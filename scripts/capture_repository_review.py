@@ -129,6 +129,10 @@ def main() -> None:
         ):
             value, alert_error = gh(endpoint(repo, path), paginate=True)
             alerts[alert_name] = {"count": len(value or []), "error": alert_error}
+            if alert_error:
+                blockers.append(
+                    f"- `{repo}` {alert_name} security alerts: {alert_error}"
+                )
 
         for label, value in (
             ("branches", branches_error), ("pull_requests", prs_error),
