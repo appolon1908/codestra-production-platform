@@ -8,7 +8,8 @@ The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
 `restore-test`, `stage`, `canary`, `status`, `rollback`, `collect-evidence`,
 `stage-control-plane`, `validate-control-plane`, `activate-control-plane`,
 `rollback-control-plane`, `enable-production-web-traffic`, or
-`disable-production-web-traffic`.
+`disable-production-web-traffic`, plus the bounded `rollout-middleware` and
+`rollback-middleware` pair.
 There is no shell, Docker-group membership, host/path input, arbitrary unit, or
 command argument. `preflight`, `status`, and `collect-evidence` are read-only.
 Every other action except emergency `rollback` requires
@@ -29,13 +30,14 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `0d218c880582ac21286b779309b0e7802a50809a6d14f4c3559e1c74ec03edc9` |
-| `codestra-production-forced-command` | `bcd05989b44a51828f3b3406e1cd7b9d128a587d68e084a36f2ffbbe26803f3b` |
-| `codestra-production-operator.sudoers` | `93e56b18fa54a61192a5a62fe972a74abec37816af8ca977c67cd1bdd75195b9` |
+| `codestra-production-operator` | `399069961f34e4ae8b29777be94862fa4202502fe05665878eca615460494ee3` |
+| `codestra-production-forced-command` | `d806b91ae6d9ddf962883487ffebaf3ac503ed3ef79b0d9a9bdedc222e64cf8c` |
+| `codestra-production-operator.sudoers` | `9023d679f923587eaaed3d0c27b5c388a136d112a9483777881b5aea002ed520` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
+| `codestra-isolated-restore-rehearsal.sh` | `076bc8d33318561fff535f336300d072cd14beb9c756c253a8b1c6a30f3f34f4` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
 
-The installer contains the first four pinned digests and verifies them before
+The installer contains the five pinned digests and verifies them before
 writing host files. The installer digest is published only after protected
 merge so it describes the immutable reviewed artifact rather than a draft.
 
@@ -52,6 +54,7 @@ merge so it describes the immutable reviewed artifact rather than a draft.
 | `/etc/codestra/production-operator/release.json` | `root:root` | `0644` | Immutable release tuple used by the forced command |
 | `/etc/codestra/production-operator/control-plane-archive.sha256` | `root:root` | `0644` | Exact protected control-plane archive digest |
 | `/etc/codestra/production-operator/installed.sha256` | `root:root` | `0600` | Installed-file checksum manifest |
+| `/opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh` | `root:root` | `0755` | Exact-backup, exact-image isolated restore and migration gate |
 | `/var/lib/codestra-production-operator` | `root:codestra-production-operator` | `0710` | Traversable operator home; contents remain non-listable and individually restricted |
 | `/var/lib/codestra-production-operator/.ssh` | operator user/group | `0700` | SSH key directory |
 | `/var/lib/codestra-production-operator/.ssh/authorized_keys` | operator user/group | `0600` | One caller-supplied ED25519 key with forced command |
@@ -91,7 +94,10 @@ sessions are rejected before sudo. Each accepted invocation acquires a global
 lock and writes a sanitized JSON result under the evidence directory.
 `status` and `collect-evidence` remain available when a safety probe fails so
 an incident can be diagnosed. `rollback` remains available outside the normal
-window and when safety flags or telephony counters are unsafe; it can remove
+window and when safety flags or telephony counters are unsafe. All four recovery
+actions skip remote telephony and runtime-safety probes so an unreachable peer
+cannot strand rollback; the recovery operation itself retains its fixed-target,
+tuple, checksum, and readback controls. `rollback` can remove
 only the fixed standby container when its digest matches the installed tuple.
 All pre-activation actions require exact zero
 calls/channels, no SIP registrations, and the complete canonical release flag
@@ -130,11 +136,63 @@ continue to use the fixed, root-owned `codestra-readiness-backup.service` and
 `codestra-readiness-restore.service` units. `validate-backup` invokes only the
 fixed root-owned `/opt/codestra/operations/backup/check-backup-state.sh` and
 rejects unsafe file type, ownership, mode, or nonzero validation status.
+`restore-test` requires prior exact-tuple `stage` evidence, selects only the
+root-owned backup stamp published in `LAST_SUCCESS`, and publishes its own
+atomic `LAST_SUCCESS` marker after checksum validation. The operator validates
+that restore result and requires it to bind the same backup stamp, immutable
+image digest, Middleware source SHA, schema tables, and Alembic head
+`0056_klyrow_delivery_events`. The migration runs as the production migration
+identity `mw_integration_api`, with the restored grant graph compared byte for
+byte to production, on an internal-only disposable network. The exact candidate
+then starts without a host port and must return healthy `/healthz` and
+database-online `/readyz` responses before production is touched.
 
 `activate-control-plane` requires exact-tuple PASS evidence from both staging
 and validation, a validated encrypted backup, a rollback snapshot, healthy
-control-plane services, and exact middleware runtime digests before atomically
-committing the active-release pointer. Validation failure invokes the bounded
+control-plane services, an exact-tuple Middleware rollout, and exact middleware
+runtime digests before atomically committing the active-release pointer.
+`rollout-middleware` accepts no path or service argument. It verifies the ten
+captured production Compose layers by SHA-256, copies the verified bytes into
+an exact-release root-owned directory, and runs Compose only from those copies.
+It requires isolated image-stage, protected platform-stage, backup-validation,
+and restore-test evidence whose tested backup stamp exactly matches the selected
+readiness backup. It migrates through the exact image and recreates only the
+integration API, scheduler, and notification worker. A retry preserves the
+original exact-tuple rollback marker while that attempt is active. After a
+completed rollback, the next attempt verifies the restored runtime and captures
+a fresh pre-change database and image snapshot so intervening writes cannot be
+lost. Before that snapshot, the operator records and stops the complete,
+checksum-pinned Middleware database-client graph, fences new non-superuser
+connections, terminates existing sessions, and verifies zero target sessions.
+The prior running set remains stopped through migration and replacement, then is
+restored exactly after successful readback or rollback. A root-owned `QUIESCED`
+marker makes an interruption before bundle publication recoverable without
+silently leaving writers stopped. Rollback reads back every restored image
+ID and fail-closed environment before recording PASS. The bundle includes the
+pre-change Middleware database dump, checksum, owner, Alembic head, and the
+validated readiness-backup reference. Rollback stops the three replaced
+writers, sets the target database connection limit to zero, terminates every
+remaining client session, and only then atomically preserves a checksum-bound
+failed-state dump and progress record. It disables all target-database
+connections before destructive restore and restores the pre-change database
+behind a connection-limit fence. A durable `DATABASE_RESTORED_FENCED` checkpoint
+is published immediately after `pg_restore`; only a later
+`CONNECTION_POLICY_RESTORED` phase can reopen the captured connection policy.
+A retry after `dropdb`, database recreation, `pg_restore`, or connection-policy
+restoration resumes from that durable phase without dropping a database that may
+have accepted writes or trying to dump a missing database; a completed retry is
+read back as an idempotent no-op. Rollback
+verifies the prior database head before PASS. The exact-tuple rollback pointer
+and phase records are fsynced, atomically replaced, and read back before use.
+Both pre-change and failed-state dumps stream directly to protected files and
+are incrementally hashed; validation and `pg_restore` also stream from one
+verified descriptor, so dump size does not become operator memory use. Every
+image record, database dump, checksum, owner/head record, Compose
+override, and target manifest is also atomically written and read back; the
+bundle directory is fsynced before `LAST_SUCCESS` can advertise it.
+It then reads back health, the immutable digest, all delivery-disable flags,
+and database head `0056_klyrow_delivery_events`. A failure restores the three
+captured image IDs. Control-plane validation failure invokes the bounded
 control-plane rollback. The Web/API traffic actions update only a root-owned
 core traffic pointer after validating the active tuple and core dependencies;
 they always persist email, SMS, voice, and PSTN as disabled.
