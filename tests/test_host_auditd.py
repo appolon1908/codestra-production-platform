@@ -372,6 +372,63 @@ def test_installed_validator_is_read_back_before_service_mutation(
         INSTALLER.installed_payloads(b"signed rule\n", b"signed validator\n")
 
 
+def test_rollback_revalidates_restored_files_and_service_before_completion(
+    tmp_path,
+) -> None:
+    target = tmp_path / "managed.rules"
+    absent = tmp_path / "previously-absent"
+    expected = b"checkpoint bytes\n"
+    target.write_bytes(expected)
+    target.chmod(0o640)
+    info = target.stat()
+    record = {
+        "files": [
+            {
+                "path": str(target),
+                "present": True,
+                "sha256": hashlib.sha256(expected).hexdigest(),
+                "mode": 0o640,
+                "uid": info.st_uid,
+                "gid": info.st_gid,
+            },
+            {"path": str(absent), "present": False},
+        ],
+        "service_before": {"enabled": True, "active": False},
+    }
+    evidence = INSTALLER.restored_checkpoint_evidence(
+        record, lambda: {"enabled": True, "active": False}
+    )
+    assert evidence["service"] == {"enabled": True, "active": False}
+    assert evidence["files"] == [
+        {
+            "path": str(target),
+            "present": True,
+            "sha256": hashlib.sha256(expected).hexdigest(),
+        },
+        {"path": str(absent), "present": False},
+    ]
+    target.write_bytes(b"displaced\n")
+    with pytest.raises(INSTALLER.InstallError, match="differs from checkpoint"):
+        INSTALLER.restored_checkpoint_evidence(
+            record, lambda: {"enabled": True, "active": False}
+        )
+    target.write_bytes(expected)
+    target.chmod(0o640)
+    with pytest.raises(INSTALLER.InstallError, match="service state read-back"):
+        INSTALLER.restored_checkpoint_evidence(
+            record, lambda: {"enabled": True, "active": True}
+        )
+
+
+def test_rollback_pass_record_follows_post_restore_readback() -> None:
+    source = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    restore = source.index("restored = restore_checkpoint(checkpoint, record)")
+    completion = source.index('"completed_at_utc"', restore)
+    evidence = source.index('"restored": restored', completion)
+    write = source.index('atomic_write(checkpoint / "rollback-result.json"', evidence)
+    assert restore < completion < evidence < write
+
+
 def test_validation_evidence_completes_partial_writes_before_readback(tmp_path, monkeypatch) -> None:
     target = tmp_path / "evidence.json"
     real_write = os.write

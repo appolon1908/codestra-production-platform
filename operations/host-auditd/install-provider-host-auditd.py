@@ -639,7 +639,54 @@ def restore_file(record: dict[str, object], checkpoint: Path) -> None:
     os.chown(target, int(record["uid"]), int(record["gid"]), follow_symlinks=False)
 
 
-def restore_checkpoint(checkpoint: Path, record: dict[str, object]) -> None:
+def restored_checkpoint_evidence(
+    record: dict[str, object],
+    read_service_state: Callable[[], dict[str, bool]] = service_state,
+) -> dict[str, object]:
+    items = record.get("files")
+    if not isinstance(items, list):
+        raise InstallError("rollback file evidence rejected")
+    restored_files: list[dict[str, object]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise InstallError("rollback file evidence entry rejected")
+        target = Path(str(item["path"]))
+        if item.get("present") is False:
+            try:
+                target.lstat()
+            except FileNotFoundError:
+                restored_files.append({"path": str(target), "present": False})
+                continue
+            raise InstallError("absent rollback target was recreated")
+        try:
+            value, info = checked_regular_snapshot(target)
+        except FileNotFoundError:
+            raise InstallError("restored target is missing") from None
+        digest = sha256_bytes(value)
+        if (
+            digest != item.get("sha256")
+            or stat.S_IMODE(info.st_mode) != item.get("mode")
+            or info.st_uid != item.get("uid")
+            or info.st_gid != item.get("gid")
+        ):
+            raise InstallError("restored target read-back differs from checkpoint")
+        restored_files.append(
+            {"path": str(target), "present": True, "sha256": digest}
+        )
+    before = record.get("service_before")
+    if not isinstance(before, dict):
+        raise InstallError("rollback service evidence rejected")
+    expected_service = {
+        "enabled": before.get("enabled") is True,
+        "active": before.get("active") is True,
+    }
+    observed_service = read_service_state()
+    if observed_service != expected_service:
+        raise InstallError("restored service state read-back differs from checkpoint")
+    return {"files": restored_files, "service": observed_service}
+
+
+def restore_checkpoint(checkpoint: Path, record: dict[str, object]) -> dict[str, object]:
     items = record.get("files")
     if not isinstance(items, list) or len(items) != len(SNAPSHOT_NAMES):
         raise InstallError("rollback file set rejected")
@@ -663,6 +710,7 @@ def restore_checkpoint(checkpoint: Path, record: dict[str, object]) -> None:
         run_checked([str(COMMANDS["systemctl"]), "start", "auditd.service"])
     elif not before.get("active") and active:
         run_checked([str(COMMANDS["service"]), "auditd", "stop"])
+    return restored_checkpoint_evidence(record)
 
 
 def install(args: argparse.Namespace) -> dict[str, object]:
@@ -740,12 +788,13 @@ def rollback(args: argparse.Namespace) -> dict[str, object]:
     record = json.loads(manifest)
     if record.get("source_sha") != args.expected_source_sha or record.get("stamp") != args.backup_stamp:
         raise InstallError("rollback source identity mismatch")
-    restore_checkpoint(checkpoint, record)
+    restored = restore_checkpoint(checkpoint, record)
     result = {
         "schema": "codestra.host-auditd.rollback-result.v1",
         "source_sha": args.expected_source_sha,
         "rollback_stamp": args.backup_stamp,
         "completed_at_utc": utc_now().isoformat().replace("+00:00", "Z"),
+        "restored": restored,
         "mutation_scope": [
             str(RULE_TARGET),
             str(AGGREGATE_TARGET),
