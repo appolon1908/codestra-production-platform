@@ -1,0 +1,3 @@
+services:
+  portal:
+    image: ${RESELLER_PORTAL_IMAGE:?immutable digest required}
