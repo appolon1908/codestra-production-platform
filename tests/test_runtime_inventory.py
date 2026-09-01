@@ -111,6 +111,13 @@ def test_unknown_safety_value_is_not_echoed() -> None:
     assert "unexpected-secretish-value" not in json.dumps(result)
 
 
+def test_duplicate_safety_flags_fail_closed() -> None:
+    result = MODULE.normalized_safety_flags(
+        ["POSTAL_INBOUND_ENABLED=true", "POSTAL_INBOUND_ENABLED=false"]
+    )
+    assert result["POSTAL_INBOUND_ENABLED"] == "unknown"
+
+
 def test_all_operational_write_gates_are_allowlisted_and_normalized() -> None:
     required = {
         "CALLBACK_DELIVERY_ENABLED",

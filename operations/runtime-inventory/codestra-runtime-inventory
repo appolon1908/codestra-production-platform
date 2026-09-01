@@ -132,11 +132,19 @@ def docker_json(*args: str) -> Any:
 
 def normalized_safety_flags(environment: list[str] | None) -> dict[str, str]:
     selected: dict[str, str] = {}
+    duplicates: set[str] = set()
     allowed = set(SAFETY_FLAGS)
     for entry in environment or []:
         name, separator, value = entry.partition("=")
         if separator and name in allowed:
-            selected[name] = NORMALIZED_SAFETY_VALUES.get(value.strip().lower(), "unknown")
+            if name in selected:
+                duplicates.add(name)
+            elif name not in duplicates:
+                selected[name] = NORMALIZED_SAFETY_VALUES.get(
+                    value.strip().lower(), "unknown"
+                )
+    for name in duplicates:
+        selected[name] = "unknown"
     # Absence is unknown, not not-applicable. A later capability authority may
     # prove that a gate is inapplicable; this inventory must never infer that.
     return {name: selected.get(name, "unknown") for name in SAFETY_FLAGS}
