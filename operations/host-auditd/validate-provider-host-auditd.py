@@ -20,6 +20,9 @@ from pathlib import Path
 
 RULE_TARGET = Path("/etc/audit/rules.d/60-codestra-provider-host.rules")
 VALIDATOR_TARGET = Path("/usr/local/sbin/validate-codestra-provider-host-auditd")
+VALIDATOR_LAUNCHER = Path(
+    "/usr/local/sbin/validate-codestra-provider-host-auditd-verified"
+)
 INSTALLATION_RECORD = Path("/var/lib/codestra/host-auditd/installation.json")
 EVIDENCE_ROOT = Path("/var/lib/codestra/host-auditd/evidence")
 AUDIT_CONFIG = Path("/etc/audit/auditd.conf")
@@ -34,6 +37,8 @@ REQUIRED_KEYS = {
     "codestra_operator_state",
     "codestra_root_session_exec",
     "codestra_privileged_exec",
+    "codestra_service_privileged_exec",
+    "codestra_unset_privileged_exec",
 }
 
 
@@ -216,6 +221,7 @@ def managed_rule_signatures(value: str, keys: set[str]) -> set[tuple[object, ...
                     continue
                 item = item.replace("arch=c000003e", "arch=b64").replace("arch=40000003", "arch=b32")
                 item = item.replace("auid!=unset", "auid!=4294967295")
+                item = item.replace("auid=unset", "auid=4294967295")
                 filters.add(item)
         signatures.add(("syscall", action, tuple(sorted(syscalls)), tuple(sorted(filters)), key))
     return signatures
@@ -269,16 +275,22 @@ def operator_cannot_modify(paths: list[Path]) -> bool:
     return True
 
 
-def installed_release_binding(expected_source_sha: str) -> tuple[bytes, str, str]:
+def installed_release_binding(
+    expected_source_sha: str,
+) -> tuple[bytes, str, str, str]:
     installed_rule = checked_regular(RULE_TARGET)
     installed_validator = checked_regular(
         VALIDATOR_TARGET, max_bytes=2 * 1024 * 1024
+    )
+    installed_launcher = checked_regular(
+        VALIDATOR_LAUNCHER, max_bytes=2 * 1024 * 1024
     )
     installation = json.loads(checked_regular(INSTALLATION_RECORD))
     if not isinstance(installation, dict):
         raise ValidationError("installation record rejected")
     rule_sha = hashlib.sha256(installed_rule).hexdigest()
     validator_sha = hashlib.sha256(installed_validator).hexdigest()
+    launcher_sha = hashlib.sha256(installed_launcher).hexdigest()
     if (
         installation.get("source_sha") != expected_source_sha
         or installation.get("rule_sha256") != rule_sha
@@ -286,7 +298,9 @@ def installed_release_binding(expected_source_sha: str) -> tuple[bytes, str, str
         raise ValidationError("installation source binding mismatch")
     if installation.get("validator_sha256") != validator_sha:
         raise ValidationError("installation validator binding mismatch")
-    return installed_rule, rule_sha, validator_sha
+    if installation.get("validator_launcher_sha256") != launcher_sha:
+        raise ValidationError("installation validator launcher binding mismatch")
+    return installed_rule, rule_sha, validator_sha, launcher_sha
 
 
 def validate(expected_source_sha: str) -> dict[str, object]:
@@ -303,7 +317,9 @@ def validate(expected_source_sha: str) -> dict[str, object]:
         raise ValidationError("audit kernel state rejected")
     if status["backlog"] >= status["backlog_limit"]:
         raise ValidationError("audit kernel backlog exhausted")
-    installed, rule_sha, validator_sha = installed_release_binding(expected_source_sha)
+    installed, rule_sha, validator_sha, launcher_sha = installed_release_binding(
+        expected_source_sha
+    )
     active_rules = run(["/usr/sbin/auditctl", "-l"])
     active_keys = rule_keys(active_rules)
     if not REQUIRED_KEYS <= active_keys:
@@ -317,6 +333,10 @@ def validate(expected_source_sha: str) -> dict[str, object]:
         [
             RULE_TARGET.parent,
             RULE_TARGET,
+            VALIDATOR_TARGET.parent,
+            VALIDATOR_TARGET,
+            VALIDATOR_LAUNCHER.parent,
+            VALIDATOR_LAUNCHER,
             INSTALLATION_RECORD.parent,
             INSTALLATION_RECORD,
             audit_log.parent,
@@ -349,6 +369,7 @@ def validate(expected_source_sha: str) -> dict[str, object]:
         "backlog_limit": status["backlog_limit"],
         "rule_sha256": rule_sha,
         "validator_sha256": validator_sha,
+        "validator_launcher_sha256": launcher_sha,
         "managed_keys": sorted(REQUIRED_KEYS),
         "audit_log": str(audit_log),
         "audit_log_root_owned": True,

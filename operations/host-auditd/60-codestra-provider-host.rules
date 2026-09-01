@@ -12,3 +12,7 @@
 -a always,exit -F arch=b32 -S execve,execveat -F euid=0 -F auid=0 -k codestra_root_session_exec
 -a always,exit -F arch=b64 -S execve,execveat -F euid=0 -F auid>=1000 -F auid!=unset -k codestra_privileged_exec
 -a always,exit -F arch=b32 -S execve,execveat -F euid=0 -F auid>=1000 -F auid!=unset -k codestra_privileged_exec
+-a always,exit -F arch=b64 -S execve,execveat -F euid=0 -F auid>=1 -F auid<1000 -k codestra_service_privileged_exec
+-a always,exit -F arch=b32 -S execve,execveat -F euid=0 -F auid>=1 -F auid<1000 -k codestra_service_privileged_exec
+-a always,exit -F arch=b64 -S execve,execveat -F euid=0 -F auid=4294967295 -k codestra_unset_privileged_exec
+-a always,exit -F arch=b32 -S execve,execveat -F euid=0 -F auid=4294967295 -k codestra_unset_privileged_exec

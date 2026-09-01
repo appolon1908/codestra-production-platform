@@ -29,6 +29,9 @@ STATE_ROOT = Path("/var/lib/codestra/host-auditd")
 INSTALLATION_RECORD = STATE_ROOT / "installation.json"
 BACKUP_ROOT = Path("/var/backups/codestra-operations/host-auditd")
 VALIDATOR_TARGET = Path("/usr/local/sbin/validate-codestra-provider-host-auditd")
+VALIDATOR_LAUNCHER_TARGET = Path(
+    "/usr/local/sbin/validate-codestra-provider-host-auditd-verified"
+)
 RELEASE_TRUST_ROOT = Path("/etc/codestra/release")
 ALLOWED_SIGNERS_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers"
 SIGNER_FINGERPRINT_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers.ssh-fingerprint"
@@ -72,6 +75,7 @@ SNAPSHOT_NAMES = {
     RULE_TARGET: "rules.managed",
     AGGREGATE_TARGET: "rules.aggregate",
     VALIDATOR_TARGET: "validator.installed",
+    VALIDATOR_LAUNCHER_TARGET: "validator.launcher",
     INSTALLATION_RECORD: "installation.record",
 }
 
@@ -90,6 +94,105 @@ def stamp_now() -> str:
 
 def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def validator_launcher_bytes(
+    validator_bytes: bytes,
+    source_sha: str,
+    validator_target: Path = VALIDATOR_TARGET,
+) -> bytes:
+    if SHA_RE.fullmatch(source_sha) is None:
+        raise InstallError("launcher source SHA rejected")
+    expected_digest = sha256_bytes(validator_bytes)
+    source = f'''#!/usr/bin/python3
+from __future__ import annotations
+
+import hashlib
+import os
+import stat
+import sys
+from pathlib import Path
+
+VALIDATOR = Path({str(validator_target)!r})
+EXPECTED_SOURCE_SHA = {source_sha!r}
+EXPECTED_VALIDATOR_SHA256 = {expected_digest!r}
+MAX_VALIDATOR_BYTES = 2 * 1024 * 1024
+
+
+def fail() -> None:
+    print("HOST_AUDITD_LAUNCH=FAIL", file=sys.stderr)
+    raise SystemExit(1)
+
+
+if sys.argv[1:] != ["--expected-source-sha", EXPECTED_SOURCE_SHA]:
+    fail()
+
+launcher = Path(__file__).absolute()
+for authority, directory in (
+    (launcher, False),
+    (launcher.parent, True),
+    (VALIDATOR.parent, True),
+):
+    try:
+        info = authority.lstat()
+    except OSError:
+        fail()
+    expected_type = stat.S_ISDIR if directory else stat.S_ISREG
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not expected_type(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) & 0o022
+    ):
+        fail()
+
+try:
+    descriptor = os.open(VALIDATOR, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+except OSError:
+    fail()
+try:
+    info = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) & 0o022
+        or info.st_size <= 0
+        or info.st_size > MAX_VALIDATOR_BYTES
+    ):
+        fail()
+    chunks = []
+    remaining = MAX_VALIDATOR_BYTES + 1
+    while remaining:
+        block = os.read(descriptor, min(1024 * 1024, remaining))
+        if not block:
+            break
+        chunks.append(block)
+        remaining -= len(block)
+    payload = b"".join(chunks)
+    if (
+        len(payload) != info.st_size
+        or hashlib.sha256(payload).hexdigest() != EXPECTED_VALIDATOR_SHA256
+    ):
+        fail()
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    os.set_inheritable(descriptor, True)
+    os.execve(
+        "/usr/bin/python3",
+        [
+            "/usr/bin/python3",
+            "-I",
+            f"/proc/self/fd/{{descriptor}}",
+            "--expected-source-sha",
+            EXPECTED_SOURCE_SHA,
+        ],
+        {{"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"}},
+    )
+finally:
+    os.close(descriptor)
+'''
+    return source.encode("utf-8")
 
 
 def checked_regular_snapshot(
@@ -213,6 +316,46 @@ def run_checked_bytes(command: list[str], input_bytes: bytes) -> subprocess.Comp
 
 def command_output(command: list[str]) -> str:
     return run_checked(command).stdout
+
+
+def operator_cannot_modify(paths: list[Path]) -> bool:
+    account = pwd.getpwnam("codestra-admin")
+    for path in paths:
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            return False
+        mode = stat.S_IMODE(info.st_mode)
+        if info.st_uid == account.pw_uid and mode & 0o200:
+            return False
+        if info.st_gid == account.pw_gid and mode & 0o020:
+            return False
+        if mode & 0o002:
+            return False
+        result = subprocess.run(
+            [
+                str(COMMANDS["runuser"]),
+                "--user",
+                account.pw_name,
+                "--",
+                str(COMMANDS["test"]),
+                "-w",
+                str(path),
+            ],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+        )
+        if result.returncode == 0:
+            return False
+        if result.returncode != 1:
+            raise InstallError("operator writability check failed")
+    return True
 
 
 def snapshot_release_inputs(args: argparse.Namespace) -> tuple[Path, dict[str, Path], dict[str, str]]:
@@ -463,6 +606,14 @@ def require_prerequisites() -> None:
         or stat.S_IMODE(home_info.st_mode) & 0o022
     ):
         raise InstallError("codestra-admin home authority rejected")
+    operator_paths = [VALIDATOR_TARGET.parent, VALIDATOR_LAUNCHER_TARGET.parent]
+    operator_paths.extend(
+        path
+        for path in (VALIDATOR_TARGET, VALIDATOR_LAUNCHER_TARGET)
+        if path.exists()
+    )
+    if not operator_cannot_modify(operator_paths):
+        raise InstallError("codestra-admin can modify validator execution authority")
 
 
 def snapshot_file(path: Path, destination: Path) -> dict[str, object]:
@@ -503,6 +654,7 @@ def snapshot_before(source_sha: str, state: dict[str, bool]) -> tuple[str, Path,
             snapshot_file(RULE_TARGET, destination),
             snapshot_file(AGGREGATE_TARGET, destination),
             snapshot_file(VALIDATOR_TARGET, destination),
+            snapshot_file(VALIDATOR_LAUNCHER_TARGET, destination),
             snapshot_file(INSTALLATION_RECORD, destination),
         ],
     }
@@ -573,36 +725,45 @@ def managed_rule_signatures(value: str, keys: set[str]) -> set[tuple[object, ...
                     continue
                 item = item.replace("arch=c000003e", "arch=b64").replace("arch=40000003", "arch=b32")
                 item = item.replace("auid!=unset", "auid!=4294967295")
+                item = item.replace("auid=unset", "auid=4294967295")
                 filters.add(item)
         signatures.add(("syscall", action, tuple(sorted(syscalls)), tuple(sorted(filters)), key))
     return signatures
 
 
 def installed_payloads(
-    rule_bytes: bytes, validator_bytes: bytes
+    rule_bytes: bytes, validator_bytes: bytes, launcher_bytes: bytes
 ) -> dict[str, str]:
     installed_rule = checked_root_regular(RULE_TARGET)
     installed_validator = checked_root_regular(
         VALIDATOR_TARGET, max_bytes=2 * 1024 * 1024
     )
+    installed_launcher = checked_root_regular(
+        VALIDATOR_LAUNCHER_TARGET, max_bytes=2 * 1024 * 1024
+    )
     if installed_rule != rule_bytes:
         raise InstallError("installed managed rule differs from signed release")
     if installed_validator != validator_bytes:
         raise InstallError("installed validator differs from signed release")
+    if installed_launcher != launcher_bytes:
+        raise InstallError("installed validator launcher differs from expected bytes")
     return {
         "managed_rule_sha256": sha256_bytes(installed_rule),
         "validator_sha256": sha256_bytes(installed_validator),
+        "validator_launcher_sha256": sha256_bytes(installed_launcher),
     }
 
 
-def validate_live(rule_bytes: bytes, validator_bytes: bytes) -> dict[str, object]:
+def validate_live(
+    rule_bytes: bytes, validator_bytes: bytes, launcher_bytes: bytes
+) -> dict[str, object]:
     status = audit_status()
     if status.get("enabled") not in {1, 2} or status.get("pid", 0) <= 0 or status.get("lost") != 0:
         raise InstallError("audit kernel state failed closed")
     state = service_state()
     if state != {"enabled": True, "active": True}:
         raise InstallError("auditd service is not enabled and active")
-    payloads = installed_payloads(rule_bytes, validator_bytes)
+    payloads = installed_payloads(rule_bytes, validator_bytes, launcher_bytes)
     expected_keys = managed_keys(rule_bytes.decode("utf-8", "strict"))
     active_rules = command_output([str(COMMANDS["auditctl"]), "-l"])
     active_keys = managed_keys(active_rules)
@@ -713,6 +874,21 @@ def restore_checkpoint(checkpoint: Path, record: dict[str, object]) -> dict[str,
     return restored_checkpoint_evidence(record)
 
 
+def persist_installation_record(record: dict[str, object]) -> dict[str, object]:
+    payload = json.dumps(record, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    atomic_write(INSTALLATION_RECORD, payload, 0o600)
+    persisted = checked_root_regular(INSTALLATION_RECORD)
+    if persisted != payload:
+        raise InstallError("installation record read-back differs from written bytes")
+    try:
+        readback = json.loads(persisted)
+    except json.JSONDecodeError as exc:
+        raise InstallError("installation record read-back rejected") from exc
+    if readback != record:
+        raise InstallError("installation record semantic read-back mismatch")
+    return readback
+
+
 def install(args: argparse.Namespace) -> dict[str, object]:
     require_prerequisites()
     if not SHA_RE.fullmatch(args.source_sha):
@@ -726,19 +902,26 @@ def install(args: argparse.Namespace) -> dict[str, object]:
         rule_bytes, validator_bytes, release_binding = verify_signed_release(
             args, stage, staged, input_digests
         )
+        launcher_bytes = validator_launcher_bytes(validator_bytes, args.source_sha)
         require_additive_rules(rule_bytes)
         status_before = audit_status()
-        if RULE_TARGET.exists() and INSTALLATION_RECORD.exists() and VALIDATOR_TARGET.exists():
+        if (
+            RULE_TARGET.exists()
+            and INSTALLATION_RECORD.exists()
+            and VALIDATOR_TARGET.exists()
+            and VALIDATOR_LAUNCHER_TARGET.exists()
+        ):
             existing_record = json.loads(checked_regular(INSTALLATION_RECORD))
             if (
                 checked_regular(RULE_TARGET) == rule_bytes
                 and checked_regular(VALIDATOR_TARGET) == validator_bytes
+                and checked_regular(VALIDATOR_LAUNCHER_TARGET) == launcher_bytes
                 and existing_record.get("source_sha") == args.source_sha
                 and existing_record.get("change_id") == args.change_id
                 and existing_record.get("approver") == args.approver
                 and existing_record.get("release") == release_binding
             ):
-                validate_live(rule_bytes, validator_bytes)
+                validate_live(rule_bytes, validator_bytes, launcher_bytes)
                 return existing_record
         if status_before["enabled"] == 2:
             raise InstallError("immutable kernel audit policy blocks this exact change")
@@ -748,12 +931,13 @@ def install(args: argparse.Namespace) -> dict[str, object]:
         try:
             atomic_write(RULE_TARGET, rule_bytes, 0o600)
             atomic_write(VALIDATOR_TARGET, validator_bytes, 0o750)
-            installed_payloads(rule_bytes, validator_bytes)
+            atomic_write(VALIDATOR_LAUNCHER_TARGET, launcher_bytes, 0o750)
+            installed_payloads(rule_bytes, validator_bytes, launcher_bytes)
             run_checked([str(COMMANDS["systemctl"]), "enable", "auditd.service"])
             if not service_state()["active"]:
                 run_checked([str(COMMANDS["systemctl"]), "start", "auditd.service"])
             run_checked([str(COMMANDS["augenrules"]), "--load"])
-            live = validate_live(rule_bytes, validator_bytes)
+            live = validate_live(rule_bytes, validator_bytes, launcher_bytes)
             record = {
                 "schema": "codestra.host-auditd.installation.v1",
                 "source_sha": args.source_sha,
@@ -763,12 +947,13 @@ def install(args: argparse.Namespace) -> dict[str, object]:
                 "rollback_stamp": stamp,
                 "rule_sha256": live["managed_rule_sha256"],
                 "validator_sha256": live["validator_sha256"],
+                "validator_launcher_sha256": live[
+                    "validator_launcher_sha256"
+                ],
                 "release": release_binding,
                 "state": live,
             }
-            payload = json.dumps(record, sort_keys=True, separators=(",", ":")).encode() + b"\n"
-            atomic_write(INSTALLATION_RECORD, payload, 0o600)
-            return record
+            return persist_installation_record(record)
         except BaseException:
             restore_checkpoint(checkpoint, rollback_record)
             raise
@@ -799,6 +984,7 @@ def rollback(args: argparse.Namespace) -> dict[str, object]:
             str(RULE_TARGET),
             str(AGGREGATE_TARGET),
             str(VALIDATOR_TARGET),
+            str(VALIDATOR_LAUNCHER_TARGET),
             str(INSTALLATION_RECORD),
             "auditd.service-state",
         ],

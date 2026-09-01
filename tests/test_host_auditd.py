@@ -150,6 +150,8 @@ def test_managed_rules_are_additive_and_cover_operator_authorities() -> None:
     assert "-w /var/lib/codestra -p wa -k codestra_operator_state" in rules
     assert "-F euid=0 -F auid=0 -k codestra_root_session_exec" in rules
     assert "-F euid=0 -F auid>=1000 -F auid!=unset -k codestra_privileged_exec" in rules
+    assert "-F euid=0 -F auid>=1 -F auid<1000 -k codestra_service_privileged_exec" in rules
+    assert "-F euid=0 -F auid=4294967295 -k codestra_unset_privileged_exec" in rules
     assert VALIDATOR.REQUIRED_KEYS <= INSTALLER.managed_keys(rules)
     INSTALLER.require_additive_rules(rules.encode())
     with pytest.raises(INSTALLER.InstallError, match="global policy"):
@@ -181,27 +183,36 @@ def test_installer_never_installs_packages_or_touches_application_runtime() -> N
 def test_installer_snapshots_before_managed_rule_mutation_and_records_after_validation() -> None:
     source = (PACKAGE / "install-provider-host-auditd.py").read_text()
     trust = source.index("rule_bytes, validator_bytes, release_binding = verify_signed_release(")
+    launcher = source.index("launcher_bytes = validator_launcher_bytes", trust)
     snapshot = source.index("snapshot_before(args.source_sha, before)")
     mutation = source.index("atomic_write(RULE_TARGET, rule_bytes, 0o600)", snapshot)
     validator_mutation = source.index(
         "atomic_write(VALIDATOR_TARGET, validator_bytes, 0o750)", mutation
     )
+    launcher_mutation = source.index(
+        "atomic_write(VALIDATOR_LAUNCHER_TARGET, launcher_bytes, 0o750)",
+        validator_mutation,
+    )
     readback = source.index(
-        "installed_payloads(rule_bytes, validator_bytes)", validator_mutation
+        "installed_payloads(rule_bytes, validator_bytes, launcher_bytes)",
+        launcher_mutation,
     )
     service_mutation = source.index(
         'run_checked([str(COMMANDS["systemctl"]), "enable", "auditd.service"])',
         readback,
     )
     validate = source.index(
-        "live = validate_live(rule_bytes, validator_bytes)", service_mutation
+        "live = validate_live(rule_bytes, validator_bytes, launcher_bytes)",
+        service_mutation,
     )
-    evidence = source.index("atomic_write(INSTALLATION_RECORD, payload, 0o600)", validate)
+    evidence = source.index("return persist_installation_record(record)", validate)
     assert (
         trust
+        < launcher
         < snapshot
         < mutation
         < validator_mutation
+        < launcher_mutation
         < readback
         < service_mutation
         < validate
@@ -211,6 +222,7 @@ def test_installer_snapshots_before_managed_rule_mutation_and_records_after_vali
         INSTALLER.RULE_TARGET,
         INSTALLER.AGGREGATE_TARGET,
         INSTALLER.VALIDATOR_TARGET,
+        INSTALLER.VALIDATOR_LAUNCHER_TARGET,
         INSTALLER.INSTALLATION_RECORD,
     }
 
@@ -248,6 +260,18 @@ def test_rule_semantics_normalize_live_kernel_forms_without_accepting_drift() ->
     assert VALIDATOR.managed_rule_signatures(source, keys) == VALIDATOR.managed_rule_signatures(live, keys)
     drifted = live.replace("euid=0", "euid=1000")
     assert VALIDATOR.managed_rule_signatures(source, keys) != VALIDATOR.managed_rule_signatures(drifted, keys)
+    unset_source = (
+        "-a always,exit -F arch=b64 -S execve,execveat -F euid=0 "
+        "-F auid=4294967295 -k codestra_unset_privileged_exec\n"
+    )
+    unset_live = unset_source.replace("auid=4294967295", "auid=unset")
+    unset_keys = {"codestra_unset_privileged_exec"}
+    assert INSTALLER.managed_rule_signatures(
+        unset_source, unset_keys
+    ) == INSTALLER.managed_rule_signatures(unset_live, unset_keys)
+    assert VALIDATOR.managed_rule_signatures(
+        unset_source, unset_keys
+    ) == VALIDATOR.managed_rule_signatures(unset_live, unset_keys)
 
 
 def test_atomic_install_completes_partial_regular_file_writes(tmp_path, monkeypatch) -> None:
@@ -363,33 +387,48 @@ def test_installed_validator_is_read_back_before_service_mutation(
 ) -> None:
     rule_target = tmp_path / "managed.rules"
     validator_target = tmp_path / "validator"
+    launcher_target = tmp_path / "launcher"
     rule_target.write_bytes(b"signed rule\n")
     validator_target.write_bytes(b"displaced validator\n")
+    launcher_target.write_bytes(b"launcher\n")
     rule_target.chmod(0o600)
     validator_target.chmod(0o750)
+    launcher_target.chmod(0o750)
     monkeypatch.setattr(INSTALLER, "RULE_TARGET", rule_target)
     monkeypatch.setattr(INSTALLER, "VALIDATOR_TARGET", validator_target)
+    monkeypatch.setattr(INSTALLER, "VALIDATOR_LAUNCHER_TARGET", launcher_target)
     with pytest.raises(INSTALLER.InstallError, match="validator differs"):
-        INSTALLER.installed_payloads(b"signed rule\n", b"signed validator\n")
+        INSTALLER.installed_payloads(
+            b"signed rule\n", b"signed validator\n", b"launcher\n"
+        )
 
 
 def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch) -> None:
     rule_path = Path("/test/managed.rules")
     validator_path = Path("/test/validator")
+    launcher_path = Path("/test/launcher")
     record_path = Path("/test/installation.json")
     source_sha = "a" * 40
     rule = b"signed rule\n"
     validator = b"signed validator\n"
+    launcher = b"signed launcher\n"
     record = json.dumps(
         {
             "source_sha": source_sha,
             "rule_sha256": hashlib.sha256(rule).hexdigest(),
             "validator_sha256": hashlib.sha256(validator).hexdigest(),
+            "validator_launcher_sha256": hashlib.sha256(launcher).hexdigest(),
         }
     ).encode()
-    payloads = {rule_path: rule, validator_path: validator, record_path: record}
+    payloads = {
+        rule_path: rule,
+        validator_path: validator,
+        launcher_path: launcher,
+        record_path: record,
+    }
     monkeypatch.setattr(VALIDATOR, "RULE_TARGET", rule_path)
     monkeypatch.setattr(VALIDATOR, "VALIDATOR_TARGET", validator_path)
+    monkeypatch.setattr(VALIDATOR, "VALIDATOR_LAUNCHER", launcher_path)
     monkeypatch.setattr(VALIDATOR, "INSTALLATION_RECORD", record_path)
     monkeypatch.setattr(
         VALIDATOR,
@@ -401,10 +440,74 @@ def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch) -> N
         rule,
         hashlib.sha256(rule).hexdigest(),
         hashlib.sha256(validator).hexdigest(),
+        hashlib.sha256(launcher).hexdigest(),
     )
     payloads[validator_path] = b"valid Python but displaced validator\n"
     with pytest.raises(VALIDATOR.ValidationError, match="validator binding"):
         VALIDATOR.installed_release_binding(source_sha)
+
+
+def test_root_only_launcher_verifies_target_before_executing_it(tmp_path: Path) -> None:
+    source_sha = "a" * 40
+    validator = tmp_path / "validator"
+    launcher = tmp_path / "launcher"
+    validator_bytes = (
+        b"import sys\n"
+        b"print('VALIDATOR_EXECUTED ' + ' '.join(sys.argv[1:]))\n"
+    )
+    validator.write_bytes(validator_bytes)
+    validator.chmod(0o750)
+    launcher.write_bytes(
+        INSTALLER.validator_launcher_bytes(
+            validator_bytes, source_sha, validator_target=validator
+        )
+    )
+    launcher.chmod(0o750)
+    completed = subprocess.run(
+        [str(launcher), "--expected-source-sha", source_sha],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert f"--expected-source-sha {source_sha}" in completed.stdout
+    validator.write_bytes(b"print('displaced')\n")
+    rejected = subprocess.run(
+        [str(launcher), "--expected-source-sha", source_sha],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert rejected.returncode != 0
+    assert "HOST_AUDITD_LAUNCH=FAIL" in rejected.stderr
+
+
+def test_validator_operator_check_includes_executable_and_parent_authority() -> None:
+    source = (PACKAGE / "validate-provider-host-auditd.py").read_text()
+    writability_check = source.split("if not operator_cannot_modify(", 1)[1]
+    for token in (
+        "VALIDATOR_TARGET.parent",
+        "VALIDATOR_TARGET",
+        "VALIDATOR_LAUNCHER.parent",
+        "VALIDATOR_LAUNCHER",
+    ):
+        assert token in writability_check
+
+
+def test_installation_record_is_read_back_before_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "installation.json"
+    monkeypatch.setattr(INSTALLER, "INSTALLATION_RECORD", target)
+    record = {"schema": "codestra.host-auditd.installation.v1", "source_sha": "a" * 40}
+    assert INSTALLER.persist_installation_record(record) == record
+
+    def corrupt_write(path: Path, _value: bytes, mode: int) -> None:
+        path.write_bytes(b"{}\n")
+        path.chmod(mode)
+
+    monkeypatch.setattr(INSTALLER, "atomic_write", corrupt_write)
+    with pytest.raises(INSTALLER.InstallError, match="read-back differs"):
+        INSTALLER.persist_installation_record(record)
 
 
 def test_rollback_revalidates_restored_files_and_service_before_completion(
