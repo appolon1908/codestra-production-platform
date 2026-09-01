@@ -69,10 +69,11 @@ INGRESS_PATHS = {
 EVENT_TYPES = {
     "/api/v1/kyqra/results": "kyqra.record.created",
     "/api/v1/kyqra/progress": "kyqra.job.completed",
+    "/api/v1/kyqra/failures": "kyqra.job.failed",
     "/api/v1/telnexa/inbound": "telnexa.sms.received",
     "/api/v1/telnexa/dlr": "telnexa.sms.delivered",
     "/api/v1/telnexa/failure": "telnexa.sms.failed",
-    "/api/v1/klyrow/events": "klyrow.delivery.event",
+    "/api/v1/klyrow/events": "klyrow.email.event",
     "/api/v1/klyrow/bounces": "klyrow.email.bounced",
     "/api/v1/klyrow/complaints": "klyrow.email.complained",
     "/api/v1/klyrow/unsubscribes": "klyrow.email.unsubscribed",
@@ -275,6 +276,8 @@ class Store:
                     provider_message_id TEXT,
                     provider_response TEXT,
                     provider_response_sha256 TEXT,
+                    operation_token TEXT,
+                    lease_expires_at REAL NOT NULL DEFAULT 0,
                     created_at REAL NOT NULL,
                     UNIQUE(customer_id, idempotency_key)
                 )"""
@@ -288,6 +291,14 @@ class Store:
             if "provider_response_sha256" not in sms_columns:
                 connection.execute(
                     "ALTER TABLE sms_transactions ADD COLUMN provider_response_sha256 TEXT"
+                )
+            if "operation_token" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN operation_token TEXT"
+                )
+            if "lease_expires_at" not in sms_columns:
+                connection.execute(
+                    "ALTER TABLE sms_transactions ADD COLUMN lease_expires_at REAL NOT NULL DEFAULT 0"
                 )
         if self.path.exists():
             self.path.chmod(0o600)
@@ -389,6 +400,8 @@ class Store:
         self,
         adapter_message_id: str,
         *,
+        operation_token: str,
+        expected_state: str,
         state: str,
         jasmin_dependency: str,
         carrier_submitted: bool,
@@ -399,8 +412,8 @@ class Store:
             cursor = connection.execute(
                 """UPDATE sms_transactions
                 SET state=?,jasmin_dependency=?,carrier_submitted=?,provider_message_id=?,
-                    provider_response_sha256=?
-                WHERE adapter_message_id=? AND state='pending'""",
+                    provider_response_sha256=?,operation_token=NULL,lease_expires_at=0
+                WHERE adapter_message_id=? AND state=? AND operation_token=?""",
                 (
                     state,
                     jasmin_dependency,
@@ -408,6 +421,8 @@ class Store:
                     provider_message_id,
                     provider_response_sha256,
                     adapter_message_id,
+                    expected_state,
+                    operation_token,
                 ),
             )
             if cursor.rowcount != 1:
@@ -419,6 +434,73 @@ class Store:
         if row is None:
             raise RuntimeError("SMS completion read-back failed")
         return row
+
+    def claim_sms(
+        self,
+        adapter_message_id: str,
+        payload_hash: str,
+        operation_token: str,
+        now: float,
+    ) -> tuple[bool, sqlite3.Row]:
+        """Claim only a demonstrably unsubmitted reservation with a short lease."""
+
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE sms_transactions
+                SET state='preflight',operation_token=?,lease_expires_at=?
+                WHERE adapter_message_id=? AND payload_hash=? AND (
+                    state IN ('reserved','dependency_unavailable') OR
+                    (state='preflight' AND lease_expires_at<=?)
+                )""",
+                (
+                    operation_token,
+                    now + 30,
+                    adapter_message_id,
+                    payload_hash,
+                    now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                (adapter_message_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("SMS claim read-back failed")
+        return cursor.rowcount == 1, row
+
+    def release_sms_preflight(
+        self, adapter_message_id: str, operation_token: str, dependency: str
+    ) -> sqlite3.Row:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE sms_transactions
+                SET state='dependency_unavailable',jasmin_dependency=?,
+                    operation_token=NULL,lease_expires_at=0
+                WHERE adapter_message_id=? AND state='preflight' AND operation_token=?""",
+                (dependency, adapter_message_id, operation_token),
+            )
+            row = connection.execute(
+                "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                (adapter_message_id,),
+            ).fetchone()
+        if cursor.rowcount != 1 or row is None:
+            raise RuntimeError("SMS preflight release lost ownership")
+        return row
+
+    def begin_sms_submission(
+        self, adapter_message_id: str, operation_token: str
+    ) -> None:
+        """Cross the fail-closed boundary immediately before the carrier call."""
+
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE sms_transactions
+                SET state='submitting',jasmin_dependency='reachable',lease_expires_at=0
+                WHERE adapter_message_id=? AND state='preflight' AND operation_token=?""",
+                (adapter_message_id, operation_token),
+            )
+        if cursor.rowcount != 1:
+            raise RuntimeError("SMS submission lost preflight ownership")
 
     def pending_events(self, now: float, limit: int = 20) -> list[sqlite3.Row]:
         with self.connect() as connection:
@@ -605,13 +687,14 @@ class Gateway:
 
         if not self.settings.middleware_forwarding_enabled:
             return 0
-        api_key = read_secret("MIDDLEWARE_EVENTS_API_KEY")
-        hmac_secret = read_secret("MIDDLEWARE_EVENTS_HMAC_SECRET")
-        if not api_key or not hmac_secret:
-            raise RuntimeError("middleware forwarding credentials are unavailable")
         rows = self.store.pending_events(self.clock())
         for row in rows:
             try:
+                api_key_name, hmac_secret_name, _ = SYSTEMS[row["system"]]
+                api_key = read_secret(api_key_name)
+                hmac_secret = read_secret(hmac_secret_name)
+                if not api_key or not hmac_secret:
+                    raise RuntimeError("source forwarding credentials are unavailable")
                 payload = json.loads(row["payload"])
                 tenant_id = payload.get("tenant_id")
                 if not isinstance(tenant_id, str) or not tenant_id:
@@ -849,7 +932,7 @@ class Gateway:
                 route,
                 "valid",
                 "unchecked",
-                "pending",
+                "reserved",
                 0,
                 None,
                 None,
@@ -857,25 +940,28 @@ class Gateway:
                 now,
             )
         )
-        if not created:
-            if reserved["payload_hash"] != payload_sha256:
-                return 409, {"detail": "idempotency_conflict"}
+        if reserved["payload_hash"] != payload_sha256:
+            return 409, {"detail": "idempotency_conflict"}
+        operation_token = str(uuid.uuid4())
+        claimed, reservation = self.store.claim_sms(
+            reserved["adapter_message_id"],
+            payload_sha256,
+            operation_token,
+            now,
+        )
+        if not claimed:
             return 202, {
                 "accepted": True,
                 "duplicate": True,
-                "adapter_message_id": reserved["adapter_message_id"],
-                "carrier_submitted": bool(reserved["carrier_submitted"]),
-                "state": reserved["state"],
+                "adapter_message_id": reservation["adapter_message_id"],
+                "carrier_submitted": bool(reservation["carrier_submitted"]),
+                "state": reservation["state"],
             }
+        adapter_message_id = reservation["adapter_message_id"]
         dependency = self.jasmin_health()
         if dependency != "reachable":
-            self.store.complete_sms(
-                adapter_message_id,
-                state="dependency_unavailable",
-                jasmin_dependency=dependency,
-                carrier_submitted=False,
-                provider_message_id=None,
-                provider_response_sha256=None,
+            self.store.release_sms_preflight(
+                adapter_message_id, operation_token, dependency
             )
             return 503, {"detail": "jasmin_dependency_unavailable"}
         state = "mock_accepted"
@@ -883,6 +969,7 @@ class Gateway:
         provider_message_id = None
         provider_response_sha256 = None
         if self.settings.live_submission_enabled:
+            self.store.begin_sms_submission(adapter_message_id, operation_token)
             mapped, provider_response = self.submit_to_jasmin(sender, destination, message)
             state = {
                 "accepted": "submitted",
@@ -898,6 +985,10 @@ class Gateway:
             provider_message_id = provider_response if carrier_submitted else None
         completed = self.store.complete_sms(
             adapter_message_id,
+            operation_token=operation_token,
+            expected_state=(
+                "submitting" if self.settings.live_submission_enabled else "preflight"
+            ),
             state=state,
             jasmin_dependency=dependency,
             carrier_submitted=carrier_submitted,
@@ -915,7 +1006,7 @@ class Gateway:
         )
         return 202, {
             "accepted": True,
-            "duplicate": False,
+            "duplicate": not created,
             "adapter_message_id": adapter_message_id,
             "carrier_submitted": bool(completed["carrier_submitted"]),
             "state": completed["state"],
@@ -1009,9 +1100,10 @@ def dispatch_worker(gateway: Gateway) -> None:
 def start_dispatcher(gateway: Gateway) -> threading.Thread:
     """Validate downstream authority before starting the isolated worker."""
 
-    for name in ("MIDDLEWARE_EVENTS_API_KEY", "MIDDLEWARE_EVENTS_HMAC_SECRET"):
-        if not read_secret(name):
-            raise RuntimeError(f"{name} is unavailable")
+    for api_key_name, hmac_secret_name, _ in SYSTEMS.values():
+        for name in (api_key_name, hmac_secret_name):
+            if not read_secret(name):
+                raise RuntimeError(f"{name} is unavailable")
     worker = threading.Thread(
         target=dispatch_worker,
         args=(gateway,),

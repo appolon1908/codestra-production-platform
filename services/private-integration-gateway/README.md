@@ -16,12 +16,18 @@ does not authorize delivery.
 Middleware forwarding is independently fail-closed. New authenticated ingress
 events become dispatch-eligible only when `MIDDLEWARE_FORWARDING_ENABLED=true`
 in `middleware` mode and an HTTPS `MIDDLEWARE_EVENTS_URL` plus the dedicated
-API-key and HMAC authorities are present. Existing database rows migrate with
+per-source API-key and HMAC authorities are present. Existing database rows migrate with
 `dispatch_eligible=0`; the dispatcher never replays that historical quarantine.
 Delivery uses the control-plane event envelope and authentication headers,
 bounded response reads, exponential retries, and a five-attempt dead-letter
 limit. The committed shared-mode Compose contract explicitly keeps forwarding
 disabled.
+
+Outbound SMS idempotency is reserved before any Jasmin interaction. A short
+preflight lease permits safe recovery after a crash or dependency failure only
+while carrier submission is demonstrably unstarted. The row crosses to
+`submitting` immediately before the carrier call; that ambiguous state is never
+automatically reclaimed, preventing a retry from creating a duplicate message.
 
 ## Release and installation contract
 

@@ -37,10 +37,6 @@ def clean_gateway_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "PRODUCTION_CHANGE_ID",
         "MIDDLEWARE_FORWARDING_ENABLED",
         "MIDDLEWARE_EVENTS_URL",
-        "MIDDLEWARE_EVENTS_API_KEY",
-        "MIDDLEWARE_EVENTS_API_KEY_FILE",
-        "MIDDLEWARE_EVENTS_HMAC_SECRET",
-        "MIDDLEWARE_EVENTS_HMAC_SECRET_FILE",
         "JASMIN_HTTP_URL",
         "TELNEXA_CUSTOMER_POLICY_JSON",
         "TELNEXA_CUSTOMER_POLICY_JSON_FILE",
@@ -49,9 +45,13 @@ def clean_gateway_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "TELNEXA_WEBHOOK_SECRET",
         "TELNEXA_WEBHOOK_SECRET_FILE",
         "KYQRA_MIDDLEWARE_API_KEY",
+        "KYQRA_MIDDLEWARE_API_KEY_FILE",
         "KYQRA_WEBHOOK_SECRET",
+        "KYQRA_WEBHOOK_SECRET_FILE",
         "KLYROW_MIDDLEWARE_API_KEY",
+        "KLYROW_MIDDLEWARE_API_KEY_FILE",
         "KLYROW_WEBHOOK_SECRET",
+        "KLYROW_WEBHOOK_SECRET_FILE",
         "JASMIN_API_USER",
         "JASMIN_API_PASSWORD",
     }
@@ -300,6 +300,8 @@ def test_existing_live_database_schema_is_migrated_without_data_loss(tmp_path: P
     assert event["dispatch_eligible"] == 0
     assert value.pending_events(2_000_000_000) == []
     assert "provider_response_sha256" in sms_columns
+    assert "operation_token" in sms_columns
+    assert "lease_expires_at" in sms_columns
 
 
 def test_ingress_rejects_stale_and_invalid_signatures(
@@ -406,8 +408,6 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     now = 2_000_000_000
     monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "test-klyrow-key")
     monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "test-klyrow-secret")
-    monkeypatch.setenv("MIDDLEWARE_EVENTS_API_KEY", "downstream-key")
-    monkeypatch.setenv("MIDDLEWARE_EVENTS_HMAC_SECRET", "downstream-secret")
     requests = []
 
     def urlopen(request, **_kwargs):
@@ -428,6 +428,7 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     )
     payload = {
         "message_id": "message-1",
+        "event_type": "klyrow.email.delivered",
         "tenant_id": "tenant-a",
         "customer_id": "customer-a",
         "idempotency_key": "delivery-1",
@@ -443,7 +444,7 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     sent = json.loads(request.data)
     assert sent == {
         "customer_id": "customer-a",
-        "event_type": "klyrow.delivery.event",
+        "event_type": "klyrow.email.event",
         "event_version": "1.0",
         "idempotency_key": "delivery-1",
         "occurred_at": "2026-09-01T00:00:00Z",
@@ -451,12 +452,12 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
         "tenant_id": "tenant-a",
     }
     request_headers = {key.lower(): value for key, value in request.header_items()}
-    assert request_headers["authorization"] == "Bearer downstream-key"
+    assert request_headers["authorization"] == "Bearer test-klyrow-key"
     assert request_headers["x-event-source"] == "klyrow"
     assert request_headers["x-event-id"] == "event-dispatch-1"
     assert request_headers["x-timestamp"] == str(now)
     expected = hmac.new(
-        b"downstream-secret",
+        b"test-klyrow-secret",
         gateway.canonical(str(now), "event-dispatch-1", "klyrow", request.data),
         hashlib.sha256,
     ).hexdigest()
@@ -468,12 +469,88 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     assert dict(row) == {"state": "delivered", "attempts": 0}
 
 
+def test_dispatch_uses_each_selected_source_identity_and_contracted_event_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    source_paths = {
+        "kyqra": "/api/v1/kyqra/failures",
+        "telnexa": "/api/v1/telnexa/inbound",
+        "klyrow": "/api/v1/klyrow/events",
+    }
+    expected_types = {
+        "kyqra": "kyqra.job.failed",
+        "telnexa": "telnexa.sms.received",
+        "klyrow": "klyrow.email.event",
+    }
+    for source in gateway.SYSTEMS:
+        monkeypatch.setenv(
+            f"{source.upper()}_MIDDLEWARE_API_KEY", f"forward-{source}-key"
+        )
+        monkeypatch.setenv(
+            f"{source.upper()}_WEBHOOK_SECRET", f"forward-{source}-secret"
+        )
+    requests = []
+
+    def urlopen(request, **_kwargs):
+        requests.append(request)
+        return HttpResponse()
+
+    state = store(tmp_path)
+    for source, path in source_paths.items():
+        payload = {
+            "tenant_id": "tenant-a",
+            "event_type": (
+                "klyrow.email.bounced" if source == "klyrow" else expected_types[source]
+            ),
+        }
+        assert state.insert_event(
+            f"event-{source}",
+            source,
+            path,
+            None,
+            json.dumps(payload, separators=(",", ":"), sort_keys=True),
+            now,
+            True,
+        ) == "accepted"
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            mode="middleware",
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    assert app.dispatch_once() == 3
+    assert len(requests) == 3
+    for request in requests:
+        request_headers = {key.lower(): value for key, value in request.header_items()}
+        source = request_headers["x-event-source"]
+        assert request_headers["authorization"] == f"Bearer forward-{source}-key"
+        envelope = json.loads(request.data)
+        assert envelope["event_type"] == expected_types[source]
+        expected_signature = hmac.new(
+            f"forward-{source}-secret".encode(),
+            gateway.canonical(
+                str(now), request_headers["x-event-id"], source, request.data
+            ),
+            hashlib.sha256,
+        ).hexdigest()
+        assert request_headers["x-signature"] == "sha256=" + expected_signature
+    source_text = (SERVICE / "gateway.py").read_text()
+    assert "MIDDLEWARE_EVENTS_API_KEY" not in source_text
+    assert "MIDDLEWARE_EVENTS_HMAC_SECRET" not in source_text
+
+
 def test_dispatch_failures_are_bounded_and_dead_lettered(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     now = [2_000_000_000.0]
-    monkeypatch.setenv("MIDDLEWARE_EVENTS_API_KEY", "downstream-key")
-    monkeypatch.setenv("MIDDLEWARE_EVENTS_HMAC_SECRET", "downstream-secret")
+    monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "downstream-key")
+    monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "downstream-secret")
     state = store(tmp_path)
     payload = json.dumps({"tenant_id": "tenant-a"}, separators=(",", ":"))
     assert state.insert_event(
@@ -527,10 +604,15 @@ def test_dispatcher_startup_requires_credentials_and_starts_daemon(
         ),
         store(tmp_path),
     )
-    with pytest.raises(RuntimeError, match="MIDDLEWARE_EVENTS_API_KEY"):
+    with pytest.raises(RuntimeError, match="KYQRA_MIDDLEWARE_API_KEY"):
         gateway.start_dispatcher(app)
-    monkeypatch.setenv("MIDDLEWARE_EVENTS_API_KEY", "downstream-key")
-    monkeypatch.setenv("MIDDLEWARE_EVENTS_HMAC_SECRET", "downstream-secret")
+    for source in gateway.SYSTEMS:
+        monkeypatch.setenv(
+            f"{source.upper()}_MIDDLEWARE_API_KEY", f"forward-{source}-key"
+        )
+        monkeypatch.setenv(
+            f"{source.upper()}_WEBHOOK_SECRET", f"forward-{source}-secret"
+        )
     started = []
 
     class FakeThread:
@@ -600,6 +682,145 @@ def test_no_effect_outbound_is_idempotent_and_never_calls_carrier(
     assert code == 202 and retry["duplicate"] is True
     assert retry["adapter_message_id"] == response["adapter_message_id"]
     assert carrier_calls == ["http://jasmin:1401/ping"]
+
+
+def test_dependency_failure_reservation_is_resumed_without_duplicate_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    probes = ["unreachable", "reachable"]
+
+    def urlopen(url, **_kwargs):
+        assert url.endswith("/ping")
+        if probes.pop(0) == "unreachable":
+            raise TimeoutError("synthetic dependency outage")
+        return HealthyJasmin()
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(tmp_path), state, clock=lambda: now, urlopen=urlopen
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    first_code, first_result = app.outbound(
+        body, outbound_headers(body, now, "nonce-retryable-0001")
+    )
+    assert first_code == 503
+    assert first_result == {"detail": "jasmin_dependency_unavailable"}
+    with state.connect() as connection:
+        reserved = connection.execute("SELECT * FROM sms_transactions").fetchone()
+    assert reserved["state"] == "dependency_unavailable"
+    assert reserved["carrier_submitted"] == 0
+    second_code, second_result = app.outbound(
+        body, outbound_headers(body, now, "nonce-retryable-0002")
+    )
+    assert second_code == 202
+    assert second_result["duplicate"] is True
+    assert second_result["adapter_message_id"] == reserved["adapter_message_id"]
+    assert second_result["state"] == "mock_accepted"
+    assert probes == []
+
+
+def test_crash_after_reservation_is_lease_resumable_before_carrier_submission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    monkeypatch.setenv("JASMIN_API_USER", "test-user")
+    monkeypatch.setenv("JASMIN_API_PASSWORD", "test-password")
+    calls = {"ping": 0, "send": 0}
+
+    def urlopen(url, **_kwargs):
+        if url.endswith("/ping"):
+            calls["ping"] += 1
+        else:
+            calls["send"] += 1
+        return HealthyJasmin()
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-TEST-CRASH",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    original_claim = state.claim_sms
+
+    def synthetic_crash(*_args, **_kwargs):
+        raise RuntimeError("synthetic crash after reservation")
+
+    monkeypatch.setattr(state, "claim_sms", synthetic_crash)
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    with pytest.raises(RuntimeError, match="synthetic crash"):
+        app.outbound(body, outbound_headers(body, now, "nonce-crash-0000001"))
+    with state.connect() as connection:
+        reserved = connection.execute("SELECT * FROM sms_transactions").fetchone()
+    assert reserved["state"] == "reserved"
+    assert calls == {"ping": 0, "send": 0}
+    monkeypatch.setattr(state, "claim_sms", original_claim)
+    code, result = app.outbound(
+        body, outbound_headers(body, now, "nonce-crash-0000002")
+    )
+    assert code == 202
+    assert result["duplicate"] is True
+    assert result["adapter_message_id"] == reserved["adapter_message_id"]
+    assert result["state"] == "submitted"
+    assert calls == {"ping": 1, "send": 1}
+
+
+def test_expired_preflight_lease_is_reclaimed_but_submitting_is_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = [2_000_000_000.0]
+    configure_tenant(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(tmp_path),
+        state,
+        clock=lambda: now[0],
+        urlopen=lambda *_args, **_kwargs: HealthyJasmin(),
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    original_complete = state.complete_sms
+
+    def crash_during_preflight(*_args, **_kwargs):
+        raise RuntimeError("synthetic preflight crash")
+
+    monkeypatch.setattr(state, "complete_sms", crash_during_preflight)
+    with pytest.raises(RuntimeError, match="synthetic preflight crash"):
+        app.outbound(body, outbound_headers(body, int(now[0]), "nonce-lease-00000001"))
+    with state.connect() as connection:
+        preflight = connection.execute("SELECT * FROM sms_transactions").fetchone()
+    assert preflight["state"] == "preflight"
+    now[0] += 31
+    monkeypatch.setattr(state, "complete_sms", original_complete)
+    code, result = app.outbound(
+        body, outbound_headers(body, int(now[0]), "nonce-lease-00000002")
+    )
+    assert code == 202 and result["state"] == "mock_accepted"
+    with state.connect() as connection:
+        connection.execute(
+            """UPDATE sms_transactions SET state='submitting',operation_token='ambiguous'
+            WHERE adapter_message_id=?""",
+            (preflight["adapter_message_id"],),
+        )
+    code, result = app.outbound(
+        body, outbound_headers(body, int(now[0]), "nonce-lease-00000003")
+    )
+    assert code == 202
+    assert result["duplicate"] is True
+    assert result["state"] == "submitting"
 
 
 def test_live_idempotency_is_reserved_before_concurrent_carrier_submission(
