@@ -157,6 +157,31 @@ def test_telnexa_provider_does_not_promote_mock_receipt_to_acceptance(
         providers.submit(production_message())
 
 
+def test_duplicate_submitting_receipt_preserves_ambiguous_delivery(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure(tmp_path, monkeypatch)
+    adapter_message_id = "18cd23b0-52bd-41d3-89f8-d276de79d254"
+    monkeypatch.setattr(
+        providers.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: Response(
+            {
+                "accepted": True,
+                "adapter_message_id": adapter_message_id,
+                "carrier_submitted": False,
+                "duplicate": True,
+                "state": "submitting",
+            }
+        ),
+    )
+    assert providers.submit(production_message()) == providers.ProviderResult(
+        adapter_message_id,
+        "deferred",
+        "submitting",
+    )
+
+
 @pytest.mark.parametrize(
     "url",
     [

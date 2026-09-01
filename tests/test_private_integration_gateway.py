@@ -1023,6 +1023,7 @@ def test_unrelated_success_response_cannot_mark_event_delivered(
             0,
             None,
             None,
+            False,
         )
 
 
@@ -1037,6 +1038,7 @@ def test_authenticated_replay_receipt_reconciles_only_after_unknown_attempt(
             0,
             None,
             None,
+            False,
         )
     with pytest.raises(RuntimeError, match="downstream_receipt_rejected"):
         gateway.verify_dispatch_receipt(
@@ -1046,6 +1048,7 @@ def test_authenticated_replay_receipt_reconciles_only_after_unknown_attempt(
             1,
             "RuntimeError",
             None,
+            False,
         )
     now = [2_000_000_000.0]
     monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "downstream-key")
@@ -1055,12 +1058,12 @@ def test_authenticated_replay_receipt_reconciles_only_after_unknown_attempt(
         "tenant_id": "tenant-a",
         "message_id": "message-lost-receipt",
         "provider_message_id": "carrier-lost-receipt",
-        "status": "delivery_success",
+        "status": "submitted",
     }, separators=(",", ":"))
     assert state.insert_event(
         "event-lost-receipt",
         "telnexa",
-        "/api/v1/telnexa/dlr",
+        gateway.TELNEXA_SUBMITTED_EVENT_PATH,
         None,
         payload,
         now[0],
@@ -1127,7 +1130,54 @@ def test_replay_receipt_requires_exact_durable_projection() -> None:
             1,
             "DispatchOutcomeUnknown",
             expected,
+            True,
         )
+
+
+def test_external_status_receipt_allows_an_absent_local_projection() -> None:
+    expected = {
+        "event_id": "external-event",
+        "message_id": "external-message",
+        "provider_message_id": "external-carrier-message",
+        "raw_status": "delivery_success",
+        "status": "delivered",
+    }
+    raw = json.dumps(
+        {
+            "event_id": "external-event",
+            "correlation_id": "external-correlation",
+            "duplicate": False,
+            "projection": None,
+            "state": "queued",
+        },
+        separators=(",", ":"),
+    ).encode()
+    assert gateway.verify_dispatch_receipt(
+        202,
+        raw,
+        "external-event",
+        0,
+        None,
+        expected,
+        False,
+    ) == "accepted"
+    replay = json.dumps(
+        {
+            "error": "replayed_event_id",
+            "event_id": "external-event",
+            "projection": None,
+        },
+        separators=(",", ":"),
+    ).encode()
+    assert gateway.verify_dispatch_receipt(
+        409,
+        replay,
+        "external-event",
+        1,
+        "DispatchOutcomeUnknown",
+        expected,
+        False,
+    ) == "reconciled_event"
 
 
 def test_lost_receipt_body_is_reconciled_by_the_exact_replay_response(
@@ -1145,12 +1195,12 @@ def test_lost_receipt_body_is_reconciled_by_the_exact_replay_response(
         "tenant_id": "tenant-a",
         "message_id": "message-lost-body",
         "provider_message_id": "carrier-lost-body",
-        "status": "delivery_success",
+        "status": "submitted",
     }, separators=(",", ":"))
     assert state.insert_event(
         "event-lost-body",
         "telnexa",
-        "/api/v1/telnexa/dlr",
+        gateway.TELNEXA_SUBMITTED_EVENT_PATH,
         None,
         payload,
         now[0],
@@ -1217,12 +1267,12 @@ def test_crash_after_receiver_commit_recovers_from_durable_dispatch_claim(
         "tenant_id": "tenant-a",
         "message_id": "message-process-exit",
         "provider_message_id": "carrier-process-exit",
-        "status": "delivery_success",
+        "status": "submitted",
     }, separators=(",", ":"))
     assert state.insert_event(
         "event-process-exit",
         "telnexa",
-        "/api/v1/telnexa/dlr",
+        gateway.TELNEXA_SUBMITTED_EVENT_PATH,
         None,
         payload,
         now[0],
@@ -1889,7 +1939,7 @@ def test_attempt_bound_rejection_dlr_supersedes_synchronous_success(
     assert len(events) == 1
     event = events[0]
     assert event["system"] == "telnexa"
-    assert event["path"] == "/api/v1/telnexa/failure"
+    assert event["path"] == gateway.TELNEXA_REJECTED_EVENT_PATH
     assert event["entity_key"] == "message-0001"
     assert event["dispatch_eligible"] == 1
     projection = json.loads(event["payload"])
@@ -2451,6 +2501,9 @@ def test_shared_http_submission_forwards_sms_c_ack_as_submitted(
     envelope = json.loads(middleware_requests[0].data)
     assert envelope["event_type"] == "telnexa.sms.submitted"
     assert envelope["payload"]["status"] == "submitted"
+    assert envelope["metadata"] == {
+        "private_gateway_projection_required": True,
+    }
 
 
 def test_crashed_submitting_row_reconciles_only_from_production_dlr_path(

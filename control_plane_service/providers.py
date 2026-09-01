@@ -205,6 +205,8 @@ def _telnexa_submit(message: dict[str, object]) -> ProviderResult:
         return ProviderResult(str(adapter_message_id), "rejected", "rejected")
     if state == "outcome_unknown" and carrier_submitted is False:
         return ProviderResult(str(adapter_message_id), "deferred", "outcome_unknown")
+    if duplicate is True and state == "submitting" and carrier_submitted is False:
+        return ProviderResult(str(adapter_message_id), "deferred", "submitting")
     # A safe-mode receipt is not evidence of carrier acceptance. The worker's
     # production ledger must therefore stay fail-closed until the gateway's
     # independently reviewed delivery gates are also enabled.

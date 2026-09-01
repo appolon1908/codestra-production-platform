@@ -7,7 +7,7 @@ import time
 import unittest
 
 from control_plane_service.core import ControlPlaneError, Store, canonical, credential_matches, validate_envelope, verify_signature
-from control_plane_service.server import apply_provider_projection
+from control_plane_service.server import apply_provider_projection, requires_telnexa_projection
 from control_plane_service.worker import once
 
 
@@ -82,6 +82,32 @@ class ControlPlaneTests(unittest.TestCase):
             payload={"event_type": "klyrow.email.delivered", "message_id": "odoo-mail-2"},
         ), "klyrow", "external-odoo-terminal")
         apply_provider_projection(self.store, "klyrow", item)
+
+    def test_external_telnexa_event_does_not_require_local_projection(self):
+        item = validate_envelope(envelope(
+            event_type="telnexa.sms.submitted",
+            payload={
+                "message_id": "external-odoo-message",
+                "provider_message_id": "external-carrier-message",
+                "status": "submitted",
+            },
+        ), "telnexa", "external-telnexa-submitted")
+        self.assertFalse(requires_telnexa_projection(item))
+        self.assertFalse(self.store.ingest(item, reject_event_replay=True).duplicate)
+        self.assertIsNone(apply_provider_projection(self.store, "telnexa", item))
+        item["metadata"] = {"sms_postgres_authority": True}
+        self.assertFalse(requires_telnexa_projection(item))
+
+    def test_private_gateway_projection_marker_is_required_and_bounded(self):
+        item = validate_envelope(envelope(
+            event_type="telnexa.sms.submitted",
+            metadata={"private_gateway_projection_required": True},
+        ), "telnexa", "internal-telnexa-submitted")
+        self.assertTrue(requires_telnexa_projection(item))
+        item["event_type"] = "telnexa.sms.delivered"
+        self.assertFalse(requires_telnexa_projection(item))
+        item["metadata"] = "invalid"
+        self.assertFalse(requires_telnexa_projection(item))
 
     def test_private_klyrow_gateway_rejects_unknown_inner_status(self):
         with self.assertRaisesRegex(ControlPlaneError, "unsupported_klyrow_email_status"):

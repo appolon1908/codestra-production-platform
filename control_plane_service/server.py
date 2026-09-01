@@ -143,9 +143,9 @@ def apply_provider_projection(store: Store, source: str, value: dict) -> dict | 
 
 
 def requires_telnexa_projection(value: dict) -> bool:
-    return value.get("event_type") in {
+    metadata = value.get("metadata")
+    return isinstance(metadata, dict) and metadata.get("private_gateway_projection_required") is True and value.get("event_type") in {
         "telnexa.sms.submitted",
-        "telnexa.sms.delivered",
         "telnexa.sms.failed",
     }
 
@@ -449,12 +449,13 @@ class Handler(BaseHTTPRequestHandler):
                         projection = apply_provider_projection(STORE, source, value)
                         if projection is None:
                             raise ControlPlaneError("provider_projection_missing")
-                        return self.send_json(409, {
-                            "error": "replayed_event_id",
-                            "event_id": replay.event_id,
-                            "projection": projection,
-                        })
-                    raise
+                    else:
+                        projection = STORE.provider_projection_receipt(value["event_id"])
+                    return self.send_json(409, {
+                        "error": "replayed_event_id",
+                        "event_id": replay.event_id,
+                        "projection": projection,
+                    })
                 if not result.duplicate and source in {"telnexa","klyrow"} and value.get("payload",{}).get("message_id") and not value.get("metadata", {}).get("sms_postgres_authority"):
                     projection = apply_provider_projection(STORE, source, value)
                 if requires_telnexa_projection(value) and projection is None:

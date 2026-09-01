@@ -47,6 +47,7 @@ SYSTEMS = {
     ),
 }
 TELNEXA_SUBMITTED_EVENT_PATH = "/internal/v1/telnexa/submitted"
+TELNEXA_REJECTED_EVENT_PATH = "/internal/v1/telnexa/rejected"
 INGRESS_PATHS = {
     "kyqra": {
         "/api/v1/kyqra/jobs",
@@ -76,6 +77,7 @@ EVENT_TYPES = {
     "/api/v1/telnexa/inbound": "telnexa.sms.received",
     "/api/v1/telnexa/dlr": "telnexa.sms.delivered",
     TELNEXA_SUBMITTED_EVENT_PATH: "telnexa.sms.submitted",
+    TELNEXA_REJECTED_EVENT_PATH: "telnexa.sms.failed",
     "/api/v1/telnexa/failure": "telnexa.sms.failed",
     "/api/v1/klyrow/events": "klyrow.email.event",
     "/api/v1/klyrow/bounces": "klyrow.email.bounced",
@@ -248,6 +250,7 @@ def verify_dispatch_receipt(
     previous_attempts: int,
     previous_error: str | None,
     expected_projection: dict[str, Any] | None,
+    projection_required: bool,
 ) -> str:
     """Authenticate a bounded control-plane ingestion result by exact content."""
 
@@ -274,21 +277,29 @@ def verify_dispatch_receipt(
         correlation_id = value["correlation_id"]
         if not isinstance(correlation_id, str) or not 1 <= len(correlation_id) <= 128:
             raise RuntimeError("invalid_downstream_receipt")
-        if value["projection"] != expected_projection:
+        if projection_required and value["projection"] != expected_projection:
+            raise RuntimeError("downstream_projection_mismatch")
+        if (
+            not projection_required
+            and value["projection"] not in (None, expected_projection)
+        ):
             raise RuntimeError("downstream_projection_mismatch")
         return "duplicate" if value["duplicate"] else "accepted"
     if (
         status == 409
         and previous_attempts > 0
         and previous_error == "DispatchOutcomeUnknown"
-        and expected_projection is not None
-        and value == {
+    ):
+        expected = {
             "error": "replayed_event_id",
             "event_id": event_id,
             "projection": expected_projection,
         }
-    ):
-        return "reconciled_projection"
+        without_projection = dict(expected, projection=None)
+        if value == expected and (expected_projection is not None or not projection_required):
+            return "reconciled_projection" if projection_required else "reconciled_event"
+        if not projection_required and value == without_projection:
+            return "reconciled_event"
     raise RuntimeError("downstream_receipt_rejected")
 
 
@@ -1127,7 +1138,7 @@ class Store:
             event_path = (
                 TELNEXA_SUBMITTED_EVENT_PATH
                 if row["state"] == "submitted"
-                else "/api/v1/telnexa/failure"
+                else TELNEXA_REJECTED_EVENT_PATH
             )
             event_id = "telnexa-dlr-" + hashlib.sha256(
                 (adapter_message_id + "\n" + carrier_dlr_sha256).encode()
@@ -1717,6 +1728,14 @@ class Gateway:
                     ),
                     "payload": payload,
                 }
+                projection_required = row["path"] in {
+                    TELNEXA_SUBMITTED_EVENT_PATH,
+                    TELNEXA_REJECTED_EVENT_PATH,
+                }
+                if projection_required:
+                    envelope["metadata"] = {
+                        "private_gateway_projection_required": True,
+                    }
                 for optional in ("customer_id", "correlation_id", "causation_id"):
                     if payload.get(optional) is not None:
                         envelope[optional] = payload[optional]
@@ -1771,6 +1790,7 @@ class Gateway:
                     expected_dispatch_projection(
                         event_type, payload, row["event_id"]
                     ),
+                    projection_required,
                 )
                 self.store.mark_event_delivered(row["event_id"], attempts)
                 LOG.info(
