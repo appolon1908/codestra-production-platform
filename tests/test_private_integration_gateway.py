@@ -1353,6 +1353,52 @@ def test_carrier_timeout_remains_unknown_until_exact_readback_reconciles(
     assert completed["operation_token"] is None
 
 
+def test_crashed_submitting_row_reconciles_only_from_exact_carrier_readback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    configure_jasmin_route(monkeypatch)
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+
+    def urlopen(url, **_kwargs):
+        if url.endswith("/ping"):
+            return HealthyJasmin()
+        raise RuntimeError("synthetic process termination after durable claim")
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            live_submission_enabled=True,
+            production_delivery_authorized=True,
+            production_change_id="CHG-JASMIN-CRASH-READBACK",
+        ),
+        state,
+        clock=lambda: now,
+        urlopen=urlopen,
+    )
+    body = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    with pytest.raises(RuntimeError, match="synthetic process termination"):
+        app.outbound(body, outbound_headers(body, now, "nonce-submit-crash-1"))
+    with state.connect() as connection:
+        pending = connection.execute("SELECT * FROM sms_transactions").fetchone()
+    assert pending["state"] == "submitting"
+    assert pending["operation_token"]
+    with pytest.raises(ValueError, match="invalid_jasmin_receipt"):
+        state.reconcile_sms_outcome(
+            pending["adapter_message_id"], pending["operation_token"], b"untrusted"
+        )
+    readback = b'Success "3f08d4cb-fc4b-4474-95c1-0d305af3a679"'
+    completed = state.reconcile_sms_outcome(
+        pending["adapter_message_id"], pending["operation_token"], readback
+    )
+    assert completed["state"] == "submitted"
+    assert completed["provider_message_id"] == "3f08d4cb-fc4b-4474-95c1-0d305af3a679"
+    assert completed["operation_token"] is None
+
+
 def test_crash_after_reservation_is_lease_resumable_before_carrier_submission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

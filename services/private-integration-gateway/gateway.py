@@ -683,10 +683,21 @@ class Store:
         """Finalize an ambiguous attempt only from an exact carrier read-back."""
 
         provider_message_id = parse_jasmin_success_receipt(carrier_readback)
+        with self.connect() as connection:
+            pending = connection.execute(
+                """SELECT state FROM sms_transactions
+                WHERE adapter_message_id=? AND operation_token=?""",
+                (adapter_message_id, operation_token),
+            ).fetchone()
+        if pending is None or pending["state"] not in {
+            "submitting",
+            "outcome_unknown",
+        }:
+            raise RuntimeError("SMS carrier read-back has no ambiguous reservation")
         return self.complete_sms(
             adapter_message_id,
             operation_token=operation_token,
-            expected_state="outcome_unknown",
+            expected_state=pending["state"],
             state="submitted",
             jasmin_dependency="reachable",
             carrier_submitted=True,
