@@ -100,9 +100,7 @@ def ready() -> dict[str, str]:
 @app.get("/api/v1/mail/messages")
 def list_messages(value: Principal = Depends(require_scope("mail.read"))) -> list[dict[str, Any]]:
     reg = registry(); user_id = actor(reg, value.subject)
-    user = reg._user(user_id)
-    rows = reg.db.execute("SELECT * FROM mail_message WHERE tenant=? AND campaign IS ? ORDER BY created_at DESC LIMIT 200",
-                          (value.tenant, user["campaign_id"])).fetchall()
+    rows = reg.messages_for_user(tenant=value.tenant, mail_user_uuid=user_id)
     return [dict(row) for row in rows]
 
 
@@ -122,12 +120,11 @@ def create_message(command: MessageCommand, value: Principal = Depends(require_s
 
 @app.get("/api/v1/mail/messages/{message_uuid}")
 def get_message(message_uuid: str, value: Principal = Depends(require_scope("mail.read"))) -> dict[str, Any]:
-    reg = registry(); user_id = actor(reg, value.subject); user = reg._user(user_id)
-    row = reg.db.execute("SELECT * FROM mail_message WHERE message_uuid=? AND tenant=? AND campaign IS ?",
-                         (message_uuid, value.tenant, user["campaign_id"])).fetchone()
-    if not row:
+    reg = registry(); user_id = actor(reg, value.subject)
+    rows = reg.messages_for_user(tenant=value.tenant, mail_user_uuid=user_id, message_uuid=message_uuid)
+    if not rows:
         raise HTTPException(status_code=404, detail="message_not_found")
-    return dict(row)
+    return dict(rows[0])
 
 
 @app.get("/api/v1/mail/mailboxes")

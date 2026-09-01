@@ -116,7 +116,8 @@ class MailRegistry:
         owned = from_address.lower() == user["primary_address"].lower() or self.db.execute(
             "SELECT 1 FROM mail_alias WHERE target_mail_user_uuid=? AND address=? AND active=1", (mail_user_uuid, from_address.lower())).fetchone()
         override = user["role"] in ADMIN_ROLES and domain["admin_override_allowed"]
-        allowed = bool(override or (owned and domain["id"] == user["domain_id"] and domain["campaign_id"] == user["campaign_id"] and domain["allow_agent_send"]))
+        domain_usable = bool(domain["active"] and domain["assignment_status"] != "BLOCKED_MISSING_CAMPAIGN_ASSIGNMENT")
+        allowed = bool(domain_usable and (override or (owned and domain["id"] == user["domain_id"] and domain["campaign_id"] == user["campaign_id"] and domain["allow_agent_send"])))
         if override and not reason:
             raise PolicyError("admin_override_reason_required")
         self._audit(user["keycloak_subject"], "mail.send.authorize" if not override else "mail.domain.override",
@@ -127,11 +128,46 @@ class MailRegistry:
         return {"allowed": True, "override": bool(override), "domain": domain["domain"], "campaign_id": domain["campaign_id"]}
 
     def route_inbound(self, recipient: str) -> dict[str, Any]:
+        recipient = recipient.lower().strip()
         domain = self.domain(address_domain(recipient))
         if not domain["active"] or not domain["allow_agent_receive"]:
             raise PolicyError("inbound_domain_denied")
-        # Campaign authority comes only from the server-side recipient domain.
-        return {"domain_id": domain["id"], "domain": domain["domain"], "campaign_id": domain["campaign_id"], "business_unit_id": domain["business_unit_id"]}
+        target = self.db.execute(
+            "SELECT mail_user_uuid AS mailbox_uuid,campaign_id FROM mail_user WHERE primary_address=? AND active=1",
+            (recipient,),
+        ).fetchone()
+        if not target:
+            target = self.db.execute("""SELECT u.mail_user_uuid AS mailbox_uuid,u.campaign_id
+                FROM mail_alias a JOIN mail_user u ON u.mail_user_uuid=a.target_mail_user_uuid
+                WHERE a.address=? AND a.active=1 AND u.active=1""", (recipient,)).fetchone()
+        if not target:
+            target = self.db.execute(
+                "SELECT mailbox_uuid,campaign_id FROM shared_mailbox WHERE address=? AND active=1",
+                (recipient,),
+            ).fetchone()
+        if not target or target["campaign_id"] != domain["campaign_id"]:
+            raise PolicyError("inbound_recipient_not_found")
+        return {"domain_id": domain["id"], "domain": domain["domain"],
+                "campaign_id": domain["campaign_id"], "business_unit_id": domain["business_unit_id"],
+                "mailbox_uuid": target["mailbox_uuid"]}
+
+    def messages_for_user(self, *, tenant: str, mail_user_uuid: str,
+                          message_uuid: str | None = None) -> list[sqlite3.Row]:
+        user = self._user(mail_user_uuid)
+        parameters: list[Any] = [mail_user_uuid, mail_user_uuid, mail_user_uuid, tenant]
+        message_filter = ""
+        if message_uuid:
+            message_filter = " AND m.message_uuid=?"
+            parameters.append(message_uuid)
+        return self.db.execute(f"""SELECT m.* FROM mail_message m
+            WHERE (m.mailbox_uuid=? OR EXISTS (
+                SELECT 1 FROM shared_mailbox s
+                LEFT JOIN shared_mailbox_member sm ON sm.mailbox_uuid=s.mailbox_uuid
+                    AND sm.mail_user_uuid=? AND sm.permission IN ('READ','SEND','MANAGE')
+                WHERE s.mailbox_uuid=m.mailbox_uuid AND s.active=1
+                    AND (sm.mail_user_uuid IS NOT NULL OR s.supervisor_mail_user_uuid=?)))
+              AND m.tenant=?{message_filter}
+            ORDER BY m.created_at DESC LIMIT 200""", parameters).fetchall()
 
     def register_message(self, *, tenant: str, direction: str, sender: str,
                          recipients: list[str], correlation_id: str,
@@ -142,20 +178,35 @@ class MailRegistry:
                          actor_uuid: str | None = None) -> dict[str, Any]:
         if direction not in {"INBOUND", "OUTBOUND"} or not recipients:
             raise PolicyError("invalid_message")
-        duplicate = self.db.execute(
-            "SELECT * FROM mail_message WHERE tenant=? AND idempotency_key=?",
-            (tenant, idempotency_key),
-        ).fetchone()
-        if duplicate:
-            return {**dict(duplicate), "duplicate": True}
         if direction == "INBOUND":
             route = self.route_inbound(recipients[0])
+            mailbox_uuid = route["mailbox_uuid"]
         else:
             if not actor_uuid:
                 raise PolicyError("authenticated_actor_required")
             route = self.authorize_sender(actor_uuid, sender)
             route["business_unit_id"] = self._user(actor_uuid)["business_unit_id"]
+            mailbox_uuid = mailbox_uuid or actor_uuid
         refs = references or []
+        normalized_recipients = [value.lower() for value in recipients]
+        duplicate = self.db.execute(
+            "SELECT * FROM mail_message WHERE tenant=? AND idempotency_key=?",
+            (tenant, idempotency_key),
+        ).fetchone()
+        if duplicate:
+            replay_matches = (
+                duplicate["mailbox_uuid"] == mailbox_uuid
+                and duplicate["direction"] == direction
+                and duplicate["sender"] == sender.lower()
+                and json.loads(duplicate["recipients_json"]) == normalized_recipients
+                and duplicate["correlation_id"] == correlation_id
+                and duplicate["message_id_header"] == message_id
+                and duplicate["in_reply_to"] == in_reply_to
+                and json.loads(duplicate["references_json"]) == refs
+            )
+            if not replay_matches:
+                raise PolicyError("idempotency_conflict")
+            return {**dict(duplicate), "duplicate": True}
         parent_ids = [value for value in [in_reply_to, *refs] if value]
         parent = None
         for parent_id in parent_ids:
@@ -172,7 +223,7 @@ class MailRegistry:
                actual_state,correlation_id,idempotency_key,created_at,updated_at)
                VALUES(?,?,?,?,?,'EMAIL',?,?,?,?,?,?,?,'REGISTERED','PENDING',?,?,?,?)""",
             (message_uuid, mailbox_uuid, tenant, route["campaign_id"], route["domain"], direction,
-             sender.lower(), json.dumps([value.lower() for value in recipients]), thread_uuid, message_id,
+             sender.lower(), json.dumps(normalized_recipients), thread_uuid, message_id,
              in_reply_to, json.dumps(refs), correlation_id, idempotency_key, stamp, stamp),
         )
         outbox_payload = {
