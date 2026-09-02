@@ -1,12 +1,12 @@
 schema_version: codestra.production-source-lock.v1
-generated_at: "2026-09-02T14:30:00Z"
+generated_at: "2026-09-02T16:56:17Z"
 status: FAIL
 target: 65.109.65.169
 protected_platform:
   repository: appolon1908-hue/codestra-production-platform
   branch: release/production-activation
-  sha: 5aec485814149434750f2313370ae0ae39db5bd8
-  release_tag: protected-5aec485814149434750f2313370ae0ae39db5bd8
+  sha: 491041d5d0d66c4434470e8a03e5846a810f60ec
+  release_tag: protected-491041d5d0d66c4434470e8a03e5846a810f60ec
 middleware_authorities:
   protected_production_tuple:
     repository: Codestra-SRL/codestra-middleware
