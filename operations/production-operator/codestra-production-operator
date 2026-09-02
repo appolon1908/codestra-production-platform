@@ -35,6 +35,7 @@ ALLOWED_ACTIONS = {
     "status",
     "rollback",
     "collect-evidence",
+    "kong-readback",
     "stage-control-plane",
     "validate-control-plane",
     "rollback-control-plane",
@@ -44,7 +45,13 @@ ALLOWED_ACTIONS = {
     "enable-production-web-traffic",
     "disable-production-web-traffic",
 }
-READ_ONLY_ACTIONS = {"preflight", "status", "collect-evidence", "validate-control-plane"}
+READ_ONLY_ACTIONS = {
+    "preflight",
+    "status",
+    "collect-evidence",
+    "kong-readback",
+    "validate-control-plane",
+}
 RECOVERY_ACTIONS = {
     "rollback",
     "rollback-control-plane",
@@ -54,6 +61,7 @@ RECOVERY_ACTIONS = {
 SAFETY_BYPASS_ACTIONS = {
     "status",
     "collect-evidence",
+    "kong-readback",
     "rollback",
     "rollback-control-plane",
     "rollback-middleware",
@@ -2289,6 +2297,125 @@ def kong_traffic_gate(enabled: bool) -> None:
         raise OperatorError("Kong traffic gate readback mismatch")
 
 
+def kong_runtime_readback() -> dict[str, object]:
+    """Return an allowlisted, credential-free view of Kong runtime authority."""
+    routes = kong_json("GET", "/routes?size=1000").get("data", [])
+    services = kong_json("GET", "/services?size=1000").get("data", [])
+    upstreams = kong_json("GET", "/upstreams?size=1000").get("data", [])
+    plugins = kong_json("GET", "/plugins?size=1000").get("data", [])
+    if not all(isinstance(items, list) for items in (routes, services, upstreams, plugins)):
+        raise OperatorError("Kong runtime readback returned invalid collections")
+
+    safe_routes = sorted(
+        (
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "service_id": (item.get("service") or {}).get("id"),
+                "protocols": item.get("protocols") or [],
+                "methods": item.get("methods") or [],
+                "hosts": item.get("hosts") or [],
+                "paths": item.get("paths") or [],
+                "strip_path": item.get("strip_path"),
+                "preserve_host": item.get("preserve_host"),
+            }
+            for item in routes
+            if isinstance(item, dict)
+        ),
+        key=lambda item: str(item["name"] or item["id"]),
+    )
+    safe_services = sorted(
+        (
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "protocol": item.get("protocol"),
+                "host": item.get("host"),
+                "port": item.get("port"),
+                "path": item.get("path"),
+                "retries": item.get("retries"),
+                "connect_timeout": item.get("connect_timeout"),
+                "read_timeout": item.get("read_timeout"),
+                "write_timeout": item.get("write_timeout"),
+                "enabled": item.get("enabled"),
+            }
+            for item in services
+            if isinstance(item, dict)
+        ),
+        key=lambda item: str(item["name"] or item["id"]),
+    )
+    safe_upstreams: list[dict[str, object]] = []
+    for item in upstreams:
+        if not isinstance(item, dict):
+            continue
+        upstream_id = item.get("id")
+        health = kong_json("GET", f"/upstreams/{upstream_id}/health")
+        health_items = health.get("data", [])
+        if not isinstance(health_items, list):
+            raise OperatorError("Kong upstream health returned invalid data")
+        safe_upstreams.append(
+            {
+                "id": upstream_id,
+                "name": item.get("name"),
+                "algorithm": item.get("algorithm"),
+                "targets": sorted(
+                    (
+                        {
+                            "id": target.get("id"),
+                            "target": target.get("target"),
+                            "weight": target.get("weight"),
+                            "health": target.get("health"),
+                        }
+                        for target in health_items
+                        if isinstance(target, dict)
+                    ),
+                    key=lambda target: str(target["target"] or target["id"]),
+                ),
+            }
+        )
+    safe_upstreams.sort(key=lambda item: str(item["name"] or item["id"]))
+    safe_plugins = sorted(
+        (
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "instance_name": item.get("instance_name"),
+                "enabled": item.get("enabled"),
+                "route_id": (item.get("route") or {}).get("id"),
+                "service_id": (item.get("service") or {}).get("id"),
+                "consumer_id": (item.get("consumer") or {}).get("id"),
+            }
+            for item in plugins
+            if isinstance(item, dict)
+        ),
+        key=lambda item: str(item["instance_name"] or item["name"] or item["id"]),
+    )
+    traffic_gate = any(
+        item["name"] == "request-termination"
+        and item["instance_name"] == KONG_TRAFFIC_GATE_INSTANCE
+        and item["enabled"] is True
+        for item in safe_plugins
+    )
+    sanitized = {
+        "routes": safe_routes,
+        "services": safe_services,
+        "upstreams": safe_upstreams,
+        "plugins": safe_plugins,
+        "core_web_traffic_gate_present": traffic_gate,
+    }
+    checksum = hashlib.sha256(
+        json.dumps(sanitized, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {
+        **sanitized,
+        "route_count": len(safe_routes),
+        "service_count": len(safe_services),
+        "upstream_count": len(safe_upstreams),
+        "plugin_count": len(safe_plugins),
+        "sanitized_configuration_sha256": checksum,
+    }
+
+
 def probe_auth_gateway() -> None:
     current = docker_inspect(AUTH_GATEWAY_CONTAINER)
     if not current["State"].get("Running"):
@@ -2479,6 +2606,8 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         result.update(stage_control_plane(config))
     elif action == "validate-control-plane":
         result.update(validate_control_plane(config))
+    elif action == "kong-readback":
+        result.update(kong_runtime_readback())
     elif action == "rollback-control-plane":
         result.update(rollback_control_plane(config))
     elif action == "rollout-middleware":

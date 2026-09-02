@@ -90,6 +90,7 @@ EXPECTED_ACTIONS = {
     "status",
     "rollback",
     "collect-evidence",
+    "kong-readback",
     "stage-control-plane",
     "validate-control-plane",
     "rollback-control-plane",
@@ -1844,7 +1845,7 @@ def test_nonzero_asterisk_counters_never_match_zero(monkeypatch, count) -> None:
     assert state["active_channels_zero"] is False
 
 
-@pytest.mark.parametrize("action", ["status", "collect-evidence"])
+@pytest.mark.parametrize("action", ["status", "collect-evidence", "kong-readback"])
 def test_diagnostics_and_rollback_remain_available_when_unsafe(monkeypatch, action) -> None:
     monkeypatch.setattr(
         OPERATOR,
@@ -1862,9 +1863,52 @@ def test_diagnostics_and_rollback_remain_available_when_unsafe(monkeypatch, acti
         "run_fixed",
         lambda command: subprocess.CompletedProcess(command, 0, "", ""),
     )
+    monkeypatch.setattr(
+        OPERATOR,
+        "kong_runtime_readback",
+        lambda: {"route_count": 29, "core_web_traffic_gate_present": True},
+    )
     code, result = OPERATOR.execute(action)
     assert code == 0
-    assert result["returncode"] == 0
+    if action == "kong-readback":
+        assert result["route_count"] == 29
+        assert result["core_web_traffic_gate_present"] is True
+    else:
+        assert result["returncode"] == 0
+
+
+def test_kong_runtime_readback_is_sanitized_and_reports_traffic_gate(monkeypatch) -> None:
+    responses = {
+        "/routes?size=1000": {"data": [{"id": "r1", "name": "health",
+            "service": {"id": "s1"}, "protocols": ["https"], "methods": ["GET"],
+            "hosts": ["api.example.invalid"], "paths": ["/health"],
+            "headers": {"x-api-key": ["secret"]}}]},
+        "/services?size=1000": {"data": [{"id": "s1", "name": "api",
+            "protocol": "http", "host": "middleware", "port": 8000, "path": "/",
+            "retries": 2, "connect_timeout": 1000, "read_timeout": 2000,
+            "write_timeout": 2000, "enabled": True,
+            "client_certificate": {"id": "private"}}]},
+        "/upstreams?size=1000": {"data": [{"id": "u1", "name": "middleware",
+            "algorithm": "round-robin"}]},
+        "/upstreams/u1/health": {"data": [{"id": "t1",
+            "target": "10.0.0.10:8000", "weight": 100, "health": "HEALTHY",
+            "certificate": "secret"}]},
+        "/plugins?size=1000": {"data": [{"id": "p1",
+            "name": "request-termination",
+            "instance_name": OPERATOR.KONG_TRAFFIC_GATE_INSTANCE, "enabled": True,
+            "route": None, "service": None, "consumer": None,
+            "config": {"message": "secret"}}]},
+    }
+    monkeypatch.setattr(OPERATOR, "kong_json", lambda method, path: responses[path])
+    result = OPERATOR.kong_runtime_readback()
+    assert result["route_count"] == 1
+    assert result["core_web_traffic_gate_present"] is True
+    serialized = json.dumps(result)
+    assert "x-api-key" not in serialized
+    assert "client_certificate" not in serialized
+    assert "certificate" not in serialized
+    assert '"config"' not in serialized
+    assert len(result["sanitized_configuration_sha256"]) == 64
 
 
 def test_rollback_remains_available_when_unsafe(monkeypatch) -> None:
