@@ -1,6 +1,6 @@
 # Repository Review Blockers
 
-Captured: 2026-09-01T21:05:47.526426+00:00
+Captured: 2026-09-02T19:22:38.549617+00:00
 
 A missing permission or unavailable API is a blocker, never a PASS.
 
@@ -20,15 +20,16 @@ A missing permission or unavailable API is a blocker, never a PASS.
 - `appolon1908-hue/Keycloak` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Keycloak` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
 - `appolon1908-hue/Keycloak` code_scanning security alerts: gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)
-- `appolon1908-hue/Middleware-` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Middleware-` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `Codestra-SRL/codestra-middleware` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
 - `Codestra-SRL/codestra-middleware` code_scanning security alerts: gh: Code Security must be enabled for this repository to use code scanning. (HTTP 403)
+- `Codestra-SRL/codestra-middleware` rulesets: gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)
 - `appolon1908-hue/Odoo` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Odoo` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `Codestra-SRL/codestra-odoo-addons` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `Codestra-SRL/codestra-odoo-addons` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
 - `Codestra-SRL/codestra-odoo-addons` code_scanning security alerts: gh: Code Security must be enabled for this repository to use code scanning. (HTTP 403)
+- `Codestra-SRL/codestra-odoo-addons` rulesets: gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)
 - `appolon1908-hue/N8N` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/N8N` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Codestra-Marketing-` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
@@ -84,12 +85,3 @@ A missing permission or unavailable API is a blocker, never a PASS.
 - `appolon1908-hue/Codestra-Postgres-Exporter` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Superset` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Superset` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
-- `Codestra-SRL/codestra-middleware`: organization Actions budget is `0` with `prevent_further_usage=true`; eligible pushes produce synthetic zero-job `BuildFailed`/`startup_failure` runs. Billing owner must establish an approved Actions entitlement, then exact-head and protected-main release workflows must be revalidated. See `CANONICAL-MIDDLEWARE-ACTIONS-BLOCKER-20260902.md`.
-# Server 65 Kong runtime read-back — 2026-09-02
-
-- **Owner:** Infrastructure/security owner
-- **Repository:** `appolon1908-hue/Kong` and `appolon1908-hue/Infustruction-repo`
-- **Service:** Kong gateway on `65.109.65.169`
-- **Blocker:** `api.breero.com/health` returns HTTP 503 through Caddy and Kong, but the installed production operator exposes no sanitized route/service/target/upstream-health read-back. A least-privilege `kong-readback` action is implemented in PR #198 but installing it changes the protected operator surface and requires separate infrastructure/security-owner approval.
-- **Required action:** review, approve, and install the PR #198 exact-command extension through protected infrastructure change control; it emits only allowlisted sanitized data and provides no arbitrary shell.
-- **Validation after action:** first rule out the global Kong traffic gate, then reconcile all 29 runtime routes and remediate an upstream only if read-back proves it is the cause; rerun Caddy/Kong health, readiness, version, authentication, authorization, and route-alignment checks.
