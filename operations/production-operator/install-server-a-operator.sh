@@ -45,12 +45,12 @@ database_validator_source=$script_dir/../../tools/validate_production_database_m
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
-9898bad6579c3c394e005739094b701dda515ed07595f7d6058578daf785ecfb  codestra-production-operator
+f986169593a78ead4133a6b102fbdaddc7f611607a6c26b9f191ad2f9e4e61f9  codestra-production-operator
 6d7432e9765474f86e93a711962ddf6b1f8edb3eab6098ace8d19d575f9ddec4  codestra-production-forced-command
 2969c70ff9e6568a6958f0e6c760a34e538aeb5934049f59dc4f69eab7ab018c  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
-3b1dc84022989ed2682980161d86a0afff43e16ff5f167f4c00f4568684380d6  ../../PRODUCTION-DATABASE-MANIFEST.yaml
-4851047951619c6288c1899aea2e06ba7d90f48f23e80d77d2b9aaab8c33cb71  ../../tools/validate_production_database_manifest.py
+50e619dcbb681081e8d0e72dfe048078b8f5f4af2ccc0608b4995df3260a0cd0  ../../PRODUCTION-DATABASE-MANIFEST.yaml
+17e78181bd880db535bee51654ca82c83a2e5c9be7776fe7bcdcd04c17dc4445  ../../tools/validate_production_database_manifest.py
 EOF
 }
 verify_payload || fail
@@ -295,7 +295,7 @@ chown root:root /etc/codestra/production-operator/installed.sha256
 sh -n /usr/local/libexec/codestra-production-forced-command
 bash -n /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh
 python3 -c 'compile(open("/usr/local/sbin/codestra-production-operator", encoding="utf-8").read(), "/usr/local/sbin/codestra-production-operator", "exec")'
-python3 -c 'import yaml; compile(open("/usr/local/libexec/validate-production-database-manifest", encoding="utf-8").read(), "/usr/local/libexec/validate-production-database-manifest", "exec")'
+python3 -c 'compile(open("/usr/local/libexec/validate-production-database-manifest", encoding="utf-8").read(), "/usr/local/libexec/validate-production-database-manifest", "exec")'
 /usr/local/libexec/validate-production-database-manifest \
   /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml \
   /opt/codestra/evidence/database-certification

@@ -313,7 +313,9 @@ def load_release_config() -> dict[str, str]:
     return config
 
 
-def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
+def run_fixed(
+    command: list[str], *, timeout: int = 1800
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         check=False,
@@ -321,7 +323,7 @@ def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        timeout=1800,
+        timeout=timeout,
         env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
     )
 

@@ -263,6 +263,38 @@ components:
     off_host_backup: NOT_PROVEN
     isolated_restore: NOT_PROVEN
     evidence_bundle: null
+  - id: prometheus-tsdb
+    service: prometheus
+    store: prometheus_data
+    kind: time_series_volume
+    source_authority: appolon1908-hue/Codestra-Prometheus
+    database_owner: observability owner
+    application_role: prometheus runtime user
+    migration_framework: Prometheus TSDB format compatibility
+    backup_method: consistent TSDB snapshot plus checksum and encryption
+    restore_method: isolated Prometheus restore and query validation
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
+  - id: alertmanager-state
+    service: alertmanager
+    store: alertmanager_data
+    kind: alert_state_volume
+    source_authority: appolon1908-hue/Codestra-Alertmanager
+    database_owner: observability owner
+    application_role: alertmanager runtime user
+    migration_framework: Alertmanager state format compatibility
+    backup_method: consistent state snapshot plus checksum and encryption
+    restore_method: isolated Alertmanager restore and silence/state validation
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
   - id: redis-ephemeral-coordination
     service: redis
     store: coordination cache and queues

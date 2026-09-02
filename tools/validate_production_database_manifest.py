@@ -7,9 +7,6 @@ import hashlib
 import re
 import sys
 
-import yaml
-
-
 REQUIRED_IDS = {
     "middleware-postgresql",
     "control-plane-postgresql",
@@ -27,8 +24,78 @@ REQUIRED_IDS = {
     "vicidial-adapter-state",
     "telephony-event-ledger",
     "kong-standby-auth-state",
+    "prometheus-tsdb",
+    "alertmanager-state",
     "redis-ephemeral-coordination",
 }
+
+
+def scalar(value: str):
+    value = value.strip()
+    if value in {"null", "~"}:
+        return None
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    if re.fullmatch(r"-?[0-9]+", value):
+        return int(value)
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
+def load_manifest(path: Path) -> dict:
+    """Parse the intentionally restricted manifest subset without third-party code."""
+    document: dict = {}
+    section = "top"
+    component = None
+    component_indent = -1
+    nested_key = None
+    nested_indent = -1
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        text = raw.strip()
+        if indent == 0 and text in {"policy:", "components:"}:
+            section = text[:-1]
+            if section == "components":
+                document[section] = []
+            else:
+                document[section] = {}
+            continue
+        if indent == 0 and not text.startswith("- "):
+            key, separator, value = text.partition(":")
+            assert separator and re.fullmatch(r"[a-z_]+", key), "unsupported manifest syntax"
+            document[key] = scalar(value)
+            section = "top"
+            continue
+        if section == "components" and text.startswith("- "):
+            component = {}
+            document["components"].append(component)
+            component_indent = indent
+            nested_key = None
+            text = text[2:]
+        key, separator, value = text.partition(":")
+        assert separator and re.fullmatch(r"[a-z_]+", key), "unsupported manifest syntax"
+        if section == "top" and indent == 0:
+            document[key] = scalar(value)
+        elif section == "policy" and indent > 0:
+            document["policy"][key] = scalar(value)
+        elif section == "components" and component is not None:
+            if nested_key is not None and indent > nested_indent:
+                component[nested_key][key] = scalar(value)
+            elif value.strip() == "" and indent > component_indent:
+                component[key] = {}
+                nested_key = key
+                nested_indent = indent
+            else:
+                component[key] = scalar(value)
+                nested_key = None
+        else:
+            raise AssertionError("unsupported manifest structure")
+    return document
 REQUIRED_FIELDS = {
     "id", "service", "store", "kind", "source_authority", "database_owner",
     "application_role", "migration_framework", "backup_method", "restore_method",
@@ -39,7 +106,7 @@ REQUIRED_FIELDS = {
 
 
 def validate(path: Path, evidence_root: Path | None = None) -> None:
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document = load_manifest(path)
     assert document["schema_version"] == "codestra.production-database-manifest.v1"
     assert document["target"] == "65.109.65.169"
     policy = document["policy"]

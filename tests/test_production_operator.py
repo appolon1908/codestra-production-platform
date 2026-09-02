@@ -147,6 +147,18 @@ def test_database_certification_requires_validator_success(monkeypatch):
         REAL_VALIDATE_DATABASE_CERTIFICATION()
 
 
+def test_run_fixed_supports_bounded_timeout(monkeypatch):
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(OPERATOR.subprocess, "run", fake_run)
+    OPERATOR.run_fixed(["/usr/bin/true"], timeout=30)
+    assert observed["timeout"] == 30
+
+
 def test_installer_validates_certified_manifest_against_evidence_root():
     installer = (PACKAGE / "install-server-a-operator.sh").read_text()
     assert "/opt/codestra/evidence/database-certification" in installer
