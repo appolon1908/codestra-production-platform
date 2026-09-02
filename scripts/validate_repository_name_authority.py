@@ -55,20 +55,51 @@ def load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def string_assignments(module: ast.Module) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for node in module.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        value = node.value
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                values[target.id] = value.value
+    return values
+
+
+def resolve_string(node: ast.AST, constants: dict[str, str]) -> str:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in constants:
+        return constants[node.id]
+    fail("KNOWN_REPOSITORIES entries must be strings or named string constants")
+    raise AssertionError("unreachable")
+
+
 def known_repositories() -> tuple[str, ...]:
     try:
         module = ast.parse(CAPTURE.read_text(encoding="utf-8"), filename=str(CAPTURE))
     except SyntaxError as exc:
         fail(f"capture script has invalid syntax: {exc}")
+
+    constants = string_assignments(module)
     for node in module.body:
-        if isinstance(node, ast.Assign):
-            targets = [target.id for target in node.targets if isinstance(target, ast.Name)]
-            if "KNOWN_REPOSITORIES" in targets:
-                value = ast.literal_eval(node.value)
-                if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
-                    return value
-                fail("KNOWN_REPOSITORIES must be a literal tuple of strings")
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(isinstance(target, ast.Name) and target.id == "KNOWN_REPOSITORIES" for target in targets):
+            continue
+        if not isinstance(node.value, ast.Tuple):
+            fail("KNOWN_REPOSITORIES must be a literal tuple")
+        repositories = tuple(resolve_string(item, constants) for item in node.value.elts)
+        if len(repositories) != len(set(repositories)):
+            fail("KNOWN_REPOSITORIES contains duplicate repository names")
+        return repositories
     fail("capture script does not define KNOWN_REPOSITORIES")
+    raise AssertionError("unreachable")
 
 
 def validate() -> None:
@@ -85,18 +116,32 @@ def validate() -> None:
     mappings = document.get("mappings")
     if not isinstance(mappings, list) or len(mappings) != 6:
         fail("manifest must contain exactly six rename mappings")
-    actual = {
-        item["repository_id"]: (
-            item["current_repository"],
-            item["target_repository_after_cutover"],
-        )
-        for item in mappings
-        if isinstance(item, dict)
-    }
+
+    actual: dict[int, tuple[str, str]] = {}
+    current_names: set[str] = set()
+    target_names: set[str] = set()
+    for item in mappings:
+        if not isinstance(item, dict):
+            fail("rename mapping must be an object")
+        repository_id = item.get("repository_id")
+        current = item.get("current_repository")
+        target = item.get("target_repository_after_cutover")
+        if not isinstance(repository_id, int) or repository_id <= 0:
+            fail("rename mapping contains an invalid repository ID")
+        if repository_id in actual:
+            fail(f"duplicate repository ID: {repository_id}")
+        if not isinstance(current, str) or not isinstance(target, str):
+            fail(f"rename mapping names are invalid for repository ID {repository_id}")
+        if current in current_names or target in target_names:
+            fail("rename mapping contains duplicate current or target names")
+        if item.get("status") != "PREPARED_NOT_RENAMED":
+            fail(f"mapping changed state without cutover: {current}")
+        actual[repository_id] = (current, target)
+        current_names.add(current)
+        target_names.add(target)
+
     if actual != EXPECTED:
         fail("rename mappings do not exactly match the approved stable-ID set")
-    if any(item.get("status") != "PREPARED_NOT_RENAMED" for item in mappings):
-        fail("an individual mapping changed state without cutover")
 
     inventory = set(known_repositories())
     missing = {current for current, _target in EXPECTED.values()} - inventory
