@@ -9,7 +9,10 @@ The reviewed Nginx authority is `nginx/telnexa-private-gateway.conf`. Nginx
 must enforce mTLS and overwrite the certificate-verification headers. Metrics
 also require the edge-verified marker, a bounded service identity, and its
 matching bearer. Event and message commands require their matching service
-bearer and replay-protected signature contract behind that mTLS edge.
+bearer and replay-protected signature contract behind that mTLS edge. Routine
+client-certificate renewal is authorized by the dedicated client CA, exact
+subject, and CRL; the rotated serial is retained for audit but is not a static
+availability-breaking identity pin.
 
 Production carrier submission is deliberately disabled in the committed
 Compose contract.  Enabling it requires a separate reviewed change that sets
@@ -35,15 +38,22 @@ The canonical `/v1/integrations/{email,sms,crawler}/commands` surface accepts
 only a strict service/tenant/idempotency envelope behind an edge-derived mTLS
 identity and scope. Commands are durably recorded in SQLite with operation,
 event, attempt, semantic-request hash, and resource-version evidence. The
-committed production contract enables bounded command intake, but no generic
-downstream dispatcher exists: newly accepted commands truthfully enter
+committed production contract keeps bounded command intake disabled pending a
+separate activation review. No generic downstream dispatcher exists: when
+separately enabled, newly accepted commands truthfully enter
 `RECONCILIATION_REQUIRED` with
 `downstream_dispatch_authority_unavailable`. They can be cancelled safely or
 reconciled after an independently reviewed adapter authority is supplied; they
 are never replayed automatically into a provider. Payload keys that could
 carry credentials are rejected. The operation and capability APIs require the
 same edge-derived identity, tenant, and explicit scope, and never permit one
-service to read another service's tenant operations.
+service to read another service's tenant operations. The service-to-tenant
+authorization map is an externally managed JSON object supplied through
+`SERVICE_TENANT_BINDINGS_FILE`; absent, malformed, duplicated, or unlisted
+bindings deny command and operation access. The production Compose contract
+expects this file at
+`/etc/kyqra-telnexa-integration/tenant-bindings.json` and mounts it as a
+read-only runtime secret without committing tenant identifiers to Git.
 
 Middleware forwarding is independently fail-closed. New authenticated ingress
 events become dispatch-eligible only when `MIDDLEWARE_FORWARDING_ENABLED=true`

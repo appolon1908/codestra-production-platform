@@ -44,6 +44,8 @@ def clean_gateway_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "PRODUCTION_DELIVERY_AUTHORIZED",
         "PRODUCTION_CHANGE_ID",
         "INTEGRATION_COMMAND_INTAKE_ENABLED",
+        "SERVICE_TENANT_BINDINGS",
+        "SERVICE_TENANT_BINDINGS_FILE",
         "MIDDLEWARE_FORWARDING_ENABLED",
         "MIDDLEWARE_EVENTS_URL",
         "JASMIN_HTTP_URL",
@@ -88,6 +90,7 @@ def settings(tmp_path: Path, **changes):
         "downstream_url": "",
         "jasmin_url": "http://jasmin:1401",
         "jasmin_dlr_callback_url": "http://gateway:8080/internal/v1/jasmin/dlr",
+        "service_tenant_bindings": {"telnexa": frozenset({"tenant-a"})},
     }
     values.update(changes)
     value = gateway.Settings(**values)
@@ -165,6 +168,23 @@ def test_delivery_defaults_fail_closed(tmp_path: Path, monkeypatch: pytest.Monke
     value = gateway.Settings.from_environment()
     assert value.live_submission_enabled is False
     assert value.production_delivery_authorized is False
+    assert value.service_tenant_bindings == {}
+
+
+def test_service_tenant_bindings_are_strict_and_file_backed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bindings = tmp_path / "tenant-bindings.json"
+    bindings.write_text('{"telnexa":["tenant-a","tenant-b"]}')
+    bindings.chmod(0o400)
+    monkeypatch.setenv("SERVICE_TENANT_BINDINGS_FILE", str(bindings))
+    assert gateway.read_service_tenant_bindings() == {
+        "telnexa": frozenset({"tenant-a", "tenant-b"})
+    }
+    bindings.chmod(0o600)
+    bindings.write_text('{"telnexa":["tenant-a"],"telnexa":["tenant-b"]}')
+    with pytest.raises(ValueError, match="duplicate keys"):
+        gateway.read_service_tenant_bindings()
 
 
 @pytest.mark.parametrize("mode", ["middleware", "shared"])
@@ -376,8 +396,8 @@ def test_operations_are_tenant_isolated_and_actions_are_idempotent(
     assert operation["operation_id"] == operation_id
     other_tenant = governed_headers("operations:read", tenant_id="tenant-b")
     assert app.read_integration_operation(operation_id, other_tenant) == (
-        404,
-        {"detail": "not_found"},
+        401,
+        {"detail": "operation_read_authority_required"},
     )
     code, listed = app.list_integration_operations(read_headers, 50)
     assert code == 200
@@ -472,12 +492,42 @@ def test_production_edge_derives_telnexa_identity_and_scopes() -> None:
     assert "integrations:sms:commands" in nginx
     assert "metrics:read" in nginx
     assert "operations:reconcile" in nginx
+    assert '"^CN=middleware-telnexa-client$"' in nginx
+    assert '$ssl_client_serial !=' not in nginx
     assert "$http_x_service_identity" not in nginx.lower()
     compose = yaml.safe_load((SERVICE / "compose.production.yaml").read_text())
     environment = compose["services"]["gateway"]["environment"]
     assert environment["INTEGRATION_COMMAND_INTAKE_ENABLED"] == "false"
+    assert environment["SERVICE_TENANT_BINDINGS_FILE"] == (
+        "/run/secrets/private_gateway_tenant_bindings"
+    )
+    assert "private_gateway_tenant_bindings" in compose["secrets"]
     assert environment["LIVE_SUBMISSION_ENABLED"] == "false"
     assert environment["PRODUCTION_DELIVERY_AUTHORIZED"] == "false"
+
+
+def test_command_and_operation_authority_fail_closed_without_tenant_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    app = gateway.Gateway(
+        settings(
+            tmp_path,
+            integration_command_intake_enabled=True,
+            service_tenant_bindings={},
+        ),
+        store(tmp_path),
+        clock=lambda: OPERATION_CLOCK,
+    )
+    command_headers = governed_headers("integrations:sms:commands")
+    code, value = app.integration_command(
+        "sms", json.dumps(command_envelope()).encode(), command_headers
+    )
+    assert code == 403
+    assert value == {"detail": "tenant_not_authorized"}
+    assert app.list_integration_operations(
+        governed_headers("operations:read"), 50
+    ) == (401, {"detail": "operation_read_authority_required"})
 
 
 def test_metrics_requires_mtls_derived_matching_service_identity(

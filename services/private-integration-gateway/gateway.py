@@ -24,7 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -275,6 +275,47 @@ def read_secret(name: str) -> str:
     if not value:
         raise ValueError(f"{name}_FILE is empty")
     return value
+
+
+def read_service_tenant_bindings() -> dict[str, frozenset[str]]:
+    """Load the externally managed service-to-tenant authorization boundary."""
+
+    raw = read_secret("SERVICE_TENANT_BINDINGS")
+    if not raw:
+        return {}
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("SERVICE_TENANT_BINDINGS contains duplicate keys")
+            value[key] = item
+        return value
+
+    try:
+        decoded = json.loads(raw, object_pairs_hook=reject_duplicate_keys)
+    except json.JSONDecodeError as error:
+        raise ValueError("SERVICE_TENANT_BINDINGS must be valid JSON") from error
+    if not isinstance(decoded, dict):
+        raise ValueError("SERVICE_TENANT_BINDINGS must be a JSON object")
+    bindings: dict[str, frozenset[str]] = {}
+    for identity, tenants in decoded.items():
+        if not isinstance(identity, str) or BOUNDED_IDENTITY.fullmatch(identity) is None:
+            raise ValueError("SERVICE_TENANT_BINDINGS has an invalid service identity")
+        if (
+            not isinstance(tenants, list)
+            or not tenants
+            or len(tenants) > 1000
+            or any(
+                not isinstance(tenant, str)
+                or BOUNDED_IDENTITY.fullmatch(tenant) is None
+                for tenant in tenants
+            )
+            or len(set(tenants)) != len(tenants)
+        ):
+            raise ValueError("SERVICE_TENANT_BINDINGS has an invalid tenant list")
+        bindings[identity] = frozenset(tenants)
+    return bindings
 
 
 def jasmin_route_secret_names(route: str) -> tuple[str, str]:
@@ -579,6 +620,7 @@ class Settings:
     jasmin_url: str
     jasmin_dlr_callback_url: str
     integration_command_intake_enabled: bool = False
+    service_tenant_bindings: dict[str, frozenset[str]] = field(default_factory=dict)
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -606,6 +648,7 @@ class Settings:
             integration_command_intake_enabled=env_bool(
                 "INTEGRATION_COMMAND_INTAKE_ENABLED"
             ),
+            service_tenant_bindings=read_service_tenant_bindings(),
         )
         settings.validate()
         return settings
@@ -632,6 +675,20 @@ class Settings:
             )
         if self.middleware_forwarding_enabled and not self.downstream_url:
             raise ValueError("middleware forwarding requires MIDDLEWARE_EVENTS_URL")
+        for identity, tenants in self.service_tenant_bindings.items():
+            if (
+                not isinstance(identity, str)
+                or BOUNDED_IDENTITY.fullmatch(identity) is None
+                or not isinstance(tenants, (set, frozenset))
+                or not tenants
+                or len(tenants) > 1000
+                or any(
+                    not isinstance(tenant, str)
+                    or BOUNDED_IDENTITY.fullmatch(tenant) is None
+                    for tenant in tenants
+                )
+            ):
+                raise ValueError("service tenant bindings are invalid")
         if self.downstream_url and not self.downstream_url.startswith("https://"):
             raise ValueError("MIDDLEWARE_EVENTS_URL must use HTTPS")
         parsed = urllib.parse.urlsplit(self.jasmin_url)
@@ -2729,6 +2786,8 @@ class Gateway:
             or normalized_headers.get("x-tenant-id") != tenant_id
         ):
             return 422, {"detail": "tenant_identity_mismatch"}
+        if not self.service_tenant_authorized(identity, tenant_id):
+            return 403, {"detail": "tenant_not_authorized"}
         if (
             not isinstance(idempotency_key, str)
             or not 8 <= len(idempotency_key) <= 128
@@ -2823,12 +2882,21 @@ class Gateway:
         )
         return 200 if result == "replay" else 202, response
 
+    def service_tenant_authorized(self, identity: str, tenant_id: str) -> bool:
+        return tenant_id in self.settings.service_tenant_bindings.get(
+            identity, frozenset()
+        )
+
     def operation_authority(
         self, headers: dict[str, str], scope: str
     ) -> tuple[str, str] | None:
         identity = self.private_service_identity(headers, scope)
         tenant_id = self.normalize_headers(headers).get("x-tenant-id", "")
-        if identity is None or BOUNDED_IDENTITY.fullmatch(tenant_id) is None:
+        if (
+            identity is None
+            or BOUNDED_IDENTITY.fullmatch(tenant_id) is None
+            or not self.service_tenant_authorized(identity, tenant_id)
+        ):
             return None
         return identity, tenant_id
 
