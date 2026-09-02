@@ -9,6 +9,7 @@ RUN test "${#SOURCE_COMMIT_SHA}" -eq 40 \
 
 LABEL org.opencontainers.image.source="https://github.com/appolon1908-hue/codestra-production-platform" \
       org.opencontainers.image.revision="${SOURCE_COMMIT_SHA}" \
+      org.opencontainers.image.version="${SOURCE_COMMIT_SHA}" \
       org.opencontainers.image.title="Codestra private integration gateway"
 
 WORKDIR /app
