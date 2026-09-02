@@ -1,0 +1,12 @@
+groups:
+  - name: codestra-environment-isolation
+    rules:
+      - alert: CodestraEnvironmentIsolationFailed
+        expr: absent(codestra_environment_isolation_success) or codestra_environment_isolation_success != 1
+        for: 15m
+        labels:
+          severity: critical
+          service: production-governance
+        annotations:
+          summary: Production and non-production isolation is not certified
+          description: Resolve shared networks, writable mounts, production secrets, and unclassified containers.

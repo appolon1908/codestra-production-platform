@@ -1,0 +1,60 @@
+{
+  "schema": "codestra.server-a-odoo-copy-governance.v1",
+  "target_server": "65.109.65.169",
+  "postgres": {
+    "compose_project": "codestra",
+    "compose_service": "postgres",
+    "os_user": "postgres",
+    "admin_login_user": "postgres",
+    "maintenance_database": "postgres"
+  },
+  "production_database": "codestra_odoo",
+  "expected_production_uuid_database_count": 22,
+  "production_runtime_roles": [
+    "REPLACE_WITH_ODOO_PRODUCTION_RUNTIME_ROLE"
+  ],
+  "copies": [
+    {
+      "database": "codestra_odoo",
+      "environment": "production",
+      "disposition": "KEEP_ACTIVE",
+      "owner": "Ralph Appolon",
+      "approved": true
+    },
+    {
+      "database": "REPLACE_WITH_EACH_PRODUCTION_DERIVED_COPY",
+      "environment": "staging",
+      "disposition": "ARCHIVE",
+      "owner": "REPLACE_WITH_COPY_OWNER",
+      "approved": false
+    }
+  ],
+  "active_environments": [
+    {
+      "id": "odoo-production",
+      "environment": "production",
+      "compose_project": "codestra",
+      "compose_service": "odoo",
+      "database": "codestra_odoo",
+      "database_binding": {
+        "type": "command_regex",
+        "pattern": "(?:^|\\s)--database(?:=|\\s+)([A-Za-z_][A-Za-z0-9_.-]{0,62})(?:\\s|$)"
+      },
+      "filestore_mount_destination": "/var/lib/odoo",
+      "expected_filestore_source": "REPLACE_WITH_PRODUCTION_FILESTORE_VOLUME_OR_BIND_SOURCE"
+    },
+    {
+      "id": "odoo-staging",
+      "environment": "staging",
+      "compose_project": "REPLACE_WITH_STAGING_COMPOSE_PROJECT",
+      "compose_service": "odoo",
+      "database": "REPLACE_WITH_STAGING_DATABASE",
+      "database_binding": {
+        "type": "command_regex",
+        "pattern": "(?:^|\\s)--database(?:=|\\s+)([A-Za-z_][A-Za-z0-9_.-]{0,62})(?:\\s|$)"
+      },
+      "filestore_mount_destination": "/var/lib/odoo",
+      "expected_filestore_source": "REPLACE_WITH_STAGING_FILESTORE_VOLUME_OR_BIND_SOURCE"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+groups:
+  - name: codestra-server-a-database-security
+    rules:
+      - alert: CodestraDatabaseSecurityContractFailed
+        expr: absent(codestra_database_security_success) or codestra_database_security_success != 1
+        for: 15m
+        labels:
+          severity: critical
+          service: database-security
+        annotations:
+          summary: Server A PostgreSQL role or CONNECT isolation contract failed
+          description: Every login role and database must be classified; runtime roles must be least privilege and CONNECT must match the explicit matrix.
+
+      - alert: CodestraRuntimeDatabaseSuperuserDetected
+        expr: codestra_database_runtime_superusers > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: database-security
+        annotations:
+          summary: A normal production application role remains PostgreSQL superuser
+          description: Use the reviewed owner/migration/runtime separation and re-run application smoke tests.

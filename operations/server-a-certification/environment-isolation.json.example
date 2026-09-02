@@ -1,0 +1,25 @@
+{
+  "schema": "codestra.server-a-environment-isolation.v1",
+  "target_server": "65.109.65.169",
+  "production_projects": [
+    "codestra",
+    "codestra-caddy",
+    "codestra-identity",
+    "codestra-kong",
+    "codestra-monitoring",
+    "codestra-provisioning-production",
+    "codestra-reseller-portal",
+    "codestra-sms-api",
+    "codestra-websocket-gateway",
+    "codestra-websocket-replica"
+  ],
+  "nonproduction_project_patterns": [
+    "(?i)(^|[-_])(staging|stage|development|dev|test|certification|restore)([-_]|$)"
+  ],
+  "shared_network_allowlist": [],
+  "shared_mount_source_allowlist": [],
+  "production_secret_source_prefixes": [
+    "/etc/codestra/secrets/production",
+    "/etc/codestra/server-a-production"
+  ]
+}

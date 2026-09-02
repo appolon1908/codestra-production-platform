@@ -1,0 +1,13 @@
+groups:
+  - name: codestra-server-a-redis-recovery
+    rules:
+      - alert: CodestraRedisRecoveryContractFailed
+        expr: codestra_redis_recovery_contract_success != 1
+        for: 15m
+        labels:
+          severity: critical
+          environment: production
+          component: redis
+        annotations:
+          summary: Production Redis recovery classification or evidence failed
+          description: A Redis dependency is unclassified, has unexpected persistence settings, or lacks tested recovery/safe-loss rebuild proof.

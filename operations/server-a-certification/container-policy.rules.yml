@@ -1,0 +1,22 @@
+groups:
+  - name: codestra-container-policy
+    rules:
+      - alert: CodestraCriticalContainerPolicyIncomplete
+        expr: absent(codestra_critical_container_policy_coverage_percent) or codestra_critical_container_policy_coverage_percent < 100
+        for: 15m
+        labels:
+          severity: critical
+          service: production-governance
+        annotations:
+          summary: Critical production container policy coverage is below 100 percent
+          description: Every critical service requires health, restart, CPU, memory, PID, immutable-image, and port-policy evidence.
+
+      - alert: CodestraCriticalContainerHealthcheckIncomplete
+        expr: codestra_critical_container_healthcheck_coverage_percent < 100
+        for: 15m
+        labels:
+          severity: critical
+          service: production-governance
+        annotations:
+          summary: Critical production healthcheck coverage is below 100 percent
+          description: Add meaningful health or worker-heartbeat checks before certification.

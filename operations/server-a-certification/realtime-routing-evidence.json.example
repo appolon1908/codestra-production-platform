@@ -1,0 +1,15 @@
+{
+  "schema": "codestra.realtime-routing-fence-evidence.v1",
+  "status": "FAIL",
+  "target_server": "65.109.65.169",
+  "verified_at": "REPLACE_WITH_UTC_TIMESTAMP",
+  "owner": "REPLACE_WITH_RESPONSIBLE_OWNER",
+  "valid_node_ids": [
+    "realtime-primary",
+    "realtime-replica-1"
+  ],
+  "false_standby_in_service_discovery": true,
+  "false_standby_in_failover": true,
+  "false_standby_in_routing": true,
+  "evidence_references": []
+}

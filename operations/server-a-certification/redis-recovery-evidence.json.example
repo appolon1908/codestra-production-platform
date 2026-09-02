@@ -1,0 +1,14 @@
+{
+  "schema": "codestra.redis-recovery-evidence.v1",
+  "status": "FAIL",
+  "target_server": "65.109.65.169",
+  "instance_id": "codestra-redis",
+  "decision": "FORMALLY_DOCUMENTED_SAFE_LOSS_AND_REBUILD",
+  "verified_at": "REPLACE_WITH_UTC_TIMESTAMP",
+  "owner": "Ralph Appolon",
+  "postgres_durable_authority_verified": false,
+  "rebuild_test_status": "FAIL",
+  "unsafe_job_replay": true,
+  "duplicate_external_actions": 0,
+  "evidence_references": []
+}

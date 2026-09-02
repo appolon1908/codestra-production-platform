@@ -1,0 +1,23 @@
+groups:
+  - name: codestra-server-a-odoo-copy-governance
+    rules:
+      - alert: CodestraOdooCopyGovernanceFailed
+        expr: codestra_odoo_copy_governance_success != 1
+        for: 15m
+        labels:
+          severity: critical
+          environment: production
+          component: odoo
+        annotations:
+          summary: Odoo database-copy governance or filestore binding failed
+          description: A production-derived copy is unclassified/unapproved, accessible by production roles, or bound to the wrong filestore.
+      - alert: CodestraOdooProductionUUIDCopyCountChanged
+        expr: codestra_odoo_production_uuid_database_count != 22
+        for: 15m
+        labels:
+          severity: warning
+          environment: production
+          component: odoo
+        annotations:
+          summary: Odoo production-derived database count changed
+          description: The count of databases sharing the production UUID no longer matches the reviewed 22-database inventory.

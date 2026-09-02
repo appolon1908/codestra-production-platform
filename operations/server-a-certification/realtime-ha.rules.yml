@@ -1,0 +1,23 @@
+groups:
+  - name: codestra-server-a-realtime-ha
+    rules:
+      - alert: CodestraRealtimeHACertificationFailed
+        expr: codestra_realtime_ha_success != 1
+        for: 5m
+        labels:
+          severity: critical
+          environment: production
+          component: realtime-postgresql
+        annotations:
+          summary: Realtime PostgreSQL HA or routing fencing is not certified
+          description: The primary/replica state, WAL streaming, lag, system identifier, or routing-fence contract failed.
+      - alert: CodestraRealtimeReplicaLagHigh
+        expr: codestra_realtime_replica_max_receive_replay_lag_bytes > 16777216
+        for: 5m
+        labels:
+          severity: warning
+          environment: production
+          component: realtime-postgresql
+        annotations:
+          summary: Realtime replica receive/replay lag exceeds policy
+          description: The inspected realtime replica lag is above the 16 MiB certification threshold.

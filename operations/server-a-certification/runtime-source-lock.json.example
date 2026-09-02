@@ -1,0 +1,32 @@
+{
+  "schema": "codestra.server-a-runtime-source-lock.v1",
+  "target_server": "65.109.65.169",
+  "workloads": [
+    {
+      "id": "caddy",
+      "compose_project": "codestra-caddy",
+      "compose_service": "caddy",
+      "environment": "production",
+      "source_type": "github",
+      "source_reference": "https://github.com/appolon1908-hue/Caddy",
+      "revision": "REPLACE_WITH_EXACT_40_CHARACTER_COMMIT",
+      "image": "ghcr.io/appolon1908-hue/caddy@sha256:REPLACE_WITH_64_HEX_DIGEST",
+      "rollback_image": "ghcr.io/appolon1908-hue/caddy@sha256:REPLACE_WITH_64_HEX_ROLLBACK_DIGEST",
+      "expected_instances": 1,
+      "critical": true
+    },
+    {
+      "id": "vendor-postgres",
+      "compose_project": "REPLACE_WITH_EXACT_PROJECT",
+      "compose_service": "postgres",
+      "environment": "production",
+      "source_type": "vendor",
+      "source_reference": "docker.io/library/postgres",
+      "revision": "N/A_VENDOR",
+      "image": "postgres@sha256:REPLACE_WITH_64_HEX_DIGEST",
+      "rollback_image": "postgres@sha256:REPLACE_WITH_64_HEX_ROLLBACK_DIGEST",
+      "expected_instances": 1,
+      "critical": true
+    }
+  ]
+}

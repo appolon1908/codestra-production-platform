@@ -1,0 +1,34 @@
+{
+  "schema": "codestra.server-a-database-security.v1",
+  "target_server": "65.109.65.169",
+  "clusters": [
+    {
+      "id": "shared",
+      "compose_project": "codestra",
+      "compose_service": "postgres",
+      "os_user": "postgres",
+      "admin_login_user": "postgres",
+      "maintenance_database": "postgres",
+      "databases": [
+        {"name": "postgres", "environment": "system", "public_connect_allowed": false},
+        {"name": "codestra_odoo", "environment": "production", "public_connect_allowed": false},
+        {"name": "codestra_middleware", "environment": "production", "public_connect_allowed": false},
+        {"name": "codestra_n8n", "environment": "production", "public_connect_allowed": false},
+        {"name": "control_plane", "environment": "production", "public_connect_allowed": false},
+        {"name": "codestra_middleware_appolon", "environment": "production", "public_connect_allowed": false},
+        {"name": "beyvra_email", "environment": "production", "public_connect_allowed": false},
+        {"name": "email_reseller", "environment": "production", "public_connect_allowed": false}
+      ],
+      "roles": [
+        {"name": "postgres", "classification": "admin", "allowed_databases": ["*"]},
+        {"name": "REPLACE_WITH_ODOO_RUNTIME_ROLE", "classification": "runtime", "allowed_databases": ["codestra_odoo"]},
+        {"name": "REPLACE_WITH_MIDDLEWARE_RUNTIME_ROLE", "classification": "runtime", "allowed_databases": ["codestra_middleware"]},
+        {"name": "REPLACE_WITH_N8N_RUNTIME_ROLE", "classification": "runtime", "allowed_databases": ["codestra_n8n"]},
+        {"name": "REPLACE_WITH_CONTROL_PLANE_RUNTIME_ROLE", "classification": "runtime", "allowed_databases": ["control_plane"]},
+        {"name": "REPLACE_WITH_APPOLON_RUNTIME_ROLE", "classification": "runtime", "allowed_databases": ["codestra_middleware_appolon"]},
+        {"name": "REPLACE_WITH_BEYVRA_EMAIL_RUNTIME_ROLE", "classification": "runtime", "allowed_databases": ["beyvra_email"]},
+        {"name": "REPLACE_WITH_EMAIL_RESELLER_RUNTIME_ROLE", "classification": "runtime", "allowed_databases": ["email_reseller"]}
+      ]
+    }
+  ]
+}

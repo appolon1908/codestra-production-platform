@@ -1,0 +1,23 @@
+groups:
+  - name: codestra-server-a-runtime-source-lock
+    rules:
+      - alert: CodestraRuntimeSourceLockMismatch
+        expr: codestra_runtime_source_lock_success != 1
+        for: 5m
+        labels:
+          severity: critical
+          environment: production
+          component: release-governance
+        annotations:
+          summary: Running Server A workloads do not match the exact source lock
+          description: A running component is unknown, absent, mutable, or has mismatched image/source/revision identity.
+      - alert: CodestraUnknownRuntimeComponent
+        expr: codestra_runtime_source_lock_unknown_components > 0
+        for: 5m
+        labels:
+          severity: critical
+          environment: production
+          component: release-governance
+        annotations:
+          summary: Server A has a running component without source authority
+          description: Every running container must be represented by an exact reviewed runtime-source-lock entry.

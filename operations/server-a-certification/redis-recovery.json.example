@@ -1,0 +1,26 @@
+{
+  "schema": "codestra.server-a-redis-recovery.v1",
+  "target_server": "65.109.65.169",
+  "evidence_max_age_days": 90,
+  "instances": [
+    {
+      "id": "codestra-redis",
+      "compose_project": "codestra",
+      "compose_service": "redis",
+      "username": "REPLACE_WITH_RESTRICTED_AUDIT_USER",
+      "password_secret_path": "/run/secrets/redis_audit_password",
+      "classifications": [
+        "QUEUE_OR_BROKER",
+        "LOCKING",
+        "WEBSOCKET_STATE"
+      ],
+      "decision": "FORMALLY_DOCUMENTED_SAFE_LOSS_AND_REBUILD",
+      "expected_config": {
+        "appendonly": "yes",
+        "appendfsync": "everysec",
+        "maxmemory-policy": "noeviction"
+      },
+      "evidence_file": "/etc/codestra/server-a-certification/redis-recovery-evidence/codestra-redis.json"
+    }
+  ]
+}

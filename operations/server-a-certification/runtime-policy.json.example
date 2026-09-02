@@ -1,0 +1,74 @@
+{
+  "schema": "codestra.server-a-runtime-policy.v1",
+  "target_server": "65.109.65.169",
+  "critical_services": [
+    {
+      "id": "caddy",
+      "compose_project": "codestra-caddy",
+      "compose_service": "caddy",
+      "approved_published_ports": [
+        "REPLACE_WITH_EXACT_CADDY_DOCKER_PORT_BINDING"
+      ]
+    },
+    {
+      "id": "kong",
+      "compose_project": "codestra-kong",
+      "compose_service": "kong",
+      "approved_published_ports": []
+    },
+    {
+      "id": "kong-db",
+      "compose_project": "codestra-kong",
+      "compose_service": "kong-db",
+      "approved_published_ports": []
+    },
+    {
+      "id": "keycloak",
+      "compose_project": "codestra-identity",
+      "compose_service": "keycloak",
+      "approved_published_ports": []
+    },
+    {
+      "id": "keycloak-db",
+      "compose_project": "codestra-identity",
+      "compose_service": "identity-db",
+      "approved_published_ports": []
+    },
+    {
+      "id": "shared-postgres",
+      "compose_project": "codestra",
+      "compose_service": "postgres",
+      "approved_published_ports": []
+    },
+    {
+      "id": "redis",
+      "compose_project": "codestra",
+      "compose_service": "redis",
+      "approved_published_ports": []
+    },
+    {
+      "id": "middleware",
+      "compose_project": "codestra",
+      "compose_service": "middleware",
+      "approved_published_ports": []
+    },
+    {
+      "id": "odoo",
+      "compose_project": "codestra",
+      "compose_service": "odoo",
+      "approved_published_ports": []
+    },
+    {
+      "id": "n8n",
+      "compose_project": "codestra",
+      "compose_service": "n8n",
+      "approved_published_ports": []
+    },
+    {
+      "id": "centrifugo",
+      "compose_project": "codestra",
+      "compose_service": "centrifugo",
+      "approved_published_ports": []
+    }
+  ]
+}

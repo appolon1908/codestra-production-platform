@@ -1,0 +1,25 @@
+{
+  "schema": "codestra.server-a-realtime-ha.v1",
+  "target_server": "65.109.65.169",
+  "primary": {
+    "id": "realtime-primary",
+    "compose_project": "codestra-websocket-gateway",
+    "compose_service": "postgres",
+    "os_user": "postgres",
+    "login_user": "codestra_realtime",
+    "database": "codestra_realtime"
+  },
+  "replicas": [
+    {
+      "id": "realtime-replica-1",
+      "compose_project": "codestra-websocket-replica",
+      "compose_service": "postgres",
+      "os_user": "postgres",
+      "login_user": "codestra_realtime",
+      "database": "codestra_realtime",
+      "max_receive_replay_lag_bytes": 16777216
+    }
+  ],
+  "routing_evidence_file": "/etc/codestra/server-a-certification/realtime-routing-evidence.json",
+  "routing_evidence_max_age_hours": 24
+}
