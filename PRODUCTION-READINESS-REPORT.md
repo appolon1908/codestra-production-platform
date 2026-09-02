@@ -16,6 +16,7 @@ Decision: **NO-GO**
 - Branch protections retain strict status checks, conversation resolution, admin enforcement, and force-push/deletion denial. No bypass was used.
 - All dangerous external-effect switches remain disabled. No email, SMS, social post, advertisement, model request, payment, or PSTN call was initiated.
 - Klyrow and Telnexa source-defined public health/readiness endpoints pass with authoritative DNS, exact peer, and TLS hostname verification; private mTLS/service-identity integration gates remain FAIL (`evidence/server65/PROVIDER-READONLY-HEALTH-20260902.md`).
+- Provider credential read-back is fail-closed: Klyrow authority and consumer states disagree, Telnexa consumer validation fails despite an active declaration, and Kyqra is uninitialized (`evidence/server65/PROVIDER-CREDENTIAL-STATE-20260902.md`).
 
 ## Runtime baseline
 
