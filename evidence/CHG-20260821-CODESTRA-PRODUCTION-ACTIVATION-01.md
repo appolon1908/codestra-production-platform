@@ -34,7 +34,12 @@ RESTORE_TEST_REFERENCE=PENDING_ISOLATED_RESTORE
 PREFLIGHT_EVIDENCE_REFERENCE=PENDING
 ROLLBACK_REHEARSAL_REFERENCE=PENDING
 SIGNATURE_STATUS=PENDING
-ACTIVATION_AUTHORIZATION=PENDING_PROTECTED_APPROVAL
+MERGE_REVIEW_POLICY=ZERO_MANDATORY_HUMAN_APPROVALS
+MERGE_GATE_STATE=PENDING_EXACT_HEAD_VALIDATION
+EXACT_HEAD_VALIDATE_STATUS=PENDING
+EXACT_HEAD_WORKFLOW_RUN=PENDING
+PRODUCTION_ENVIRONMENT_GATE_STATE=PENDING
+RUNTIME_ACTIVATION_GATE_STATE=PENDING_PRODUCTION_ENVIRONMENT_APPROVAL
 ```
 
 The prior protected target
@@ -88,9 +93,15 @@ SECURITY_APPROVER_NAME=Ralph Appolon
 PRODUCTION_ACTIVATION_APPROVER_NAME=Ralph Appolon
 ROLLBACK_DECISION_OWNER_NAME=Ralph Appolon
 SIGNATURE_STATUS=PENDING
-ACTIVATION_AUTHORIZATION=PENDING_PROTECTED_APPROVAL
+MERGE_GATE_STATE=PENDING_EXACT_HEAD_VALIDATION
+PRODUCTION_ENVIRONMENT_GATE_STATE=PENDING
+RUNTIME_ACTIVATION_GATE_STATE=PENDING_PRODUCTION_ENVIRONMENT_APPROVAL
 ```
 
-GitHub protected review and production-environment approval must record the
-reviewer identity and timestamps. This packet must not be edited to claim those
-events before GitHub records them.
+GitHub must record successful required checks for the exact pull-request head,
+zero unresolved conversations, the protected merge result, and the resulting
+protected-branch SHA. Those events authorize source history only. The separate
+GitHub `production` environment gate must record its reviewer or authorized
+actor identity and timestamp before any live-effect workflow can proceed. This
+packet must not be edited to claim either source-merge evidence or production
+environment approval before GitHub records it.

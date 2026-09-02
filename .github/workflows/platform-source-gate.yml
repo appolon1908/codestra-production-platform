@@ -12,6 +12,7 @@ on:
       - "integrations/**"
       - "services/private-integration-gateway/**"
       - "operations/**"
+      - "evidence/**"
       - "config/**"
       - "deploy/**"
       - "docs/**"
@@ -22,6 +23,7 @@ on:
       - "tel_events/**"
       - "tools/**"
       - "tests/**"
+      - "AUTOMATED_PRODUCTION_GATES.md"
       - "PRODUCTION-*.md"
       - "PRODUCTION-*.yaml"
       - "REPOSITORY-AUTHORITY-MATRIX.yaml"
@@ -187,7 +189,28 @@ jobs:
           install -m 0755 "${RUNNER_TEMP}/gitleaks" "${RUNNER_TEMP}/gitleaks-bin"
 
       - name: Gitleaks candidate tree
-        run: '"${RUNNER_TEMP}/gitleaks-bin" dir --no-banner --redact --exit-code 1 .'
+        run: |
+          report="${RUNNER_TEMP}/gitleaks-candidate.json"
+          set +e
+          "${RUNNER_TEMP}/gitleaks-bin" dir --no-banner --redact --exit-code 1 \
+            --report-format json --report-path "${report}" .
+          status=$?
+          set -e
+          if [[ -s "${report}" ]]; then
+            python - "${report}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          findings = json.loads(Path(sys.argv[1]).read_text())
+          for finding in findings:
+              rule = finding.get("RuleID", "unknown")
+              path = finding.get("File", "unknown")
+              line = finding.get("StartLine", "unknown")
+              print(f"Gitleaks finding: rule={rule} file={path}:{line}")
+          PY
+          fi
+          exit "${status}"
 
       - name: Gitleaks pull-request commit range
         run: |
