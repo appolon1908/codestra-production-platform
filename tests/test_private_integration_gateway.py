@@ -241,6 +241,14 @@ def test_private_gateway_openapi_contains_only_executable_routes(mode: str):
             "serviceScope": [],
         }
     ]
+    assert paths["/v1/capabilities"]["get"]["security"] == [
+        {
+            "mutualTLS": [],
+            "bearerAuth": [],
+            "serviceIdentity": [],
+            "serviceScope": [],
+        }
+    ]
     if mode == "shared":
         assert paths["/v1/messages"]["post"]["security"] == [
             {

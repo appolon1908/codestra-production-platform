@@ -3811,6 +3811,12 @@ def openapi_document(mode: str) -> dict[str, Any]:
         "serviceIdentity": [],
         "serviceScope": [],
     }]
+    capability_security = [{
+        "mutualTLS": [],
+        "bearerAuth": [],
+        "serviceIdentity": [],
+        "serviceScope": [],
+    }]
     operation_security = [
         {
             "mutualTLS": [],
@@ -3877,7 +3883,7 @@ def openapi_document(mode: str) -> dict[str, Any]:
         },
         "/v1/capabilities": {
             "get": {
-                **read_operation("Service-scoped gateway capabilities", operation_security),
+                **read_operation("Service-scoped gateway capabilities", capability_security),
                 "responses": {
                     "200": {"description": "Capabilities returned"},
                     "401": {"description": "Service identity and scope required"},
