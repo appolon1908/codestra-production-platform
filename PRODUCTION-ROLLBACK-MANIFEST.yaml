@@ -12,4 +12,3 @@ appolon_middleware:
   source_controls: PASS
   production_rehearsal: FAIL
   failure_reason: Candidate lacks a matching installed exact-tuple production deployment authority and isolated restore proof.
-

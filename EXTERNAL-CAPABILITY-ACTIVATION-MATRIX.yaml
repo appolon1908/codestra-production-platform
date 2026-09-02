@@ -18,4 +18,3 @@ requirements:
   monitoring_and_alert_owner: FAIL
   bounded_canary: FAIL
   rollback_and_kill_switch: FAIL
-

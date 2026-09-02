@@ -1,8 +1,8 @@
 # Codestra core production readiness report
 
-Date: 2026-09-02  
-Production target: `65.109.65.169`  
-Staging target: `2.29.17.172`  
+Date: 2026-09-02
+Production target: `65.109.65.169`
+Staging target: `2.29.17.172`
 Decision: **NO-GO**
 
 ## Verified progress
@@ -16,10 +16,10 @@ Decision: **NO-GO**
 
 ## Runtime baseline
 
-Running containers: 102  
-Live Kong routes: 29  
-Endpoint records: 641  
-Runtime OpenAPI applications: 20  
+Running containers: 102
+Live Kong routes: 29
+Endpoint records: 641
+Runtime OpenAPI applications: 20
 Monitoring coverage: 4/20
 
 ## Mandatory gate matrix
@@ -92,8 +92,7 @@ The protected production activation tuple authorizes `Codestra-SRL/codestra-midd
 
 ## External capabilities
 
-Enabled: none.  
+Enabled: none.
 Disabled: email delivery, SMS delivery, PSTN dialing, social publishing, advertising, external model calls, and n8n external-provider writes.
 
 OVERALL_VERDICT=PRODUCTION_BLOCKED
-

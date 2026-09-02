@@ -13,4 +13,3 @@ capabilities:
   PRODUCTION_DIALING: {state: DISABLED, activation_authorized: false}
 observed_effects:
   calls_placed: 0
-

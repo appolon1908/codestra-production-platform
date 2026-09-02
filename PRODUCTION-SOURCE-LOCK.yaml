@@ -27,4 +27,3 @@ blockers:
   - id: unpinned-custom-runtime
     count: 24
     evidence: SERVER-65-UNPINNED-CUSTOM-DEPLOYMENTS.yaml
-

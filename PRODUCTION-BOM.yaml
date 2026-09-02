@@ -30,4 +30,3 @@ components:
 unresolved_components:
   count: 24
   evidence: SERVER-65-UNPINNED-CUSTOM-DEPLOYMENTS.yaml
-
