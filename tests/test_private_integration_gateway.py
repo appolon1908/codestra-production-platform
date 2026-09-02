@@ -1399,6 +1399,23 @@ def test_existing_live_database_schema_is_migrated_without_data_loss(tmp_path: P
                 UNIQUE(customer_id,idempotency_key)
             )"""
         )
+        legacy_payload = json.dumps(
+            {"body": "migration fixture"}, separators=(",", ":")
+        )
+        connection.execute(
+            """INSERT INTO sms_transactions(
+                adapter_message_id,customer_id,idempotency_key,payload_hash,
+                payload,correlation_id,sender,destination,logical_route,
+                validation_result,jasmin_dependency,state,carrier_submitted,
+                provider_message_id,provider_response,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "old-sms", "legacy-customer", "legacy-idempotency",
+                hashlib.sha256(legacy_payload.encode()).hexdigest(), legacy_payload,
+                None, "TEST", "+4915512345678", "synthetic", "accepted",
+                "jasmin", "queued", 0, None, None, 1,
+            ),
+        )
     value = gateway.Store(path)
     value.initialize()
     with value.connect() as connection:
@@ -1409,6 +1426,10 @@ def test_existing_live_database_schema_is_migrated_without_data_loss(tmp_path: P
         sms_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(sms_transactions)")
         }
+        legacy_sms = connection.execute(
+            "SELECT customer_id,tenant_id,payload FROM sms_transactions "
+            "WHERE adapter_message_id='old-sms'"
+        ).fetchone()
     assert event["payload"] == '{"old":true}'
     assert event["payload_sha256"] == hashlib.sha256(b'{"old":true}').hexdigest()
     assert event["dispatch_eligible"] == 0
@@ -1419,6 +1440,30 @@ def test_existing_live_database_schema_is_migrated_without_data_loss(tmp_path: P
     assert "effect_hash" in sms_columns
     assert "reconciliation_proof_sha256" in sms_columns
     assert "carrier_dlr_sha256" in sms_columns
+    assert legacy_sms["customer_id"] == "legacy-customer"
+    assert legacy_sms["tenant_id"] == "legacy-customer"
+    assert json.loads(legacy_sms["payload"]) == {"body": "migration fixture"}
+
+
+def test_legacy_sms_migration_prefers_explicit_customer_tenant_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "TELNEXA_CUSTOMER_POLICY_JSON",
+        json.dumps({"shared-customer": {"tenant_id": "tenant-a"}}),
+    )
+    assert gateway.legacy_sms_tenant("shared-customer", {"body": "old"}) == "tenant-a"
+    assert (
+        gateway.legacy_sms_tenant(
+            "shared-customer", {"tenant_id": "tenant-b", "body": "new"}
+        )
+        == "tenant-b"
+    )
+    for invalid in (None, "", " tenant-b", "tenant-b ", "x" * 129):
+        with pytest.raises(ValueError, match="tenant_id_required"):
+            gateway.legacy_sms_tenant(
+                "shared-customer", {"tenant_id": invalid, "body": "malformed"}
+            )
 
 
 def test_ingress_rejects_stale_and_invalid_signatures(
@@ -4182,6 +4227,7 @@ def test_release_scans_and_verifies_the_exact_digest_before_source_tag():
     assert verification < promotion
     assert "--certificate-identity \"$SIGNING_IDENTITY\"" in signer
     assert "--certificate-oidc-issuer \"$OIDC_ISSUER\"" in signer
+    assert signer.count("jq -s -e") == 4
     assert "--prefer-index=false" in signer
 
 

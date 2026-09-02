@@ -16,6 +16,7 @@ services:
     networks:
       monitoring: {}
       backend: {}
+      edge: {}
       alerting:
         ipv4_address: 10.253.127.2
     read_only: true
@@ -137,7 +138,7 @@ services:
     command: [--config.file=/etc/blackbox/blackbox.yml]
     volumes:
       - ./blackbox.yml:/etc/blackbox/blackbox.yml:ro
-    networks: [monitoring]
+    networks: [monitoring, backend, edge]
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
@@ -160,6 +161,9 @@ networks:
   backend:
     external: true
     name: codestra_backend
+  edge:
+    external: true
+    name: codestra_edge
 
 volumes:
   prometheus_data: {}

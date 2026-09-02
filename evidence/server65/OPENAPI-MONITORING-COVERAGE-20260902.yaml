@@ -103,3 +103,26 @@ result:
   missing_application_monitoring: 18
   observability: FAIL
   production_changed: false
+
+source_reconciliation:
+  canonical_middleware:
+    repository: Codestra-SRL/codestra-middleware
+    candidate_pr: 283
+    runtime_applications: 16
+    result: SOURCE_IMPLEMENTED_NOT_DEPLOYED
+    evidence: >-
+      The canonical main FastAPI application mounts /metrics. API entrypoints
+      call add_api_runtime, and worker entrypoints use worker_app; both runtime
+      factories mount real prometheus_client metrics and expose liveness and
+      readiness. Runtime coverage remains unchanged until an exact protected
+      image is promoted and scraped successfully.
+  platform_mail_api:
+    repository: appolon1908-hue/codestra-production-platform
+    result: SOURCE_CANDIDATE_NOT_DEPLOYED
+    candidate_contract: [/healthz, /healthz/ready, /metrics]
+  platform_reseller_portal:
+    repository: appolon1908-hue/codestra-production-platform
+    result: SOURCE_CANDIDATE_NOT_DEPLOYED
+    candidate_contract: [/healthz, /readyz, /metrics]
+  candidate_after_exact_digest_promotion: 20/20
+  runtime_certification_unchanged: 2/20

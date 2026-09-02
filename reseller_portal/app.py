@@ -1,18 +1,30 @@
 from __future__ import annotations
 
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from prometheus_client import Counter, Histogram, make_asgi_app
 
 from .core import MemoryStore, PortalError, PortalService, hash_secret
 from .persistence import PostgresState
 
 repository = None
 service = PortalService(MemoryStore())
+HTTP_REQUESTS = Counter(
+    "codestra_reseller_portal_http_requests_total",
+    "Reseller portal HTTP requests by method, route, and status.",
+    ("method", "route", "status"),
+)
+HTTP_DURATION = Histogram(
+    "codestra_reseller_portal_http_request_duration_seconds",
+    "Reseller portal HTTP request duration by method and route.",
+    ("method", "route"),
+)
 
 
 @asynccontextmanager
@@ -27,6 +39,20 @@ async def lifespan(app):
 
 
 app=FastAPI(title="Codestra Reseller Portal API",version="1.0",docs_url="/docs",redoc_url=None,lifespan=lifespan)
+
+@app.middleware("http")
+async def observe_request(request, call_next):
+    started = time.monotonic()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", "unmatched")
+        HTTP_REQUESTS.labels(request.method, route_path, str(status_code)).inc()
+        HTTP_DURATION.labels(request.method, route_path).observe(time.monotonic() - started)
 
 class Credential(BaseModel): name:str=Field(min_length=2,max_length=80)
 class Sender(BaseModel): value:str; sender_type:str; countries:list[str]; services:list[str]
@@ -65,8 +91,14 @@ def allow(*roles):
 
 @app.get("/livez")
 def livez(): return {"status":"live"}
+@app.get("/healthz")
+def healthz(): return {"status":"live"}
 @app.get("/readyz")
-def readyz(): return {"status":"ready" if repository else "degraded","database":"postgresql" if repository else "memory","live_sms":False,"live_email":False}
+def readyz():
+    if repository is None or not repository.ready():
+        raise HTTPException(503,"database_unavailable")
+    return {"status":"ready","database":"postgresql","live_sms":False,"live_email":False}
+app.mount("/metrics", make_asgi_app())
 @app.get("/")
 def index(): return FileResponse(os.path.join(os.path.dirname(__file__),"static","index.html"))
 @app.post("/v1/session")
