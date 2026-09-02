@@ -1,0 +1,22 @@
+groups:
+  - name: codestra-centrifugo-certification
+    rules:
+      - alert: CodestraCentrifugoProbeFailed
+        expr: absent(codestra_centrifugo_probe_success) or codestra_centrifugo_probe_success != 1
+        for: 2m
+        labels:
+          severity: critical
+          service: centrifugo
+        annotations:
+          summary: The combined Centrifugo availability probe is failing
+          description: Internal process, routed HTTPS, and WebSocket checks must all pass.
+
+      - alert: CodestraCentrifugoComponentProbeFailed
+        expr: codestra_centrifugo_probe_component_success != 1
+        for: 2m
+        labels:
+          severity: critical
+          service: centrifugo
+        annotations:
+          summary: A Centrifugo component probe is failing
+          description: Inspect the probe label to distinguish process, edge route, and WebSocket failures.

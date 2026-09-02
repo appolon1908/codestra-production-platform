@@ -1,0 +1,14 @@
+{
+  "schema": "codestra.server-a-firewall.v1",
+  "target_server": "65.109.65.169",
+  "public_interface": "REPLACE_WITH_PUBLIC_INTERFACE",
+  "private_interface": "REPLACE_WITH_VSWITCH_INTERFACE",
+  "private_ipv4_subnets": ["10.40.0.0/24"],
+  "public_tcp_ports": [80, 443],
+  "public_udp_ports": [],
+  "required_https_urls": [
+    "https://api.codestra.co/healthz",
+    "https://auth.codestra.co/realms/codestra/.well-known/openid-configuration"
+  ],
+  "rollback_seconds": 180
+}

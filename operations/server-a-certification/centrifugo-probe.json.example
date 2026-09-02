@@ -1,0 +1,24 @@
+{
+  "schema": "codestra.centrifugo-probe.v1",
+  "http_probes": [
+    {
+      "id": "internal",
+      "url": "REPLACE_WITH_EXACT_INTERNAL_CENTRIFUGO_HEALTH_URL",
+      "expected_statuses": [200],
+      "timeout_seconds": 10
+    },
+    {
+      "id": "external",
+      "url": "REPLACE_WITH_EXACT_HTTPS_ROUTED_CENTRIFUGO_HEALTH_URL",
+      "expected_statuses": [200],
+      "timeout_seconds": 10,
+      "require_https_final": true
+    }
+  ],
+  "websocket_probe": {
+    "url": "REPLACE_WITH_EXACT_WSS_CENTRIFUGO_URL",
+    "origin": "https://REPLACE_WITH_APPROVED_ORIGIN",
+    "timeout_seconds": 10,
+    "protected_headers_file": "/etc/codestra/server-a-certification/centrifugo-websocket.headers"
+  }
+}

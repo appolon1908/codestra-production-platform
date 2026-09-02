@@ -1,0 +1,22 @@
+groups:
+  - name: codestra-financial-governance
+    rules:
+      - alert: CodestraFinancialGovernancePublisherFailed
+        expr: absent(codestra_financial_governance_publish_success) or codestra_financial_governance_publish_success != 1
+        for: 5m
+        labels:
+          severity: critical
+          service: financial-governance
+        annotations:
+          summary: Financial governance status publishing is failing
+          description: The exact commit status could not be posted and read back from GitHub.
+
+      - alert: CodestraFinancialGovernanceStatusStale
+        expr: time() - codestra_financial_governance_last_publish_timestamp_seconds > 600
+        for: 5m
+        labels:
+          severity: critical
+          service: financial-governance
+        annotations:
+          summary: Financial governance status has not been published for more than ten minutes
+          description: Inspect repository, SHA, credential permission, rate limit, DNS, and systemd environment evidence.
