@@ -1,0 +1,23 @@
+{
+  "realm": "codestra",
+  "issuer": "https://auth.codestra.co/realms/codestra",
+  "client": "codestra-mail-api",
+  "roles": [
+    "codestra_mail_user",
+    "codestra_mail_agent",
+    "codestra_mail_supervisor",
+    "codestra_mail_campaign_manager",
+    "codestra_mail_domain_admin",
+    "codestra_mail_admin",
+    "codestra_mail_owner"
+  ],
+  "scopes": [
+    "mail.read",
+    "mail.send",
+    "mailbox.manage.self",
+    "mailbox.manage.domain",
+    "mail.admin",
+    "mail.domain.override"
+  ],
+  "standalone_requires_odoo_role": false
+}

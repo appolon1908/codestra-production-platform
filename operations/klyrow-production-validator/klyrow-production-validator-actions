@@ -1,0 +1,636 @@
+#!/usr/bin/python3
+"""Fixed, read-only action implementations for Klyrow validation.
+
+Complex synthetic tests are delegated only to hash-pinned, reviewed companion
+probes. A missing probe is a hard failure, never an invitation to accept a path
+or command from the caller.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import socket
+import ssl
+import sys
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+from klyrow_validator_core import (
+    APPROVED_ACTIONS,
+    EXPECTED_RUNBOOK_SHA256,
+    PolicyError,
+    RUNBOOK_PATH,
+    limited_command,
+    parse_direct,
+    regular_nonsymlink,
+    safe_json_file,
+    sha256_file,
+)
+
+
+CONTAINERS = (
+    "klyrow-gateway-1",
+    "klyrow-smtp-relay-1",
+    "klyrow-worker-1",
+    "klyrow-postal-smtp-1",
+)
+CONFIGURATION_CONTAINERS = CONTAINERS[:3]
+LISTENER_PORTS = (25, 587, 2525, 18000)
+RELEASE_CONTAINER_FIELDS = {
+    "name",
+    "image_repository",
+    "image_digest",
+    "oci_source_revision",
+    "source_repository",
+    "source_commit_sha",
+    "release_change_id",
+    "build_workflow_run",
+    "sbom_digest",
+    "provenance_reference",
+    "signature_verification",
+    "vulnerability_scan_result",
+    "configuration_checksum",
+}
+SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
+COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
+REPOSITORY_RE = re.compile(
+    r"(?:https://github\.com/)?[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?\Z"
+)
+SAFE_REFERENCE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}\Z")
+IMAGE_REFERENCE_RE = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}@sha256:[0-9a-f]{64}\Z"
+)
+BOOLEAN_FIELDS = {
+    "KLYROW_PLATFORM_EMERGENCY_STOP",
+    "KLYROW_SAFE_MODE",
+    "KLYROW_PRODUCTION_GATE_APPROVED",
+    "LIVE_EMAIL_DELIVERY",
+    "EXTERNAL_EMAIL_DELIVERY",
+    "PRODUCTION_PROVIDER_ROUTING",
+    "KLYROW_BULK_DELIVERY_ENABLED",
+    "KLYROW_CAMPAIGN_DELIVERY_ENABLED",
+    "MARKETING_DELIVERY",
+}
+READBACK_ROOT = Path("/var/lib/codestra/klyrow-production-validator/readback")
+PROBE_ROOT = Path("/opt/codestra/operators/klyrow-production-validator/probes")
+PROBE_MANIFEST = Path("/etc/codestra/klyrow-production-validator/probe-manifest.json")
+EVIDENCE_ROOT = Path("/var/lib/codestra/klyrow-production-validator/evidence")
+MAXIMUM_READBACK_AGE_SECONDS = 300
+MAXIMUM_FUTURE_SKEW_SECONDS = 30
+
+
+def fresh_utc_timestamp(value: object, *, prefix: str) -> str:
+    if not isinstance(value, str) or len(value) > 40:
+        raise PolicyError(f"{prefix}_TIMESTAMP_REJECTED")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise PolicyError(f"{prefix}_TIMESTAMP_REJECTED") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(None):
+        raise PolicyError(f"{prefix}_TIMESTAMP_REJECTED")
+    readback_age = (datetime.now(timezone.utc) - parsed).total_seconds()
+    if not -MAXIMUM_FUTURE_SKEW_SECONDS <= readback_age <= MAXIMUM_READBACK_AGE_SECONDS:
+        raise PolicyError(f"{prefix}_TIMESTAMP_STALE")
+    return value
+
+
+def emit(value: object) -> None:
+    print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+
+
+def verified_probe_manifest() -> dict[str, object]:
+    manifest = safe_json_file(
+        PROBE_MANIFEST, allowed_keys={"schema_version", "probes", "probe_core"}
+    )
+    if manifest.get("schema_version") != "1.0.0":
+        raise PolicyError("PROBE_MANIFEST_REJECTED")
+    core = manifest.get("probe_core")
+    fixed_core = PROBE_ROOT / "kpv_probe_core.py"
+    if not isinstance(core, dict) or set(core) != {"path", "sha256"}:
+        raise PolicyError("PROBE_MANIFEST_REJECTED")
+    if core.get("path") != str(fixed_core):
+        raise PolicyError("PROBE_PATH_REJECTED")
+    core_digest = core.get("sha256")
+    if not isinstance(core_digest, str) or len(core_digest) != 64:
+        raise PolicyError("PROBE_DIGEST_REJECTED")
+    regular_nonsymlink(fixed_core)
+    if sha256_file(fixed_core) != core_digest:
+        raise PolicyError("PROBE_DIGEST_MISMATCH")
+    probes = manifest.get("probes")
+    expected_actions = {
+        "authorization-tests",
+        "no-effect-tests",
+        "callback-tests",
+        "smtp-no-data",
+    }
+    if not isinstance(probes, dict) or set(probes) != expected_actions:
+        raise PolicyError("PROBE_MANIFEST_REJECTED")
+    for action in expected_actions:
+        expected = probes.get(action)
+        fixed_path = PROBE_ROOT / action
+        if not isinstance(expected, dict) or set(expected) != {"path", "sha256"}:
+            raise PolicyError("PROBE_MANIFEST_REJECTED")
+        if expected.get("path") != str(fixed_path):
+            raise PolicyError("PROBE_PATH_REJECTED")
+        digest = expected.get("sha256")
+        if not isinstance(digest, str) or len(digest) != 64:
+            raise PolicyError("PROBE_DIGEST_REJECTED")
+        regular_nonsymlink(fixed_path)
+        if sha256_file(fixed_path) != digest:
+            raise PolicyError("PROBE_DIGEST_MISMATCH")
+    return manifest
+
+
+def run(argv: list[str], *, timeout: int = 20, maximum: int = 131072) -> dict[str, object]:
+    result = limited_command(argv, timeout_seconds=timeout, maximum_output_bytes=maximum)
+    return {
+        "argv_id": Path(argv[0]).name,
+        "exit_code": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "elapsed_ms": result.elapsed_ms,
+        "truncated": result.truncated,
+        "timed_out": result.timed_out,
+    }
+
+
+def authenticate_runbook() -> int:
+    metadata = regular_nonsymlink(RUNBOOK_PATH)
+    actual = sha256_file(RUNBOOK_PATH)
+    emit(
+        {
+            "runbook_authentication": "PASS" if actual == EXPECTED_RUNBOOK_SHA256 else "FAIL",
+            "sha256": actual,
+            "regular_file": True,
+            "symlink": False,
+            "owner_uid": metadata.st_uid,
+            "group_gid": metadata.st_gid,
+            "mode": oct(metadata.st_mode & 0o777),
+            "size": metadata.st_size,
+            "mtime_ns": metadata.st_mtime_ns,
+        }
+    )
+    return 0 if actual == EXPECTED_RUNBOOK_SHA256 else 3
+
+
+def status() -> int:
+    checks: dict[str, object] = {}
+    try:
+        regular_nonsymlink(RUNBOOK_PATH)
+        checks["runbook"] = sha256_file(RUNBOOK_PATH) == EXPECTED_RUNBOOK_SHA256
+    except PolicyError:
+        checks["runbook"] = False
+    checks["docker_cli_present"] = Path("/usr/bin/docker").is_file()
+    checks["sudo_present"] = Path("/usr/bin/sudo").is_file()
+    checks["evidence_root_nonsymlink"] = not EVIDENCE_ROOT.is_symlink()
+    try:
+        verified_probe_manifest()
+        checks["pinned_probes"] = True
+    except (OSError, PolicyError):
+        checks["pinned_probes"] = False
+    emit(
+        {
+            "operator_status": "READY" if all(checks.values()) else "NOT_READY",
+            "checks": checks,
+            "application_runtime_inspected": False,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    return 0 if all(checks.values()) else 3
+
+
+def inventory() -> int:
+    commands = [
+        ["/usr/bin/uname", "-srvmo"],
+        ["/usr/bin/docker", "version", "--format", "{{json .Server.Version}}"],
+        ["/usr/bin/docker", "compose", "version", "--short"],
+        ["/usr/bin/df", "-P", "/", "/opt", "/var/lib/docker"],
+        ["/usr/bin/df", "-Pi", "/", "/opt", "/var/lib/docker"],
+    ]
+    for container in CONTAINERS:
+        commands.append(
+            [
+                "/usr/bin/docker",
+                "ps",
+                "--no-trunc",
+                "--filter",
+                f"name=^/{container}$",
+                "--format",
+                "{{.Names}}|{{.Image}}|{{.ID}}|{{.Status}}|{{.Ports}}|{{.Networks}}",
+            ]
+        )
+    for port in LISTENER_PORTS:
+        commands.append(["/usr/bin/ss", "-H", "-lntp", "sport", "=", f":{port}"])
+    results = [run(command) for command in commands]
+    emit({"inventory": results, "mutation": False})
+    return 0 if all(item["exit_code"] == 0 for item in results) else 3
+
+
+def projected_configuration_view(value: dict[str, object]) -> dict[str, object]:
+    if set(value) != {"values", "generated_at_utc", "containers"}:
+        raise PolicyError("CONFIGURATION_SCHEMA_REJECTED")
+    values = value.get("values")
+    containers = value.get("containers")
+    if (
+        not isinstance(values, dict)
+        or set(values) != BOOLEAN_FIELDS
+        or not all(isinstance(item, bool) for item in values.values())
+    ):
+        raise PolicyError("CONFIGURATION_VALUES_REJECTED")
+    if not isinstance(containers, dict) or set(containers) != set(CONFIGURATION_CONTAINERS):
+        raise PolicyError("CONFIGURATION_CONTAINER_SET_REJECTED")
+    projected_containers = {}
+    for name in CONFIGURATION_CONTAINERS:
+        binding = containers.get(name)
+        if not isinstance(binding, dict) or set(binding) != {
+            "image_reference",
+            "source_revision",
+        }:
+            raise PolicyError("CONFIGURATION_CONTAINER_BINDING_REJECTED")
+        image_reference = binding.get("image_reference")
+        source_revision = binding.get("source_revision")
+        if not isinstance(image_reference, str) or IMAGE_REFERENCE_RE.fullmatch(
+            image_reference
+        ) is None:
+            raise PolicyError("CONFIGURATION_IMAGE_REFERENCE_REJECTED")
+        if not isinstance(source_revision, str) or COMMIT_RE.fullmatch(source_revision) is None:
+            raise PolicyError("CONFIGURATION_SOURCE_REVISION_REJECTED")
+        projected_containers[name] = {
+            "image_reference": image_reference,
+            "source_revision": source_revision,
+        }
+    return {
+        "values": {field: values[field] for field in sorted(BOOLEAN_FIELDS)},
+        "generated_at_utc": fresh_utc_timestamp(
+            value.get("generated_at_utc"), prefix="CONFIGURATION"
+        ),
+        "containers": projected_containers,
+    }
+
+
+def live_configuration_bindings(
+    containers: dict[str, object], values: dict[str, object]
+) -> tuple[list[dict[str, object]], bool]:
+    results = []
+    all_match = True
+    identity_template = (
+        '{{json .Config.Image}}|{{json (index .Config.Labels "org.opencontainers.image.revision")}}'
+    )
+    boolean_template = "{{range .Config.Env}}" + "".join(
+        f'{{{{if or (eq . "{field}=true") (eq . "{field}=false")}}}}{{{{println .}}}}{{{{end}}}}'
+        for field in sorted(BOOLEAN_FIELDS)
+    ) + "{{end}}"
+    for name in CONFIGURATION_CONTAINERS:
+        result = run(["/usr/bin/docker", "inspect", "--format", identity_template, name])
+        image_reference = revision = None
+        if result["exit_code"] == 0 and not result["timed_out"] and not result["truncated"]:
+            parts = str(result["stdout"]).strip().split("|")
+            if len(parts) == 2:
+                try:
+                    parsed = [json.loads(part) for part in parts]
+                except json.JSONDecodeError:
+                    parsed = [None, None]
+                if all(isinstance(item, str) for item in parsed):
+                    image_reference, revision = parsed
+        expected = containers[name]
+        if not isinstance(expected, dict):
+            raise PolicyError("CONFIGURATION_CONTAINER_BINDING_REJECTED")
+        environment = run(
+            ["/usr/bin/docker", "inspect", "--format", boolean_template, name]
+        )
+        live_values: dict[str, bool] = {}
+        environment_valid = (
+            environment["exit_code"] == 0
+            and not environment["timed_out"]
+            and not environment["truncated"]
+        )
+        if environment_valid:
+            for line in str(environment["stdout"]).splitlines():
+                match = re.fullmatch(r"([A-Z][A-Z0-9_]*)=(true|false)", line)
+                if (
+                    match is None
+                    or match.group(1) not in BOOLEAN_FIELDS
+                    or match.group(1) in live_values
+                ):
+                    environment_valid = False
+                    break
+                live_values[match.group(1)] = match.group(2) == "true"
+        environment_valid = environment_valid and set(live_values) == BOOLEAN_FIELDS
+        values_match = environment_valid and live_values == values
+        matched = (
+            image_reference == expected["image_reference"]
+            and revision == expected["source_revision"]
+            and values_match
+        )
+        all_match = all_match and matched
+        results.append(
+            {
+                "container": name,
+                "image_reference_matches": image_reference == expected["image_reference"],
+                "source_revision_matches": revision == expected["source_revision"],
+                "approved_boolean_values": live_values if environment_valid else {},
+                "approved_boolean_values_match": values_match,
+                "matched": matched,
+            }
+        )
+    return results, all_match
+
+
+def configuration_readback() -> int:
+    views: dict[str, dict[str, object]] = {}
+    for name in ("rendered", "running", "gateway-api"):
+        raw = safe_json_file(
+            READBACK_ROOT / f"configuration-{name}.json",
+            allowed_keys={"values", "generated_at_utc", "containers"},
+        )
+        views[name] = projected_configuration_view(raw)
+    baseline = views["rendered"]
+    consistent = all(
+        view["values"] == baseline["values"]
+        and view["containers"] == baseline["containers"]
+        for view in views.values()
+    )
+    bindings, live_match = live_configuration_bindings(
+        baseline["containers"], baseline["values"]
+    )
+    emit(
+        {
+            "views": views,
+            "live_bindings": bindings,
+            "consistent": consistent,
+            "live_match": live_match,
+            "secret_fields_read": False,
+        }
+    )
+    return 0 if consistent and live_match else 3
+
+
+def projected_release_identity(value: dict[str, object]) -> dict[str, object]:
+    top_level_fields = {
+        "containers",
+        "contract_compatibility",
+        "mutable_image_references",
+        "source_provenance_match",
+        "signature_verification",
+        "vulnerability_gate",
+        "generated_at_utc",
+    }
+    if set(value) != top_level_fields:
+        raise PolicyError("RELEASE_IDENTITY_SCHEMA_REJECTED")
+    containers = value.get("containers")
+    if not isinstance(containers, list) or len(containers) != len(CONTAINERS):
+        raise PolicyError("RELEASE_CONTAINER_SET_REJECTED")
+    projected_containers = []
+    observed_names = []
+    for container in containers:
+        if not isinstance(container, dict) or set(container) != RELEASE_CONTAINER_FIELDS:
+            raise PolicyError("RELEASE_CONTAINER_SCHEMA_REJECTED")
+        if not all(isinstance(container[field], str) for field in RELEASE_CONTAINER_FIELDS):
+            raise PolicyError("RELEASE_CONTAINER_TYPE_REJECTED")
+        name = container["name"]
+        observed_names.append(name)
+        if name not in CONTAINERS:
+            raise PolicyError("RELEASE_CONTAINER_NAME_REJECTED")
+        for field in ("image_digest", "sbom_digest", "configuration_checksum"):
+            if not SHA256_RE.fullmatch(container[field]):
+                raise PolicyError(f"RELEASE_{field.upper()}_REJECTED")
+        for field in ("oci_source_revision", "source_commit_sha"):
+            if not COMMIT_RE.fullmatch(container[field]):
+                raise PolicyError(f"RELEASE_{field.upper()}_REJECTED")
+        if container["source_commit_sha"] != container["oci_source_revision"]:
+            raise PolicyError("RELEASE_SOURCE_REVISION_MISMATCH")
+        if not REPOSITORY_RE.fullmatch(container["source_repository"]):
+            raise PolicyError("RELEASE_SOURCE_REPOSITORY_REJECTED")
+        for field in (
+            "image_repository",
+            "release_change_id",
+            "build_workflow_run",
+            "provenance_reference",
+        ):
+            if not SAFE_REFERENCE_RE.fullmatch(container[field]):
+                raise PolicyError(f"RELEASE_{field.upper()}_REJECTED")
+        if container["signature_verification"] != "PASS":
+            raise PolicyError("RELEASE_SIGNATURE_REJECTED")
+        if container["vulnerability_scan_result"] != "PASS":
+            raise PolicyError("RELEASE_VULNERABILITY_RESULT_REJECTED")
+        projected_containers.append({field: container[field] for field in sorted(RELEASE_CONTAINER_FIELDS)})
+    if len(set(observed_names)) != len(observed_names) or set(observed_names) != set(CONTAINERS):
+        raise PolicyError("RELEASE_CONTAINER_SET_REJECTED")
+    generated_at = fresh_utc_timestamp(value.get("generated_at_utc"), prefix="RELEASE")
+    enum_fields = {
+        "contract_compatibility": {"PASS", "FAIL", "BLOCKED"},
+        "source_provenance_match": {"YES", "NO", "UNKNOWN"},
+        "signature_verification": {"PASS", "FAIL", "BLOCKED"},
+        "vulnerability_gate": {"PASS", "FAIL", "BLOCKED"},
+    }
+    for field, allowed_values in enum_fields.items():
+        if not isinstance(value.get(field), str) or value[field] not in allowed_values:
+            raise PolicyError(f"RELEASE_{field.upper()}_REJECTED")
+    mutable_references = value.get("mutable_image_references")
+    if (
+        isinstance(mutable_references, bool)
+        or not isinstance(mutable_references, int)
+        or not 0 <= mutable_references <= len(CONTAINERS)
+    ):
+        raise PolicyError("RELEASE_MUTABLE_IMAGE_REFERENCES_REJECTED")
+    projected = {
+        "containers": projected_containers,
+        "contract_compatibility": value.get("contract_compatibility"),
+        "mutable_image_references": value.get("mutable_image_references"),
+        "source_provenance_match": value.get("source_provenance_match"),
+        "signature_verification": value.get("signature_verification"),
+        "vulnerability_gate": value.get("vulnerability_gate"),
+        "generated_at_utc": generated_at,
+    }
+    return projected
+
+
+def live_release_bindings(containers: list[dict[str, object]]) -> tuple[list[dict[str, object]], bool]:
+    expected = {str(container["name"]): container for container in containers}
+    bindings = []
+    all_match = True
+    template = (
+        '{{json .Config.Image}}|{{json (index .Config.Labels "org.opencontainers.image.revision")}}|'
+        '{{json (index .Config.Labels "org.opencontainers.image.source")}}'
+    )
+    for name in CONTAINERS:
+        result = run(["/usr/bin/docker", "inspect", "--format", template, name])
+        image_reference = revision = source_repository = None
+        if result["exit_code"] == 0 and not result["timed_out"] and not result["truncated"]:
+            parts = str(result["stdout"]).strip().split("|")
+            if len(parts) == 3:
+                try:
+                    parsed = [json.loads(part) for part in parts]
+                except json.JSONDecodeError:
+                    parsed = [None, None, None]
+                if all(isinstance(item, str) for item in parsed):
+                    image_reference, revision, source_repository = parsed
+        asserted = expected[name]
+        expected_reference = f'{asserted["image_repository"]}@{asserted["image_digest"]}'
+        matched = (
+            image_reference == expected_reference
+            and revision == asserted["oci_source_revision"]
+            and revision == asserted["source_commit_sha"]
+            and source_repository == asserted["source_repository"]
+        )
+        all_match = all_match and matched
+        bindings.append(
+            {
+                "container": name,
+                "image_reference_matches": image_reference == expected_reference,
+                "source_revision_matches": revision == asserted["oci_source_revision"],
+                "source_commit_matches": revision == asserted["source_commit_sha"],
+                "source_repository_matches": source_repository == asserted["source_repository"],
+                "matched": matched,
+            }
+        )
+    return bindings, all_match
+
+
+def release_identity() -> int:
+    allowed = {
+        "containers",
+        "contract_compatibility",
+        "mutable_image_references",
+        "source_provenance_match",
+        "signature_verification",
+        "vulnerability_gate",
+        "generated_at_utc",
+    }
+    raw_value = safe_json_file(READBACK_ROOT / "release-identity.json", allowed_keys=allowed)
+    value = projected_release_identity(raw_value)
+    bindings, live_match = live_release_bindings(value["containers"])
+    required = {
+        "contract_compatibility": "PASS",
+        "mutable_image_references": 0,
+        "source_provenance_match": "YES",
+        "signature_verification": "PASS",
+        "vulnerability_gate": "PASS",
+    }
+    passed = live_match and all(value.get(key) == expected for key, expected in required.items())
+    emit({"release_identity": value, "live_bindings": bindings, "passed": passed})
+    return 0 if passed else 3
+
+
+def health() -> int:
+    results: list[dict[str, object]] = []
+    passed = True
+    for container in CONTAINERS:
+        raw = run(
+            [
+                "/usr/bin/docker",
+                "inspect",
+                "--format",
+                "{{json .State.Health.Status}}",
+                container,
+            ]
+        )
+        health_status = None
+        if raw["exit_code"] == 0 and not raw["timed_out"] and not raw["truncated"]:
+            try:
+                candidate = json.loads(str(raw["stdout"]).strip())
+                if isinstance(candidate, str) and candidate in {"healthy", "unhealthy", "starting"}:
+                    health_status = candidate
+            except json.JSONDecodeError:
+                health_status = None
+        container_passed = health_status == "healthy"
+        passed = passed and container_passed
+        results.append(
+            {
+                "container": container,
+                "status": health_status or "invalid-or-missing",
+                "exit_code": raw["exit_code"],
+                "elapsed_ms": raw["elapsed_ms"],
+                "timed_out": raw["timed_out"],
+                "truncated": raw["truncated"],
+                "passed": container_passed,
+            }
+        )
+    for url in ("http://127.0.0.1:18000/v1/health", "http://127.0.0.1:18000/healthz"):
+        started = datetime.now(timezone.utc)
+        try:
+            request = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                body = response.read(8193)
+                results.append(
+                    {
+                        "endpoint": url,
+                        "status": response.status,
+                        "body_too_large": len(body) > 8192,
+                        "elapsed_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
+                    }
+                )
+                passed = passed and response.status == 200 and len(body) <= 8192
+        except (OSError, urllib.error.URLError) as exc:
+            results.append({"endpoint": url, "status": 0, "error": type(exc).__name__})
+            passed = False
+    emit({"health": results, "passed": passed})
+    return 0 if passed else 3
+
+
+def pinned_probe(action: str) -> int:
+    manifest = verified_probe_manifest()
+    probes = manifest.get("probes")
+    if not isinstance(probes, dict):
+        raise PolicyError("PROBE_MANIFEST_REJECTED")
+    expected = probes.get(action)
+    if not isinstance(expected, dict) or set(expected) != {"path", "sha256"}:
+        raise PolicyError("PROBE_MANIFEST_REJECTED")
+    fixed_path = PROBE_ROOT / action
+    if expected.get("path") != str(fixed_path):
+        raise PolicyError("PROBE_PATH_REJECTED")
+    digest = expected.get("sha256")
+    if not isinstance(digest, str) or len(digest) != 64:
+        raise PolicyError("PROBE_DIGEST_REJECTED")
+    result = run([str(fixed_path)], timeout=120 if action == "smtp-no-data" else 60)
+    emit({"probe": action, "result": result})
+    return int(result["exit_code"])
+
+
+def collect_evidence() -> int:
+    if not EVIDENCE_ROOT.is_dir() or EVIDENCE_ROOT.is_symlink():
+        raise PolicyError("EVIDENCE_ROOT_REJECTED")
+    entries = []
+    for path in sorted(EVIDENCE_ROOT.iterdir()):
+        metadata = path.lstat()
+        if path.is_symlink() or not path.is_file():
+            raise PolicyError("EVIDENCE_ENTRY_REJECTED")
+        if metadata.st_size > 1024 * 1024:
+            raise PolicyError("EVIDENCE_ENTRY_TOO_LARGE")
+        entries.append({"name": path.name, "size": metadata.st_size, "sha256": sha256_file(path)})
+    emit({"evidence": entries, "count": len(entries), "content_returned": False})
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    os.umask(0o077)
+    try:
+        action = parse_direct(argv)
+        if action == "authenticate-runbook":
+            return authenticate_runbook()
+        if action == "status":
+            return status()
+        if action == "inventory":
+            return inventory()
+        if action == "configuration-readback":
+            return configuration_readback()
+        if action == "release-identity":
+            return release_identity()
+        if action == "health":
+            return health()
+        if action in {"authorization-tests", "no-effect-tests", "callback-tests", "smtp-no-data"}:
+            return pinned_probe(action)
+        if action == "collect-evidence":
+            return collect_evidence()
+        raise PolicyError("ACTION_REJECTED")
+    except (OSError, PolicyError) as exc:
+        emit({"result": "FAIL", "reason": str(exc).split(":", 1)[0]})
+        return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -10,7 +10,10 @@ on:
       - "eventing/**"
       - "identity/**"
       - "integrations/**"
+      - "services/private-integration-gateway/**"
       - "operations/**"
+      - "orbit/**"
+      - "evidence/**"
       - "config/**"
       - "deploy/**"
       - "docs/**"
@@ -21,6 +24,15 @@ on:
       - "tel_events/**"
       - "tools/**"
       - "tests/**"
+      - "AUTOMATED_PRODUCTION_GATES.md"
+      - "PRODUCTION-*.md"
+      - "PRODUCTION-*.yaml"
+      - "REPOSITORY-AUTHORITY-MATRIX.yaml"
+      - "STAGING-CERTIFICATION-REPORT.md"
+      - "BACKUP-RESTORE-CERTIFICATION.md"
+      - "OBSERVABILITY-CERTIFICATION.md"
+      - "SECURITY-CERTIFICATION.md"
+      - "EXTERNAL-CAPABILITY-ACTIVATION-MATRIX.yaml"
       - "pytest.ini"
       - ".gitleaksignore"
       - ".gitignore"
@@ -49,8 +61,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends nats-server
-          python -m pip install pytest pytest-subtests PyYAML requests "nats-py==2.15.0" \
-            "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9"
+          python -m pip install pytest pytest-subtests PyYAML requests "bandit==1.9.4" "nats-py==2.15.0" \
+            "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9" "prometheus-client==0.22.1" \
+            "openapi-spec-validator==0.7.2"
 
       - name: Verify recovered source evidence hashes
         run: |
@@ -177,7 +190,28 @@ jobs:
           install -m 0755 "${RUNNER_TEMP}/gitleaks" "${RUNNER_TEMP}/gitleaks-bin"
 
       - name: Gitleaks candidate tree
-        run: '"${RUNNER_TEMP}/gitleaks-bin" dir --no-banner --redact --exit-code 1 .'
+        run: |
+          report="${RUNNER_TEMP}/gitleaks-candidate.json"
+          set +e
+          "${RUNNER_TEMP}/gitleaks-bin" dir --no-banner --redact --exit-code 1 \
+            --report-format json --report-path "${report}" .
+          status=$?
+          set -e
+          if [[ -s "${report}" ]]; then
+            python - "${report}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          findings = json.loads(Path(sys.argv[1]).read_text())
+          for finding in findings:
+              rule = finding.get("RuleID", "unknown")
+              path = finding.get("File", "unknown")
+              line = finding.get("StartLine", "unknown")
+              print(f"Gitleaks finding: rule={rule} file={path}:{line}")
+          PY
+          fi
+          exit "${status}"
 
       - name: Gitleaks pull-request commit range
         run: |

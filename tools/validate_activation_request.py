@@ -16,6 +16,7 @@ ACTIONS = {
     "preflight", "backup", "validate-backup", "restore-test", "stage",
     "canary", "status", "rollback", "collect-evidence",
     "stage-control-plane", "validate-control-plane", "rollback-control-plane",
+    "rollout-middleware", "rollback-middleware",
     "activate-control-plane", "enable-production-web-traffic", "disable-production-web-traffic",
 }
 REQUIRED_FALSE_FLAGS = {

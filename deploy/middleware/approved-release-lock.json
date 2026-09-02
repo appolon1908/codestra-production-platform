@@ -5,5 +5,5 @@
   "required_database_head": "0056_klyrow_delivery_events",
   "webphone_endpoint_adapter_url": "",
   "webphone_features_enabled": false,
-  "deployment_state": "BLOCKED_PENDING_SHARED_POSTGRESQL_PITR_AND_0056_MIGRATION"
+  "deployment_state": "BLOCKED_PENDING_PROTECTED_BACKUP_RESTORE_AND_ROLLOUT"
 }

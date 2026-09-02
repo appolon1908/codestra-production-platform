@@ -7,8 +7,9 @@ raw = os.environ.get("SSH_ORIGINAL_COMMAND", "")
 parts = raw.split(" ")
 allowed = {
     "preflight", "backup", "validate-backup", "restore-test", "stage",
-    "canary", "status", "rollback", "collect-evidence",
+    "canary", "status", "rollback", "collect-evidence", "kong-readback",
     "stage-control-plane", "validate-control-plane", "rollback-control-plane",
+    "rollout-middleware", "rollback-middleware",
     "activate-control-plane", "enable-production-web-traffic", "disable-production-web-traffic",
 }
 if len(parts) != 5 or parts[0] not in allowed:
