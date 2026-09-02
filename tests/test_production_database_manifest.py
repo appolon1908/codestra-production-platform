@@ -1,4 +1,5 @@
 from copy import deepcopy
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,7 @@ def test_production_database_manifest_is_complete_and_fail_closed():
     validate(MANIFEST)
     document = yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))
     assert document["certification_status"] == "FAIL"
-    assert len(document["components"]) == 19
+    assert len(document["components"]) == 20
     assert any(c["isolated_restore"] != "PASS" for c in document["components"])
 
 
@@ -66,3 +67,28 @@ def test_pass_requires_checksum_bound_evidence_root(tmp_path):
     )
     with pytest.raises(AssertionError, match="evidence root"):
         validate(candidate)
+
+
+def test_complete_checksum_bound_evidence_can_pass(tmp_path):
+    document = yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))
+    document["certification_status"] = "PASS"
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    for component in document["components"]:
+        component["isolated_restore"] = "PASS"
+        if component["kind"] != "redis":
+            component["local_backup"] = "PASS"
+            component["off_host_backup"] = "PASS"
+        payload = f"verified evidence for {component['id']}\n".encode()
+        relative = f"{component['id']}.txt"
+        (evidence_root / relative).write_bytes(payload)
+        component["evidence_bundle"] = {
+            "path": relative,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "captured_at": "2026-09-02T00:00:00Z",
+        }
+    candidate = tmp_path / "manifest.yaml"
+    candidate.write_text(
+        yaml.safe_dump(document, sort_keys=False, width=10000), encoding="utf-8"
+    )
+    validate(candidate, evidence_root)

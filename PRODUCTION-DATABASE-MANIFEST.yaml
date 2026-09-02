@@ -295,6 +295,22 @@ components:
     off_host_backup: NOT_PROVEN
     isolated_restore: NOT_PROVEN
     evidence_bundle: null
+  - id: stalwart-mail-state
+    service: stalwart-mail
+    store: stalwart-etc and stalwart-data
+    kind: configuration_plus_mail_store
+    source_authority: appolon1908-hue/codestra-production-runtime-authority
+    database_owner: mail infrastructure owner
+    application_role: stalwart runtime user
+    migration_framework: Stalwart storage format compatibility
+    backup_method: consistent configuration and mail-store snapshot plus checksum and encryption
+    restore_method: isolated Stalwart restore with outbound delivery disabled
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
   - id: redis-ephemeral-coordination
     service: redis
     store: coordination cache and queues

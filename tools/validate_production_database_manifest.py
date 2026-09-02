@@ -26,6 +26,7 @@ REQUIRED_IDS = {
     "kong-standby-auth-state",
     "prometheus-tsdb",
     "alertmanager-state",
+    "stalwart-mail-state",
     "redis-ephemeral-coordination",
 }
 
@@ -67,7 +68,7 @@ def load_manifest(path: Path) -> dict:
             continue
         if indent == 0 and not text.startswith("- "):
             key, separator, value = text.partition(":")
-            assert separator and re.fullmatch(r"[a-z_]+", key), "unsupported manifest syntax"
+            assert separator and re.fullmatch(r"[a-z_][a-z0-9_]*", key), "unsupported manifest syntax"
             document[key] = scalar(value)
             section = "top"
             continue
@@ -78,7 +79,7 @@ def load_manifest(path: Path) -> dict:
             nested_key = None
             text = text[2:]
         key, separator, value = text.partition(":")
-        assert separator and re.fullmatch(r"[a-z_]+", key), "unsupported manifest syntax"
+        assert separator and re.fullmatch(r"[a-z_][a-z0-9_]*", key), "unsupported manifest syntax"
         if section == "top" and indent == 0:
             document[key] = scalar(value)
         elif section == "policy" and indent > 0:
