@@ -2,6 +2,15 @@
 
 Status: active runtime captured; API-completion replacement pending protected apply.
 
+Authority clarification (2026-09-02): this Appolon runtime is a transitional,
+isolated integration runtime and is not the source authority for the Codestra
+Middleware control plane. It must not replace the protected
+`Codestra-SRL/codestra-middleware` production tuple. The three compatibility
+operation routes are being converged into that canonical repository in PR
+`Codestra-SRL/codestra-middleware#283`. This candidate remains rollback-bound
+evidence only until canonical exact-head CI, immutable build, staging, and
+promotion gates pass.
+
 The controlling production Compose project was discovered read-only from the
 running `middleware-integration-api` service. Its assembled configuration is
 owned by `/opt/codestra/compose` plus protected release overrides. No live file,
