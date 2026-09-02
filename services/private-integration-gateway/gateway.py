@@ -472,6 +472,21 @@ def forwarding_tenant(payload: dict[str, Any]) -> str:
     return tenant_id
 
 
+def legacy_sms_tenant(customer_id: str, payload: dict[str, Any]) -> str:
+    """Resolve one pre-tenant SMS row using its existing isolation authority."""
+
+    try:
+        return forwarding_tenant(payload)
+    except ValueError:
+        policy = customer_policy().get(customer_id)
+        policy_tenant = (
+            policy.get("tenant_id", customer_id)
+            if isinstance(policy, dict)
+            else customer_id
+        )
+        return forwarding_tenant({"tenant_id": policy_tenant})
+
+
 def canonical_customer_id(value: Any) -> str:
     """Return one exact bounded customer identity shared by policy and effects."""
 
@@ -871,11 +886,13 @@ class Store:
                     "ALTER TABLE sms_transactions ADD COLUMN tenant_id TEXT"
                 )
                 for row in connection.execute(
-                    "SELECT adapter_message_id,payload FROM sms_transactions"
+                    "SELECT adapter_message_id,customer_id,payload FROM sms_transactions"
                 ).fetchall():
                     try:
                         payload = json.loads(row["payload"])
-                        tenant_id = forwarding_tenant(payload)
+                        if not isinstance(payload, dict):
+                            raise ValueError("tenant_id_required")
+                        tenant_id = legacy_sms_tenant(row["customer_id"], payload)
                     except (json.JSONDecodeError, ValueError) as error:
                         raise RuntimeError(
                             "existing SMS tenant identity is invalid"
