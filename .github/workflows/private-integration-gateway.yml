@@ -1,0 +1,460 @@
+name: Private integration gateway release
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/private-integration-gateway.yml"
+      - "services/private-integration-gateway/**"
+      - "tests/test_private_integration_gateway.py"
+  push:
+    branches: ["release/production-activation"]
+    paths:
+      - ".github/workflows/private-integration-gateway.yml"
+      - "services/private-integration-gateway/**"
+      - "tests/test_private_integration_gateway.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_GATEWAY_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  PRIVATE_GATEWAY_IMAGE: ghcr.io/${{ github.repository_owner }}/codestra-private-integration-gateway
+
+jobs:
+  source:
+    name: private-integration-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned source-test tools
+        run: python -m pip install "pytest==8.4.2" "PyYAML==6.0.3" "bandit==1.9.4" "openapi-spec-validator==0.7.2"
+
+      - name: Compile and run the exact gateway suite
+        run: |
+          set -Eeuo pipefail
+          python -m compileall -q \
+            services/private-integration-gateway/gateway.py \
+            tests/test_private_integration_gateway.py
+          python -m pytest -q tests/test_private_integration_gateway.py
+          bandit -q -ll services/private-integration-gateway/gateway.py
+
+      - name: Prove the runtime has no third-party Python dependency
+        run: |
+          set -Eeuo pipefail
+          test ! -e services/private-integration-gateway/requirements.txt
+          python -I -S -m py_compile services/private-integration-gateway/gateway.py
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Bind build epoch to the exact source commit
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
+      - name: Build exact local candidate
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: services/private-integration-gateway
+          file: services/private-integration-gateway/Dockerfile
+          load: true
+          tags: private-integration-gateway:${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+          build-args: SOURCE_COMMIT_SHA=${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+          provenance: false
+          sbom: false
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+
+      - name: Validate the no-effect container boundary
+        run: |
+          set -Eeuo pipefail
+          container="private-gateway-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          volume="private-gateway-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            docker volume rm "$volume" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker volume create "$volume" >/dev/null
+          docker run --detach --name "$container" \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=10001,gid=10001 \
+            --volume "$volume:/data" \
+            --publish 127.0.0.1:18045:8080 \
+            --env GATEWAY_MODE=shared \
+            --env SOURCE_COMMIT_SHA="$PRIVATE_GATEWAY_SOURCE_SHA" \
+            --env LIVE_SUBMISSION_ENABLED=false \
+            --env PRODUCTION_DELIVERY_AUTHORIZED=false \
+            "private-integration-gateway:${PRIVATE_GATEWAY_SOURCE_SHA}"
+          ready=false
+          for _ in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:18045/health > health.json; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = true
+          jq -e --arg source "$PRIVATE_GATEWAY_SOURCE_SHA" \
+            '.status == "ok" and .source_commit_sha == $source and .live_submission_enabled == false' \
+            health.json
+          test "$(docker inspect "$container" --format '{{.Config.User}}')" = "10001:10001"
+          test "$(docker inspect "$container" --format '{{.HostConfig.ReadonlyRootfs}}')" = true
+          test "$(docker inspect "$container" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$PRIVATE_GATEWAY_SOURCE_SHA"
+
+      - name: Scan the exact local candidate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: private-integration-gateway:${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+          format: json
+          output: private-gateway-source-trivy.json
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Verify deterministic OCI bytes
+        run: |
+          set -Eeuo pipefail
+          for copy in a b; do
+            docker buildx build --no-cache --provenance=false --sbom=false \
+              --build-arg "SOURCE_COMMIT_SHA=${PRIVATE_GATEWAY_SOURCE_SHA}" \
+              --build-arg "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" \
+              --output "type=oci,dest=${RUNNER_TEMP}/private-gateway-${copy}.tar,rewrite-timestamp=true" \
+              --file services/private-integration-gateway/Dockerfile \
+              services/private-integration-gateway
+          done
+          cmp "${RUNNER_TEMP}/private-gateway-a.tar" "${RUNNER_TEMP}/private-gateway-b.tar"
+          sha256sum "${RUNNER_TEMP}/private-gateway-a.tar"
+
+      - name: Validate workflow and Compose syntax
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          for path in (
+              Path('.github/workflows/private-integration-gateway.yml'),
+              Path('services/private-integration-gateway/compose.production.yaml'),
+          ):
+              value = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+              assert isinstance(value, dict), path
+          PY
+          PRIVATE_INTEGRATION_GATEWAY_IMAGE="example.invalid/gateway@sha256:$(printf 'a%.0s' {1..64})" \
+          PRIVATE_INTEGRATION_GATEWAY_SOURCE_SHA="$(printf 'b%.0s' {1..40})" \
+          PRIVATE_INTEGRATION_GATEWAY_ENV_FILE=/dev/null \
+            docker compose -f services/private-integration-gateway/compose.production.yaml config --quiet
+          git diff --check "${BASE_SHA}..HEAD"
+
+  build_candidate:
+    name: private-integration-protected-build
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/release/production-activation' &&
+      github.ref_protected == true
+    needs: [source]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+          persist-credentials: false
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - id: source
+        name: Authenticate the protected source tree
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REPOSITORY" = "appolon1908-hue/codestra-production-platform"
+          test "$GITHUB_REF" = "refs/heads/release/production-activation"
+          test "$GITHUB_REF_PROTECTED" = true
+          test "$(git rev-parse HEAD)" = "$PRIVATE_GATEWAY_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          echo "epoch=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
+
+      - id: push
+        name: Publish unique pre-release candidate
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: services/private-integration-gateway
+          file: services/private-integration-gateway/Dockerfile
+          outputs: type=registry,rewrite-timestamp=true
+          tags: ${{ env.PRIVATE_GATEWAY_IMAGE }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          build-args: |
+            SOURCE_COMMIT_SHA=${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+            SOURCE_DATE_EPOCH=${{ steps.source.outputs.epoch }}
+          provenance: false
+          sbom: false
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+
+      - name: Pull and inspect the exact registry digest
+        env:
+          CANDIDATE_DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker pull "${PRIVATE_GATEWAY_IMAGE}@${CANDIDATE_DIGEST}"
+          test "$(docker image inspect "${PRIVATE_GATEWAY_IMAGE}@${CANDIDATE_DIGEST}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$PRIVATE_GATEWAY_SOURCE_SHA"
+          test "$(docker image inspect "${PRIVATE_GATEWAY_IMAGE}@${CANDIDATE_DIGEST}" --format '{{.Config.User}}')" = "10001:10001"
+
+      - name: Scan the exact registry digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.PRIVATE_GATEWAY_IMAGE }}@${{ steps.push.outputs.digest }}
+          format: json
+          output: private-gateway-trivy.json
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Generate the exact SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ env.PRIVATE_GATEWAY_IMAGE }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: private-gateway-sbom.spdx.json
+          upload-artifact: false
+
+      - name: Bind release evidence to source and artifact
+        env:
+          CANDIDATE_DIGEST: ${{ steps.push.outputs.digest }}
+          SIGNING_IDENTITY: https://github.com/appolon1908-hue/codestra-production-platform/.github/workflows/private-integration-gateway.yml@refs/heads/release/production-activation
+        run: |
+          set -Eeuo pipefail
+          test "$(jq '[.Results[].Vulnerabilities[]?] | length' private-gateway-trivy.json)" = 0
+          jq -e '.spdxVersion == "SPDX-2.3" and (.packages | length > 0)' private-gateway-sbom.spdx.json
+          jq -n \
+            --arg repository "https://github.com/${GITHUB_REPOSITORY}" \
+            --arg source "$PRIVATE_GATEWAY_SOURCE_SHA" \
+            --arg image "$PRIVATE_GATEWAY_IMAGE" \
+            --arg digest "$CANDIDATE_DIGEST" \
+            --arg invocation "$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" \
+            '{
+              buildDefinition: {
+                buildType: "https://codestra.co/build-types/github-protected-release/v1",
+                externalParameters: {
+                  repository: $repository,
+                  sourceCommit: $source,
+                  registryImage: $image,
+                  registryDigest: $digest
+                },
+                internalParameters: {protectedRef: "refs/heads/release/production-activation"},
+                resolvedDependencies: [{
+                  uri: ("git+" + $repository + "@refs/heads/release/production-activation"),
+                  digest: {gitCommit: $source}
+                }]
+              },
+              runDetails: {
+                builder: {id: ($repository + "/actions")},
+                metadata: {invocationId: $invocation},
+                byproducts: []
+              }
+            }' > private-gateway-provenance.json
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg source_sha "$PRIVATE_GATEWAY_SOURCE_SHA" \
+            --arg image "$PRIVATE_GATEWAY_IMAGE" \
+            --arg image_digest "$CANDIDATE_DIGEST" \
+            --arg signing_identity "$SIGNING_IDENTITY" \
+            '{schema:"codestra.private-integration-gateway.release-input.v1",repository:$repository,source_sha:$source_sha,image:$image,image_digest:$image_digest,signing_identity:$signing_identity,oidc_issuer:"https://token.actions.githubusercontent.com",vulnerability_gate:"PASS",high_critical_findings:0}' \
+            > RELEASE_INPUT.json
+          sha256sum RELEASE_INPUT.json private-gateway-trivy.json \
+            private-gateway-sbom.spdx.json private-gateway-provenance.json > SHA256SUMS
+          sha256sum --check --strict SHA256SUMS
+
+      - name: Transfer only checksummed release inputs to the isolated signer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: private-gateway-release-input-${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+          path: |
+            RELEASE_INPUT.json
+            SHA256SUMS
+            private-gateway-trivy.json
+            private-gateway-sbom.spdx.json
+            private-gateway-provenance.json
+          if-no-files-found: error
+          retention-days: 90
+
+  sign_and_promote:
+    name: private-integration-sign-and-promote
+    needs: [build_candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Download protected build evidence without repository checkout
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: private-gateway-release-input-${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+          path: release-input
+
+      - name: Validate the complete isolated signing input
+        working-directory: release-input
+        env:
+          EXPECTED_DIGEST: ${{ needs.build_candidate.outputs.digest }}
+          EXPECTED_SIGNING_IDENTITY: https://github.com/appolon1908-hue/codestra-production-platform/.github/workflows/private-integration-gateway.yml@refs/heads/release/production-activation
+        run: |
+          set -Eeuo pipefail
+          mapfile -t files < <(find . -maxdepth 1 -type f -printf '%f\n' | sort)
+          expected=(RELEASE_INPUT.json SHA256SUMS private-gateway-provenance.json private-gateway-sbom.spdx.json private-gateway-trivy.json)
+          test "${files[*]}" = "${expected[*]}"
+          sha256sum --check --strict SHA256SUMS
+          jq -e \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg source "$PRIVATE_GATEWAY_SOURCE_SHA" \
+            --arg image "$PRIVATE_GATEWAY_IMAGE" \
+            --arg digest "$EXPECTED_DIGEST" \
+            --arg identity "$EXPECTED_SIGNING_IDENTITY" \
+            '.schema == "codestra.private-integration-gateway.release-input.v1" and .repository == $repository and .source_sha == $source and .image == $image and .image_digest == $digest and .signing_identity == $identity and .oidc_issuer == "https://token.actions.githubusercontent.com" and .vulnerability_gate == "PASS" and .high_critical_findings == 0' \
+            RELEASE_INPUT.json
+          jq -e --arg source "$PRIVATE_GATEWAY_SOURCE_SHA" --arg digest "$EXPECTED_DIGEST" \
+            '.buildDefinition.externalParameters.sourceCommit == $source and .buildDefinition.externalParameters.registryDigest == $digest' \
+            private-gateway-provenance.json
+          jq -e '.spdxVersion == "SPDX-2.3" and (.packages | length > 0)' private-gateway-sbom.spdx.json
+          test "$(jq '[.Results[].Vulnerabilities[]?] | length' private-gateway-trivy.json)" = 0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Install pinned Cosign in the no-checkout signer
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v3
+
+      - id: release_state
+        name: Reject immutable source-tag collisions before signing
+        env:
+          CANDIDATE_DIGEST: ${{ needs.build_candidate.outputs.digest }}
+        run: |
+          set -Eeuo pipefail
+          final_image="${PRIVATE_GATEWAY_IMAGE}:${PRIVATE_GATEWAY_SOURCE_SHA}"
+          if existing="$(docker buildx imagetools inspect "$final_image" --format '{{.Manifest.Digest}}' 2>/dev/null)"; then
+            test "$existing" = "$CANDIDATE_DIGEST"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sign and attest only the unpublished exact digest
+        if: steps.release_state.outputs.published != 'true'
+        working-directory: release-input
+        env:
+          CANDIDATE_DIGEST: ${{ needs.build_candidate.outputs.digest }}
+          SIGNING_IDENTITY: https://github.com/appolon1908-hue/codestra-production-platform/.github/workflows/private-integration-gateway.yml@refs/heads/release/production-activation
+          OIDC_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -Eeuo pipefail
+          exact_image="${PRIVATE_GATEWAY_IMAGE}@${CANDIDATE_DIGEST}"
+          if ! cosign verify --certificate-identity "$SIGNING_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" "$exact_image" >/dev/null 2>&1; then
+            cosign sign --yes "$exact_image"
+          fi
+          if ! cosign verify-attestation --type slsaprovenance1 \
+            --certificate-identity "$SIGNING_IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" \
+            "$exact_image" 2>/dev/null | jq -e --arg source "$PRIVATE_GATEWAY_SOURCE_SHA" --arg digest "$CANDIDATE_DIGEST" \
+            'any(.[]; ((.payload | @base64d | fromjson).predicate.buildDefinition.externalParameters.sourceCommit == $source) and ((.payload | @base64d | fromjson).predicate.buildDefinition.externalParameters.registryDigest == $digest))' >/dev/null; then
+            cosign attest --yes --type slsaprovenance1 \
+              --predicate private-gateway-provenance.json "$exact_image"
+          fi
+          if ! cosign verify-attestation --type spdxjson \
+            --certificate-identity "$SIGNING_IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" \
+            "$exact_image" 2>/dev/null | jq -e 'any(.[]; ((.payload | @base64d | fromjson).predicate.spdxVersion == "SPDX-2.3"))' >/dev/null; then
+            cosign attest --yes --type spdxjson \
+              --predicate private-gateway-sbom.spdx.json "$exact_image"
+          fi
+
+      - name: Verify exact signature, provenance, and SBOM before publication
+        working-directory: release-input
+        env:
+          CANDIDATE_DIGEST: ${{ needs.build_candidate.outputs.digest }}
+          SIGNING_IDENTITY: https://github.com/appolon1908-hue/codestra-production-platform/.github/workflows/private-integration-gateway.yml@refs/heads/release/production-activation
+          OIDC_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -Eeuo pipefail
+          exact_image="${PRIVATE_GATEWAY_IMAGE}@${CANDIDATE_DIGEST}"
+          cosign verify --certificate-identity "$SIGNING_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" "$exact_image" \
+            > signature-verification.json
+          cosign verify-attestation --type slsaprovenance1 \
+            --certificate-identity "$SIGNING_IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" \
+            "$exact_image" > provenance-verification.json
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity "$SIGNING_IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" \
+            "$exact_image" > sbom-verification.json
+          jq -e 'length > 0' signature-verification.json
+          jq -e --arg source "$PRIVATE_GATEWAY_SOURCE_SHA" --arg digest "$CANDIDATE_DIGEST" \
+            'any(.[]; ((.payload | @base64d | fromjson).predicate.buildDefinition.externalParameters.sourceCommit == $source) and ((.payload | @base64d | fromjson).predicate.buildDefinition.externalParameters.registryDigest == $digest))' \
+            provenance-verification.json
+          jq -e 'any(.[]; ((.payload | @base64d | fromjson).predicate.spdxVersion == "SPDX-2.3"))' sbom-verification.json
+
+      - name: Promote only the fully certified digest to the source tag
+        env:
+          CANDIDATE_DIGEST: ${{ needs.build_candidate.outputs.digest }}
+        run: |
+          set -Eeuo pipefail
+          exact_image="${PRIVATE_GATEWAY_IMAGE}@${CANDIDATE_DIGEST}"
+          final_image="${PRIVATE_GATEWAY_IMAGE}:${PRIVATE_GATEWAY_SOURCE_SHA}"
+          if existing="$(docker buildx imagetools inspect "$final_image" --format '{{.Manifest.Digest}}' 2>/dev/null)"; then
+            test "$existing" = "$CANDIDATE_DIGEST"
+          else
+            docker buildx imagetools create --prefer-index=false --tag "$final_image" "$exact_image"
+          fi
+          test "$(docker buildx imagetools inspect "$final_image" --format '{{.Manifest.Digest}}')" = "$CANDIDATE_DIGEST"
+
+      - name: Checksum final independent verification evidence
+        working-directory: release-input
+        env:
+          CANDIDATE_DIGEST: ${{ needs.build_candidate.outputs.digest }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s\n' "$PRIVATE_GATEWAY_SOURCE_SHA" > PUBLISHED_SOURCE_SHA
+          printf '%s\n' "$CANDIDATE_DIGEST" > PUBLISHED_IMAGE_DIGEST
+          sha256sum PUBLISHED_SOURCE_SHA PUBLISHED_IMAGE_DIGEST \
+            signature-verification.json provenance-verification.json sbom-verification.json \
+            RELEASE_INPUT.json SHA256SUMS private-gateway-trivy.json \
+            private-gateway-sbom.spdx.json private-gateway-provenance.json \
+            > CERTIFICATION_SHA256SUMS
+          sha256sum --check --strict CERTIFICATION_SHA256SUMS
+
+      - name: Retain exact signed release evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: private-gateway-release-${{ env.PRIVATE_GATEWAY_SOURCE_SHA }}
+          path: release-input/
+          if-no-files-found: error
+          retention-days: 90

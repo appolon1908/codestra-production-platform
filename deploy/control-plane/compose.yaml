@@ -71,6 +71,8 @@ services:
       KLYROW_MTLS_CA_FILE: /run/secrets/klyrow_mtls_ca
       KLYROW_MTLS_CERT_FILE: /run/secrets/klyrow_mtls_cert
       KLYROW_MTLS_KEY_FILE: /run/secrets/klyrow_mtls_key
+      TELNEXA_OUTBOUND_API_KEY_FILE: /run/secrets/telnexa_outbound_api_key
+      TELNEXA_OUTBOUND_HMAC_SECRET_FILE: /run/secrets/telnexa_outbound_hmac_secret
     secrets:
       - control_plane_database_url
     volumes:
@@ -79,6 +81,8 @@ services:
       - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-ca:/run/secrets/klyrow_mtls_ca:ro
       - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-cert:/run/secrets/klyrow_mtls_cert:ro
       - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-key:/run/secrets/klyrow_mtls_key:ro
+      - /etc/codestra/runtime-secrets/control-plane/telnexa-outbound-api-key:/run/secrets/telnexa_outbound_api_key:ro
+      - /etc/codestra/runtime-secrets/control-plane/telnexa-outbound-hmac-secret:/run/secrets/telnexa_outbound_hmac_secret:ro
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
