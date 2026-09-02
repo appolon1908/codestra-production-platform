@@ -4182,6 +4182,7 @@ def test_release_scans_and_verifies_the_exact_digest_before_source_tag():
     assert verification < promotion
     assert "--certificate-identity \"$SIGNING_IDENTITY\"" in signer
     assert "--certificate-oidc-issuer \"$OIDC_ISSUER\"" in signer
+    assert signer.count("jq -s -e") == 4
     assert "--prefer-index=false" in signer
 
 
