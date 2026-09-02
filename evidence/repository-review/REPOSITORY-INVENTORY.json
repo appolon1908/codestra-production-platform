@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-09-02T19:22:38.549617+00:00",
+  "captured_at": "2026-09-02T19:37:04.462953+00:00",
   "repositories": [
     {
       "archived": false,
@@ -732,12 +732,17 @@
         {
           "name": "fix/private-gateway-legacy-tenant-migration-20260902",
           "protected": false,
-          "sha": "618c12e8decbac9f3c8255fae0b64c40c89a16f0"
+          "sha": "e736707f27437081e497f95ea6bd5c680499ab68"
         },
         {
           "name": "fix/provider-host-auditd-20260901",
           "protected": false,
           "sha": "622896db22e8d2246d99c6b03380fc4f5c0b37af"
+        },
+        {
+          "name": "fix/repository-authority-evidence-20260902",
+          "protected": false,
+          "sha": "bcadbe731623aba62cc7215921691dd73a10c5f7"
         },
         {
           "name": "fix/repository-name-authority-20260902",
@@ -947,7 +952,7 @@
         {
           "name": "release/production-activation",
           "protected": true,
-          "sha": "585dd6c714c155b4eee5738a29fb56648dedcc38"
+          "sha": "a3dbfd6b464d2ba4c130e360f8ad73338bdd9fbb"
         },
         {
           "name": "release/vicidial-adapter",
@@ -1024,6 +1029,12 @@
           "target": "b122da8d5ba51417c1887c2b796a2934f13ba1f9"
         },
         {
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/releases/tag/protected-a3dbfd6b464d2ba4c130e360f8ad73338bdd9fbb",
+          "published_at": "2026-09-02T19:36:16Z",
+          "tag_name": "protected-a3dbfd6b464d2ba4c130e360f8ad73338bdd9fbb",
+          "target": "a3dbfd6b464d2ba4c130e360f8ad73338bdd9fbb"
+        },
+        {
           "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/releases/tag/protected-9ad14d7c546a5fded5df58d9ccbd88df3377041b",
           "published_at": "2026-09-02T18:54:48Z",
           "tag_name": "protected-9ad14d7c546a5fded5df58d9ccbd88df3377041b",
@@ -1060,6 +1071,12 @@
           "target": "5aec485814149434750f2313370ae0ae39db5bd8"
         },
         {
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/releases/tag/protected-585dd6c714c155b4eee5738a29fb56648dedcc38",
+          "published_at": "2026-09-02T19:23:50Z",
+          "tag_name": "protected-585dd6c714c155b4eee5738a29fb56648dedcc38",
+          "target": "585dd6c714c155b4eee5738a29fb56648dedcc38"
+        },
+        {
           "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/releases/tag/protected-519336962444bd46881caa0b3d08c96848fbb551",
           "published_at": "2026-09-02T19:14:18Z",
           "tag_name": "protected-519336962444bd46881caa0b3d08c96848fbb551",
@@ -1082,34 +1099,92 @@
           "published_at": "2026-09-02T19:06:23Z",
           "tag_name": "protected-3a1343fa22d351a79a758a4fe549180273ea9e91",
           "target": "3a1343fa22d351a79a758a4fe549180273ea9e91"
-        },
-        {
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/releases/tag/protected-330a8c440dc8b520a51076c78932e934a5768b4e",
-          "published_at": "2026-09-02T18:22:57Z",
-          "tag_name": "protected-330a8c440dc8b520a51076c78932e934a5768b4e",
-          "target": "330a8c440dc8b520a51076c78932e934a5768b4e"
-        },
-        {
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/releases/tag/protected-165288b9fbad0a0ac6f9da26b74407e524ffe43d",
-          "published_at": "2026-09-02T17:46:11Z",
-          "tag_name": "protected-165288b9fbad0a0ac6f9da26b74407e524ffe43d",
-          "target": "165288b9fbad0a0ac6f9da26b74407e524ffe43d"
         }
       ],
       "latest_workflow_runs": [
         {
-          "conclusion": null,
-          "head_sha": "585dd6c714c155b4eee5738a29fb56648dedcc38",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33672844637",
-          "name": "Exact protected release",
-          "status": "in_progress"
+          "conclusion": "success",
+          "head_sha": "bcadbe731623aba62cc7215921691dd73a10c5f7",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33674123443",
+          "name": "Platform source validation",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "a3dbfd6b464d2ba4c130e360f8ad73338bdd9fbb",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33674092497",
+          "name": "immutable-candidate-build",
+          "status": "completed"
         },
         {
           "conclusion": null,
+          "head_sha": "a3dbfd6b464d2ba4c130e360f8ad73338bdd9fbb",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33674092431",
+          "name": "Private integration gateway release",
+          "status": "in_progress"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "a3dbfd6b464d2ba4c130e360f8ad73338bdd9fbb",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33674092388",
+          "name": "Exact protected release",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "08c76df36c3cd91f388d61bc4dd3171e06000caf",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33674061331",
+          "name": "Platform source validation",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "e736707f27437081e497f95ea6bd5c680499ab68",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33673722637",
+          "name": "Private integration gateway release",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "e736707f27437081e497f95ea6bd5c680499ab68",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33673722532",
+          "name": "Platform source validation",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "5f3565b2014282980c9504d54d0aa9033b4d4c4e",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33673409862",
+          "name": "Platform source validation",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "76df4f0e3414602de111fa7ff15eaaac62a4245a",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33672947685",
+          "name": "Private integration gateway release",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "76df4f0e3414602de111fa7ff15eaaac62a4245a",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33672947658",
+          "name": "Platform source validation",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "585dd6c714c155b4eee5738a29fb56648dedcc38",
+          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33672844637",
+          "name": "Exact protected release",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
           "head_sha": "585dd6c714c155b4eee5738a29fb56648dedcc38",
           "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33672844626",
           "name": "immutable-candidate-build",
-          "status": "in_progress"
+          "status": "completed"
         },
         {
           "conclusion": "success",
@@ -1166,80 +1241,10 @@
           "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671661431",
           "name": "mail-api-authority",
           "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "63750b098bc50eaa2ec5e1d54933c6b6343e3e12",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671661428",
-          "name": "immutable-candidate-build",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "f9b984a43b679423996bf41afe9ef3b8a3984c61",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671352910",
-          "name": "Platform source validation",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "f9b984a43b679423996bf41afe9ef3b8a3984c61",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671352866",
-          "name": "immutable-candidate-build",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "f9b984a43b679423996bf41afe9ef3b8a3984c61",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671352831",
-          "name": "reseller-portal-authority",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "f9b984a43b679423996bf41afe9ef3b8a3984c61",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671352786",
-          "name": "mail-api-authority",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "afd02541adf33cfece278fd7c7c31df354dccaf0",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671339171",
-          "name": "reseller-portal-authority",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "afd02541adf33cfece278fd7c7c31df354dccaf0",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671339130",
-          "name": "mail-api-authority",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "afd02541adf33cfece278fd7c7c31df354dccaf0",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671339119",
-          "name": "immutable-candidate-build",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "afd02541adf33cfece278fd7c7c31df354dccaf0",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671339049",
-          "name": "Platform source validation",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "15f20a8412734bb18a3e58d32c8de3650b90a0c7",
-          "html_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33671156622",
-          "name": "mail-api-authority",
-          "status": "completed"
         }
       ],
       "open_issues_count": 46,
-      "pushed_at": "2026-09-02T19:21:45Z",
+      "pushed_at": "2026-09-02T19:36:16Z",
       "repository": "appolon1908-hue/codestra-production-platform",
       "rulesets": [],
       "security_alerts": {
@@ -1746,7 +1751,7 @@
         {
           "name": "fix/repository-name-authority-20260902",
           "protected": false,
-          "sha": "1e1ce8e0f06c53f987ad651fcc675e7d7473595e"
+          "sha": "942fa1ac7df0b16de15da8c114d63f72959a3e50"
         },
         {
           "name": "fix/stage6-apply-reviewed-plan-artifact",
@@ -1816,7 +1821,7 @@
         {
           "name": "mission/full-platform-certification-20260902",
           "protected": false,
-          "sha": "ea407385d5d218bfa72129663cc2e66afb2e0b24"
+          "sha": "10bd3bbbef2f61f671974c4f9ec139c095fa00dc"
         },
         {
           "name": "mission/server-b-observability-authority-20260902",
@@ -1826,7 +1831,7 @@
         {
           "name": "ops/staging-middleware-safety-release-20260902",
           "protected": false,
-          "sha": "6820b226c60ec02184582df6f8f3796dfc861786"
+          "sha": "fd247b161036a2d660fa19facc0c4faafd6ae4e0"
         },
         {
           "name": "prod-readiness-20260901",
@@ -1900,6 +1905,48 @@
       "html_url": "https://github.com/appolon1908-hue/Infustruction-repo",
       "latest_releases": [],
       "latest_workflow_runs": [
+        {
+          "conclusion": "success",
+          "head_sha": "942fa1ac7df0b16de15da8c114d63f72959a3e50",
+          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33674306710",
+          "name": "Marketing Stage 9 Synthetic Certification",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "942fa1ac7df0b16de15da8c114d63f72959a3e50",
+          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33674306699",
+          "name": "Repository Name Authority",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "143dedf68bbd99faf66950d743d934260195f3a2",
+          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33674262516",
+          "name": "Marketing Stage 9 Synthetic Certification",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "143dedf68bbd99faf66950d743d934260195f3a2",
+          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33674262445",
+          "name": "Repository Name Authority",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "fd247b161036a2d660fa19facc0c4faafd6ae4e0",
+          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33673689287",
+          "name": "Validate Stage 6 intake observability infrastructure",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "10bd3bbbef2f61f671974c4f9ec139c095fa00dc",
+          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33673290769",
+          "name": "Full platform certification evidence",
+          "status": "completed"
+        },
         {
           "conclusion": "success",
           "head_sha": "1e1ce8e0f06c53f987ad651fcc675e7d7473595e",
@@ -1997,52 +2044,10 @@
           "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33671658578",
           "name": "Marketing Stage 9 Synthetic Certification",
           "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "42b4c846f5df9f7a6b761732169c86d4da45874e",
-          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33671627538",
-          "name": "Marketing Stage 9 Synthetic Certification",
-          "status": "completed"
-        },
-        {
-          "conclusion": "failure",
-          "head_sha": "42b4c846f5df9f7a6b761732169c86d4da45874e",
-          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33671627399",
-          "name": "Repository Name Authority",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "70137b0e71a831b3fd3af1d43e8e2c56bf9e3f16",
-          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33670542523",
-          "name": "Marketing Stage 9 Synthetic Certification",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "70137b0e71a831b3fd3af1d43e8e2c56bf9e3f16",
-          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33670542499",
-          "name": "Repository Name Authority",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "6820b226c60ec02184582df6f8f3796dfc861786",
-          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33668666541",
-          "name": "Validate Stage 6 intake observability infrastructure",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "ee89a90101923ed0d5b6b3a622a6acb2670ab263",
-          "html_url": "https://github.com/appolon1908-hue/Infustruction-repo/actions/runs/33668560840",
-          "name": "Full platform certification evidence",
-          "status": "completed"
         }
       ],
       "open_issues_count": 19,
-      "pushed_at": "2026-09-02T19:22:29Z",
+      "pushed_at": "2026-09-02T19:36:15Z",
       "repository": "appolon1908-hue/Infustruction-repo",
       "rulesets": [],
       "security_alerts": {
@@ -2280,7 +2285,7 @@
         {
           "name": "mission/observability-url-boundary-20260902",
           "protected": false,
-          "sha": "47857c7f051f2015f444fbb7deea457a0dd40b77"
+          "sha": "5a4ba893ad6e8c0f15a18c0f3267851bfe4d7c79"
         },
         {
           "name": "prod-readiness-20260901",
@@ -2314,6 +2319,27 @@
       "html_url": "https://github.com/appolon1908-hue/Caddy",
       "latest_releases": [],
       "latest_workflow_runs": [
+        {
+          "conclusion": "success",
+          "head_sha": "5a4ba893ad6e8c0f15a18c0f3267851bfe4d7c79",
+          "html_url": "https://github.com/appolon1908-hue/Caddy/actions/runs/33674343523",
+          "name": "Validate Caddy source authority",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "93ab46197edf5d103bb88e584448da8f441819a2",
+          "html_url": "https://github.com/appolon1908-hue/Caddy/actions/runs/33674002983",
+          "name": "Validate Caddy source authority",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "e304364b5eb512619e25cd41f6420ca1de522524",
+          "html_url": "https://github.com/appolon1908-hue/Caddy/actions/runs/33673659431",
+          "name": "Validate Caddy source authority",
+          "status": "completed"
+        },
         {
           "conclusion": "success",
           "head_sha": "47857c7f051f2015f444fbb7deea457a0dd40b77",
@@ -2432,31 +2458,10 @@
           "html_url": "https://github.com/appolon1908-hue/Caddy/actions/runs/33647803549",
           "name": "Immutable Caddy release",
           "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "8301fd7e5924a0cbd1b5f5831fc1067043a73676",
-          "html_url": "https://github.com/appolon1908-hue/Caddy/actions/runs/33647803513",
-          "name": "Validate Caddy source authority",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "8301fd7e5924a0cbd1b5f5831fc1067043a73676",
-          "html_url": "https://github.com/appolon1908-hue/Caddy/actions/runs/33647803501",
-          "name": "Caddy validation",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "8301fd7e5924a0cbd1b5f5831fc1067043a73676",
-          "html_url": "https://github.com/appolon1908-hue/Caddy/actions/runs/33647788807",
-          "name": "Caddy validation",
-          "status": "completed"
         }
       ],
       "open_issues_count": 7,
-      "pushed_at": "2026-09-02T19:19:36Z",
+      "pushed_at": "2026-09-02T19:36:38Z",
       "repository": "appolon1908-hue/Caddy",
       "rulesets": [
         {
@@ -3295,11 +3300,11 @@
       "latest_releases": [],
       "latest_workflow_runs": [
         {
-          "conclusion": null,
+          "conclusion": "success",
           "head_sha": "85992ac9607e2dd6f3d0404c321c96a7d07c0987",
           "html_url": "https://github.com/appolon1908-hue/Keycloak/actions/runs/33672953435",
           "name": "Validate Keycloak GitOps",
-          "status": "in_progress"
+          "status": "completed"
         },
         {
           "conclusion": "success",
@@ -3809,11 +3814,6 @@
           "sha": "54912cb720d5366d08159487e2f5091d00832683"
         },
         {
-          "name": "feature/observability-alert-delivery-v1-20260902",
-          "protected": false,
-          "sha": "d1e64edbf60aa3d5a8b9b9918174d9efa32b451e"
-        },
-        {
           "name": "feature/platform-api-runtime-v2-20260901",
           "protected": false,
           "sha": "d378a87283a20d8f376e80318bbef1931f200011"
@@ -4176,7 +4176,7 @@
         {
           "name": "main",
           "protected": true,
-          "sha": "454d7d659cbb95e5e21443c5d6bb7794ddfe2880"
+          "sha": "65b8e511a412c4ba922876e906f95b9f2e4277a1"
         },
         {
           "name": "noop",
@@ -4421,6 +4421,41 @@
       "latest_releases": [],
       "latest_workflow_runs": [
         {
+          "conclusion": null,
+          "head_sha": "65b8e511a412c4ba922876e906f95b9f2e4277a1",
+          "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33674420398",
+          "name": "Middleware CI",
+          "status": "in_progress"
+        },
+        {
+          "conclusion": null,
+          "head_sha": "65b8e511a412c4ba922876e906f95b9f2e4277a1",
+          "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33674420380",
+          "name": "Connector Runtime API validation",
+          "status": "in_progress"
+        },
+        {
+          "conclusion": null,
+          "head_sha": "65b8e511a412c4ba922876e906f95b9f2e4277a1",
+          "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33674420213",
+          "name": "Connector SDK v1 validation",
+          "status": "in_progress"
+        },
+        {
+          "conclusion": "skipped",
+          "head_sha": "454d7d659cbb95e5e21443c5d6bb7794ddfe2880",
+          "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33673426645",
+          "name": "Apply repository governance",
+          "status": "completed"
+        },
+        {
+          "conclusion": "skipped",
+          "head_sha": "454d7d659cbb95e5e21443c5d6bb7794ddfe2880",
+          "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33673039022",
+          "name": "Apply repository governance",
+          "status": "completed"
+        },
+        {
           "conclusion": "success",
           "head_sha": "d1e64edbf60aa3d5a8b9b9918174d9efa32b451e",
           "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33670645317",
@@ -4524,45 +4559,10 @@
           "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33667319433",
           "name": "Export PR96 exact source",
           "status": "completed"
-        },
-        {
-          "conclusion": "skipped",
-          "head_sha": "454d7d659cbb95e5e21443c5d6bb7794ddfe2880",
-          "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33667173424",
-          "name": "Apply repository governance",
-          "status": "completed"
-        },
-        {
-          "conclusion": "skipped",
-          "head_sha": "454d7d659cbb95e5e21443c5d6bb7794ddfe2880",
-          "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33666901079",
-          "name": "Apply repository governance",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "0137e60eb09d8dc6e28fca7c425c8dabd443bbe7",
-          "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33666879131",
-          "name": "Connector Runtime API validation",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "0137e60eb09d8dc6e28fca7c425c8dabd443bbe7",
-          "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33666879091",
-          "name": "Stage 6 staging intake observability contract",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "0137e60eb09d8dc6e28fca7c425c8dabd443bbe7",
-          "html_url": "https://github.com/appolon1908-hue/Middleware-/actions/runs/33666879090",
-          "name": "Connector SDK v1 validation",
-          "status": "completed"
         }
       ],
-      "open_issues_count": 34,
-      "pushed_at": "2026-09-02T18:59:59Z",
+      "open_issues_count": 33,
+      "pushed_at": "2026-09-02T19:37:28Z",
       "repository": "appolon1908-hue/Middleware-",
       "rulesets": [
         {
@@ -6636,7 +6636,7 @@
         {
           "name": "fix/canonical-integration-contract-v2-20260830",
           "protected": false,
-          "sha": "1610c9c8fb2914d1a7ce50ac2b2d88e680e5e8ce"
+          "sha": "805b45051c6be39ef67a75946662463312b359bc"
         },
         {
           "name": "fix/cc-11-production-readiness",
@@ -6686,7 +6686,7 @@
         {
           "name": "ops/codestra-odoo-upstream-sync-v1-20260830",
           "protected": false,
-          "sha": "472482715ae3ed09bd6af552d06f1c8f2dc22f48"
+          "sha": "72daabe40aae59444b51d1c90212c6936d2aab5c"
         },
         {
           "name": "prod-readiness-20260901",
@@ -6751,6 +6751,41 @@
       "latest_releases": [],
       "latest_workflow_runs": [
         {
+          "conclusion": "success",
+          "head_sha": "72daabe40aae59444b51d1c90212c6936d2aab5c",
+          "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33673221566",
+          "name": "Security gates",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "72daabe40aae59444b51d1c90212c6936d2aab5c",
+          "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33673221556",
+          "name": "Odoo Addons CI",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "805b45051c6be39ef67a75946662463312b359bc",
+          "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33673217921",
+          "name": "Odoo Addons CI",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "805b45051c6be39ef67a75946662463312b359bc",
+          "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33673217666",
+          "name": "Security gates",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "72daabe40aae59444b51d1c90212c6936d2aab5c",
+          "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33673213952",
+          "name": ".github/workflows/sync-codestra-odoo-addons.yml",
+          "status": "completed"
+        },
+        {
           "conclusion": "failure",
           "head_sha": "472482715ae3ed09bd6af552d06f1c8f2dc22f48",
           "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33672700001",
@@ -6765,11 +6800,11 @@
           "status": "completed"
         },
         {
-          "conclusion": null,
+          "conclusion": "cancelled",
           "head_sha": "1610c9c8fb2914d1a7ce50ac2b2d88e680e5e8ce",
           "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33672697748",
           "name": "Odoo Addons CI",
-          "status": "in_progress"
+          "status": "completed"
         },
         {
           "conclusion": "success",
@@ -6854,45 +6889,10 @@
           "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33665162856",
           "name": "Odoo Addons CI",
           "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "ba85beb0e84a877355d6892797ed24d1141bb589",
-          "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33661879178",
-          "name": "Security gates",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "ba85beb0e84a877355d6892797ed24d1141bb589",
-          "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33661879158",
-          "name": "Odoo Addons CI",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "b77dd59fa1b3c054a2fd9c61049f534b7cbe59d7",
-          "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33657128114",
-          "name": "Odoo Addons CI",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "b77dd59fa1b3c054a2fd9c61049f534b7cbe59d7",
-          "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33657128085",
-          "name": "Security gates",
-          "status": "completed"
-        },
-        {
-          "conclusion": "failure",
-          "head_sha": "c438011f9945c823174574cd82e4e355df22dfdc",
-          "html_url": "https://github.com/appolon1908-hue/Odoo/actions/runs/33656345474",
-          "name": "Odoo Addons CI",
-          "status": "completed"
         }
       ],
       "open_issues_count": 32,
-      "pushed_at": "2026-09-02T19:20:16Z",
+      "pushed_at": "2026-09-02T19:25:26Z",
       "repository": "appolon1908-hue/Odoo",
       "rulesets": [],
       "security_alerts": {
@@ -10839,7 +10839,7 @@
         {
           "name": "fix/production-promotion-evidence-20260902",
           "protected": false,
-          "sha": "e8cff64d238a3fb90174a12c2a603423be89beb0"
+          "sha": "187fae333dc624681bb8d4114abd321fc9e25321"
         },
         {
           "name": "integration/codestra-observability-suite-v1-20260830",
@@ -10964,6 +10964,34 @@
       "latest_releases": [],
       "latest_workflow_runs": [
         {
+          "conclusion": "startup_failure",
+          "head_sha": "187fae333dc624681bb8d4114abd321fc9e25321",
+          "html_url": "https://github.com/appolon1908-hue/Codestra-OpenBao/actions/runs/33674046718",
+          "name": "Validate Codestra OpenBao corporate configuration",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "187fae333dc624681bb8d4114abd321fc9e25321",
+          "html_url": "https://github.com/appolon1908-hue/Codestra-OpenBao/actions/runs/33674043091",
+          "name": "Controlled intake staging activation preparation gate",
+          "status": "completed"
+        },
+        {
+          "conclusion": "startup_failure",
+          "head_sha": "bc2620b3e90625fa312d5b309f23229d877d4b5a",
+          "html_url": "https://github.com/appolon1908-hue/Codestra-OpenBao/actions/runs/33673320263",
+          "name": "Validate Codestra OpenBao corporate configuration",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "bc2620b3e90625fa312d5b309f23229d877d4b5a",
+          "html_url": "https://github.com/appolon1908-hue/Codestra-OpenBao/actions/runs/33673319035",
+          "name": "Controlled intake staging activation preparation gate",
+          "status": "completed"
+        },
+        {
           "conclusion": "success",
           "head_sha": "5bdccbf543a4bf1989c17415ccaa54a6ed8d8ffe",
           "html_url": "https://github.com/appolon1908-hue/Codestra-OpenBao/actions/runs/33672774224",
@@ -11074,38 +11102,10 @@
           "html_url": "https://github.com/appolon1908-hue/Codestra-OpenBao/actions/runs/33672573546",
           "name": "Validate Codestra production server API contract",
           "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "631a47ffb1c4acda3febbb827594e19816b2ac79",
-          "html_url": "https://github.com/appolon1908-hue/Codestra-OpenBao/actions/runs/33672573512",
-          "name": "Validate Codestra enterprise profile",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "631a47ffb1c4acda3febbb827594e19816b2ac79",
-          "html_url": "https://github.com/appolon1908-hue/Codestra-OpenBao/actions/runs/33672568374",
-          "name": "Validate Codestra service API contract",
-          "status": "completed"
-        },
-        {
-          "conclusion": "startup_failure",
-          "head_sha": "e8cff64d238a3fb90174a12c2a603423be89beb0",
-          "html_url": "https://github.com/appolon1908-hue/Codestra-OpenBao/actions/runs/33671600172",
-          "name": "Validate Codestra OpenBao corporate configuration",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "e8cff64d238a3fb90174a12c2a603423be89beb0",
-          "html_url": "https://github.com/appolon1908-hue/Codestra-OpenBao/actions/runs/33671598965",
-          "name": "Controlled intake staging activation preparation gate",
-          "status": "completed"
         }
       ],
       "open_issues_count": 9,
-      "pushed_at": "2026-09-02T19:21:00Z",
+      "pushed_at": "2026-09-02T19:33:35Z",
       "repository": "appolon1908-hue/Codestra-OpenBao",
       "rulesets": [],
       "security_alerts": {
@@ -11358,7 +11358,7 @@
         {
           "name": "ops/promote-staging-authority-main-20260902",
           "protected": false,
-          "sha": "be61949dee5a67a9bce1817e59314b34bcf14e7e"
+          "sha": "e9ff18b4ab4c23b32e94b83d67d7484f2472691c"
         },
         {
           "name": "ops/staging-observability-runtime-20260902",
@@ -11397,6 +11397,34 @@
       "html_url": "https://github.com/appolon1908-hue/Codestra-Prometheus",
       "latest_releases": [],
       "latest_workflow_runs": [
+        {
+          "conclusion": "success",
+          "head_sha": "e9ff18b4ab4c23b32e94b83d67d7484f2472691c",
+          "html_url": "https://github.com/appolon1908-hue/Codestra-Prometheus/actions/runs/33673176314",
+          "name": "Validate Codestra Prometheus corporate authority",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "e9ff18b4ab4c23b32e94b83d67d7484f2472691c",
+          "html_url": "https://github.com/appolon1908-hue/Codestra-Prometheus/actions/runs/33673176192",
+          "name": "Stage 6 intake observability contract certification",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "e9ff18b4ab4c23b32e94b83d67d7484f2472691c",
+          "html_url": "https://github.com/appolon1908-hue/Codestra-Prometheus/actions/runs/33673176109",
+          "name": "Controlled intake monitoring integration gate",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "e9ff18b4ab4c23b32e94b83d67d7484f2472691c",
+          "html_url": "https://github.com/appolon1908-hue/Codestra-Prometheus/actions/runs/33673176094",
+          "name": "Controlled intake staging activation preparation gate",
+          "status": "completed"
+        },
         {
           "conclusion": "success",
           "head_sha": "be61949dee5a67a9bce1817e59314b34bcf14e7e",
@@ -11508,38 +11536,10 @@
           "html_url": "https://github.com/appolon1908-hue/Codestra-Prometheus/actions/runs/33670617134",
           "name": "Stage 6 intake observability contract certification",
           "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "42d7e9f24d0d604681bece46551c4b71aa2f7f44",
-          "html_url": "https://github.com/appolon1908-hue/Codestra-Prometheus/actions/runs/33670617114",
-          "name": "Controlled intake staging activation preparation gate",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "6b92b7d234073dd7e29d19bf54ad70a5566adc4c",
-          "html_url": "https://github.com/appolon1908-hue/Codestra-Prometheus/actions/runs/33670465372",
-          "name": "Validate Codestra Prometheus corporate authority",
-          "status": "completed"
-        },
-        {
-          "conclusion": "failure",
-          "head_sha": "6b92b7d234073dd7e29d19bf54ad70a5566adc4c",
-          "html_url": "https://github.com/appolon1908-hue/Codestra-Prometheus/actions/runs/33670465332",
-          "name": "Stage 6 intake observability contract certification",
-          "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "6b92b7d234073dd7e29d19bf54ad70a5566adc4c",
-          "html_url": "https://github.com/appolon1908-hue/Codestra-Prometheus/actions/runs/33670465325",
-          "name": "Controlled intake staging activation preparation gate",
-          "status": "completed"
         }
       ],
       "open_issues_count": 10,
-      "pushed_at": "2026-09-02T19:13:39Z",
+      "pushed_at": "2026-09-02T19:25:01Z",
       "repository": "appolon1908-hue/Codestra-Prometheus",
       "rulesets": [],
       "security_alerts": {
@@ -11712,7 +11712,7 @@
         {
           "name": "ops/staging-observability-deploy-20260902",
           "protected": false,
-          "sha": "0352f46f128735d6b8433c3ff7b271608f8f1d01"
+          "sha": "80b74a2c278f2dcc2b9a197c8ed0159702c79f5a"
         },
         {
           "name": "prod-readiness-20260901",
@@ -11746,6 +11746,13 @@
       "html_url": "https://github.com/appolon1908-hue/Codestra-Grafana-",
       "latest_releases": [],
       "latest_workflow_runs": [
+        {
+          "conclusion": "success",
+          "head_sha": "80b74a2c278f2dcc2b9a197c8ed0159702c79f5a",
+          "html_url": "https://github.com/appolon1908-hue/Codestra-Grafana-/actions/runs/33674006235",
+          "name": "Validate Codestra Grafana corporate control plane",
+          "status": "completed"
+        },
         {
           "conclusion": "success",
           "head_sha": "0352f46f128735d6b8433c3ff7b271608f8f1d01",
@@ -11878,17 +11885,10 @@
           "html_url": "https://github.com/appolon1908-hue/Codestra-Grafana-/actions/runs/33661868488",
           "name": "Validate Codestra service API contract",
           "status": "completed"
-        },
-        {
-          "conclusion": "success",
-          "head_sha": "c62f93a57994a8ee0dded2b0f27254590015c7ae",
-          "html_url": "https://github.com/appolon1908-hue/Codestra-Grafana-/actions/runs/33661867672",
-          "name": "Validate Codestra Grafana corporate control plane",
-          "status": "completed"
         }
       ],
       "open_issues_count": 5,
-      "pushed_at": "2026-09-02T19:17:50Z",
+      "pushed_at": "2026-09-02T19:33:18Z",
       "repository": "appolon1908-hue/Codestra-Grafana-",
       "rulesets": [],
       "security_alerts": {
