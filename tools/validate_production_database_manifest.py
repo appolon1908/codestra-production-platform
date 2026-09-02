@@ -4,7 +4,9 @@
 from pathlib import Path
 from datetime import datetime, timezone
 import hashlib
+import os
 import re
+import stat
 import sys
 
 REQUIRED_IDS = {
@@ -98,6 +100,24 @@ def load_manifest(path: Path) -> dict:
         else:
             raise AssertionError("unsupported manifest structure")
     return document
+
+
+def read_evidence(root: Path, relative: str) -> bytes:
+    current = root
+    for part in Path(relative).parts[:-1]:
+        current = current / part
+        info = current.lstat()
+        assert stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode)
+        assert info.st_uid == os.geteuid() and info.st_gid == os.getegid()
+        assert stat.S_IMODE(info.st_mode) & 0o022 == 0
+    target = root / relative
+    descriptor = os.open(target, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        assert stat.S_ISREG(info.st_mode)
+        assert info.st_uid == os.geteuid() and info.st_gid == os.getegid()
+        assert stat.S_IMODE(info.st_mode) == 0o600
+        return stream.read()
 REQUIRED_FIELDS = {
     "id", "service", "store", "kind", "source_authority", "database_owner",
     "application_role", "migration_framework", "backup_method", "restore_method",
@@ -159,9 +179,9 @@ def validate(path: Path, evidence_root: Path | None = None) -> None:
                 assert age_hours <= component["target_rpo_hours"], (
                     f"stale certification evidence: {component['id']}"
                 )
-            evidence_path = evidence_root / evidence["path"]
-            assert evidence_path.is_file()
-            assert hashlib.sha256(evidence_path.read_bytes()).hexdigest() == evidence["sha256"]
+            assert hashlib.sha256(
+                read_evidence(evidence_root, evidence["path"])
+            ).hexdigest() == evidence["sha256"]
 
 
 if __name__ == "__main__":

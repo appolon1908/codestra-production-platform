@@ -162,6 +162,8 @@ def test_run_fixed_supports_bounded_timeout(monkeypatch):
 def test_installer_validates_certified_manifest_against_evidence_root():
     installer = (PACKAGE / "install-server-a-operator.sh").read_text()
     assert "/opt/codestra/evidence/database-certification" in installer
+    assert 'validate_trusted_source "$database_manifest_source"' in installer
+    assert 'validate_trusted_source "$database_validator_source"' in installer
 
 
 def test_web_traffic_health_revalidates_database_certification():

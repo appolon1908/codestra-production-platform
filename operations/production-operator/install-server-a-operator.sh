@@ -42,6 +42,26 @@ restore_source=$script_dir/../readiness/codestra-isolated-restore-rehearsal.sh
 database_manifest_source=$script_dir/../../PRODUCTION-DATABASE-MANIFEST.yaml
 database_validator_source=$script_dir/../../tools/validate_production_database_manifest.py
 
+validate_trusted_source() {
+  target=$1
+  [ -f "$target" ] || fail
+  [ ! -L "$target" ] || fail
+  [ "$(stat -c '%U:%G' "$target")" = root:root ] || fail
+  case "$(stat -c %a "$target")" in
+    *[2367]|*[2367][0-9]) fail ;;
+  esac
+  parent=$(dirname -- "$target")
+  while [ "$parent" != / ]; do
+    [ -d "$parent" ] || fail
+    [ ! -L "$parent" ] || fail
+    [ "$(stat -c '%U:%G' "$parent")" = root:root ] || fail
+    case "$(stat -c %a "$parent")" in
+      *[2367]|*[2367][0-9]) fail ;;
+    esac
+    parent=$(dirname -- "$parent")
+  done
+}
+
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
@@ -50,7 +70,7 @@ f986169593a78ead4133a6b102fbdaddc7f611607a6c26b9f191ad2f9e4e61f9  codestra-produ
 2969c70ff9e6568a6958f0e6c760a34e538aeb5934049f59dc4f69eab7ab018c  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
 dad62a1dcb35fabb97991ad2f0a1079d13d949528daa7bebe0d35d291ec23f67  ../../PRODUCTION-DATABASE-MANIFEST.yaml
-de4d9ed07a33d4a9addf7cbef1df2d6f72125d3d67113662e64eab29e6124ec3  ../../tools/validate_production_database_manifest.py
+c6b3041ead24fb674d982a5787ff4f2d0eabbf0fd9bb45be8bcb695d09647235  ../../tools/validate_production_database_manifest.py
 EOF
 }
 verify_payload || fail
@@ -61,6 +81,8 @@ verify_payload || fail
 [ -f "$database_manifest_source" ] || fail
 [ ! -L "$database_validator_source" ] || fail
 [ -f "$database_validator_source" ] || fail
+validate_trusted_source "$database_manifest_source"
+validate_trusted_source "$database_validator_source"
 
 for payload in \
   codestra-production-operator \

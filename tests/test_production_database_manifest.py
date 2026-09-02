@@ -83,6 +83,7 @@ def test_complete_checksum_bound_evidence_can_pass(tmp_path):
         payload = f"verified evidence for {component['id']}\n".encode()
         relative = f"{component['id']}.txt"
         (evidence_root / relative).write_bytes(payload)
+        (evidence_root / relative).chmod(0o600)
         component["evidence_bundle"] = {
             "path": relative,
             "sha256": hashlib.sha256(payload).hexdigest(),
@@ -109,6 +110,7 @@ def test_stale_evidence_is_rejected(tmp_path):
         payload = component["id"].encode()
         relative = f"{component['id']}.txt"
         (evidence_root / relative).write_bytes(payload)
+        (evidence_root / relative).chmod(0o600)
         component["evidence_bundle"] = {
             "path": relative,
             "sha256": hashlib.sha256(payload).hexdigest(),
@@ -120,3 +122,16 @@ def test_stale_evidence_is_rejected(tmp_path):
     )
     with pytest.raises(AssertionError, match="stale certification evidence"):
         validate(candidate, evidence_root)
+
+
+def test_symlink_evidence_is_rejected(tmp_path):
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    target = tmp_path / "target"
+    target.write_bytes(b"not trusted")
+    target.chmod(0o600)
+    (evidence_root / "link").symlink_to(target)
+    with pytest.raises(OSError):
+        from tools.validate_production_database_manifest import read_evidence
+
+        read_evidence(evidence_root, "link")
