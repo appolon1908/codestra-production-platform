@@ -1,15 +1,25 @@
 [Unit]
-Description=Codestra isolated all-database restore rehearsal
-After=docker.service
+Description=Codestra isolated restore from encrypted off-host database backup
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+ConditionPathExists=/etc/codestra/server-a-certification/database-restore.env
 
 [Service]
 Type=oneshot
 User=root
 Group=root
-ExecStart=/opt/codestra/operations/database-certification/restore-all-databases.sh
-ExecStartPost=/opt/codestra/operations/database-certification/database-certification-metrics.sh
+EnvironmentFile=/etc/codestra/server-a-certification/database-restore.env
+WorkingDirectory=/opt/codestra/production-controls/current/operations/database-certification
+ExecStart=/usr/bin/python3 /opt/codestra/production-controls/current/operations/database-certification/restore-all-databases.py --run
+TimeoutStartSec=4h
+UMask=0077
+NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/codestra/evidence/database-restore /var/lib/docker /etc/codestra/backup-gpg /var/lib/node_exporter/textfile_collector
-NoNewPrivileges=true
+ReadWritePaths=/opt/codestra/evidence/database-restore /var/lib/node_exporter/textfile_collector /run
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

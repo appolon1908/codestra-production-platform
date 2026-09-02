@@ -1,17 +1,25 @@
 [Unit]
-Description=Codestra all-database encrypted certification backup
-After=docker.service network-online.target
-Wants=network-online.target
+Description=Codestra encrypted off-host database and application-state backup
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+ConditionPathExists=/etc/codestra/server-a-certification/database-backup.env
 
 [Service]
 Type=oneshot
 User=root
 Group=root
-EnvironmentFile=-/etc/codestra/backup/database-certification.env
-ExecStart=/opt/codestra/operations/database-certification/backup-all-databases.sh
-ExecStartPost=/opt/codestra/operations/database-certification/database-certification-metrics.sh
+EnvironmentFile=/etc/codestra/server-a-certification/database-backup.env
+WorkingDirectory=/opt/codestra/production-controls/current/operations/database-certification
+ExecStart=/usr/bin/python3 /opt/codestra/production-controls/current/operations/database-certification/backup-all-databases.py --run
+TimeoutStartSec=3h
+UMask=0077
+NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/opt/codestra/backups /var/lib/docker/volumes/codestra-provisioning-production_state/_data /var/lib/node_exporter/textfile_collector
-NoNewPrivileges=true
+ProtectHome=true
+ReadWritePaths=/opt/codestra/backups/database-certification /var/lib/node_exporter/textfile_collector /run
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

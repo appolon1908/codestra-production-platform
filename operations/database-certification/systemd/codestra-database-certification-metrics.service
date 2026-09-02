@@ -1,0 +1,21 @@
+[Unit]
+Description=Publish Codestra database backup and restore certification metrics
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=-/etc/codestra/server-a-certification/database-backup.env
+EnvironmentFile=-/etc/codestra/server-a-certification/database-restore.env
+WorkingDirectory=/opt/codestra/production-controls/current/operations/database-certification
+ExecStart=/usr/bin/python3 /opt/codestra/production-controls/current/operations/database-certification/database-certification-metrics.py
+UMask=0022
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/node_exporter/textfile_collector
+
+[Install]
+WantedBy=multi-user.target

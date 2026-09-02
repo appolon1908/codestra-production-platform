@@ -1,59 +1,59 @@
 groups:
-  - name: database-certification
+  - name: codestra-database-certification
     rules:
-      - alert: CodestraCanonicalDatabaseDown
-        expr: codestra_database_up == 0
-        for: 2m
-        labels: {severity: critical, environment: production, service: database}
-        annotations: {summary: A canonical production database is unavailable}
-      - alert: CodestraCanonicalDatabaseConnectionsWarning
-        expr: codestra_database_connections / clamp_min(codestra_database_max_connections, 1) >= 0.70
-        for: 15m
-        labels: {severity: warning, environment: production, service: database}
-        annotations: {summary: A production database exceeds 70 percent connection utilization}
-      - alert: CodestraCanonicalDatabaseConnectionsCritical
-        expr: codestra_database_connections / clamp_min(codestra_database_max_connections, 1) >= 0.85
-        for: 5m
-        labels: {severity: critical, environment: production, service: database}
-        annotations: {summary: A production database exceeds 85 percent connection utilization}
-      - alert: CodestraCanonicalDatabaseLockWait
-        expr: codestra_database_waiting_locks > 0
-        for: 5m
-        labels: {severity: warning, environment: production, service: database}
-        annotations: {summary: A production database has waiting locks}
-      - alert: CodestraDatabaseBackupStale
-        expr: (time() - codestra_database_backup_last_success_timestamp_seconds > 86400) or absent(codestra_database_backup_last_success_timestamp_seconds)
-        for: 15m
-        labels: {severity: critical, environment: production, service: database-backup}
+      - alert: CodestraCentralBackupMissing
+        expr: absent(codestra_database_backup_evidence_valid) or codestra_database_backup_evidence_valid != 1
+        for: 10m
+        labels: {severity: critical, service: central-backup}
         annotations:
-          summary: Database certification backup is older than 24 hours
-      - alert: CodestraDatabaseOffhostBackupMissing
-        expr: (codestra_database_backup_offhost_ok != 1) or absent(codestra_database_backup_offhost_ok)
+          summary: Codestra central backup evidence is missing or invalid
+          description: The fail-closed backup evidence metric is absent or not PASS.
+      - alert: CodestraCentralBackupStale
+        expr: codestra_database_backup_age_seconds > 108000
         for: 15m
-        labels: {severity: critical, environment: production, service: database-backup}
+        labels: {severity: critical, service: central-backup}
         annotations:
-          summary: Database backup is not verified in an independent failure domain
-      - alert: CodestraDatabaseRestoreOverdue
-        expr: (time() - codestra_database_restore_last_success_timestamp_seconds > 604800) or absent(codestra_database_restore_last_success_timestamp_seconds)
+          summary: Codestra central backup is older than 30 hours
+          description: Repair the backup before approving further production changes.
+      - alert: CodestraOffHostRestoreMissing
+        expr: absent(codestra_database_restore_evidence_valid) or codestra_database_restore_evidence_valid != 1
+        for: 30m
+        labels: {severity: critical, service: disaster-recovery}
+        annotations:
+          summary: No valid isolated off-host restore evidence is available
+          description: Production certification requires a restore from the encrypted off-host copy.
+      - alert: CodestraOffHostRestoreStale
+        expr: codestra_database_restore_age_seconds > 691200
         for: 1h
-        labels: {severity: critical, environment: production, service: database-restore}
+        labels: {severity: warning, service: disaster-recovery}
         annotations:
-          summary: Isolated database restore rehearsal is overdue
-      - alert: CodestraWebsocketReplicationDown
-        expr: (codestra_websocket_db_replication_streaming != 1) or absent(codestra_websocket_db_replication_streaming)
-        for: 2m
-        labels: {severity: critical, environment: production, service: websocket-database}
+          summary: Codestra restore rehearsal is older than eight days
+          description: Run the isolated recovery exercise and verify all restored applications.
+      - alert: CodestraKeycloakRestoredStartupFailed
+        expr: absent(codestra_keycloak_restored_startup_success) or codestra_keycloak_restored_startup_success != 1
+        for: 30m
+        labels: {severity: critical, service: keycloak}
         annotations:
-          summary: WebSocket PostgreSQL streaming replication is unavailable
-      - alert: CodestraWebsocketStandbyUnexpectedlyWritable
-        expr: (codestra_websocket_db_standby_in_recovery != 1) or absent(codestra_websocket_db_standby_in_recovery)
-        for: 1m
-        labels: {severity: critical, environment: production, service: websocket-database}
+          summary: Keycloak has not started successfully against restored identity data
+          description: Identity recovery is not certified until this gate is PASS.
+      - alert: CodestraOffHostBackupVerificationFailed
+        expr: absent(codestra_database_backup_offhost_verified) or codestra_database_backup_offhost_verified != 1
+        for: 10m
+        labels: {severity: critical, service: central-backup}
         annotations:
-          summary: WebSocket standby database is unexpectedly writable
-      - alert: CodestraWebsocketReplicationLag
-        expr: codestra_websocket_db_replication_lag_bytes > 16777216
-        for: 5m
-        labels: {severity: warning, environment: production, service: websocket-database}
+          summary: Codestra off-host backup verification is not PASS
+          description: The encrypted artifact must upload and pass remote checksum readback.
+      - alert: CodestraImmutableRetentionEvidenceFailed
+        expr: absent(codestra_database_backup_immutable_retention_verified) or codestra_database_backup_immutable_retention_verified != 1
+        for: 10m
+        labels: {severity: critical, service: disaster-recovery}
         annotations:
-          summary: WebSocket database replication lag exceeds 16 MiB
+          summary: Codestra immutable retention evidence is absent, stale, or failed
+          description: Confirm object lock, WORM, or immutable snapshot retention and deletion protection.
+      - alert: CodestraN8nCredentialRecoveryFailed
+        expr: absent(codestra_n8n_credential_recovery_success) or codestra_n8n_credential_recovery_success != 1
+        for: 30m
+        labels: {severity: critical, service: n8n}
+        annotations:
+          summary: n8n credential recovery is not proven
+          description: Restore the off-host database and prove credential decryption inside the no-egress rehearsal network.

@@ -1,0 +1,10 @@
+{
+  "schema": "codestra.offhost-immutability-evidence.v1",
+  "status": "PASS",
+  "provider_reference": "REPLACE_WITH_OBJECT_LOCK_WORM_OR_IMMUTABLE_SNAPSHOT_REFERENCE",
+  "retention_mode": "OBJECT_LOCK",
+  "verified_at": "REPLACE_WITH_UTC_TIMESTAMP",
+  "retention_until": "REPLACE_WITH_FUTURE_UTC_TIMESTAMP",
+  "deletion_protection_tested": true,
+  "owner": "REPLACE_WITH_RESPONSIBLE_OWNER"
+}

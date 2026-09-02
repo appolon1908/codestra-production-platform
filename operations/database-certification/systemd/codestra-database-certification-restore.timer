@@ -1,9 +1,9 @@
 [Unit]
-Description=Weekly Codestra isolated all-database restore rehearsal
+Description=Weekly Codestra isolated off-host restore rehearsal schedule
 
 [Timer]
-OnCalendar=Sun *-*-* 03:30:00 UTC
-RandomizedDelaySec=900
+OnCalendar=Sun *-*-* 04:00:00 UTC
+RandomizedDelaySec=20m
 Persistent=true
 Unit=codestra-database-certification-restore.service
 

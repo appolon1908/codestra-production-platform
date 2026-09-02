@@ -1,0 +1,4 @@
+# Exact protected paths required to reconstruct applications after a host loss.
+# Do not include SSH configuration, SSH keys, or authorized_keys.
+/etc/codestra/runtime-secrets
+/opt/codestra/production-controls/current
