@@ -26,6 +26,7 @@ components:
     sbom: GENERATED_BY_PROTECTED_BUILD
     provenance: GENERATED_BY_PROTECTED_BUILD
     runtime_state: NOT_DEPLOYED
+    evidence: evidence/server65/AI-MARKETING-IMMUTABLE-CANDIDATES-20260902.md
     rollback_digest: null
   - service: codestra-marketing
     state: IMMUTABLE_CANDIDATE_NOT_DEPLOYED
@@ -37,6 +38,7 @@ components:
     sbom: GENERATED_BY_PROTECTED_BUILD
     provenance: GENERATED_BY_PROTECTED_BUILD
     runtime_state: NOT_DEPLOYED
+    evidence: evidence/server65/AI-MARKETING-IMMUTABLE-CANDIDATES-20260902.md
     rollback_digest: null
   - service: appolon-middleware-integration-api
     state: SIGNED_CANDIDATE_NOT_DEPLOYED

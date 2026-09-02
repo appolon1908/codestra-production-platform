@@ -40,6 +40,7 @@ custom_release_candidates:
     image_digest: sha256:908c59e54a2620142e597523fa31b5d1d710dc00156b35c5a642e5437362df3e
     migration_head: 003_api_completion
     runtime_state: IMMUTABLE_CANDIDATE_NOT_DEPLOYED
+    evidence: evidence/server65/AI-MARKETING-IMMUTABLE-CANDIDATES-20260902.md
     deployment_authorized: false
   codestra_marketing:
     repository: appolon1908-hue/Codestra-Marketing-
@@ -48,6 +49,7 @@ custom_release_candidates:
     image_digest: sha256:3d9bd44922ad02d865f191cac5c9e454b88bb7cbfc8cd643f81e7b57f132c391
     migration_head: 003_operations
     runtime_state: IMMUTABLE_CANDIDATE_NOT_DEPLOYED
+    evidence: evidence/server65/AI-MARKETING-IMMUTABLE-CANDIDATES-20260902.md
     deployment_authorized: false
 blockers:
   - id: middleware-authority-split
