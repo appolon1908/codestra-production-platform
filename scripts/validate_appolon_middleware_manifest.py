@@ -11,7 +11,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "deploy/middleware/compose.appolon-integration-api.yaml"
 LOCK = ROOT / "deploy/middleware/appolon-integration-api-lock.json"
-EXPECTED_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware@sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820"
+ROLLBACK_COMPOSE = ROOT / "deploy/middleware/compose.appolon-integration-api.rollback.yaml"
+EXPECTED_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware@sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484"
 DISABLED = {
     "OUTBOX_DISPATCH_ENABLED",
     "ODOO_WRITE",
@@ -51,6 +52,8 @@ def validate() -> None:
     raw = COMPOSE.read_text(encoding="utf-8")
     compose = yaml.safe_load(raw)
     lock = json.loads(LOCK.read_text(encoding="utf-8"))
+    rollback_raw = ROLLBACK_COMPOSE.read_text(encoding="utf-8")
+    rollback_compose = yaml.safe_load(rollback_raw)
     assert "middleware-integration-api" not in compose["services"]
     service = compose["services"]["appolon-middleware-integration-api"]
     assert service["image"] == EXPECTED_IMAGE == lock["image"]
@@ -68,9 +71,9 @@ def validate() -> None:
     assert all(environment[name] == "false" for name in DISABLED)
     assert environment["APP_ENV"] == "production"
     assert environment["RUNTIME_PROFILE_ID"] == "codestra-middleware-production-compose-v1"
-    assert environment["APP_SOURCE_SHA"] == "f6748a58f8d2590520a4f28776770957061cdea1"
-    assert environment["IMAGE_DIGEST"] == "sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820"
-    assert environment["BUILD_TIME"] == "2026-08-30T13:24:37Z"
+    assert environment["APP_SOURCE_SHA"] == "f3437709c06747249586598590145234ea2c7327"
+    assert environment["IMAGE_DIGEST"] == "sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484"
+    assert environment["BUILD_TIME"] == "2026-09-02T10:04:02Z"
     assert environment["PRODUCTION_DIALING"] == "DISABLED"
     assert service["env_file"] == [{
         "path": "/etc/codestra/secrets/appolon-middleware-production.env",
@@ -78,15 +81,41 @@ def validate() -> None:
     }]
     assert SECRET_PATTERN.search(raw) is None
     assert lock["source"] == "https://github.com/appolon1908-hue/Middleware-"
-    assert lock["revision"] == "f6748a58f8d2590520a4f28776770957061cdea1"
-    assert lock["release_run"] == 33314094004
+    assert lock["revision"] == "f3437709c06747249586598590145234ea2c7327"
+    assert lock["release_run"] == 33617485810
     assert lock["runtime_profile"] == "codestra-middleware-production-compose-v1"
     assert lock["database_name"] == "codestra_middleware_appolon"
     assert lock["database_role"] == "appolon_middleware_api"
     assert lock["production_writes_enabled"] is False
     assert lock["deployment_state"] == "ISOLATED_DATABASE_REVIEW_REQUIRED"
     assert lock["rollback"]["requires_separate_protected_apply"] is True
-    assert lock["rollback"]["action"] == "remove_appolon_service_and_preserve_legacy_runtime"
+    assert lock["rollback"]["action"] == "restore_database_then_redeploy_previous_appolon_image_digest"
+    assert lock["rollback"].get("previous_command") is None
+    assert lock["rollback"]["previous_entrypoint"] == "image-default-app.main:create_app"
+    assert lock["rollback"]["database_name"] == lock["database_name"]
+    assert lock["rollback"]["pre_migration_head"] == "0003_immutable_event_ledger"
+    assert lock["rollback"]["candidate_migration_head"] == "0006_outbox_attempt_events"
+    assert lock["rollback"]["requires_pre_migration_database_backup"] is True
+    assert lock["rollback"]["rollback_compose_override"] == str(ROLLBACK_COMPOSE.relative_to(ROOT))
+    assert lock["rollback"]["previous_source_revision"] == "f6748a58f8d2590520a4f28776770957061cdea1"
+    assert lock["rollback"]["previous_build_time"] == "2026-08-30T13:24:37Z"
+    assert lock["rollback"]["restore_order"] == [
+        "stop_candidate",
+        "restore_verified_pre_migration_database_backup",
+        "verify_pre_migration_head",
+        "redeploy_previous_image_digest_with_pinned_runtime_metadata",
+        "verify_health_readiness_and_runtime_version",
+    ]
+    rollback_service = rollback_compose["services"]["appolon-middleware-integration-api"]
+    assert rollback_service["image"].endswith("@" + lock["rollback"]["previous_image_digest"])
+    rollback_environment = rollback_service["environment"]
+    assert rollback_environment == {
+        "APP_SOURCE_SHA": lock["rollback"]["previous_source_revision"],
+        "IMAGE_DIGEST": lock["rollback"]["previous_image_digest"],
+        "BUILD_TIME": lock["rollback"]["previous_build_time"],
+        "SCHEMA_HEAD": lock["rollback"]["pre_migration_head"],
+    }
+    assert SECRET_PATTERN.search(rollback_raw) is None
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", lock["rollback"]["previous_image_digest"])
 
 
