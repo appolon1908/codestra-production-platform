@@ -1,0 +1,84 @@
+schema: codestra.server-a-source-authority.v1
+target_server: 65.109.65.169
+target_private_ip: 10.40.0.1
+status: repository_authority_defined_runtime_attestation_required
+platform:
+  repository: appolon1908-hue/codestra-production-platform
+  protected_branch: release/production-activation
+  checkout_path: /root/codestra-production-completion
+  role: deployment_orchestration_and_certification_authority
+components:
+  - id: caddy
+    repository: appolon1908-hue/Caddy
+    platform_paths:
+      - operations/caddy
+    runtime_attestation: required
+  - id: kong
+    repository: appolon1908-hue/Kong
+    platform_paths:
+      - deploy/kong-production-standby
+      - operations/kong-database
+    runtime_attestation: required
+  - id: keycloak
+    repository: appolon1908-hue/Keycloak
+    platform_paths:
+      - identity
+      - operations/database-certification
+    runtime_attestation: required
+  - id: middleware-protected-production
+    repository: Codestra-SRL/codestra-middleware
+    platform_lock_path: PRODUCTION-SOURCE-LOCK.yaml
+    runtime_attestation: required
+  - id: middleware-appolon-candidate
+    repository: appolon1908-hue/Middleware-
+    platform_lock_path: PRODUCTION-SOURCE-LOCK.yaml
+    runtime_attestation: required
+    certification_constraint: must_not_replace_protected_production_tuple_until_migrations_and_contracts_are_reconciled
+  - id: odoo
+    repository: appolon1908-hue/Odoo
+    platform_paths:
+      - deploy/odoo
+      - odoo_addons
+    runtime_attestation: required
+  - id: n8n
+    repository: appolon1908-hue/N8N
+    platform_paths:
+      - n8n
+      - operations/odoo-n8n
+    runtime_attestation: required
+  - id: prometheus
+    repository: appolon1908-hue/Codestra-Prometheus
+    platform_paths:
+      - operations/monitoring
+    runtime_attestation: required
+  - id: alertmanager
+    repository: appolon1908-hue/Codestra-Alertmanager
+    platform_paths:
+      - operations/monitoring
+    runtime_attestation: required
+  - id: grafana
+    repository: appolon1908-hue/Codestra-Grafana-
+    runtime_attestation: required
+  - id: loki
+    repository: appolon1908-hue/Codestra-Loki
+    runtime_attestation: required
+  - id: tempo
+    repository: appolon1908-hue/Codestra-Tempo
+    runtime_attestation: required
+  - id: alloy
+    repository: appolon1908-hue/Codestra-Alloy
+    runtime_attestation: required
+  - id: telemetry
+    repository: appolon1908-hue/Codestra-Telemetry
+    runtime_attestation: required
+  - id: blackbox-exporter
+    repository: appolon1908-hue/Codestra-Blackbox-Exporter
+    runtime_attestation: required
+  - id: openbao
+    repository: appolon1908-hue/Codestra-OpenBao
+    runtime_attestation: required
+unresolved_runtime_authority_policy:
+  action: fail
+  fallback_repository: appolon1908-hue/codestra-production-platform
+  fallback_path: operations/server-a-certification/runtime-authority-imports
+  secret_material_allowed: false
