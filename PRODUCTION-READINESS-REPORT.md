@@ -51,7 +51,7 @@ The count change is not attributed to this remediation session; no container mut
 | VULNERABILITY_GATE | FAIL |
 | CADDY | FAIL — active and syntactically valid, but the approved health gate returns 503 for `api.breero.com`; readiness/version, exact source alignment, and structural secret-redaction proof remain failed (`evidence/server65/CADDY-RUNTIME-READBACK-20260902.md`) |
 | KEYCLOAK | FAIL — public discovery, issuer, JWKS, TLS, and advertised S256 read-back pass; authenticated client, audience, tenant, MFA, service-account, and session controls remain uncertified (`evidence/server65/KEYCLOAK-RUNTIME-READBACK-20260902.md`) |
-| KONG | FAIL |
+| KONG | FAIL — all 29 routes are inventoried, but the live 503 remains unattributed until the reviewed, sanitized `kong-readback` action is separately approved and installed; global traffic-gate state must be checked before an upstream is blamed (`evidence/server65/KONG-RUNTIME-READBACK-BLOCKER-20260902.md`) |
 | MIDDLEWARE | FAIL |
 | ODOO | FAIL |
 | N8N | FAIL |

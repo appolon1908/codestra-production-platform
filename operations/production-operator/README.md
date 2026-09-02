@@ -6,12 +6,17 @@ protected commit.
 
 The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
 `restore-test`, `stage`, `canary`, `status`, `rollback`, `collect-evidence`,
+`kong-readback`,
 `stage-control-plane`, `validate-control-plane`, `activate-control-plane`,
 `rollback-control-plane`, `enable-production-web-traffic`, or
 `disable-production-web-traffic`, plus the bounded `rollout-middleware` and
 `rollback-middleware` pair.
 There is no shell, Docker-group membership, host/path input, arbitrary unit, or
-command argument. `preflight`, `status`, and `collect-evidence` are read-only.
+command argument. `preflight`, `status`, `collect-evidence`, and `kong-readback`
+are read-only. `kong-readback` emits only allowlisted route, service, upstream,
+target-health, plugin-scope, traffic-gate, and checksum fields. Plugin
+configuration, route header matchers, certificates, credentials, and consumer
+data are excluded.
 Every other action except emergency `rollback` requires
 `/etc/codestra/production-operator/maintenance-date`
 
@@ -30,9 +35,9 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `399069961f34e4ae8b29777be94862fa4202502fe05665878eca615460494ee3` |
-| `codestra-production-forced-command` | `d806b91ae6d9ddf962883487ffebaf3ac503ed3ef79b0d9a9bdedc222e64cf8c` |
-| `codestra-production-operator.sudoers` | `9023d679f923587eaaed3d0c27b5c388a136d112a9483777881b5aea002ed520` |
+| `codestra-production-operator` | `1897bb1ec205a2ff1ffddbc190de20dcb34016de9083584c83849abd87d79679` |
+| `codestra-production-forced-command` | `6d7432e9765474f86e93a711962ddf6b1f8edb3eab6098ace8d19d575f9ddec4` |
+| `codestra-production-operator.sudoers` | `2969c70ff9e6568a6958f0e6c760a34e538aeb5934049f59dc4f69eab7ab018c` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `codestra-isolated-restore-rehearsal.sh` | `076bc8d33318561fff535f336300d072cd14beb9c756c253a8b1c6a30f3f34f4` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |

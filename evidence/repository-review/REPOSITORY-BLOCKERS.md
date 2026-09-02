@@ -85,3 +85,11 @@ A missing permission or unavailable API is a blocker, never a PASS.
 - `appolon1908-hue/Superset` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Superset` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `Codestra-SRL/codestra-middleware`: organization Actions budget is `0` with `prevent_further_usage=true`; eligible pushes produce synthetic zero-job `BuildFailed`/`startup_failure` runs. Billing owner must establish an approved Actions entitlement, then exact-head and protected-main release workflows must be revalidated. See `CANONICAL-MIDDLEWARE-ACTIONS-BLOCKER-20260902.md`.
+# Server 65 Kong runtime read-back — 2026-09-02
+
+- **Owner:** Infrastructure/security owner
+- **Repository:** `appolon1908-hue/Kong` and `appolon1908-hue/Infustruction-repo`
+- **Service:** Kong gateway on `65.109.65.169`
+- **Blocker:** `api.breero.com/health` returns HTTP 503 through Caddy and Kong, but the installed production operator exposes no sanitized route/service/target/upstream-health read-back. A least-privilege `kong-readback` action is implemented in PR #198 but installing it changes the protected operator surface and requires separate infrastructure/security-owner approval.
+- **Required action:** review, approve, and install the PR #198 exact-command extension through protected infrastructure change control; it emits only allowlisted sanitized data and provides no arbitrary shell.
+- **Validation after action:** first rule out the global Kong traffic gate, then reconcile all 29 runtime routes and remediate an upstream only if read-back proves it is the cause; rerun Caddy/Kong health, readiness, version, authentication, authorization, and route-alignment checks.
