@@ -2,7 +2,8 @@
 
 Captured read-only at `2026-09-02T17:08:00Z` from the production public identity endpoint. No credentials, tokens, secrets, user records, or private key material were requested or recorded.
 
-Target: `65.109.65.169` identity boundary  
+Target: `65.109.65.169` identity boundary
+
 Public authority: `https://auth.codestra.co/realms/codestra`
 
 ## Direct runtime observations
