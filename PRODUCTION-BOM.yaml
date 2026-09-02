@@ -1,5 +1,5 @@
 schema_version: codestra.production-bom.v1
-generated_at: "2026-09-02T14:30:00Z"
+generated_at: "2026-09-02T22:52:00Z"
 target: 65.109.65.169
 status: FAIL
 inventory_baseline:
