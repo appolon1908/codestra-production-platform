@@ -243,7 +243,7 @@ def test_spool_cleanup_removes_only_verified_expired_wal(tmp_path):
     failed = stage / "000000010000000000000002"; failed.write_text("wal")
     failed_marker = Path(str(failed) + ".offhost")
     failed_marker.write_text("EVIDENCE_TYPE=WAL_OFFHOST\nSTATUS=FAIL\n")
-    old = (datetime.now().timestamp() - 9 * 86400)
+    old = (datetime.now().timestamp() - 7 * 86400 - 5 * 60)
     # A delayed off-host upload must not restart the WAL retention clock.
     os.utime(verified, (old, old)); os.utime(failed, (old, old))
     env = {**os.environ, "CODESTRA_SHARED_WAL_STAGE": str(stage), "CODESTRA_SHARED_POSTGRES_STATE": str(state)}
