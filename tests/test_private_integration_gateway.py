@@ -188,14 +188,11 @@ def test_private_gateway_openapi_contains_only_executable_routes(mode: str):
         "/v1/operations/{id}/attempts",
         "/v1/operations/{id}/cancel",
         "/v1/operations/{id}/reconcile",
-        "/v1/integrations/email/commands",
-        "/v1/integrations/sms/commands",
-        "/v1/integrations/crawler/commands",
         gateway.JASMIN_DLR_PATH,
         *(f"/api/v1/{system}/health" for system in gateway.SYSTEMS),
     }
     if mode == "shared":
-        expected.add("/v1/messages")
+        expected.update({"/v1/messages", "/v1/integrations/sms/commands"})
     else:
         expected.update(
             path for values in gateway.INGRESS_PATHS.values() for path in values
@@ -205,12 +202,9 @@ def test_private_gateway_openapi_contains_only_executable_routes(mode: str):
         gateway.JASMIN_DLR_PATH,
         "/v1/operations/{id}/cancel",
         "/v1/operations/{id}/reconcile",
-        "/v1/integrations/email/commands",
-        "/v1/integrations/sms/commands",
-        "/v1/integrations/crawler/commands",
     }
     if mode == "shared":
-        post_paths.add("/v1/messages")
+        post_paths.update({"/v1/messages", "/v1/integrations/sms/commands"})
     else:
         post_paths.update(
             value for values in gateway.INGRESS_PATHS.values() for value in values
@@ -256,17 +250,20 @@ def test_private_gateway_openapi_contains_only_executable_routes(mode: str):
     assert schemes["kyqraTimestamp"]["name"] == "X-Kyqra-Timestamp"
     assert schemes["telnexaEventId"]["name"] == "X-Telnexa-Event-Id"
     assert schemes["klyrowSignature"]["name"] == "X-Klyrow-Signature"
-    command_security = paths["/v1/integrations/sms/commands"]["post"]["security"]
-    assert command_security == [
-        {
-            "mutualTLS": [],
-            "bearerAuth": [],
-            "serviceIdentity": [],
-            "serviceScope": [],
-            "tenantHeader": [],
-            "idempotencyHeader": [],
-        }
-    ]
+    if mode == "shared":
+        command_security = paths["/v1/integrations/sms/commands"]["post"][
+            "security"
+        ]
+        assert command_security == [
+            {
+                "mutualTLS": [],
+                "bearerAuth": [],
+                "serviceIdentity": [],
+                "serviceScope": [],
+                "tenantHeader": [],
+                "idempotencyHeader": [],
+            }
+        ]
 
 
 def test_private_gateway_openapi_rejects_unknown_runtime_mode():
@@ -478,7 +475,7 @@ def test_production_edge_derives_telnexa_identity_and_scopes() -> None:
     assert "$http_x_service_identity" not in nginx.lower()
     compose = yaml.safe_load((SERVICE / "compose.production.yaml").read_text())
     environment = compose["services"]["gateway"]["environment"]
-    assert environment["INTEGRATION_COMMAND_INTAKE_ENABLED"] == "true"
+    assert environment["INTEGRATION_COMMAND_INTAKE_ENABLED"] == "false"
     assert environment["LIVE_SUBMISSION_ENABLED"] == "false"
     assert environment["PRODUCTION_DELIVERY_AUTHORIZED"] == "false"
 
@@ -487,7 +484,27 @@ def test_metrics_requires_mtls_derived_matching_service_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
-    app = gateway.Gateway(settings(tmp_path), store(tmp_path))
+    app = gateway.Gateway(
+        settings(tmp_path, integration_command_intake_enabled=True),
+        store(tmp_path),
+        clock=lambda: OPERATION_CLOCK,
+    )
+    command_headers = governed_headers("integrations:sms:commands")
+    operation_id = command_envelope()["operation_id"]
+    code, _ = app.integration_command(
+        "sms", json.dumps(command_envelope()).encode(), command_headers
+    )
+    assert code == 202
+    reconcile_headers = governed_headers(
+        "operations:reconcile", idempotency_key="reconcile-key-0001"
+    )
+    code, _ = app.mutate_integration_operation(
+        operation_id,
+        "reconcile",
+        json.dumps(operation_action("reconcile-key-0001")).encode(),
+        reconcile_headers,
+    )
+    assert code == 409
     server = gateway.ThreadingHTTPServer(("127.0.0.1", 0), gateway.handler_for(app))
     server.daemon_threads = True
     worker = threading.Thread(target=server.serve_forever, daemon=True)
@@ -534,7 +551,16 @@ def test_metrics_requires_mtls_derived_matching_service_identity(
         with urllib.request.urlopen(authorized, timeout=5) as response:
             assert response.status == 200
             assert response.headers["Content-Type"] == "text/plain; charset=us-ascii"
-            assert b"private_gateway_events" in response.read()
+            metrics = response.read()
+            assert b"private_gateway_events" in metrics
+            assert (
+                b'private_gateway_operations{channel="sms",status="RECONCILIATION_REQUIRED"} 1'
+                in metrics
+            )
+            assert (
+                b'private_gateway_operation_attempts{attempt_type="RECONCILE",status="BLOCKED"} 1'
+                in metrics
+            )
     finally:
         server.shutdown()
         server.server_close()

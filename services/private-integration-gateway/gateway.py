@@ -1606,6 +1606,22 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def integration_operation_counts(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT channel,status,count(*) AS count
+                FROM integration_operations GROUP BY channel,status"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def integration_attempt_counts(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT attempt_type,status,count(*) AS count
+                FROM integration_operation_attempts GROUP BY attempt_type,status"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def create_integration_operation(
         self, values: dict[str, Any], now: float
     ) -> tuple[str, sqlite3.Row]:
@@ -3539,6 +3555,34 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                     lines.append(
                         f'private_gateway_events{{system="{system}",state="{state}"}} {int(item["count"])}'
                     )
+                lines.extend(
+                    [
+                        "# HELP private_gateway_operations Durable integration operations by status",
+                        "# TYPE private_gateway_operations gauge",
+                    ]
+                )
+                for item in gateway.store.integration_operation_counts():
+                    channel = re.sub(
+                        r"[^a-zA-Z0-9_-]", "", str(item["channel"])
+                    )
+                    status = re.sub(r"[^a-zA-Z0-9_-]", "", str(item["status"]))
+                    lines.append(
+                        f'private_gateway_operations{{channel="{channel}",status="{status}"}} {int(item["count"])}'
+                    )
+                lines.extend(
+                    [
+                        "# HELP private_gateway_operation_attempts Durable reconciliation attempts by status",
+                        "# TYPE private_gateway_operation_attempts gauge",
+                    ]
+                )
+                for item in gateway.store.integration_attempt_counts():
+                    attempt_type = re.sub(
+                        r"[^a-zA-Z0-9_-]", "", str(item["attempt_type"])
+                    )
+                    status = re.sub(r"[^a-zA-Z0-9_-]", "", str(item["status"]))
+                    lines.append(
+                        f'private_gateway_operation_attempts{{attempt_type="{attempt_type}",status="{status}"}} {int(item["count"])}'
+                    )
                 return self.send_text(200, ("\n".join(lines) + "\n").encode())
             headers = {key: value for key, value in self.headers.items()}
             if parsed_path == "/v1/capabilities":
@@ -3888,7 +3932,12 @@ def openapi_document(mode: str) -> dict[str, Any]:
             }
         },
     }
-    for channel in COMMAND_CHANNELS:
+    # The only checked-in production edge is the shared Telnexa edge.  It
+    # derives the Telnexa service identity from the approved client
+    # certificate and grants only the SMS command channel.  Middleware mode
+    # has no checked-in command edge, so it must not advertise command intake.
+    advertised_command_channels = {"sms"} if mode == "shared" else set()
+    for channel in advertised_command_channels:
         paths[f"/v1/integrations/{channel}/commands"] = {
             "post": {
                 "summary": f"Persist one governed {channel} integration command",
