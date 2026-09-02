@@ -256,6 +256,19 @@ class MonitoringGovernanceTests(unittest.TestCase):
             staging["static_configs"][0]["targets"],
             ["middleware-intake-staging:8080"],
         )
+        self.assertEqual(
+            staging["oauth2"]["token_url"],
+            "https://auth-staging.codestra.co/realms/codestra/protocol/openid-connect/token",
+        )
+        self.assertNotIn("codestra-mail-api", jobs)
+        self.assertNotIn("codestra-reseller-portal", jobs)
+        readiness_targets = [
+            target
+            for config in jobs["blackbox_application_readiness"]["static_configs"]
+            for target in config["targets"]
+        ]
+        self.assertIn("http://codestra-mail-api:8098/healthz/ready", readiness_targets)
+        self.assertIn("http://portal:8080/readyz", readiness_targets)
         self.assertIn("operations_dashboard_staging", compose["services"]["prometheus"]["networks"])
         self.assertEqual(
             compose["networks"]["operations_dashboard_staging"],

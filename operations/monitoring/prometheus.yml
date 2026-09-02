@@ -39,7 +39,7 @@ scrape_configs:
     oauth2:
       client_id: monitoring-readonly
       client_secret_file: /run/secrets/staging_metrics_client_secret
-      token_url: https://auth.codestra.co/realms/codestra/protocol/openid-connect/token
+      token_url: https://auth-staging.codestra.co/realms/codestra/protocol/openid-connect/token
       scopes: [metrics.read]
     sample_limit: 250000
     label_limit: 40
@@ -107,24 +107,6 @@ scrape_configs:
         labels:
           environment: production
           application: middleware
-
-  - job_name: codestra-mail-api
-    metrics_path: /metrics
-    static_configs:
-      - targets: [codestra-mail-api:8098]
-        labels:
-          environment: production
-          application: mail-api
-          service: mail-api
-
-  - job_name: codestra-reseller-portal
-    metrics_path: /metrics
-    static_configs:
-      - targets: [portal:8080]
-        labels:
-          environment: production
-          application: reseller-portal
-          service: reseller-portal
 
   - job_name: blackbox_application_readiness
     metrics_path: /probe
