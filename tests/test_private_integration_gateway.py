@@ -167,9 +167,11 @@ def test_delivery_defaults_fail_closed(tmp_path: Path, monkeypatch: pytest.Monke
     assert value.production_delivery_authorized is False
 
 
-def test_private_gateway_openapi_contains_required_routes():
-    document = gateway.openapi_document()
+@pytest.mark.parametrize("mode", ["middleware", "shared"])
+def test_private_gateway_openapi_contains_only_executable_routes(mode: str):
+    document = gateway.openapi_document(mode)
     validate(document)
+    assert document["x-gateway-mode"] == mode
     paths = document["paths"]
     expected = {
         "/health",
@@ -189,52 +191,67 @@ def test_private_gateway_openapi_contains_required_routes():
         "/v1/integrations/email/commands",
         "/v1/integrations/sms/commands",
         "/v1/integrations/crawler/commands",
-        "/v1/messages",
         gateway.JASMIN_DLR_PATH,
         *(f"/api/v1/{system}/health" for system in gateway.SYSTEMS),
-        *(path for values in gateway.INGRESS_PATHS.values() for path in values),
     }
+    if mode == "shared":
+        expected.add("/v1/messages")
+    else:
+        expected.update(
+            path for values in gateway.INGRESS_PATHS.values() for path in values
+        )
     assert set(paths) == expected
     post_paths = {
-        "/v1/messages",
         gateway.JASMIN_DLR_PATH,
         "/v1/operations/{id}/cancel",
         "/v1/operations/{id}/reconcile",
         "/v1/integrations/email/commands",
         "/v1/integrations/sms/commands",
         "/v1/integrations/crawler/commands",
-        *(value for values in gateway.INGRESS_PATHS.values() for value in values),
     }
+    if mode == "shared":
+        post_paths.add("/v1/messages")
+    else:
+        post_paths.update(
+            value for values in gateway.INGRESS_PATHS.values() for value in values
+        )
     assert all(
         set(item) == ({"post"} if path in post_paths else {"get"})
         for path, item in paths.items()
     )
     assert paths["/metrics"]["get"]["security"] == [
-        {"mutualTLS": [], "bearerAuth": []}
-    ]
-    assert paths["/v1/messages"]["post"]["security"] == [
         {
             "mutualTLS": [],
             "bearerAuth": [],
-            "codestraTimestamp": [],
-            "codestraNonce": [],
-            "codestraSignature": [],
+            "serviceIdentity": [],
+            "serviceScope": [],
         }
     ]
+    if mode == "shared":
+        assert paths["/v1/messages"]["post"]["security"] == [
+            {
+                "mutualTLS": [],
+                "bearerAuth": [],
+                "codestraTimestamp": [],
+                "codestraNonce": [],
+                "codestraSignature": [],
+            }
+        ]
     assert paths[gateway.JASMIN_DLR_PATH]["post"]["security"] == [
         {"jasminProof": []}
     ]
-    kyqra_security = paths["/api/v1/kyqra/jobs"]["post"]["security"]
-    assert kyqra_security == [
-        {
-            "mutualTLS": [],
-            "bearerAuth": [],
-            "kyqraTimestamp": [],
-            "kyqraEventId": [],
-            "kyqraSignature": [],
-            "sourceSystem": [],
-        }
-    ]
+    if mode == "middleware":
+        kyqra_security = paths["/api/v1/kyqra/jobs"]["post"]["security"]
+        assert kyqra_security == [
+            {
+                "mutualTLS": [],
+                "bearerAuth": [],
+                "kyqraTimestamp": [],
+                "kyqraEventId": [],
+                "kyqraSignature": [],
+                "sourceSystem": [],
+            }
+        ]
     schemes = document["components"]["securitySchemes"]
     assert schemes["kyqraTimestamp"]["name"] == "X-Kyqra-Timestamp"
     assert schemes["telnexaEventId"]["name"] == "X-Telnexa-Event-Id"
@@ -250,6 +267,11 @@ def test_private_gateway_openapi_contains_required_routes():
             "idempotencyHeader": [],
         }
     ]
+
+
+def test_private_gateway_openapi_rejects_unknown_runtime_mode():
+    with pytest.raises(ValueError, match="OpenAPI mode"):
+        gateway.openapi_document("invalid")
 
 
 def test_governed_command_is_durable_idempotent_and_semantic(
@@ -451,6 +473,7 @@ def test_production_edge_derives_telnexa_identity_and_scopes() -> None:
     nginx = (SERVICE / "nginx/telnexa-private-gateway.conf").read_text()
     assert "proxy_set_header X-Service-Identity telnexa;" in nginx
     assert "integrations:sms:commands" in nginx
+    assert "metrics:read" in nginx
     assert "operations:reconcile" in nginx
     assert "$http_x_service_identity" not in nginx.lower()
     compose = yaml.safe_load((SERVICE / "compose.production.yaml").read_text())
@@ -487,12 +510,25 @@ def test_metrics_requires_mtls_derived_matching_service_identity(
             urllib.request.urlopen(wrong_certificate, timeout=5)
         assert unverified.value.code == 401
 
+        missing_scope = urllib.request.Request(
+            endpoint,
+            headers={
+                "Authorization": "Bearer test-telnexa-key",
+                "X-Client-Certificate-Verified": "SUCCESS",
+                "X-Service-Identity": "telnexa",
+            },
+        )
+        with pytest.raises(urllib.error.HTTPError) as unscoped:
+            urllib.request.urlopen(missing_scope, timeout=5)
+        assert unscoped.value.code == 401
+
         authorized = urllib.request.Request(
             endpoint,
             headers={
                 "Authorization": "Bearer test-telnexa-key",
                 "X-Client-Certificate-Verified": "SUCCESS",
                 "X-Service-Identity": "telnexa",
+                "X-Service-Scope": "metrics:read",
             },
         )
         with urllib.request.urlopen(authorized, timeout=5) as response:
@@ -503,6 +539,15 @@ def test_metrics_requires_mtls_derived_matching_service_identity(
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
+
+
+def test_connectivity_audit_uses_bounded_authenticated_metrics_identity() -> None:
+    source = (ROOT / "scripts/private_gateway_audit.py").read_text()
+
+    assert '"X-Service-Identity":"telnexa"' in source
+    assert '"X-Service-Scope":"metrics:read"' in source
+    assert 'os.environ["TELNEXA_MIDDLEWARE_API_KEY"]' in source
+    assert 'call("GET","/metrics",headers=metrics_headers)' in source
 
 
 def test_live_delivery_requires_second_gate_and_change_id(tmp_path: Path):

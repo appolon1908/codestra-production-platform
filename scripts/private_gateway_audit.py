@@ -46,8 +46,10 @@ def record(items,name,actual,expected,evidence=None):
 
 def inside():
     run=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")+"-"+uuid.uuid4().hex[:8]; items=[]
-    for path in ("/health","/api/v1/kyqra/health","/api/v1/telnexa/health","/api/v1/klyrow/health","/metrics"):
+    for path in ("/health","/api/v1/kyqra/health","/api/v1/telnexa/health","/api/v1/klyrow/health"):
         status,value=call("GET",path); record(items,"private gateway "+path,status,200,{"response":value})
+    metrics_headers={"Authorization":"Bearer "+os.environ["TELNEXA_MIDDLEWARE_API_KEY"],"X-Client-Certificate-Verified":"SUCCESS","X-Service-Identity":"telnexa","X-Service-Scope":"metrics:read"}
+    status,value=call("GET","/metrics",headers=metrics_headers); record(items,"private gateway authenticated /metrics",status,200,{"response":value})
     for system,paths in ROUTES.items():
         for index,path in enumerate(paths):
             event_id=f"gateway-audit-{system}-{index}-{run}"

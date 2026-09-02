@@ -3470,16 +3470,6 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(raw)
 
-        def authenticated_private_service(self) -> bool:
-            identity = self.headers.get("X-Service-Identity", "").strip().lower()
-            return (
-                self.headers.get("X-Client-Certificate-Verified", "") == "SUCCESS"
-                and identity in SYSTEMS
-                and gateway.authenticate_key(
-                    identity, self.headers.get("Authorization", "")
-                )
-            )
-
         def read_request_body(self, length: int) -> bytes:
             deadline = time.monotonic() + REQUEST_BODY_DEADLINE_SECONDS
             chunks: list[bytes] = []
@@ -3534,9 +3524,10 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                         )
                     return self.send_json(200, value)
             if parsed_path == "/openapi.json":
-                return self.send_json(200, openapi_document())
+                return self.send_json(200, openapi_document(gateway.settings.mode))
             if parsed_path == "/metrics":
-                if not self.authenticated_private_service():
+                headers = {key: value for key, value in self.headers.items()}
+                if gateway.private_service_identity(headers, "metrics:read") is None:
                     return self.send_json(401, {"detail": "service_identity_required"})
                 lines = [
                     "# HELP private_gateway_events Events by durable state",
@@ -3695,12 +3686,19 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-def openapi_document() -> dict[str, Any]:
+def openapi_document(mode: str) -> dict[str, Any]:
+    if mode not in {"middleware", "shared"}:
+        raise ValueError("OpenAPI mode must be middleware or shared")
     # Schemes within one security object are conjunctive in OpenAPI.  Keeping
     # them together documents the edge mTLS requirement as an additional
     # control, not an alternative to the service bearer and signed request.
     edge_security = [{"mutualTLS": []}]
-    metrics_security = [{"mutualTLS": [], "bearerAuth": []}]
+    metrics_security = [{
+        "mutualTLS": [],
+        "bearerAuth": [],
+        "serviceIdentity": [],
+        "serviceScope": [],
+    }]
     operation_security = [
         {
             "mutualTLS": [],
@@ -3756,6 +3754,7 @@ def openapi_document() -> dict[str, Any]:
                 **read_operation("Prometheus metrics", metrics_security),
                 "x-required-headers": [
                     "X-Service-Identity",
+                    "X-Service-Scope (metrics:read)",
                     "X-Client-Certificate-Verified (edge supplied)",
                 ],
                 "responses": {
@@ -3845,23 +3844,6 @@ def openapi_document() -> dict[str, Any]:
                 },
             }
         },
-        "/v1/messages": {
-            "post": {
-                "summary": "Governed Telnexa message submission",
-                "security": message_security,
-                "x-required-headers": [
-                    "X-Codestra-Timestamp",
-                    "X-Codestra-Nonce",
-                    "X-Codestra-Signature",
-                ],
-                "responses": {
-                    "202": {"description": "Durable message state returned"},
-                    "401": {"description": "Authentication failed"},
-                    "409": {"description": "Replay or idempotency conflict"},
-                    "422": {"description": "Policy or payload rejected"},
-                },
-            }
-        },
         JASMIN_DLR_PATH: {
             "post": {
                 "summary": "Attempt-bound Jasmin delivery receipt",
@@ -3880,6 +3862,24 @@ def openapi_document() -> dict[str, Any]:
             }
         },
     }
+    if mode == "shared":
+        paths["/v1/messages"] = {
+            "post": {
+                "summary": "Governed Telnexa message submission",
+                "security": message_security,
+                "x-required-headers": [
+                    "X-Codestra-Timestamp",
+                    "X-Codestra-Nonce",
+                    "X-Codestra-Signature",
+                ],
+                "responses": {
+                    "202": {"description": "Durable message state returned"},
+                    "401": {"description": "Authentication failed"},
+                    "409": {"description": "Replay or idempotency conflict"},
+                    "422": {"description": "Policy or payload rejected"},
+                },
+            }
+        }
     command_request = {
         "required": True,
         "content": {
@@ -3939,22 +3939,23 @@ def openapi_document() -> dict[str, Any]:
         paths[f"/api/v1/{system}/health"] = {
             "get": read_operation(f"{system.title()} integration health", edge_security)
         }
-    for system, ingress_paths in INGRESS_PATHS.items():
-        for path in sorted(ingress_paths):
-            paths[path] = {
-                "post": {
-                    "summary": f"Authenticated {system.title()} event ingress",
-                    "security": event_security(system),
-                    "x-signature-header-prefix": SYSTEMS[system][2],
-                    "responses": {
-                        "200": {"description": "Semantic duplicate accepted"},
-                        "202": {"description": "Event durably accepted"},
-                        "401": {"description": "Authentication failed"},
-                        "409": {"description": "Replay or event ID conflict"},
-                        "422": {"description": "Payload rejected"},
-                    },
+    if mode == "middleware":
+        for system, ingress_paths in INGRESS_PATHS.items():
+            for path in sorted(ingress_paths):
+                paths[path] = {
+                    "post": {
+                        "summary": f"Authenticated {system.title()} event ingress",
+                        "security": event_security(system),
+                        "x-signature-header-prefix": SYSTEMS[system][2],
+                        "responses": {
+                            "200": {"description": "Semantic duplicate accepted"},
+                            "202": {"description": "Event durably accepted"},
+                            "401": {"description": "Authentication failed"},
+                            "409": {"description": "Replay or event ID conflict"},
+                            "422": {"description": "Payload rejected"},
+                        },
+                    }
                 }
-            }
 
     security_schemes: dict[str, Any] = {
         "bearerAuth": {"type": "http", "scheme": "bearer"},
@@ -4023,6 +4024,7 @@ def openapi_document() -> dict[str, Any]:
     return {
         "openapi": "3.1.0",
         "info": {"title": "Private Integration Gateway", "version": "2.0.0"},
+        "x-gateway-mode": mode,
         "components": {
             "securitySchemes": security_schemes,
             "schemas": {
