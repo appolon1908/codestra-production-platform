@@ -1,5 +1,5 @@
 schema_version: codestra.production-bom.v1
-generated_at: "2026-09-02T14:30:00Z"
+generated_at: "2026-09-02T22:52:00Z"
 target: 65.109.65.169
 status: FAIL
 inventory_baseline:
@@ -16,6 +16,30 @@ components:
     image_digest: sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820
     migration_head: 0003_immutable_event_ledger
     rollback_digest: sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820
+  - service: codestra-ai
+    state: IMMUTABLE_CANDIDATE_NOT_DEPLOYED
+    source_repository: appolon1908-hue/Codestra-AI
+    source_sha: 7d31ef8de1c15bcc71b61de50917c81e3bcf557d
+    image: ghcr.io/appolon1908-hue/codestra-ai
+    image_digest: sha256:908c59e54a2620142e597523fa31b5d1d710dc00156b35c5a642e5437362df3e
+    migration_head: 003_api_completion
+    sbom: GENERATED_BY_PROTECTED_BUILD
+    provenance: GENERATED_BY_PROTECTED_BUILD
+    runtime_state: NOT_DEPLOYED
+    evidence: evidence/server65/AI-MARKETING-IMMUTABLE-CANDIDATES-20260902.md
+    rollback_digest: null
+  - service: codestra-marketing
+    state: IMMUTABLE_CANDIDATE_NOT_DEPLOYED
+    source_repository: appolon1908-hue/Codestra-Marketing-
+    source_sha: fe784f1e91bb0f0fd49f2b2f741a4020a337c149
+    image: ghcr.io/appolon1908-hue/codestra-marketing
+    image_digest: sha256:3d9bd44922ad02d865f191cac5c9e454b88bb7cbfc8cd643f81e7b57f132c391
+    migration_head: 003_operations
+    sbom: GENERATED_BY_PROTECTED_BUILD
+    provenance: GENERATED_BY_PROTECTED_BUILD
+    runtime_state: NOT_DEPLOYED
+    evidence: evidence/server65/AI-MARKETING-IMMUTABLE-CANDIDATES-20260902.md
+    rollback_digest: null
   - service: appolon-middleware-integration-api
     state: SIGNED_CANDIDATE_NOT_DEPLOYED
     source_repository: appolon1908-hue/Middleware-
