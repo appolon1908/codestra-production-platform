@@ -17,6 +17,7 @@ Decision: **NO-GO**
 - All dangerous external-effect switches remain disabled. No email, SMS, social post, advertisement, model request, payment, or PSTN call was initiated.
 - Klyrow and Telnexa source-defined public health/readiness endpoints pass with authoritative DNS, exact peer, and TLS hostname verification; private mTLS/service-identity integration gates remain FAIL (`evidence/server65/PROVIDER-READONLY-HEALTH-20260902.md`).
 - Provider credential read-back is fail-closed: Klyrow authority and consumer states disagree, Telnexa consumer validation fails despite an active declaration, and Kyqra is uninitialized (`evidence/server65/PROVIDER-CREDENTIAL-STATE-20260902.md`).
+- All 24 known unpinned deployments were refreshed from safe live Docker metadata; none has a digest-pinned Compose reference, only four expose a valid repository/SHA pair, and four deployment authorities remain under inaccessible `/root` worktrees (`evidence/server65/SOURCE-AUTHORITY-24-DEPLOYMENTS-20260902.yaml`).
 
 ## Runtime baseline
 
