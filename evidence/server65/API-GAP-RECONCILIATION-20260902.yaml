@@ -55,6 +55,39 @@ candidate:
   database_role: appolon_middleware_api
   deployment_state: ISOLATED_DATABASE_REVIEW_REQUIRED
   external_effects_enabled: false
+  authority_classification: TRANSITIONAL_RUNTIME_NOT_CONTROL_PLANE_AUTHORITY
+  promotion_decision: DO_NOT_PROMOTE_AS_CANONICAL_MIDDLEWARE
+
+canonical_convergence:
+  source_repository: https://github.com/Codestra-SRL/codestra-middleware
+  pull_request: https://github.com/Codestra-SRL/codestra-middleware/pull/283
+  signed_head_sha: e48ec614a2da680802ee106e271b52f3006e72dc
+  source_state: IMPLEMENTED_PENDING_EXACT_HEAD_CI
+  routes:
+    - GET /v1/integrations/n8n/operations
+    - POST /v1/integrations/n8n/operations/{operation_id}/cancel
+    - POST /v1/integrations/n8n/operations/{operation_id}/reconcile
+  implementation_basis: existing durable N8nRuntimeExecution engine
+  local_validation:
+    ruff: PASS
+    mypy: PASS
+    pytest_passed: 1261
+    pytest_skipped: 33
+  controls:
+    keycloak_service_jwt: true
+    scope_enforcement: true
+    token_bound_tenant: true
+    idempotency_key_for_mutations: true
+    correlation_id: true
+    durable_control_evidence: true
+    audit: true
+    existing_worker_retry_timeout_policy_reused: true
+    ambiguous_downstream_state_fails_closed: true
+  exact_head_ci: BLOCKED
+  blocker: >-
+    Codestra-SRL organization Actions budget is zero with
+    prevent_further_usage enabled; push and pull_request events create only
+    zero-job BuildFailed startup_failure records.
 
 rollback:
   previous_source_sha: f6748a58f8d2590520a4f28776770957061cdea1

@@ -23,9 +23,22 @@ middleware_authorities:
     image_digest: sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484
     migration_head: 0006_outbox_attempt_events
     runtime_state: IMPLEMENTED_NOT_DEPLOYED
+    authority_classification: TRANSITIONAL_RUNTIME_NOT_CONTROL_PLANE_AUTHORITY
+    promotion_decision: DO_NOT_PROMOTE_AS_CANONICAL_MIDDLEWARE
+  canonical_n8n_gap_convergence:
+    repository: Codestra-SRL/codestra-middleware
+    pull_request: 283
+    signed_head_sha: e48ec614a2da680802ee106e271b52f3006e72dc
+    runtime_state: IMPLEMENTED_PENDING_EXACT_HEAD_CI
+    image_digest: null
+    deployment_authorized: false
 blockers:
   - id: middleware-authority-split
-    reason: The protected production tuple and Appolon n8n-gap candidate are different implementations with incompatible migration identities.
+    reason: >-
+      The Appolon n8n-gap runtime is transitional and must not replace the
+      canonical control plane. Canonical convergence PR 283 is implemented but
+      cannot run exact-head CI while the Codestra-SRL Actions budget prevents
+      further usage.
   - id: unpinned-custom-runtime
     count: 24
     evidence: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml

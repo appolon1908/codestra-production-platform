@@ -20,6 +20,7 @@ Decision: **NO-GO**
 - All 24 known unpinned deployments were refreshed from safe live Docker metadata; none has a digest-pinned Compose reference, only four expose a valid repository/SHA pair, and four deployment authorities remain under inaccessible `/root` worktrees (`evidence/server65/SOURCE-AUTHORITY-24-DEPLOYMENTS-20260902.yaml`).
 - The three required n8n gaps are reconciled without inflating the 641 runtime-derived record count: two absent contracts remain in the required-gap register and live Kong record `ep-0577` is the broken collection route (`evidence/server65/API-GAP-RECONCILIATION-20260902.yaml`).
 - Canonical Middleware protected release CI is externally blocked before job creation: the `Codestra-SRL` organization Actions budget is zero and prevents further usage. No billing control was changed (`evidence/repository-review/CANONICAL-MIDDLEWARE-ACTIONS-BLOCKER-20260902.md`).
+- The three n8n operation gaps are now implemented on canonical Middleware PR `Codestra-SRL/codestra-middleware#283` at signed head `e48ec614a2da680802ee106e271b52f3006e72dc`; local Ruff, MyPy, and all 1,261 repository tests pass. Exact-head CI and image publication remain blocked by the same Actions entitlement, so runtime gap count remains three and no deployment is authorized.
 
 ## Runtime baseline
 
