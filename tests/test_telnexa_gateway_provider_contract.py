@@ -136,6 +136,43 @@ def test_telnexa_provider_uses_gateway_body_and_hmac_contract(
     assert headers["x-codestra-signature"] == "sha256=" + expected
 
 
+def test_explicit_retry_uses_a_new_stable_gateway_attempt_identity(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure(tmp_path, monkeypatch)
+    message = production_message()
+    message["provider_attempt"] = 1
+    requests = []
+
+    def urlopen(request, *, timeout):
+        requests.append(request)
+        return Response(
+            {
+                "accepted": True,
+                "adapter_message_id": "18cd23b0-52bd-41d3-89f8-d276de79d254",
+                "carrier_submitted": True,
+                "duplicate": False,
+                "state": "submitted",
+            }
+        )
+
+    monkeypatch.setattr(providers.urllib.request, "urlopen", urlopen)
+    providers.submit(message)
+    first_payload = json.loads(requests[0].data)
+    providers.submit(message)
+    replay_payload = json.loads(requests[1].data)
+    assert first_payload["idempotency_key"] == replay_payload["idempotency_key"]
+    assert first_payload["idempotency_key"].startswith("retry-")
+    assert first_payload["idempotency_key"] != message["idempotency_key"]
+
+    next_attempt = dict(message, provider_attempt=2)
+    providers.submit(next_attempt)
+    assert (
+        json.loads(requests[2].data)["idempotency_key"]
+        != first_payload["idempotency_key"]
+    )
+
+
 def test_telnexa_provider_does_not_promote_mock_receipt_to_acceptance(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

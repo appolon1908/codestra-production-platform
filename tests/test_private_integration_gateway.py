@@ -772,6 +772,38 @@ def valid_payload(**changes):
     return value
 
 
+@pytest.mark.parametrize("prefix", ["", "+", "49155", "+0", "+49x", "+1234567890123456"])
+def test_customer_destination_prefixes_are_strict_e164_routes(
+    monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["tenant-a"]["destination_prefixes"] = [prefix]
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    with pytest.raises(PermissionError, match="destination_route_not_authorized"):
+        gateway.validate_outbound(valid_payload(), 2_000_000_000)
+
+
+@pytest.mark.parametrize(
+    ("message", "segments"),
+    [
+        ("a" * 160, 1),
+        ("a" * 161, 2),
+        ("^" * 80, 1),
+        ("^" * 81, 2),
+        ("€" * 80, 1),
+        ("漢" * 70, 1),
+        ("漢" * 71, 2),
+        ("😀" * 35, 1),
+        ("😀" * 36, 2),
+    ],
+)
+def test_sms_segment_count_uses_gsm_septets_and_utf16_units(
+    message: str, segments: int
+) -> None:
+    assert gateway.sms_segment_count(message) == segments
+
+
 @pytest.mark.parametrize(
     ("changes", "error"),
     [
@@ -1020,6 +1052,10 @@ def test_quota_and_wallet_are_atomically_reserved_before_carrier_effect(
         first_body,
         outbound_headers(first_body, now, "nonce-billing-reserve-0001"),
     )[0] == 202
+    with state.connect() as connection:
+        connection.execute(
+            "UPDATE sms_transactions SET state='submitted',carrier_submitted=1"
+        )
     second_body = json.dumps(
         valid_payload(
             idempotency_key="idem-billing-0002",
@@ -1040,6 +1076,133 @@ def test_quota_and_wallet_are_atomically_reserved_before_carrier_effect(
     assert [tuple(row) for row in rows] == [
         ("tenant-a", "2026-09", 1, 5, "EUR", "quota_wallet_reserved")
     ]
+
+
+def test_segment_quota_remains_enforced_after_currency_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["tenant-a"].update(
+        {"quota_limit_segments": 1, "wallet_limit_minor": 5}
+    )
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(tmp_path),
+        state,
+        clock=lambda: now,
+        urlopen=lambda *_args, **_kwargs: HealthyJasmin(),
+    )
+    first = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    assert app.outbound(
+        first, outbound_headers(first, now, "nonce-cross-currency-0001")
+    )[0] == 202
+    with state.connect() as connection:
+        connection.execute(
+            "UPDATE sms_transactions SET state='submitted',carrier_submitted=1"
+        )
+    policy["tenant-a"]["currency"] = "USD"
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    second = json.dumps(
+        valid_payload(
+            idempotency_key="idem-cross-currency-0002",
+            message_id="message-cross-currency-0002",
+        ),
+        separators=(",", ":"),
+    ).encode()
+    assert app.outbound(
+        second, outbound_headers(second, now, "nonce-cross-currency-0002")
+    ) == (403, {"detail": "customer_quota_exhausted"})
+
+
+def test_released_reservation_reacquires_current_capacity_before_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["tenant-a"]["quota_limit_segments"] = 1
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    probes = [False, True]
+
+    def urlopen(url, **_kwargs):
+        assert url.endswith("/ping")
+        if not probes.pop(0):
+            raise TimeoutError("synthetic dependency outage")
+        return HealthyJasmin()
+
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(tmp_path), state, clock=lambda: now, urlopen=urlopen
+    )
+    released = json.dumps(valid_payload(), separators=(",", ":")).encode()
+    assert app.outbound(
+        released, outbound_headers(released, now, "nonce-release-capacity-0001")
+    ) == (503, {"detail": "jasmin_dependency_unavailable"})
+    replacement = json.dumps(
+        valid_payload(
+            idempotency_key="idem-release-capacity-0002",
+            message_id="message-release-capacity-0002",
+        ),
+        separators=(",", ":"),
+    ).encode()
+    assert app.outbound(
+        replacement,
+        outbound_headers(replacement, now, "nonce-release-capacity-0002"),
+    )[0] == 202
+    with state.connect() as connection:
+        connection.execute(
+            """UPDATE sms_transactions SET state='submitted',carrier_submitted=1
+            WHERE idempotency_key='idem-release-capacity-0002'"""
+        )
+    assert app.outbound(
+        released, outbound_headers(released, now, "nonce-release-capacity-0003")
+    ) == (403, {"detail": "customer_quota_exhausted"})
+
+
+def test_safe_mode_and_rejected_rows_release_reserved_capacity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 2_000_000_000
+    configure_tenant(monkeypatch)
+    policy = gateway.customer_policy()
+    policy["tenant-a"]["quota_limit_segments"] = 1
+    policy["tenant-a"]["wallet_limit_minor"] = 5
+    monkeypatch.setenv("TELNEXA_CUSTOMER_POLICY_JSON", json.dumps(policy))
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    monkeypatch.setenv("TELNEXA_WEBHOOK_SECRET", "test-telnexa-secret")
+    state = store(tmp_path)
+    app = gateway.Gateway(
+        settings(tmp_path),
+        state,
+        clock=lambda: now,
+        urlopen=lambda *_args, **_kwargs: HealthyJasmin(),
+    )
+    for attempt in range(1, 4):
+        body = json.dumps(
+            valid_payload(
+                idempotency_key=f"idem-released-{attempt:04d}",
+                message_id=f"message-released-{attempt:04d}",
+            ),
+            separators=(",", ":"),
+        ).encode()
+        assert app.outbound(
+            body,
+            outbound_headers(body, now, f"nonce-released-{attempt:04d}"),
+        )[0] == 202
+        if attempt == 1:
+            with state.connect() as connection:
+                connection.execute(
+                    """UPDATE sms_transactions
+                    SET state='rejected',carrier_submitted=0
+                    WHERE idempotency_key='idem-released-0001'"""
+                )
 
 
 @pytest.mark.parametrize(

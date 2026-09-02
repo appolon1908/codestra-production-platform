@@ -199,6 +199,16 @@ class CommunicationsTests(unittest.TestCase):
         message,_=self.store.create_message(request()); env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"stop-1","payload":{"message_id":message["message_id"],"status":"received","text":"STOP"}},"telnexa","stop-1")
         self.store.apply_provider_event("telnexa",env); self.assertFalse(self.store.preference_allows("tenant-a","customer-1","sms"))
 
+    def test_exact_provider_replay_repairs_missing_optout_side_effects(self):
+        message,_=self.store.create_message(request())
+        env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"stop-crash-replay","payload":{"message_id":message["message_id"],"status":"received","text":"STOP"}},"telnexa","stop-crash-replay")
+        self.store.transition_message(message["message_id"],"tenant-a","inbound_received","received",event_id=env["event_id"],payload=env["payload"])
+        self.assertTrue(self.store.preference_allows("tenant-a","customer-1","sms"))
+        self.assertFalse(self.store.is_suppressed("tenant-a","sms",message["normalized_destination"]))
+        self.assertFalse(self.store.apply_provider_event("telnexa",env))
+        self.assertFalse(self.store.preference_allows("tenant-a","customer-1","sms"))
+        self.assertTrue(self.store.is_suppressed("tenant-a","sms",message["normalized_destination"]))
+
     def test_new_inbound_sms_creates_one_ledger_record(self):
         env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"inbound-new","payload":{"from":"+18095550123","to":"+18095550100","text":"HELP"}},"telnexa","inbound-new")
         first,duplicate=self.store.create_inbound_sms(env); second,replayed=self.store.create_inbound_sms(env)
@@ -208,7 +218,9 @@ class CommunicationsTests(unittest.TestCase):
         message,_=self.store.create_message(request()); self.store.cancel_message(message["message_id"],"tenant-a")
         with self.assertRaisesRegex(ControlPlaneError,"not_retryable"): self.store.retry_message(message["message_id"],"tenant-a")
         failed,_=self.store.create_message(request(key="failed")); self.store.transition_message(failed["message_id"],"tenant-a","failed","simulated")
-        self.assertEqual(self.store.retry_message(failed["message_id"],"tenant-a")["status"],"queued")
+        retried=self.store.retry_message(failed["message_id"],"tenant-a")
+        self.assertEqual(retried["status"],"queued")
+        self.assertEqual(retried["provider_attempt"],1)
 
     def test_normalization_segments_and_usage_integer_money(self):
         self.assertEqual(normalize_destination("email","USER@Example.Test"),"user@example.test")

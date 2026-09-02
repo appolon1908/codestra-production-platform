@@ -134,11 +134,26 @@ def _telnexa_submit(message: dict[str, object]) -> ProviderResult:
     body_value = content.get("text", content.get("content"))
     if not isinstance(body_value, str) or not body_value.strip():
         raise ProviderError("provider_payload_invalid")
+    provider_attempt = int(message.get("provider_attempt") or 0)
+    caller_idempotency_key = str(message["idempotency_key"])
+    provider_idempotency_key = caller_idempotency_key
+    if provider_attempt > 0:
+        attempt_identity = "\n".join(
+            (
+                str(message["tenant_id"]),
+                str(message["message_id"]),
+                caller_idempotency_key,
+                str(provider_attempt),
+            )
+        )
+        provider_idempotency_key = (
+            "retry-" + hashlib.sha256(attempt_identity.encode()).hexdigest()
+        )
     payload = {
         "body": body_value,
         "correlation_id": str(message["correlation_id"]),
         "customer_id": str(message["customer_id"]),
-        "idempotency_key": str(message["idempotency_key"]),
+        "idempotency_key": provider_idempotency_key,
         "message_id": str(message["message_id"]),
         "sender": str(message["sender"]),
         "tenant_id": str(message["tenant_id"]),

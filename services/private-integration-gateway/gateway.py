@@ -1080,14 +1080,34 @@ class Store:
                 WHERE customer_id=? AND idempotency_key=?""",
                 (authorization.customer_id, str(values[3])),
             ).fetchone()
-            if existing is not None:
+            same_released_reservation = (
+                existing is not None
+                and existing["state"] == "dependency_unavailable"
+                and existing["payload_hash"] == str(values[4])
+                and existing["effect_hash"] == str(values[5])
+                and existing["tenant_id"] == authorization.tenant_id
+            )
+            if existing is not None and not same_released_reservation:
                 return False, existing
-            totals = connection.execute(
-                """SELECT COALESCE(SUM(reserved_units),0) AS units,
-                COALESCE(SUM(reserved_cost_minor),0) AS cost
+            units = connection.execute(
+                """SELECT COALESCE(SUM(reserved_units),0) AS value
                 FROM sms_transactions
                 WHERE customer_id=? AND tenant_id=? AND billing_period=?
-                  AND currency=?""",
+                  AND state IN ('reserved','preflight','submitting',
+                                'outcome_unknown','submitted')""",
+                (
+                    authorization.customer_id,
+                    authorization.tenant_id,
+                    authorization.billing_period,
+                ),
+            ).fetchone()
+            cost = connection.execute(
+                """SELECT COALESCE(SUM(reserved_cost_minor),0) AS value
+                FROM sms_transactions
+                WHERE customer_id=? AND tenant_id=? AND billing_period=?
+                  AND currency=?
+                  AND state IN ('reserved','preflight','submitting',
+                                'outcome_unknown','submitted')""",
                 (
                     authorization.customer_id,
                     authorization.tenant_id,
@@ -1095,18 +1115,43 @@ class Store:
                     authorization.currency,
                 ),
             ).fetchone()
-            if totals is None:
+            if units is None or cost is None:
                 raise RuntimeError("SMS authorization totals read-back failed")
             if (
-                int(totals["units"]) + authorization.reserved_units
+                int(units["value"]) + authorization.reserved_units
                 > authorization.quota_limit_segments
             ):
                 raise PermissionError("customer_quota_exhausted")
             if (
-                int(totals["cost"]) + authorization.reserved_cost_minor
+                int(cost["value"]) + authorization.reserved_cost_minor
                 > authorization.wallet_limit_minor
             ):
                 raise PermissionError("wallet_funds_insufficient")
+            if same_released_reservation:
+                reacquired_cursor = connection.execute(
+                    """UPDATE sms_transactions
+                    SET state='reserved',jasmin_dependency='unchecked',
+                        billing_period=?,reserved_units=?,reserved_cost_minor=?,
+                        currency=?,authorization_sha256=?
+                    WHERE adapter_message_id=? AND state='dependency_unavailable'""",
+                    (
+                        authorization.billing_period,
+                        authorization.reserved_units,
+                        authorization.reserved_cost_minor,
+                        authorization.currency,
+                        authorization.authorization_sha256,
+                        existing["adapter_message_id"],
+                    ),
+                )
+                if reacquired_cursor.rowcount != 1:
+                    raise RuntimeError("SMS reservation reacquisition lost ownership")
+                reacquired = connection.execute(
+                    "SELECT * FROM sms_transactions WHERE adapter_message_id=?",
+                    (existing["adapter_message_id"],),
+                ).fetchone()
+                if reacquired is None:
+                    raise RuntimeError("SMS reservation reacquisition read-back failed")
+                return False, reacquired
             connection.execute(
                 """INSERT INTO sms_transactions(
                 adapter_message_id,customer_id,tenant_id,idempotency_key,
@@ -2083,15 +2128,24 @@ def customer_policy() -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def sms_segment_count(message: str) -> int:
-    """Return a conservative, bounded GSM/UCS segment reservation."""
+GSM_7_BASIC = frozenset(
+    "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./"
+    "0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿"
+    "abcdefghijklmnopqrstuvwxyzäöñüà"
+)
+GSM_7_EXTENSION = frozenset("\f^{}\\[~]|€")
 
-    single, concatenated = (160, 153) if message.isascii() else (70, 67)
-    return (
-        1
-        if len(message) <= single
-        else (len(message) + concatenated - 1) // concatenated
-    )
+
+def sms_segment_count(message: str) -> int:
+    """Return the exact GSM-7 septet or UTF-16 code-unit reservation."""
+
+    if all(character in GSM_7_BASIC or character in GSM_7_EXTENSION for character in message):
+        units = sum(2 if character in GSM_7_EXTENSION else 1 for character in message)
+        single, concatenated = 160, 153
+    else:
+        units = len(message.encode("utf-16-be")) // 2
+        single, concatenated = 70, 67
+    return 1 if units <= single else (units + concatenated - 1) // concatenated
 
 
 def billing_authorization(
@@ -2318,7 +2372,14 @@ def validate_outbound_authorization(
         raise PermissionError("sender_not_authorized")
     destination = normalize_destination(payload.get("to"))
     prefixes = policy.get("destination_prefixes", [])
-    if not prefixes or not all(isinstance(prefix, str) for prefix in prefixes):
+    if (
+        not prefixes
+        or not all(
+            isinstance(prefix, str)
+            and re.fullmatch(r"\+[1-9][0-9]{0,14}", prefix) is not None
+            for prefix in prefixes
+        )
+    ):
         raise PermissionError("destination_route_not_authorized")
     if not any(destination.startswith(prefix) for prefix in prefixes):
         raise PermissionError("destination_route_not_authorized")
