@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS public.messages(
   downstream_provider text, status text NOT NULL, raw_provider_status text,
   estimated_cost_minor integer NOT NULL DEFAULT 0, final_cost_minor integer,
   customer_charge_minor integer, currency text NOT NULL, provider_message_id text,
-  provider_error_code text, retry_count integer NOT NULL DEFAULT 0, created_at text NOT NULL,
+  provider_error_code text, retry_count integer NOT NULL DEFAULT 0,
+  provider_attempt integer NOT NULL DEFAULT 0, created_at text NOT NULL,
   submitted_at text, accepted_at text, sent_at text, delivered_at text, failed_at text,
   UNIQUE(tenant_id,idempotency_key));
 CREATE INDEX IF NOT EXISTS messages_tenant_created ON public.messages(tenant_id,created_at);
