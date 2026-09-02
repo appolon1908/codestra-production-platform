@@ -45,7 +45,7 @@
                         class="btn-secondary"
                         invisible="state != 'pending'"/>
             </xpath>
-            <xpath expr="//group[@string='Scheduled Next Step']" position="before">
+            <xpath expr="//field[@name='schedule_kind']/ancestor::group[1]" position="before">
                 <group string="Popup Reminder" invisible="not snoozed_until and not snooze_count">
                     <field name="snoozed_until" readonly="1"/>
                     <field name="snooze_count" readonly="1"/>
