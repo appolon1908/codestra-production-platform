@@ -14,9 +14,20 @@
   "deployment_state": "ISOLATED_DATABASE_REVIEW_REQUIRED",
   "production_writes_enabled": false,
   "rollback": {
-    "action": "redeploy_previous_appolon_image_digest",
+    "action": "restore_database_then_redeploy_previous_appolon_image_digest",
     "previous_image_digest": "sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820",
     "previous_entrypoint": "image-default-app.main:create_app",
+    "database_name": "codestra_middleware_appolon",
+    "pre_migration_head": "0003_immutable_event_ledger",
+    "candidate_migration_head": "0006_outbox_attempt_events",
+    "requires_pre_migration_database_backup": true,
+    "restore_order": [
+      "stop_candidate",
+      "restore_verified_pre_migration_database_backup",
+      "verify_pre_migration_head",
+      "redeploy_previous_image_digest",
+      "verify_health_readiness_and_runtime_version"
+    ],
     "requires_separate_protected_apply": true
   }
 }

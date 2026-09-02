@@ -86,9 +86,20 @@ def validate() -> None:
     assert lock["production_writes_enabled"] is False
     assert lock["deployment_state"] == "ISOLATED_DATABASE_REVIEW_REQUIRED"
     assert lock["rollback"]["requires_separate_protected_apply"] is True
-    assert lock["rollback"]["action"] == "redeploy_previous_appolon_image_digest"
+    assert lock["rollback"]["action"] == "restore_database_then_redeploy_previous_appolon_image_digest"
     assert lock["rollback"].get("previous_command") is None
     assert lock["rollback"]["previous_entrypoint"] == "image-default-app.main:create_app"
+    assert lock["rollback"]["database_name"] == lock["database_name"]
+    assert lock["rollback"]["pre_migration_head"] == "0003_immutable_event_ledger"
+    assert lock["rollback"]["candidate_migration_head"] == "0006_outbox_attempt_events"
+    assert lock["rollback"]["requires_pre_migration_database_backup"] is True
+    assert lock["rollback"]["restore_order"] == [
+        "stop_candidate",
+        "restore_verified_pre_migration_database_backup",
+        "verify_pre_migration_head",
+        "redeploy_previous_image_digest",
+        "verify_health_readiness_and_runtime_version",
+    ]
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", lock["rollback"]["previous_image_digest"])
 
 

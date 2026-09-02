@@ -32,10 +32,16 @@ approved source or build input for the canonical runtime.
 - Role: dedicated `appolon_middleware_api`
 
 This is the known-good immediate rollback target for the API-completion
-deployment. Rollback must redeploy this exact digest with the protected
-Appolon Compose profile and existing protected environment input; it must not
-remove the active service or fall back to the older legacy runtime. The older
-`09d4bd...` runtime remains historical recovery evidence only.
+deployment. Before migration, protected apply must capture an encrypted,
+integrity-verified backup of dedicated database `codestra_middleware_appolon`
+at head `0003_immutable_event_ledger`. Rollback must stop the candidate,
+restore that verified pre-migration backup into the dedicated database, verify
+the restored head is exactly `0003_immutable_event_ledger`, and only then
+redeploy this exact digest with the protected Appolon Compose profile and
+existing protected environment input. It must verify health, readiness, image
+digest, source revision, and schema head after restart. It must not remove the
+active service or fall back to the older legacy runtime. The older `09d4bd...`
+runtime remains historical recovery evidence only.
 
 ## Canonical side-by-side manifest
 
@@ -84,5 +90,7 @@ All canonical external-effect flags are explicitly disabled in the manifest,
 overriding any legacy value in the protected env file. Deployment requires a
 separate protected review and an exact-command operator apply after
 configuration, DNS, authentication, migration, route, rollback, and readiness
-validation. If any validation fails, the operator must restore the captured
-`695fa3...` digest above. This change does not authorize that apply.
+validation. If any validation fails, the operator must first restore the
+verified `0003_immutable_event_ledger` database backup and then restore the
+captured `695fa3...` digest above. An image-only rollback is prohibited. This
+change does not authorize that apply.
