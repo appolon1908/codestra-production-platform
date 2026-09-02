@@ -18,10 +18,12 @@ def test_security_alert_api_errors_are_reported_as_blockers(tmp_path, monkeypatc
     module = load_module()
     monkeypatch.setattr(module, "OUT", tmp_path)
     monkeypatch.setattr(module, "KNOWN_REPOSITORIES", ("example/service",))
+    monkeypatch.setattr(module, "load_repository_aliases", lambda: {})
 
     def fake_gh(path, *, paginate=False):
         if path == "repos/example/service":
             return {
+                "id": 123456,
                 "default_branch": "main",
                 "visibility": "private",
                 "archived": False,

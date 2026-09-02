@@ -1,0 +1,36 @@
+name: Repository Name Authority
+
+on:
+  pull_request:
+    branches:
+      - release/production-activation
+    paths:
+      - 'config/repository-name-aliases.v1.json'
+      - 'scripts/capture_repository_review.py'
+      - 'scripts/validate_repository_name_authority.py'
+      - '.github/workflows/repository-name-authority.yml'
+  push:
+    branches:
+      - release/production-activation
+    paths:
+      - 'config/repository-name-aliases.v1.json'
+      - 'scripts/capture_repository_review.py'
+      - 'scripts/validate_repository_name_authority.py'
+      - '.github/workflows/repository-name-authority.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile repository review capture
+        run: python -m py_compile scripts/capture_repository_review.py
+      - name: Validate stable repository identities
+        run: python scripts/validate_repository_name_authority.py
