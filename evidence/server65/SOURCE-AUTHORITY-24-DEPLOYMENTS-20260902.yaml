@@ -6,6 +6,10 @@ record_count: 24
 digest_semantics: current_digest is the local Docker content identity and is not proof of a registry-published immutable artifact
 summary:
   digest_pinned_compose_references: 0
+  unpinned_deployments: 24
+  distinct_local_image_artifacts: 19
+  unpinned_custom_image_artifacts: 18
+  third_party_image_artifacts: 1
   repository_and_valid_sha_labels: 4
   repository_label_invalid_or_unknown_sha: 6
   no_repository_label: 12
@@ -48,4 +52,5 @@ certification:
   source_authority: FAIL
   source_runtime_drift: 24
   all_custom_images_digest_pinned: false
-  unpinned_custom_images: 24
+  unpinned_deployments: 24
+  unpinned_custom_image_artifacts: 18
