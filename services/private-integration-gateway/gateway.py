@@ -1504,7 +1504,6 @@ class Store:
         except sqlite3.Error:
             return False
 
-
 def canonical(timestamp: str, event_id: str, source: str, body: bytes) -> bytes:
     return (
         timestamp.encode()
@@ -2618,6 +2617,16 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(raw)
 
+        def authenticated_private_service(self) -> bool:
+            identity = self.headers.get("X-Service-Identity", "").strip().lower()
+            return (
+                self.headers.get("X-Client-Certificate-Verified", "") == "SUCCESS"
+                and identity in SYSTEMS
+                and gateway.authenticate_key(
+                    identity, self.headers.get("Authorization", "")
+                )
+            )
+
         def read_request_body(self, length: int) -> bytes:
             deadline = time.monotonic() + REQUEST_BODY_DEADLINE_SECONDS
             chunks: list[bytes] = []
@@ -2642,7 +2651,14 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                 self.connection.settimeout(REQUEST_IO_TIMEOUT_SECONDS)
 
         def do_GET(self) -> None:
-            if self.path in {"/health", "/ready", "/version"}:
+            parsed_path = urllib.parse.urlsplit(self.path).path
+            if parsed_path in {
+                "/health",
+                "/ready",
+                "/version",
+                "/health/live",
+                "/health/ready",
+            }:
                 ready = gateway.store.ready()
                 value = {
                     "status": "ok" if ready else "unavailable",
@@ -2652,7 +2668,7 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                 }
                 return self.send_json(200 if ready else 503, value)
             for system in SYSTEMS:
-                if self.path == f"/api/v1/{system}/health":
+                if parsed_path == f"/api/v1/{system}/health":
                     value = {
                         "status": "ok",
                         "mode": gateway.settings.mode,
@@ -2664,8 +2680,22 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                             gateway.settings.live_submission_enabled
                         )
                     return self.send_json(200, value)
-            if self.path == "/metrics":
-                return self.send_json(200, {"events": gateway.store.event_counts()})
+            if parsed_path == "/openapi.json":
+                return self.send_json(200, openapi_document())
+            if parsed_path == "/metrics":
+                if not self.authenticated_private_service():
+                    return self.send_json(401, {"detail": "service_identity_required"})
+                lines = [
+                    "# HELP private_gateway_events Events by durable state",
+                    "# TYPE private_gateway_events gauge",
+                ]
+                for item in gateway.store.event_counts():
+                    system = re.sub(r"[^a-zA-Z0-9_-]", "", str(item["system"]))
+                    state = re.sub(r"[^a-zA-Z0-9_-]", "", str(item["state"]))
+                    lines.append(
+                        f'private_gateway_events{{system="{system}",state="{state}"}} {int(item["count"])}'
+                    )
+                return self.send_text(200, ("\n".join(lines) + "\n").encode())
             return self.send_json(404, {"detail": "not found"})
 
         def do_POST(self) -> None:
@@ -2704,23 +2734,187 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                     return self.send_json(409, {"detail": "carrier receipt conflict"})
                 return self.send_text(200, b"ACK/Jasmin")
             headers = {key: value for key, value in self.headers.items()}
-            if gateway.settings.mode == "shared" and self.path == "/v1/messages":
+            if gateway.settings.mode == "shared" and parsed_path.path == "/v1/messages":
                 code, value = gateway.outbound(body, headers)
                 return self.send_json(code, value)
             system = next(
                 (
                     name
                     for name, paths in INGRESS_PATHS.items()
-                    if self.path in paths
+                    if parsed_path.path in paths
                 ),
                 None,
             )
             if gateway.settings.mode != "middleware" or system is None:
                 return self.send_json(404, {"detail": "not found"})
-            code, value = gateway.ingress(system, self.path, body, headers)
+            code, value = gateway.ingress(system, parsed_path.path, body, headers)
             return self.send_json(code, value)
 
     return Handler
+
+
+def openapi_document() -> dict[str, Any]:
+    # Schemes within one security object are conjunctive in OpenAPI.  Keeping
+    # them together documents the edge mTLS requirement as an additional
+    # control, not an alternative to the service bearer and signed request.
+    edge_security = [{"mutualTLS": []}]
+    metrics_security = [{"mutualTLS": [], "bearerAuth": []}]
+    def event_security(system: str) -> list[dict[str, list[str]]]:
+        return [{
+            "mutualTLS": [],
+            "bearerAuth": [],
+            f"{system}Timestamp": [],
+            f"{system}EventId": [],
+            f"{system}Signature": [],
+            "sourceSystem": [],
+        }]
+    message_security = [
+        {
+            "mutualTLS": [],
+            "bearerAuth": [],
+            "codestraTimestamp": [],
+            "codestraNonce": [],
+            "codestraSignature": [],
+        }
+    ]
+
+    def read_operation(summary: str, security: list[dict[str, list[str]]]) -> dict[str, Any]:
+        return {
+            "summary": summary,
+            "security": security,
+            "responses": {"200": {"description": "Success"}},
+        }
+
+    paths: dict[str, Any] = {
+        "/health": {"get": read_operation("Legacy health", edge_security)},
+        "/ready": {"get": read_operation("Legacy readiness", edge_security)},
+        "/version": {"get": read_operation("Version", edge_security)},
+        "/health/live": {"get": read_operation("Liveness", edge_security)},
+        "/health/ready": {"get": read_operation("Readiness", edge_security)},
+        "/openapi.json": {
+            "get": read_operation("Canonical OpenAPI document", edge_security)
+        },
+        "/metrics": {
+            "get": {
+                **read_operation("Prometheus metrics", metrics_security),
+                "x-required-headers": [
+                    "X-Service-Identity",
+                    "X-Client-Certificate-Verified (edge supplied)",
+                ],
+                "responses": {
+                    "200": {"description": "Prometheus text exposition"},
+                    "401": {"description": "Verified service identity required"},
+                },
+            }
+        },
+        "/v1/messages": {
+            "post": {
+                "summary": "Governed Telnexa message submission",
+                "security": message_security,
+                "x-required-headers": [
+                    "X-Codestra-Timestamp",
+                    "X-Codestra-Nonce",
+                    "X-Codestra-Signature",
+                ],
+                "responses": {
+                    "202": {"description": "Durable message state returned"},
+                    "401": {"description": "Authentication failed"},
+                    "409": {"description": "Replay or idempotency conflict"},
+                    "422": {"description": "Policy or payload rejected"},
+                },
+            }
+        },
+        JASMIN_DLR_PATH: {
+            "post": {
+                "summary": "Attempt-bound Jasmin delivery receipt",
+                "security": [{"jasminProof": []}],
+                "description": (
+                    "The private Jasmin callback presents a one-attempt HMAC "
+                    "capability in the query string; it does not use the service "
+                    "bearer contract."
+                ),
+                "responses": {
+                    "200": {"description": "Receipt reconciled"},
+                    "403": {"description": "Invalid callback authority"},
+                    "409": {"description": "Receipt conflicts with durable state"},
+                    "422": {"description": "Invalid carrier receipt"},
+                },
+            }
+        },
+    }
+    for system in SYSTEMS:
+        paths[f"/api/v1/{system}/health"] = {
+            "get": read_operation(f"{system.title()} integration health", edge_security)
+        }
+    for system, ingress_paths in INGRESS_PATHS.items():
+        for path in sorted(ingress_paths):
+            paths[path] = {
+                "post": {
+                    "summary": f"Authenticated {system.title()} event ingress",
+                    "security": event_security(system),
+                    "x-signature-header-prefix": SYSTEMS[system][2],
+                    "responses": {
+                        "200": {"description": "Semantic duplicate accepted"},
+                        "202": {"description": "Event durably accepted"},
+                        "401": {"description": "Authentication failed"},
+                        "409": {"description": "Replay or event ID conflict"},
+                        "422": {"description": "Payload rejected"},
+                    },
+                }
+            }
+
+    security_schemes: dict[str, Any] = {
+        "bearerAuth": {"type": "http", "scheme": "bearer"},
+        "mutualTLS": {"type": "mutualTLS"},
+        "sourceSystem": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Source-System",
+        },
+        "codestraTimestamp": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Codestra-Timestamp",
+        },
+        "codestraNonce": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Codestra-Nonce",
+        },
+        "codestraSignature": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Codestra-Signature",
+        },
+        "jasminProof": {
+            "type": "apiKey",
+            "in": "query",
+            "name": "proof",
+            "description": (
+                "One-attempt HMAC capability bound to the exact SMS effect"
+            ),
+        },
+    }
+    for system, (_, _, header_prefix) in SYSTEMS.items():
+        for suffix, name_suffix in (
+            ("Timestamp", "Timestamp"),
+            ("EventId", "Event-Id"),
+            ("Signature", "Signature"),
+        ):
+            security_schemes[f"{system}{suffix}"] = {
+                "type": "apiKey",
+                "in": "header",
+                "name": f"{header_prefix}-{name_suffix}",
+            }
+
+    return {
+        "openapi": "3.1.0",
+        "info": {"title": "Private Integration Gateway", "version": "2.0.0"},
+        "components": {
+            "securitySchemes": security_schemes
+        },
+        "paths": paths,
+    }
 
 
 def dispatch_worker(gateway: Gateway) -> None:

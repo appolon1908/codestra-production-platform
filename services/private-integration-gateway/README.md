@@ -5,6 +5,12 @@ between Codestra middleware and private provider adapters on `37.27.128.39`.
 It supports authenticated, replay-protected provider events in `middleware`
 mode and a tenant/sender/route-bounded Telnexa adapter in `shared` mode.
 
+The reviewed Nginx authority is `nginx/telnexa-private-gateway.conf`. Nginx
+must enforce mTLS and overwrite the certificate-verification headers. Metrics
+also require the edge-verified marker, a bounded service identity, and its
+matching bearer. Event and message commands require their matching service
+bearer and replay-protected signature contract behind that mTLS edge.
+
 Production carrier submission is deliberately disabled in the committed
 Compose contract.  Enabling it requires a separate reviewed change that sets
 both `LIVE_SUBMISSION_ENABLED=true` and

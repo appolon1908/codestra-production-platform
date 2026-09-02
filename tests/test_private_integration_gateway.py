@@ -106,6 +106,106 @@ def test_delivery_defaults_fail_closed(tmp_path: Path, monkeypatch: pytest.Monke
     assert value.production_delivery_authorized is False
 
 
+def test_private_gateway_openapi_contains_required_routes():
+    document = gateway.openapi_document()
+    paths = document["paths"]
+    expected = {
+        "/health",
+        "/ready",
+        "/version",
+        "/health/live",
+        "/health/ready",
+        "/openapi.json",
+        "/metrics",
+        "/v1/messages",
+        gateway.JASMIN_DLR_PATH,
+        *(f"/api/v1/{system}/health" for system in gateway.SYSTEMS),
+        *(path for values in gateway.INGRESS_PATHS.values() for path in values),
+    }
+    assert set(paths) == expected
+    assert all(set(item) == ({"get"} if path not in {
+        "/v1/messages", gateway.JASMIN_DLR_PATH,
+        *(value for values in gateway.INGRESS_PATHS.values() for value in values),
+    } else {"post"}) for path, item in paths.items())
+    assert paths["/metrics"]["get"]["security"] == [
+        {"mutualTLS": [], "bearerAuth": []}
+    ]
+    assert paths["/v1/messages"]["post"]["security"] == [
+        {
+            "mutualTLS": [],
+            "bearerAuth": [],
+            "codestraTimestamp": [],
+            "codestraNonce": [],
+            "codestraSignature": [],
+        }
+    ]
+    assert paths[gateway.JASMIN_DLR_PATH]["post"]["security"] == [
+        {"jasminProof": []}
+    ]
+    kyqra_security = paths["/api/v1/kyqra/jobs"]["post"]["security"]
+    assert kyqra_security == [
+        {
+            "mutualTLS": [],
+            "bearerAuth": [],
+            "kyqraTimestamp": [],
+            "kyqraEventId": [],
+            "kyqraSignature": [],
+            "sourceSystem": [],
+        }
+    ]
+    schemes = document["components"]["securitySchemes"]
+    assert schemes["kyqraTimestamp"]["name"] == "X-Kyqra-Timestamp"
+    assert schemes["telnexaEventId"]["name"] == "X-Telnexa-Event-Id"
+    assert schemes["klyrowSignature"]["name"] == "X-Klyrow-Signature"
+    assert not any(path.startswith("/v1/operations") for path in paths)
+    assert not any(path.startswith("/v1/integrations") for path in paths)
+
+
+def test_metrics_requires_mtls_derived_matching_service_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    app = gateway.Gateway(settings(tmp_path), store(tmp_path))
+    server = gateway.ThreadingHTTPServer(("127.0.0.1", 0), gateway.handler_for(app))
+    server.daemon_threads = True
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    endpoint = f"http://127.0.0.1:{server.server_port}/metrics"
+    try:
+        with pytest.raises(urllib.error.HTTPError) as missing_authority:
+            urllib.request.urlopen(endpoint, timeout=5)
+        assert missing_authority.value.code == 401
+
+        wrong_certificate = urllib.request.Request(
+            endpoint,
+            headers={
+                "Authorization": "Bearer test-telnexa-key",
+                "X-Client-Certificate-Verified": "FAILED",
+                "X-Service-Identity": "telnexa",
+            },
+        )
+        with pytest.raises(urllib.error.HTTPError) as unverified:
+            urllib.request.urlopen(wrong_certificate, timeout=5)
+        assert unverified.value.code == 401
+
+        authorized = urllib.request.Request(
+            endpoint,
+            headers={
+                "Authorization": "Bearer test-telnexa-key",
+                "X-Client-Certificate-Verified": "SUCCESS",
+                "X-Service-Identity": "telnexa",
+            },
+        )
+        with urllib.request.urlopen(authorized, timeout=5) as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"] == "text/plain; charset=us-ascii"
+            assert b"private_gateway_events" in response.read()
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+
+
 def test_live_delivery_requires_second_gate_and_change_id(tmp_path: Path):
     with pytest.raises(ValueError, match="production authorization"):
         settings(tmp_path, live_submission_enabled=True)
