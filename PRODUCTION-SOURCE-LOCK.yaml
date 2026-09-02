@@ -26,4 +26,4 @@ blockers:
     reason: The protected production tuple and Appolon n8n-gap candidate are different implementations with incompatible migration identities.
   - id: unpinned-custom-runtime
     count: 24
-    evidence: SERVER-65-UNPINNED-CUSTOM-DEPLOYMENTS.yaml
+    evidence: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml

@@ -29,4 +29,4 @@ components:
     rollback_digest: sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820
 unresolved_components:
   count: 24
-  evidence: SERVER-65-UNPINNED-CUSTOM-DEPLOYMENTS.yaml
+  evidence: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml
