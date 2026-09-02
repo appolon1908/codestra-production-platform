@@ -134,6 +134,38 @@ AMBIGUOUS_CARRIER_HTTP_STATUSES = {408, 409, 425, 429}
 REQUEST_IO_TIMEOUT_SECONDS = 10.0
 REQUEST_HEADER_DEADLINE_SECONDS = 10.0
 REQUEST_BODY_DEADLINE_SECONDS = 10.0
+OPERATION_STATUSES = {
+    "QUEUED",
+    "PROCESSING",
+    "SUCCEEDED",
+    "FAILED",
+    "CANCELLED",
+    "AMBIGUOUS",
+    "RECONCILIATION_REQUIRED",
+}
+COMMAND_CHANNELS = {
+    "email": "klyrow",
+    "sms": "telnexa",
+    "crawler": "kyqra",
+}
+COMMAND_ACTION = re.compile(r"[a-z][a-z0-9_.-]{0,63}")
+BOUNDED_IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
+TRACE_CONTEXT = re.compile(
+    r"[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}"
+)
+COMMAND_ENVELOPE_FIELDS = {
+    "request_id",
+    "correlation_id",
+    "tenant_id",
+    "service_identity",
+    "operation_id",
+    "idempotency_key",
+    "api_version",
+    "timestamp",
+    "trace_context",
+    "action",
+    "payload",
+}
 
 
 class DispatchOutcomeUnknown(RuntimeError):
@@ -546,6 +578,7 @@ class Settings:
     downstream_url: str
     jasmin_url: str
     jasmin_dlr_callback_url: str
+    integration_command_intake_enabled: bool = False
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -570,6 +603,9 @@ class Settings:
                 "JASMIN_DLR_CALLBACK_URL",
                 "http://gateway:8080/internal/v1/jasmin/dlr",
             ).strip(),
+            integration_command_intake_enabled=env_bool(
+                "INTEGRATION_COMMAND_INTAKE_ENABLED"
+            ),
         )
         settings.validate()
         return settings
@@ -626,6 +662,7 @@ class Store:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=10000")
         connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA synchronous=FULL")
         return connection
 
     def initialize(self) -> None:
@@ -815,6 +852,78 @@ class Store:
                     "ALTER TABLE sms_transactions ADD COLUMN authorization_sha256 TEXT "
                     "NOT NULL DEFAULT 'legacy'"
                 )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS integration_operations(
+                    operation_id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    service_identity TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    api_version TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    semantic_sha256 TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    correlation_id TEXT NOT NULL,
+                    trace_context TEXT NOT NULL,
+                    command_payload TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    resource_version INTEGER NOT NULL,
+                    result TEXT,
+                    error TEXT,
+                    retryability INTEGER NOT NULL,
+                    reconciliation_required INTEGER NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    UNIQUE(
+                        tenant_id,service_identity,channel,action,
+                        api_version,idempotency_key
+                    )
+                )"""
+            )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS integration_operation_events(
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    operation_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    resource_version INTEGER NOT NULL,
+                    evidence TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY(operation_id) REFERENCES integration_operations(operation_id)
+                )"""
+            )
+            connection.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS integration_operation_event_version
+                ON integration_operation_events(operation_id,resource_version)"""
+            )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS integration_operation_attempts(
+                    attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    operation_id TEXT NOT NULL,
+                    attempt_number INTEGER NOT NULL,
+                    attempt_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    evidence TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY(operation_id) REFERENCES integration_operations(operation_id),
+                    UNIQUE(operation_id,attempt_number)
+                )"""
+            )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS integration_action_idempotency(
+                    operation_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    semantic_sha256 TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY(operation_id) REFERENCES integration_operations(operation_id),
+                    UNIQUE(operation_id,action,idempotency_key)
+                )"""
+            )
+            connection.execute(
+                """CREATE INDEX IF NOT EXISTS integration_operations_tenant_updated
+                ON integration_operations(tenant_id,service_identity,updated_at DESC)"""
+            )
         if self.path.exists():
             self.path.chmod(0o600)
 
@@ -1497,6 +1606,350 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def create_integration_operation(
+        self, values: dict[str, Any], now: float
+    ) -> tuple[str, sqlite3.Row]:
+        """Atomically enforce durable, semantic command idempotency."""
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                connection.execute(
+                    """INSERT INTO integration_operations(
+                        operation_id,tenant_id,service_identity,channel,action,
+                        api_version,idempotency_key,semantic_sha256,request_id,
+                        correlation_id,trace_context,command_payload,status,
+                        resource_version,result,error,retryability,
+                        reconciliation_required,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,NULL,?,0,1,?,?)""",
+                    (
+                        values["operation_id"],
+                        values["tenant_id"],
+                        values["service_identity"],
+                        values["channel"],
+                        values["action"],
+                        values["api_version"],
+                        values["idempotency_key"],
+                        values["semantic_sha256"],
+                        values["request_id"],
+                        values["correlation_id"],
+                        values["trace_context"],
+                        values["command_payload"],
+                        "RECONCILIATION_REQUIRED",
+                        values["error"],
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                existing = connection.execute(
+                    """SELECT * FROM integration_operations
+                    WHERE tenant_id=? AND service_identity=? AND channel=?
+                      AND action=? AND api_version=? AND idempotency_key=?""",
+                    (
+                        values["tenant_id"],
+                        values["service_identity"],
+                        values["channel"],
+                        values["action"],
+                        values["api_version"],
+                        values["idempotency_key"],
+                    ),
+                ).fetchone()
+                if existing is None:
+                    existing = connection.execute(
+                        "SELECT * FROM integration_operations WHERE operation_id=?",
+                        (values["operation_id"],),
+                    ).fetchone()
+                if existing is None:
+                    raise RuntimeError("operation idempotency conflict read-back failed")
+                same_request = (
+                    existing["operation_id"] == values["operation_id"]
+                    and existing["semantic_sha256"] == values["semantic_sha256"]
+                )
+                return ("replay" if same_request else "conflict"), existing
+            connection.execute(
+                """INSERT INTO integration_operation_events(
+                    operation_id,event_type,status,resource_version,evidence,created_at
+                ) VALUES(?,?,?,?,?,?)""",
+                (
+                    values["operation_id"],
+                    "command.accepted",
+                    "RECONCILIATION_REQUIRED",
+                    1,
+                    json.dumps(
+                        {
+                            "channel": values["channel"],
+                            "semantic_sha256": values["semantic_sha256"],
+                        },
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                    now,
+                ),
+            )
+            created = connection.execute(
+                "SELECT * FROM integration_operations WHERE operation_id=?",
+                (values["operation_id"],),
+            ).fetchone()
+        if created is None:
+            raise RuntimeError("operation creation read-back failed")
+        return "created", created
+
+    def integration_operation(
+        self, operation_id: str, tenant_id: str, service_identity: str
+    ) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return connection.execute(
+                """SELECT * FROM integration_operations
+                WHERE operation_id=? AND tenant_id=? AND service_identity=?""",
+                (operation_id, tenant_id, service_identity),
+            ).fetchone()
+
+    def integration_operations(
+        self, tenant_id: str, service_identity: str, limit: int
+    ) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return connection.execute(
+                """SELECT * FROM integration_operations
+                WHERE tenant_id=? AND service_identity=?
+                ORDER BY updated_at DESC,operation_id LIMIT ?""",
+                (tenant_id, service_identity, limit),
+            ).fetchall()
+
+    def integration_operation_events(
+        self, operation_id: str, tenant_id: str, service_identity: str
+    ) -> list[sqlite3.Row] | None:
+        with self.connect() as connection:
+            authorized = connection.execute(
+                """SELECT 1 FROM integration_operations
+                WHERE operation_id=? AND tenant_id=? AND service_identity=?""",
+                (operation_id, tenant_id, service_identity),
+            ).fetchone()
+            if authorized is None:
+                return None
+            return connection.execute(
+                """SELECT * FROM integration_operation_events
+                WHERE operation_id=? ORDER BY resource_version,event_id""",
+                (operation_id,),
+            ).fetchall()
+
+    def integration_operation_attempts(
+        self, operation_id: str, tenant_id: str, service_identity: str
+    ) -> list[sqlite3.Row] | None:
+        with self.connect() as connection:
+            authorized = connection.execute(
+                """SELECT 1 FROM integration_operations
+                WHERE operation_id=? AND tenant_id=? AND service_identity=?""",
+                (operation_id, tenant_id, service_identity),
+            ).fetchone()
+            if authorized is None:
+                return None
+            return connection.execute(
+                """SELECT * FROM integration_operation_attempts
+                WHERE operation_id=? ORDER BY attempt_number""",
+                (operation_id,),
+            ).fetchall()
+
+    @staticmethod
+    def reserve_integration_action(
+        connection: sqlite3.Connection,
+        operation_id: str,
+        action: str,
+        idempotency_key: str,
+        semantic_sha256: str,
+        now: float,
+    ) -> str:
+        existing = connection.execute(
+            """SELECT semantic_sha256 FROM integration_action_idempotency
+            WHERE operation_id=? AND action=? AND idempotency_key=?""",
+            (operation_id, action, idempotency_key),
+        ).fetchone()
+        if existing is not None:
+            return (
+                "replay"
+                if existing["semantic_sha256"] == semantic_sha256
+                else "conflict"
+            )
+        connection.execute(
+            """INSERT INTO integration_action_idempotency(
+                operation_id,action,idempotency_key,semantic_sha256,created_at
+            ) VALUES(?,?,?,?,?)""",
+            (operation_id, action, idempotency_key, semantic_sha256, now),
+        )
+        return "created"
+
+    def cancel_integration_operation(
+        self,
+        operation_id: str,
+        tenant_id: str,
+        service_identity: str,
+        correlation_id: str,
+        idempotency_key: str,
+        semantic_sha256: str,
+        now: float,
+    ) -> tuple[str, sqlite3.Row | None]:
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                """SELECT * FROM integration_operations
+                WHERE operation_id=? AND tenant_id=? AND service_identity=?""",
+                (operation_id, tenant_id, service_identity),
+            ).fetchone()
+            if current is None:
+                return "missing", None
+            if current["status"] == "CANCELLED":
+                return "replay", current
+            if current["status"] in {"SUCCEEDED", "FAILED"}:
+                return "terminal", current
+            reservation = self.reserve_integration_action(
+                connection,
+                operation_id,
+                "cancel",
+                idempotency_key,
+                semantic_sha256,
+                now,
+            )
+            if reservation == "conflict":
+                return "idempotency_conflict", current
+            if reservation == "replay":
+                return "replay", current
+            resource_version = int(current["resource_version"]) + 1
+            result = json.dumps(
+                {"cancelled": True}, separators=(",", ":"), sort_keys=True
+            )
+            cursor = connection.execute(
+                """UPDATE integration_operations
+                SET status='CANCELLED',resource_version=?,result=?,error=NULL,
+                    retryability=0,reconciliation_required=0,
+                    correlation_id=?,updated_at=?
+                WHERE operation_id=? AND resource_version=?""",
+                (
+                    resource_version,
+                    result,
+                    correlation_id,
+                    now,
+                    operation_id,
+                    current["resource_version"],
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("operation cancellation changed concurrently")
+            connection.execute(
+                """INSERT INTO integration_operation_events(
+                    operation_id,event_type,status,resource_version,evidence,created_at
+                ) VALUES(?,?,?,?,?,?)""",
+                (
+                    operation_id,
+                    "operation.cancelled",
+                    "CANCELLED",
+                    resource_version,
+                    json.dumps(
+                        {"correlation_id": correlation_id},
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                    now,
+                ),
+            )
+            updated = connection.execute(
+                "SELECT * FROM integration_operations WHERE operation_id=?",
+                (operation_id,),
+            ).fetchone()
+        return "cancelled", updated
+
+    def reconcile_integration_operation(
+        self,
+        operation_id: str,
+        tenant_id: str,
+        service_identity: str,
+        correlation_id: str,
+        idempotency_key: str,
+        semantic_sha256: str,
+        now: float,
+    ) -> tuple[str, sqlite3.Row | None]:
+        """Record a bounded reconciliation attempt without inventing authority."""
+
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                """SELECT * FROM integration_operations
+                WHERE operation_id=? AND tenant_id=? AND service_identity=?""",
+                (operation_id, tenant_id, service_identity),
+            ).fetchone()
+            if current is None:
+                return "missing", None
+            if current["status"] in {"CANCELLED", "SUCCEEDED"}:
+                return "terminal", current
+            reservation = self.reserve_integration_action(
+                connection,
+                operation_id,
+                "reconcile",
+                idempotency_key,
+                semantic_sha256,
+                now,
+            )
+            if reservation == "conflict":
+                return "idempotency_conflict", current
+            if reservation == "replay":
+                return "replay", current
+            attempt_number = int(
+                connection.execute(
+                    """SELECT COALESCE(MAX(attempt_number),0)+1
+                    FROM integration_operation_attempts WHERE operation_id=?""",
+                    (operation_id,),
+                ).fetchone()[0]
+            )
+            resource_version = int(current["resource_version"]) + 1
+            evidence = json.dumps(
+                {
+                    "code": "downstream_dispatch_authority_unavailable",
+                    "correlation_id": correlation_id,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            connection.execute(
+                """INSERT INTO integration_operation_attempts(
+                    operation_id,attempt_number,attempt_type,status,evidence,created_at
+                ) VALUES(?,?,'RECONCILE','BLOCKED',?,?)""",
+                (operation_id, attempt_number, evidence, now),
+            )
+            cursor = connection.execute(
+                """UPDATE integration_operations
+                SET status='RECONCILIATION_REQUIRED',resource_version=?,
+                    error=?,retryability=0,reconciliation_required=1,
+                    correlation_id=?,updated_at=?
+                WHERE operation_id=? AND resource_version=?""",
+                (
+                    resource_version,
+                    evidence,
+                    correlation_id,
+                    now,
+                    operation_id,
+                    current["resource_version"],
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("operation reconciliation changed concurrently")
+            connection.execute(
+                """INSERT INTO integration_operation_events(
+                    operation_id,event_type,status,resource_version,evidence,created_at
+                ) VALUES(?,?,?,?,?,?)""",
+                (
+                    operation_id,
+                    "reconciliation.blocked",
+                    "RECONCILIATION_REQUIRED",
+                    resource_version,
+                    evidence,
+                    now,
+                ),
+            )
+            updated = connection.execute(
+                "SELECT * FROM integration_operations WHERE operation_id=?",
+                (operation_id,),
+            ).fetchone()
+        return "blocked", updated
+
     def ready(self) -> bool:
         try:
             with self.connect() as connection:
@@ -2169,6 +2622,398 @@ class Gateway:
     def normalize_headers(headers: dict[str, str]) -> dict[str, str]:
         return {key.lower(): value for key, value in headers.items()}
 
+    def private_service_identity(
+        self, headers: dict[str, str], required_scope: str
+    ) -> str | None:
+        normalized = self.normalize_headers(headers)
+        identity = normalized.get("x-service-identity", "").strip().lower()
+        scopes = {
+            value
+            for value in re.split(r"[ ,]+", normalized.get("x-service-scope", "").strip())
+            if value
+        }
+        if (
+            normalized.get("x-client-certificate-verified") != "SUCCESS"
+            or identity not in SYSTEMS
+            or required_scope not in scopes
+            or not self.authenticate_key(identity, normalized.get("authorization", ""))
+        ):
+            return None
+        return identity
+
+    @staticmethod
+    def operation_response(row: sqlite3.Row) -> dict[str, Any]:
+        result = json.loads(row["result"]) if row["result"] else None
+        error = json.loads(row["error"]) if row["error"] else None
+        return {
+            "operation_id": row["operation_id"],
+            "status": row["status"],
+            "resource_version": int(row["resource_version"]),
+            "result": result,
+            "error": error,
+            "retryability": bool(row["retryability"]),
+            "reconciliation_required": bool(row["reconciliation_required"]),
+            "correlation_id": row["correlation_id"],
+        }
+
+    @staticmethod
+    def command_contains_secret(value: Any) -> bool:
+        forbidden = {
+            "api_key",
+            "authorization",
+            "client_secret",
+            "credential",
+            "password",
+            "private_key",
+            "secret",
+            "token",
+        }
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                normalized = str(key).strip().lower().replace("-", "_")
+                sensitive_key = normalized in forbidden or any(
+                    normalized.endswith("_" + suffix) for suffix in forbidden
+                )
+                if sensitive_key or Gateway.command_contains_secret(nested):
+                    return True
+        elif isinstance(value, list):
+            return any(Gateway.command_contains_secret(item) for item in value)
+        return False
+
+    def integration_command(
+        self,
+        channel: str,
+        body: bytes,
+        headers: dict[str, str],
+    ) -> tuple[int, dict[str, Any]]:
+        if channel not in COMMAND_CHANNELS:
+            return 404, {"detail": "not found"}
+        required_scope = f"integrations:{channel}:commands"
+        identity = self.private_service_identity(headers, required_scope)
+        if identity is None:
+            return 401, {"detail": "service_identity_scope_required"}
+        if identity != COMMAND_CHANNELS[channel]:
+            return 403, {"detail": "channel_not_authorized"}
+        if not self.settings.integration_command_intake_enabled:
+            return 503, {"detail": "integration_command_intake_disabled"}
+        try:
+            envelope = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return 422, {"detail": "invalid_json"}
+        if not isinstance(envelope, dict) or set(envelope) != COMMAND_ENVELOPE_FIELDS:
+            return 422, {"detail": "invalid_command_envelope"}
+        normalized_headers = self.normalize_headers(headers)
+        if normalized_headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+            return 415, {"detail": "unsupported_media_type"}
+        tenant_id = envelope.get("tenant_id")
+        idempotency_key = envelope.get("idempotency_key")
+        if (
+            not isinstance(tenant_id, str)
+            or BOUNDED_IDENTITY.fullmatch(tenant_id) is None
+            or normalized_headers.get("x-tenant-id") != tenant_id
+        ):
+            return 422, {"detail": "tenant_identity_mismatch"}
+        if (
+            not isinstance(idempotency_key, str)
+            or not 8 <= len(idempotency_key) <= 128
+            or idempotency_key != normalized_headers.get("idempotency-key")
+        ):
+            return 422, {"detail": "idempotency_key_mismatch"}
+        if envelope.get("service_identity") != identity:
+            return 422, {"detail": "service_identity_mismatch"}
+        if envelope.get("api_version") != "v1":
+            return 422, {"detail": "unsupported_api_version"}
+        for field in ("request_id", "correlation_id"):
+            value = envelope.get(field)
+            if not isinstance(value, str) or BOUNDED_IDENTITY.fullmatch(value) is None:
+                return 422, {"detail": f"invalid_{field}"}
+        operation_id = envelope.get("operation_id")
+        try:
+            canonical_operation_id = str(uuid.UUID(str(operation_id)))
+        except (ValueError, AttributeError):
+            return 422, {"detail": "invalid_operation_id"}
+        if operation_id != canonical_operation_id:
+            return 422, {"detail": "invalid_operation_id"}
+        trace_context = envelope.get("trace_context")
+        if not isinstance(trace_context, str) or TRACE_CONTEXT.fullmatch(trace_context) is None:
+            return 422, {"detail": "invalid_trace_context"}
+        action = envelope.get("action")
+        if not isinstance(action, str) or COMMAND_ACTION.fullmatch(action) is None:
+            return 422, {"detail": "invalid_action"}
+        payload = envelope.get("payload")
+        if not isinstance(payload, dict) or self.command_contains_secret(payload):
+            return 422, {"detail": "invalid_or_sensitive_payload"}
+        timestamp = envelope.get("timestamp")
+        if not isinstance(timestamp, str) or len(timestamp) > 64:
+            return 422, {"detail": "invalid_timestamp"}
+        try:
+            parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            if parsed_timestamp.tzinfo is None:
+                raise ValueError("timezone required")
+            timestamp_value = parsed_timestamp.timestamp()
+        except ValueError:
+            return 422, {"detail": "invalid_timestamp"}
+        if abs(self.clock() - timestamp_value) > self.settings.webhook_ttl_seconds:
+            return 401, {"detail": "expired_timestamp"}
+        semantic_request = {
+            "operation_id": operation_id,
+            "tenant_id": tenant_id,
+            "service_identity": identity,
+            "channel": channel,
+            "action": action,
+            "api_version": "v1",
+            "payload": payload,
+        }
+        semantic_serialized = json.dumps(
+            semantic_request, separators=(",", ":"), sort_keys=True
+        )
+        error = json.dumps(
+            {
+                "code": "downstream_dispatch_authority_unavailable",
+                "message": "command persisted; downstream dispatch is not authorized",
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        result, row = self.store.create_integration_operation(
+            {
+                **semantic_request,
+                "idempotency_key": idempotency_key,
+                "semantic_sha256": hashlib.sha256(
+                    semantic_serialized.encode()
+                ).hexdigest(),
+                "request_id": envelope["request_id"],
+                "correlation_id": envelope["correlation_id"],
+                "trace_context": trace_context,
+                "command_payload": json.dumps(
+                    payload, separators=(",", ":"), sort_keys=True
+                ),
+                "error": error,
+            },
+            self.clock(),
+        )
+        if result == "conflict":
+            return 409, {"detail": "idempotency_conflict"}
+        response = self.operation_response(row)
+        response["duplicate"] = result == "replay"
+        LOG.info(
+            "service=private_gateway request_id=%s correlation_id=%s "
+            "operation_id=%s tenant=%s outcome=%s",
+            envelope["request_id"],
+            envelope["correlation_id"],
+            operation_id,
+            tenant_id,
+            "idempotent_replay" if result == "replay" else row["status"],
+        )
+        return 200 if result == "replay" else 202, response
+
+    def operation_authority(
+        self, headers: dict[str, str], scope: str
+    ) -> tuple[str, str] | None:
+        identity = self.private_service_identity(headers, scope)
+        tenant_id = self.normalize_headers(headers).get("x-tenant-id", "")
+        if identity is None or BOUNDED_IDENTITY.fullmatch(tenant_id) is None:
+            return None
+        return identity, tenant_id
+
+    def read_integration_operation(
+        self, operation_id: str, headers: dict[str, str]
+    ) -> tuple[int, dict[str, Any]]:
+        authority = self.operation_authority(headers, "operations:read")
+        if authority is None:
+            return 401, {"detail": "operation_read_authority_required"}
+        identity, tenant_id = authority
+        row = self.store.integration_operation(operation_id, tenant_id, identity)
+        return (404, {"detail": "not_found"}) if row is None else (
+            200,
+            self.operation_response(row),
+        )
+
+    def list_integration_operations(
+        self, headers: dict[str, str], limit: int
+    ) -> tuple[int, dict[str, Any]]:
+        authority = self.operation_authority(headers, "operations:read")
+        if authority is None:
+            return 401, {"detail": "operation_read_authority_required"}
+        if not 1 <= limit <= 100:
+            return 422, {"detail": "invalid_limit"}
+        identity, tenant_id = authority
+        rows = self.store.integration_operations(tenant_id, identity, limit)
+        return 200, {"operations": [self.operation_response(row) for row in rows]}
+
+    def read_integration_operation_records(
+        self, operation_id: str, record_type: str, headers: dict[str, str]
+    ) -> tuple[int, dict[str, Any]]:
+        authority = self.operation_authority(headers, "operations:read")
+        if authority is None:
+            return 401, {"detail": "operation_read_authority_required"}
+        identity, tenant_id = authority
+        if record_type == "events":
+            rows = self.store.integration_operation_events(
+                operation_id, tenant_id, identity
+            )
+            if rows is None:
+                return 404, {"detail": "not_found"}
+            return 200, {
+                "events": [
+                    {
+                        "event_id": int(row["event_id"]),
+                        "event_type": row["event_type"],
+                        "status": row["status"],
+                        "resource_version": int(row["resource_version"]),
+                        "evidence": json.loads(row["evidence"]),
+                    }
+                    for row in rows
+                ]
+            }
+        rows = self.store.integration_operation_attempts(
+            operation_id, tenant_id, identity
+        )
+        if rows is None:
+            return 404, {"detail": "not_found"}
+        return 200, {
+            "attempts": [
+                {
+                    "attempt_id": int(row["attempt_id"]),
+                    "attempt_number": int(row["attempt_number"]),
+                    "attempt_type": row["attempt_type"],
+                    "status": row["status"],
+                    "evidence": json.loads(row["evidence"]),
+                }
+                for row in rows
+            ]
+        }
+
+    def mutate_integration_operation(
+        self,
+        operation_id: str,
+        action: str,
+        body: bytes,
+        headers: dict[str, str],
+    ) -> tuple[int, dict[str, Any]]:
+        authority = self.operation_authority(headers, f"operations:{action}")
+        if authority is None:
+            return 401, {"detail": f"operation_{action}_authority_required"}
+        identity, tenant_id = authority
+        if self.normalize_headers(headers).get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+            return 415, {"detail": "unsupported_media_type"}
+        try:
+            request = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return 422, {"detail": "invalid_json"}
+        required_fields = {
+            "request_id",
+            "correlation_id",
+            "idempotency_key",
+            "timestamp",
+            "trace_context",
+        }
+        if not isinstance(request, dict) or set(request) != required_fields:
+            return 422, {"detail": "invalid_operation_action_request"}
+        correlation_id = request.get("correlation_id")
+        if (
+            not isinstance(correlation_id, str)
+            or BOUNDED_IDENTITY.fullmatch(correlation_id) is None
+        ):
+            return 422, {"detail": "invalid_correlation_id"}
+        request_id = request.get("request_id")
+        if not isinstance(request_id, str) or BOUNDED_IDENTITY.fullmatch(request_id) is None:
+            return 422, {"detail": "invalid_request_id"}
+        idempotency_key = request.get("idempotency_key")
+        if (
+            not isinstance(idempotency_key, str)
+            or not 8 <= len(idempotency_key) <= 128
+            or idempotency_key
+            != self.normalize_headers(headers).get("idempotency-key")
+        ):
+            return 422, {"detail": "idempotency_key_mismatch"}
+        trace_context = request.get("trace_context")
+        if not isinstance(trace_context, str) or TRACE_CONTEXT.fullmatch(trace_context) is None:
+            return 422, {"detail": "invalid_trace_context"}
+        timestamp = request.get("timestamp")
+        if not isinstance(timestamp, str) or len(timestamp) > 64:
+            return 422, {"detail": "invalid_timestamp"}
+        try:
+            parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            if parsed_timestamp.tzinfo is None:
+                raise ValueError("timezone required")
+            timestamp_value = parsed_timestamp.timestamp()
+        except ValueError:
+            return 422, {"detail": "invalid_timestamp"}
+        if abs(self.clock() - timestamp_value) > self.settings.webhook_ttl_seconds:
+            return 401, {"detail": "expired_timestamp"}
+        semantic_sha256 = hashlib.sha256(
+            json.dumps(
+                {
+                    "operation_id": operation_id,
+                    "action": action,
+                    "tenant_id": tenant_id,
+                    "service_identity": identity,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        if action == "cancel":
+            result, row = self.store.cancel_integration_operation(
+                operation_id,
+                tenant_id,
+                identity,
+                correlation_id,
+                idempotency_key,
+                semantic_sha256,
+                self.clock(),
+            )
+            if result == "missing":
+                return 404, {"detail": "not_found"}
+            if result == "terminal":
+                return 409, {"detail": "operation_terminal"}
+            if result == "idempotency_conflict":
+                return 409, {"detail": "idempotency_conflict"}
+            if row is None:
+                raise RuntimeError("operation cancellation read-back missing")
+            response = self.operation_response(row)
+            response["duplicate"] = result == "replay"
+            LOG.info(
+                "service=private_gateway request_id=%s correlation_id=%s "
+                "operation_id=%s tenant=%s outcome=%s",
+                request_id,
+                correlation_id,
+                operation_id,
+                tenant_id,
+                "idempotent_replay" if result == "replay" else row["status"],
+            )
+            return 200, response
+        result, row = self.store.reconcile_integration_operation(
+            operation_id,
+            tenant_id,
+            identity,
+            correlation_id,
+            idempotency_key,
+            semantic_sha256,
+            self.clock(),
+        )
+        if result == "missing":
+            return 404, {"detail": "not_found"}
+        if result == "terminal":
+            return 409, {"detail": "operation_terminal"}
+        if result == "idempotency_conflict":
+            return 409, {"detail": "idempotency_conflict"}
+        if row is None:
+            raise RuntimeError("operation reconciliation read-back missing")
+        response = self.operation_response(row)
+        response["duplicate"] = result == "replay"
+        LOG.info(
+            "service=private_gateway request_id=%s correlation_id=%s "
+            "operation_id=%s tenant=%s outcome=%s",
+            request_id,
+            correlation_id,
+            operation_id,
+            tenant_id,
+            "idempotent_replay" if result == "replay" else "reconciliation_blocked",
+        )
+        return (200 if result == "replay" else 409), response
+
     def ingress(
         self, system: str, path: str, body: bytes, headers: dict[str, str]
     ) -> tuple[int, dict[str, Any]]:
@@ -2593,8 +3438,16 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                 self.close_connection = True
 
         def log_message(self, _format_string: str, *_arguments: Any) -> None:
+            request_id = re.sub(
+                r"[^A-Za-z0-9_.:-]", "", self.headers.get("X-Request-ID", "-"))
+            tenant_id = re.sub(
+                r"[^A-Za-z0-9_.:-]", "", self.headers.get("X-Tenant-Id", "-"))
             LOG.info(
-                "system=http client=%s method=%s path=%s",
+                "service=private_gateway request_id=%s correlation_id=- "
+                "operation_id=- tenant=%s outcome=http_response "
+                "client=%s method=%s path=%s",
+                request_id[:128] or "-",
+                tenant_id[:128] or "-",
                 self.client_address[0],
                 self.command,
                 urllib.parse.urlsplit(self.path).path,
@@ -2696,6 +3549,71 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                         f'private_gateway_events{{system="{system}",state="{state}"}} {int(item["count"])}'
                     )
                 return self.send_text(200, ("\n".join(lines) + "\n").encode())
+            headers = {key: value for key, value in self.headers.items()}
+            if parsed_path == "/v1/capabilities":
+                identity = gateway.private_service_identity(
+                    headers, "capabilities:read"
+                )
+                if identity is None:
+                    return self.send_json(
+                        401, {"detail": "capability_read_authority_required"}
+                    )
+                channels = [
+                    channel
+                    for channel, owner in COMMAND_CHANNELS.items()
+                    if owner == identity
+                ]
+                return self.send_json(
+                    200,
+                    {
+                        "api_version": "v1",
+                        "command_channels": channels,
+                        "command_intake_enabled": (
+                            gateway.settings.integration_command_intake_enabled
+                        ),
+                        "downstream_dispatch_enabled": False,
+                        "operation_statuses": sorted(OPERATION_STATUSES),
+                        "service_identity": identity,
+                    },
+                )
+            if parsed_path == "/v1/operations":
+                try:
+                    query = urllib.parse.parse_qs(
+                        urllib.parse.urlsplit(self.path).query,
+                        keep_blank_values=True,
+                        strict_parsing=True,
+                    )
+                except ValueError:
+                    return self.send_json(422, {"detail": "invalid_query"})
+                if set(query) - {"limit"} or any(len(values) != 1 for values in query.values()):
+                    return self.send_json(422, {"detail": "invalid_query"})
+                try:
+                    limit = int(query.get("limit", ["50"])[0])
+                except ValueError:
+                    return self.send_json(422, {"detail": "invalid_limit"})
+                code, value = gateway.list_integration_operations(headers, limit)
+                return self.send_json(code, value)
+            operation_match = re.fullmatch(
+                r"/v1/operations/([0-9a-f-]{36})(?:/(events|attempts))?",
+                parsed_path,
+            )
+            if operation_match:
+                operation_id = operation_match.group(1)
+                try:
+                    if str(uuid.UUID(operation_id)) != operation_id:
+                        raise ValueError("non-canonical operation id")
+                except ValueError:
+                    return self.send_json(404, {"detail": "not_found"})
+                record_type = operation_match.group(2)
+                if record_type:
+                    code, value = gateway.read_integration_operation_records(
+                        operation_id, record_type, headers
+                    )
+                else:
+                    code, value = gateway.read_integration_operation(
+                        operation_id, headers
+                    )
+                return self.send_json(code, value)
             return self.send_json(404, {"detail": "not found"})
 
         def do_POST(self) -> None:
@@ -2734,6 +3652,30 @@ def handler_for(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                     return self.send_json(409, {"detail": "carrier receipt conflict"})
                 return self.send_text(200, b"ACK/Jasmin")
             headers = {key: value for key, value in self.headers.items()}
+            command_match = re.fullmatch(
+                r"/v1/integrations/(email|sms|crawler)/commands",
+                parsed_path.path,
+            )
+            if command_match:
+                code, value = gateway.integration_command(
+                    command_match.group(1), body, headers
+                )
+                return self.send_json(code, value)
+            operation_match = re.fullmatch(
+                r"/v1/operations/([0-9a-f-]{36})/(cancel|reconcile)",
+                parsed_path.path,
+            )
+            if operation_match:
+                operation_id = operation_match.group(1)
+                try:
+                    if str(uuid.UUID(operation_id)) != operation_id:
+                        raise ValueError("non-canonical operation id")
+                except ValueError:
+                    return self.send_json(404, {"detail": "not_found"})
+                code, value = gateway.mutate_integration_operation(
+                    operation_id, operation_match.group(2), body, headers
+                )
+                return self.send_json(code, value)
             if gateway.settings.mode == "shared" and parsed_path.path == "/v1/messages":
                 code, value = gateway.outbound(body, headers)
                 return self.send_json(code, value)
@@ -2759,6 +3701,21 @@ def openapi_document() -> dict[str, Any]:
     # control, not an alternative to the service bearer and signed request.
     edge_security = [{"mutualTLS": []}]
     metrics_security = [{"mutualTLS": [], "bearerAuth": []}]
+    operation_security = [
+        {
+            "mutualTLS": [],
+            "bearerAuth": [],
+            "serviceIdentity": [],
+            "serviceScope": [],
+            "tenantHeader": [],
+        }
+    ]
+    command_security = [
+        {
+            **operation_security[0],
+            "idempotencyHeader": [],
+        }
+    ]
     def event_security(system: str) -> list[dict[str, list[str]]]:
         return [{
             "mutualTLS": [],
@@ -2807,6 +3764,87 @@ def openapi_document() -> dict[str, Any]:
                 },
             }
         },
+        "/v1/capabilities": {
+            "get": {
+                **read_operation("Service-scoped gateway capabilities", operation_security),
+                "responses": {
+                    "200": {"description": "Capabilities returned"},
+                    "401": {"description": "Service identity and scope required"},
+                },
+            }
+        },
+        "/v1/operations": {
+            "get": {
+                **read_operation("List tenant-scoped operations", operation_security),
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "integer", "minimum": 1, "maximum": 100},
+                    }
+                ],
+                "responses": {
+                    "200": {"description": "Tenant operations returned"},
+                    "401": {"description": "Operation read authority required"},
+                    "422": {"description": "Invalid query"},
+                },
+            }
+        },
+        "/v1/operations/{id}": {
+            "get": {
+                **read_operation("Get one tenant-scoped operation", operation_security),
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "format": "uuid"},
+                    }
+                ],
+                "responses": {
+                    "200": {"description": "Operation returned"},
+                    "401": {"description": "Operation read authority required"},
+                    "404": {"description": "Operation not found in caller tenant"},
+                },
+            }
+        },
+        "/v1/operations/{id}/events": {
+            "get": {
+                **read_operation("Get durable operation events", operation_security),
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "format": "uuid"},
+                    }
+                ],
+                "responses": {
+                    "200": {"description": "Operation events returned"},
+                    "401": {"description": "Operation read authority required"},
+                    "404": {"description": "Operation not found in caller tenant"},
+                },
+            }
+        },
+        "/v1/operations/{id}/attempts": {
+            "get": {
+                **read_operation("Get durable operation attempts", operation_security),
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string", "format": "uuid"},
+                    }
+                ],
+                "responses": {
+                    "200": {"description": "Operation attempts returned"},
+                    "401": {"description": "Operation read authority required"},
+                    "404": {"description": "Operation not found in caller tenant"},
+                },
+            }
+        },
         "/v1/messages": {
             "post": {
                 "summary": "Governed Telnexa message submission",
@@ -2842,6 +3880,61 @@ def openapi_document() -> dict[str, Any]:
             }
         },
     }
+    command_request = {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/IntegrationCommand"}
+            }
+        },
+    }
+    for channel in COMMAND_CHANNELS:
+        paths[f"/v1/integrations/{channel}/commands"] = {
+            "post": {
+                "summary": f"Persist one governed {channel} integration command",
+                "security": command_security,
+                "requestBody": command_request,
+                "responses": {
+                    "200": {"description": "Idempotent command replay"},
+                    "202": {"description": "Command durably accepted"},
+                    "401": {"description": "Service identity and scope required"},
+                    "403": {"description": "Channel not authorized for service"},
+                    "409": {"description": "Idempotency conflict"},
+                    "422": {"description": "Invalid command envelope"},
+                    "503": {"description": "Command intake disabled"},
+                },
+            }
+        }
+    operation_action_request = {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/OperationAction"}
+            }
+        },
+    }
+    operation_parameter = {
+        "name": "id",
+        "in": "path",
+        "required": True,
+        "schema": {"type": "string", "format": "uuid"},
+    }
+    for action in ("cancel", "reconcile"):
+        paths[f"/v1/operations/{{id}}/{action}"] = {
+            "post": {
+                "summary": f"{action.title()} one durable operation",
+                "security": command_security,
+                "parameters": [operation_parameter],
+                "requestBody": operation_action_request,
+                "responses": {
+                    "200": {"description": "Idempotent action result"},
+                    "401": {"description": "Operation action authority required"},
+                    "404": {"description": "Operation not found in caller tenant"},
+                    "409": {"description": "Action conflict or reconciliation blocked"},
+                    "422": {"description": "Invalid action envelope"},
+                },
+            }
+        }
     for system in SYSTEMS:
         paths[f"/api/v1/{system}/health"] = {
             "get": read_operation(f"{system.title()} integration health", edge_security)
@@ -2894,6 +3987,26 @@ def openapi_document() -> dict[str, Any]:
                 "One-attempt HMAC capability bound to the exact SMS effect"
             ),
         },
+        "serviceIdentity": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Service-Identity",
+        },
+        "serviceScope": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Service-Scope",
+        },
+        "tenantHeader": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Tenant-Id",
+        },
+        "idempotencyHeader": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "Idempotency-Key",
+        },
     }
     for system, (_, _, header_prefix) in SYSTEMS.items():
         for suffix, name_suffix in (
@@ -2911,7 +4024,45 @@ def openapi_document() -> dict[str, Any]:
         "openapi": "3.1.0",
         "info": {"title": "Private Integration Gateway", "version": "2.0.0"},
         "components": {
-            "securitySchemes": security_schemes
+            "securitySchemes": security_schemes,
+            "schemas": {
+                "IntegrationCommand": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": sorted(COMMAND_ENVELOPE_FIELDS),
+                    "properties": {
+                        "request_id": {"type": "string", "maxLength": 128},
+                        "correlation_id": {"type": "string", "maxLength": 128},
+                        "tenant_id": {"type": "string", "maxLength": 128},
+                        "service_identity": {"type": "string", "enum": sorted(SYSTEMS)},
+                        "operation_id": {"type": "string", "format": "uuid"},
+                        "idempotency_key": {"type": "string", "minLength": 8, "maxLength": 128},
+                        "api_version": {"type": "string", "const": "v1"},
+                        "timestamp": {"type": "string", "format": "date-time"},
+                        "trace_context": {"type": "string", "maxLength": 55},
+                        "action": {"type": "string", "maxLength": 64},
+                        "payload": {"type": "object"},
+                    },
+                },
+                "OperationAction": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "request_id",
+                        "correlation_id",
+                        "idempotency_key",
+                        "timestamp",
+                        "trace_context",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string", "maxLength": 128},
+                        "correlation_id": {"type": "string", "maxLength": 128},
+                        "idempotency_key": {"type": "string", "minLength": 8, "maxLength": 128},
+                        "timestamp": {"type": "string", "format": "date-time"},
+                        "trace_context": {"type": "string", "maxLength": 55},
+                    },
+                },
+            },
         },
         "paths": paths,
     }

@@ -31,6 +31,20 @@ start represents an overnight window. Any seasonal offset change requires the
 normal reviewed policy update. Missing, malformed, or currently closed windows
 fail before SMS reservation or any Jasmin request.
 
+The canonical `/v1/integrations/{email,sms,crawler}/commands` surface accepts
+only a strict service/tenant/idempotency envelope behind an edge-derived mTLS
+identity and scope. Commands are durably recorded in SQLite with operation,
+event, attempt, semantic-request hash, and resource-version evidence. The
+committed production contract enables bounded command intake, but no generic
+downstream dispatcher exists: newly accepted commands truthfully enter
+`RECONCILIATION_REQUIRED` with
+`downstream_dispatch_authority_unavailable`. They can be cancelled safely or
+reconciled after an independently reviewed adapter authority is supplied; they
+are never replayed automatically into a provider. Payload keys that could
+carry credentials are rejected. The operation and capability APIs require the
+same edge-derived identity, tenant, and explicit scope, and never permit one
+service to read another service's tenant operations.
+
 Middleware forwarding is independently fail-closed. New authenticated ingress
 events become dispatch-eligible only when `MIDDLEWARE_FORWARDING_ENABLED=true`
 and an HTTPS `MIDDLEWARE_EVENTS_URL` plus the dedicated per-source API-key and

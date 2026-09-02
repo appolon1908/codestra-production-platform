@@ -15,6 +15,7 @@ services:
       LIVE_SUBMISSION_ENABLED: "false"
       PRODUCTION_DELIVERY_AUTHORIZED: "false"
       MIDDLEWARE_FORWARDING_ENABLED: "true"
+      INTEGRATION_COMMAND_INTAKE_ENABLED: "true"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

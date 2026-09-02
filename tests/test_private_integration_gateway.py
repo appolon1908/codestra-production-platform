@@ -43,6 +43,7 @@ def clean_gateway_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "LIVE_SUBMISSION_ENABLED",
         "PRODUCTION_DELIVERY_AUTHORIZED",
         "PRODUCTION_CHANGE_ID",
+        "INTEGRATION_COMMAND_INTAKE_ENABLED",
         "MIDDLEWARE_FORWARDING_ENABLED",
         "MIDDLEWARE_EVENTS_URL",
         "JASMIN_HTTP_URL",
@@ -100,6 +101,65 @@ def store(tmp_path: Path):
     return value
 
 
+OPERATION_CLOCK = 2_000_000_000.0
+TRACE_CONTEXT = "00-" + ("1" * 32) + "-" + ("2" * 16) + "-01"
+
+
+def governed_headers(
+    scope: str,
+    *,
+    identity: str = "telnexa",
+    tenant_id: str = "tenant-a",
+    idempotency_key: str = "command-key-0001",
+) -> dict[str, str]:
+    return {
+        "Authorization": "Bearer test-telnexa-key",
+        "Content-Type": "application/json",
+        "X-Client-Certificate-Verified": "SUCCESS",
+        "X-Service-Identity": identity,
+        "X-Service-Scope": scope,
+        "X-Tenant-Id": tenant_id,
+        "Idempotency-Key": idempotency_key,
+    }
+
+
+def command_envelope(
+    *,
+    operation_id: str = "11111111-1111-4111-8111-111111111111",
+    idempotency_key: str = "command-key-0001",
+    payload: dict | None = None,
+) -> dict:
+    return {
+        "request_id": "request-0001",
+        "correlation_id": "correlation-0001",
+        "tenant_id": "tenant-a",
+        "service_identity": "telnexa",
+        "operation_id": operation_id,
+        "idempotency_key": idempotency_key,
+        "api_version": "v1",
+        "timestamp": datetime.fromtimestamp(
+            OPERATION_CLOCK, timezone.utc
+        ).isoformat().replace("+00:00", "Z"),
+        "trace_context": TRACE_CONTEXT,
+        "action": "sms.send",
+        "payload": payload or {"message_reference": "message-0001"},
+    }
+
+
+def operation_action(
+    idempotency_key: str, correlation_id: str = "correlation-action-0001"
+) -> dict:
+    return {
+        "request_id": "request-action-0001",
+        "correlation_id": correlation_id,
+        "idempotency_key": idempotency_key,
+        "timestamp": datetime.fromtimestamp(
+            OPERATION_CLOCK, timezone.utc
+        ).isoformat().replace("+00:00", "Z"),
+        "trace_context": TRACE_CONTEXT,
+    }
+
+
 def test_delivery_defaults_fail_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("INTEGRATION_DB", str(tmp_path / "default.db"))
     value = gateway.Settings.from_environment()
@@ -119,16 +179,36 @@ def test_private_gateway_openapi_contains_required_routes():
         "/health/ready",
         "/openapi.json",
         "/metrics",
+        "/v1/capabilities",
+        "/v1/operations",
+        "/v1/operations/{id}",
+        "/v1/operations/{id}/events",
+        "/v1/operations/{id}/attempts",
+        "/v1/operations/{id}/cancel",
+        "/v1/operations/{id}/reconcile",
+        "/v1/integrations/email/commands",
+        "/v1/integrations/sms/commands",
+        "/v1/integrations/crawler/commands",
         "/v1/messages",
         gateway.JASMIN_DLR_PATH,
         *(f"/api/v1/{system}/health" for system in gateway.SYSTEMS),
         *(path for values in gateway.INGRESS_PATHS.values() for path in values),
     }
     assert set(paths) == expected
-    assert all(set(item) == ({"get"} if path not in {
-        "/v1/messages", gateway.JASMIN_DLR_PATH,
+    post_paths = {
+        "/v1/messages",
+        gateway.JASMIN_DLR_PATH,
+        "/v1/operations/{id}/cancel",
+        "/v1/operations/{id}/reconcile",
+        "/v1/integrations/email/commands",
+        "/v1/integrations/sms/commands",
+        "/v1/integrations/crawler/commands",
         *(value for values in gateway.INGRESS_PATHS.values() for value in values),
-    } else {"post"}) for path, item in paths.items())
+    }
+    assert all(
+        set(item) == ({"post"} if path in post_paths else {"get"})
+        for path, item in paths.items()
+    )
     assert paths["/metrics"]["get"]["security"] == [
         {"mutualTLS": [], "bearerAuth": []}
     ]
@@ -159,8 +239,225 @@ def test_private_gateway_openapi_contains_required_routes():
     assert schemes["kyqraTimestamp"]["name"] == "X-Kyqra-Timestamp"
     assert schemes["telnexaEventId"]["name"] == "X-Telnexa-Event-Id"
     assert schemes["klyrowSignature"]["name"] == "X-Klyrow-Signature"
-    assert not any(path.startswith("/v1/operations") for path in paths)
-    assert not any(path.startswith("/v1/integrations") for path in paths)
+    command_security = paths["/v1/integrations/sms/commands"]["post"]["security"]
+    assert command_security == [
+        {
+            "mutualTLS": [],
+            "bearerAuth": [],
+            "serviceIdentity": [],
+            "serviceScope": [],
+            "tenantHeader": [],
+            "idempotencyHeader": [],
+        }
+    ]
+
+
+def test_governed_command_is_durable_idempotent_and_semantic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    storage = store(tmp_path)
+    app = gateway.Gateway(
+        settings(tmp_path, integration_command_intake_enabled=True),
+        storage,
+        clock=lambda: OPERATION_CLOCK,
+    )
+    headers = governed_headers("integrations:sms:commands")
+    body = json.dumps(command_envelope(), separators=(",", ":")).encode()
+
+    code, created = app.integration_command("sms", body, headers)
+    assert code == 202
+    assert created == {
+        "operation_id": "11111111-1111-4111-8111-111111111111",
+        "status": "RECONCILIATION_REQUIRED",
+        "resource_version": 1,
+        "result": None,
+        "error": {
+            "code": "downstream_dispatch_authority_unavailable",
+            "message": "command persisted; downstream dispatch is not authorized",
+        },
+        "retryability": False,
+        "reconciliation_required": True,
+        "correlation_id": "correlation-0001",
+        "duplicate": False,
+    }
+
+    code, replay = app.integration_command("sms", body, headers)
+    assert code == 200
+    assert replay == {**created, "duplicate": True}
+
+    changed = command_envelope(payload={"message_reference": "message-0002"})
+    code, conflict = app.integration_command(
+        "sms", json.dumps(changed).encode(), headers
+    )
+    assert code == 409
+    assert conflict == {"detail": "idempotency_conflict"}
+
+    code, wrong_channel = app.integration_command(
+        "email", body, governed_headers("integrations:email:commands")
+    )
+    assert code == 403
+    assert wrong_channel == {"detail": "channel_not_authorized"}
+
+    sensitive = command_envelope(
+        operation_id="22222222-2222-4222-8222-222222222222",
+        idempotency_key="command-key-0002",
+        payload={"provider": {"smtp_password": "must-not-be-accepted"}},
+    )
+    sensitive_headers = governed_headers(
+        "integrations:sms:commands", idempotency_key="command-key-0002"
+    )
+    code, rejected = app.integration_command(
+        "sms", json.dumps(sensitive).encode(), sensitive_headers
+    )
+    assert code == 422
+    assert rejected == {"detail": "invalid_or_sensitive_payload"}
+
+
+def test_command_intake_is_fail_closed_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    storage = store(tmp_path)
+    app = gateway.Gateway(
+        settings(tmp_path), storage, clock=lambda: OPERATION_CLOCK
+    )
+    code, value = app.integration_command(
+        "sms",
+        json.dumps(command_envelope()).encode(),
+        governed_headers("integrations:sms:commands"),
+    )
+    assert code == 503
+    assert value == {"detail": "integration_command_intake_disabled"}
+    assert storage.integration_operation(
+        "11111111-1111-4111-8111-111111111111", "tenant-a", "telnexa"
+    ) is None
+
+
+def test_operations_are_tenant_isolated_and_actions_are_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    storage = store(tmp_path)
+    app = gateway.Gateway(
+        settings(tmp_path, integration_command_intake_enabled=True),
+        storage,
+        clock=lambda: OPERATION_CLOCK,
+    )
+    command_headers = governed_headers("integrations:sms:commands")
+    operation_id = command_envelope()["operation_id"]
+    code, _ = app.integration_command(
+        "sms", json.dumps(command_envelope()).encode(), command_headers
+    )
+    assert code == 202
+
+    read_headers = governed_headers("operations:read")
+    code, operation = app.read_integration_operation(operation_id, read_headers)
+    assert code == 200
+    assert operation["operation_id"] == operation_id
+    other_tenant = governed_headers("operations:read", tenant_id="tenant-b")
+    assert app.read_integration_operation(operation_id, other_tenant) == (
+        404,
+        {"detail": "not_found"},
+    )
+    code, listed = app.list_integration_operations(read_headers, 50)
+    assert code == 200
+    assert [item["operation_id"] for item in listed["operations"]] == [operation_id]
+
+    reconcile_headers = governed_headers(
+        "operations:reconcile", idempotency_key="reconcile-key-0001"
+    )
+    reconcile_body = json.dumps(operation_action("reconcile-key-0001")).encode()
+    code, blocked = app.mutate_integration_operation(
+        operation_id, "reconcile", reconcile_body, reconcile_headers
+    )
+    assert code == 409
+    assert blocked["status"] == "RECONCILIATION_REQUIRED"
+    assert blocked["resource_version"] == 2
+    assert blocked["duplicate"] is False
+
+    code, replay = app.mutate_integration_operation(
+        operation_id, "reconcile", reconcile_body, reconcile_headers
+    )
+    assert code == 200
+    assert replay["resource_version"] == 2
+    assert replay["duplicate"] is True
+
+    code, attempts = app.read_integration_operation_records(
+        operation_id, "attempts", read_headers
+    )
+    assert code == 200
+    assert len(attempts["attempts"]) == 1
+    assert attempts["attempts"][0]["status"] == "BLOCKED"
+
+    cancel_headers = governed_headers(
+        "operations:cancel", idempotency_key="cancel-key-0001"
+    )
+    cancel_body = json.dumps(operation_action("cancel-key-0001")).encode()
+    code, cancelled = app.mutate_integration_operation(
+        operation_id, "cancel", cancel_body, cancel_headers
+    )
+    assert code == 200
+    assert cancelled["status"] == "CANCELLED"
+    assert cancelled["resource_version"] == 3
+    assert cancelled["duplicate"] is False
+
+    code, duplicate_cancel = app.mutate_integration_operation(
+        operation_id, "cancel", cancel_body, cancel_headers
+    )
+    assert code == 200
+    assert duplicate_cancel["resource_version"] == 3
+    assert duplicate_cancel["duplicate"] is True
+
+    code, events = app.read_integration_operation_records(
+        operation_id, "events", read_headers
+    )
+    assert code == 200
+    assert [event["resource_version"] for event in events["events"]] == [1, 2, 3]
+
+
+def test_capabilities_route_requires_derived_identity_and_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TELNEXA_MIDDLEWARE_API_KEY", "test-telnexa-key")
+    app = gateway.Gateway(
+        settings(tmp_path, integration_command_intake_enabled=True), store(tmp_path)
+    )
+    server = gateway.ThreadingHTTPServer(("127.0.0.1", 0), gateway.handler_for(app))
+    server.daemon_threads = True
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    endpoint = f"http://127.0.0.1:{server.server_port}/v1/capabilities"
+    try:
+        with pytest.raises(urllib.error.HTTPError) as missing_scope:
+            urllib.request.urlopen(endpoint, timeout=5)
+        assert missing_scope.value.code == 401
+        request = urllib.request.Request(
+            endpoint, headers=governed_headers("capabilities:read")
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            value = json.load(response)
+        assert value["service_identity"] == "telnexa"
+        assert value["command_channels"] == ["sms"]
+        assert value["command_intake_enabled"] is True
+        assert value["downstream_dispatch_enabled"] is False
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+
+
+def test_production_edge_derives_telnexa_identity_and_scopes() -> None:
+    nginx = (SERVICE / "nginx/telnexa-private-gateway.conf").read_text()
+    assert "proxy_set_header X-Service-Identity telnexa;" in nginx
+    assert "integrations:sms:commands" in nginx
+    assert "operations:reconcile" in nginx
+    assert "$http_x_service_identity" not in nginx.lower()
+    compose = yaml.safe_load((SERVICE / "compose.production.yaml").read_text())
+    environment = compose["services"]["gateway"]["environment"]
+    assert environment["INTEGRATION_COMMAND_INTAKE_ENABLED"] == "true"
+    assert environment["LIVE_SUBMISSION_ENABLED"] == "false"
+    assert environment["PRODUCTION_DELIVERY_AUTHORIZED"] == "false"
 
 
 def test_metrics_requires_mtls_derived_matching_service_identity(
