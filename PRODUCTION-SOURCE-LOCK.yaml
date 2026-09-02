@@ -1,0 +1,31 @@
+schema_version: codestra.production-source-lock.v1
+generated_at: "2026-09-02T16:56:17Z"
+status: FAIL
+target: 65.109.65.169
+protected_platform:
+  repository: appolon1908-hue/codestra-production-platform
+  branch: release/production-activation
+  identity_authority: signed exact-release provenance generated after protected merge
+  manifest_parent_sha: 6861ca89f4d5ce0ac6929d21ddcf235d76e815e4
+  manifest_parent_release_tag: protected-6861ca89f4d5ce0ac6929d21ddcf235d76e815e4
+  note: The resulting commit SHA cannot be embedded in its own source tree; release provenance supplies that exact identity.
+middleware_authorities:
+  protected_production_tuple:
+    repository: Codestra-SRL/codestra-middleware
+    source_sha: f199b6c40f4e467979e9a8b255a0e686321a182d
+    image: ghcr.io/codestra-srl/codestra-middleware
+    image_digest: sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b
+    migration_head: 0056_klyrow_delivery_events
+  appolon_n8n_gap_candidate:
+    repository: appolon1908-hue/Middleware-
+    source_sha: f3437709c06747249586598590145234ea2c7327
+    image: ghcr.io/appolon1908-hue/codestra-middleware
+    image_digest: sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484
+    migration_head: 0006_outbox_attempt_events
+    runtime_state: IMPLEMENTED_NOT_DEPLOYED
+blockers:
+  - id: middleware-authority-split
+    reason: The protected production tuple and Appolon n8n-gap candidate are different implementations with incompatible migration identities.
+  - id: unpinned-custom-runtime
+    count: 24
+    evidence: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml
