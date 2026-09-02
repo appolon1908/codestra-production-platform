@@ -4,7 +4,6 @@ import hashlib
 import hmac
 import importlib.util
 import json
-import os
 import socket
 import sys
 import threading
@@ -12,15 +11,14 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from io import BytesIO
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
-from openapi_spec_validator import validate
 import yaml
-
+from openapi_spec_validator import validate
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE = ROOT / "services/private-integration-gateway"
@@ -625,13 +623,20 @@ def test_metrics_requires_mtls_derived_matching_service_identity(
         worker.join(timeout=5)
 
 
-def test_connectivity_audit_uses_bounded_authenticated_metrics_identity() -> None:
+def test_connectivity_audit_proves_metrics_through_the_real_mtls_edge() -> None:
     source = (ROOT / "scripts/private_gateway_audit.py").read_text()
 
-    assert '"X-Service-Identity":"telnexa"' in source
-    assert '"X-Service-Scope":"metrics:read"' in source
-    assert 'os.environ["TELNEXA_MIDDLEWARE_API_KEY"]' in source
-    assert 'call("GET","/metrics",headers=metrics_headers)' in source
+    assert "https://telnexa.internal.codestra.agency:8443/metrics" in source
+    assert 'EDGE_ADDRESS != "10.40.0.4"' in source
+    assert "PRIVATE_GATEWAY_AUDIT_CLIENT_CERT_FILE" in source
+    assert "PRIVATE_GATEWAY_AUDIT_CLIENT_KEY_FILE" in source
+    assert "PRIVATE_GATEWAY_AUDIT_CA_FILE" in source
+    assert "PRIVATE_GATEWAY_AUDIT_BEARER_TOKEN_FILE" in source
+    assert "context.load_cert_chain" in source
+    assert "server_hostname=self.host" in source
+    assert "X-Client-Certificate-Verified" not in source
+    assert '"X-Service-Identity"' not in source
+    assert '"X-Service-Scope"' not in source
 
 
 def test_live_delivery_requires_second_gate_and_change_id(tmp_path: Path):
