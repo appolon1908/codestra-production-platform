@@ -15,7 +15,7 @@ def test_production_database_manifest_is_complete_and_fail_closed():
     validate(MANIFEST)
     document = yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))
     assert document["certification_status"] == "FAIL"
-    assert len(document["components"]) == 11
+    assert len(document["components"]) == 17
     assert any(c["isolated_restore"] != "PASS" for c in document["components"])
 
 

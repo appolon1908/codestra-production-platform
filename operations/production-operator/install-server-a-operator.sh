@@ -49,8 +49,8 @@ verify_payload() {
 6d7432e9765474f86e93a711962ddf6b1f8edb3eab6098ace8d19d575f9ddec4  codestra-production-forced-command
 2969c70ff9e6568a6958f0e6c760a34e538aeb5934049f59dc4f69eab7ab018c  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
-f7e4b144e0186bf0d7ddfa01d30bc879ebde64fa7e2262d136ec2d6cbbcd4f99  ../../PRODUCTION-DATABASE-MANIFEST.yaml
-2d888686c6566ca73b2e781f56cc3f8c246495c3ccdabc860a10aedc265c5c6d  ../../tools/validate_production_database_manifest.py
+3b1dc84022989ed2682980161d86a0afff43e16ff5f167f4c00f4568684380d6  ../../PRODUCTION-DATABASE-MANIFEST.yaml
+4851047951619c6288c1899aea2e06ba7d90f48f23e80d77d2b9aaab8c33cb71  ../../tools/validate_production_database_manifest.py
 EOF
 }
 verify_payload || fail
@@ -297,7 +297,8 @@ bash -n /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.s
 python3 -c 'compile(open("/usr/local/sbin/codestra-production-operator", encoding="utf-8").read(), "/usr/local/sbin/codestra-production-operator", "exec")'
 python3 -c 'import yaml; compile(open("/usr/local/libexec/validate-production-database-manifest", encoding="utf-8").read(), "/usr/local/libexec/validate-production-database-manifest", "exec")'
 /usr/local/libexec/validate-production-database-manifest \
-  /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml
+  /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml \
+  /opt/codestra/evidence/database-certification
 operator_hash=$(sha256sum /usr/local/sbin/codestra-production-operator | awk '{print $1}')
 rm -rf "$rollback_dir"
 trap - EXIT HUP INT TERM

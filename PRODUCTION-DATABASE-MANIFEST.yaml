@@ -167,6 +167,102 @@ components:
     off_host_backup: NOT_PROVEN
     isolated_restore: NOT_PROVEN
     evidence_bundle: null
+  - id: reseller-portal-postgresql
+    service: reseller-portal
+    store: portal_postgres
+    kind: postgresql
+    source_authority: appolon1908-hue/codestra-production-runtime-authority
+    database_owner: reseller portal database owner
+    application_role: restricted portal runtime role
+    migration_framework: one-shot portal migrations
+    backup_method: pg_dump custom format plus checksum and encryption
+    restore_method: pg_restore into an isolated PostgreSQL database
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
+  - id: mail-registry-sqlite
+    service: mail-api
+    store: mail registry database
+    kind: sqlite
+    source_authority: appolon1908-hue/codestra-production-runtime-authority
+    database_owner: mail platform owner
+    application_role: mail API runtime user
+    migration_framework: one-shot SQLite schema initialization
+    backup_method: SQLite online backup plus checksum and encryption
+    restore_method: restore into an isolated read-only-root mail API deployment
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
+  - id: private-integration-gateway-state
+    service: private-integration-gateway
+    store: gateway_data SQLite ledger
+    kind: sqlite_volume
+    source_authority: appolon1908-hue/codestra-production-platform
+    database_owner: private integration owner
+    application_role: private gateway runtime user
+    migration_framework: embedded versioned schema
+    backup_method: SQLite online backup plus volume metadata and encryption
+    restore_method: isolated gateway restore with delivery disabled
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
+  - id: vicidial-adapter-state
+    service: vicidial-restricted-adapter
+    store: restricted adapter SQLite state
+    kind: sqlite
+    source_authority: appolon1908-hue/codestra-production-platform
+    database_owner: telephony integration owner
+    application_role: restricted adapter runtime user
+    migration_framework: embedded versioned schema
+    backup_method: SQLite online backup plus checksum and encryption
+    restore_method: isolated adapter restore with all write capabilities disabled
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
+  - id: telephony-event-ledger
+    service: telephony-events
+    store: delivery SQLite ledger
+    kind: sqlite
+    source_authority: appolon1908-hue/codestra-production-platform
+    database_owner: telephony integration owner
+    application_role: event publisher runtime user
+    migration_framework: embedded versioned schema
+    backup_method: SQLite online backup plus checksum and encryption
+    restore_method: isolated publisher restore with external delivery disabled
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
+  - id: kong-standby-auth-state
+    service: kong-standby-auth
+    store: standby authentication replay SQLite state
+    kind: sqlite_volume
+    source_authority: appolon1908-hue/codestra-production-platform
+    database_owner: gateway security owner
+    application_role: standby auth runtime user
+    migration_framework: embedded versioned schema
+    backup_method: SQLite online backup plus checksum and encryption
+    restore_method: isolated standby restore with live effects disabled
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
   - id: redis-ephemeral-coordination
     service: redis
     store: coordination cache and queues

@@ -147,6 +147,11 @@ def test_database_certification_requires_validator_success(monkeypatch):
         REAL_VALIDATE_DATABASE_CERTIFICATION()
 
 
+def test_installer_validates_certified_manifest_against_evidence_root():
+    installer = (PACKAGE / "install-server-a-operator.sh").read_text()
+    assert "/opt/codestra/evidence/database-certification" in installer
+
+
 def test_web_traffic_health_revalidates_database_certification():
     source = OPERATOR_PATH.read_text()
     function = source.split("def core_web_health", 1)[1].split("\ndef ", 1)[0]

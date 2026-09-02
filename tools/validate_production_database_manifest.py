@@ -21,6 +21,12 @@ REQUIRED_IDS = {
     "openbao-raft",
     "caddy-configuration",
     "platform-release-authority",
+    "reseller-portal-postgresql",
+    "mail-registry-sqlite",
+    "private-integration-gateway-state",
+    "vicidial-adapter-state",
+    "telephony-event-ledger",
+    "kong-standby-auth-state",
     "redis-ephemeral-coordination",
 }
 REQUIRED_FIELDS = {
