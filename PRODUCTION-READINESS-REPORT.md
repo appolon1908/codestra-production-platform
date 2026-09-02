@@ -38,7 +38,7 @@ The count change is not attributed to this remediation session; no container mut
 | PROVENANCE | FAIL |
 | VULNERABILITY_GATE | FAIL |
 | CADDY | FAIL |
-| KEYCLOAK | FAIL |
+| KEYCLOAK | FAIL — public discovery, issuer, JWKS, TLS, and advertised S256 read-back pass; authenticated client, audience, tenant, MFA, service-account, and session controls remain uncertified (`evidence/server65/KEYCLOAK-RUNTIME-READBACK-20260902.md`) |
 | KONG | FAIL |
 | MIDDLEWARE | FAIL |
 | ODOO | FAIL |
