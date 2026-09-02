@@ -6,8 +6,8 @@ protected_platform:
   repository: appolon1908-hue/codestra-production-platform
   branch: release/production-activation
   identity_authority: signed exact-release provenance generated after protected merge
-  manifest_parent_sha: 491041d5d0d66c4434470e8a03e5846a810f60ec
-  manifest_parent_release_tag: protected-491041d5d0d66c4434470e8a03e5846a810f60ec
+  manifest_parent_sha: 6861ca89f4d5ce0ac6929d21ddcf235d76e815e4
+  manifest_parent_release_tag: protected-6861ca89f4d5ce0ac6929d21ddcf235d76e815e4
   note: The resulting commit SHA cannot be embedded in its own source tree; release provenance supplies that exact identity.
 middleware_authorities:
   protected_production_tuple:
