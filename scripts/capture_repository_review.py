@@ -53,6 +53,18 @@ KNOWN_REPOSITORIES = (
     "appolon1908-hue/Codestra-Postgres-Exporter",
     "appolon1908-hue/Superset",
 )
+OPERATIONAL_BLOCKERS = (
+    (
+        "Codestra-SRL/codestra-middleware",
+        "Canonical Middleware exact-head and protected-main workflows cannot start because the organization Actions budget is zero with prevent_further_usage enabled.",
+        "evidence/repository-review/CANONICAL-MIDDLEWARE-ACTIONS-BLOCKER-20260902.md",
+    ),
+    (
+        "Server 65 Kong runtime read-back",
+        "The reviewed narrow kong-readback operator action is not installed; Infrastructure/security-owner approval is required without changing SSH or granting an arbitrary shell.",
+        "evidence/server65/KONG-RUNTIME-READBACK-BLOCKER-20260902.md",
+    ),
+)
 
 
 def gh(path: str, *, paginate: bool = False) -> tuple[Any | None, str | None]:
@@ -207,6 +219,9 @@ def main() -> None:
         "# Repository Review Blockers", "", f"Captured: {captured_at}", "",
         "A missing permission or unavailable API is a blocker, never a PASS.", "",
     ] + (blockers or ["- None observed during API capture."])
+    blocker_text.extend(["", "## Active operational blockers", ""])
+    for owner, detail, evidence in OPERATIONAL_BLOCKERS:
+        blocker_text.append(f"- `{owner}`: {detail} Evidence: `{evidence}`")
     (OUT / "REPOSITORY-BLOCKERS.md").write_text("\n".join(blocker_text) + "\n")
     print(f"REPOSITORIES={len(inventory)}")
     print(f"PULL_REQUESTS={len(pr_rows)}")

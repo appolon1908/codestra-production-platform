@@ -48,3 +48,5 @@ def test_security_alert_api_errors_are_reported_as_blockers(tmp_path, monkeypatc
     alerts = inventory["repositories"][0]["security_alerts"]
     assert alerts["dependabot"]["count"] == 0
     assert alerts["dependabot"]["error"].startswith("HTTP 403")
+    assert "Canonical Middleware exact-head" in blockers
+    assert "Kong runtime read-back" in blockers

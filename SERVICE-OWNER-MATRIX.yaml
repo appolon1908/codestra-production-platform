@@ -1,0 +1,95 @@
+schema_version: codestra.service-owner-matrix.v1
+status: FAIL
+reason: Named security and business owners and protected overlap decisions are not approved for every service.
+release_authority: appolon1908-hue/codestra-production-platform
+infrastructure_authority: appolon1908-hue/Infustruction-repo
+services:
+  - service: edge
+    source_authority: appolon1908-hue/Caddy
+    database_authority: N/A
+    runtime_authority: PENDING_RUNTIME_RECONCILIATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: gateway
+    source_authority: appolon1908-hue/Kong
+    database_authority: PENDING_KONG_DATABASE_DECISION
+    runtime_authority: PENDING_RUNTIME_RECONCILIATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: identity
+    source_authority: appolon1908-hue/Keycloak
+    database_authority: PENDING_KEYCLOAK_DATABASE_OWNER
+    runtime_authority: PENDING_RUNTIME_RECONCILIATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: middleware
+    source_authority: PENDING_MIDDLEWARE_OVERLAP_DECISION
+    candidates: [appolon1908-hue/Middleware-, Codestra-SRL/codestra-middleware]
+    database_authority: PENDING_MIDDLEWARE_DATABASE_OWNER
+    runtime_authority: PENDING_RUNTIME_RECONCILIATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: odoo
+    source_authority: PENDING_ODOO_OVERLAP_DECISION
+    candidates: [appolon1908-hue/Odoo, Codestra-SRL/codestra-odoo-addons]
+    database_authority: PENDING_ODOO_DATABASE_OWNER
+    runtime_authority: PENDING_RUNTIME_RECONCILIATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: n8n
+    source_authority: appolon1908-hue/N8N
+    database_authority: PENDING_N8N_DATABASE_OWNER
+    runtime_authority: PENDING_RUNTIME_RECONCILIATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: marketing
+    source_authority: appolon1908-hue/Codestra-Marketing-
+    database_authority: PENDING_MARKETING_DATABASE_OWNER
+    runtime_authority: PENDING_EXECUTABLE_RUNTIME_VERIFICATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: ai
+    source_authority: appolon1908-hue/Codestra-AI
+    database_authority: PENDING_AI_STATE_OWNER
+    runtime_authority: PENDING_EXECUTABLE_RUNTIME_VERIFICATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: communication
+    source_authority: PENDING_COMMUNICATION_OVERLAP_DECISION
+    candidates: [appolon1908-hue/communication-platform-, appolon1908-hue/Codestra-Communication-CC]
+    database_authority: PENDING_COMMUNICATION_DATABASE_OWNER
+    runtime_authority: PENDING_EXECUTABLE_RUNTIME_VERIFICATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: social
+    source_authority: PENDING_SOCIAL_OVERLAP_DECISION
+    candidates: [appolon1908-hue/Codesrea-Social-, appolon1908-hue/social.codestra.co]
+    database_authority: PENDING_SOCIAL_DATABASE_OWNER
+    runtime_authority: PENDING_EXECUTABLE_RUNTIME_VERIFICATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: provisioning
+    source_authority: appolon1908-hue/codestra-provisioning-service
+    database_authority: PENDING_PROVISIONING_STATE_DECISION
+    runtime_authority: PENDING_EXECUTABLE_RUNTIME_VERIFICATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: backend
+    source_authority: PENDING_BACKEND_OVERLAP_DECISION
+    candidates: [appolon1908-hue/codestra-backend, appolon1908-hue/backend2]
+    database_authority: PENDING_BACKEND_DATABASE_DECISION
+    runtime_authority: PENDING_RUNTIME_RECONCILIATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT
+  - service: secrets
+    source_authority: appolon1908-hue/Codestra-OpenBao
+    database_authority: SECURITY_OWNER_CUSTODY_REQUIRED
+    runtime_authority: PENDING_APPROVED_INITIALIZATION_CEREMONY
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: N/A
+  - service: observability
+    source_authority: MULTI_REPOSITORY_COMPONENT_SET_REQUIRES_RELEASE_TUPLE
+    database_authority: PENDING_OBSERVABILITY_STATE_OWNER
+    runtime_authority: PENDING_RUNTIME_RECONCILIATION
+    security_owner: PENDING_OWNER_ASSIGNMENT
+    business_owner: PENDING_OWNER_ASSIGNMENT

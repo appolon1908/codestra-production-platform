@@ -87,6 +87,9 @@ SYSTEMD_ACTIONS = {
 BACKUP_STATE_VALIDATOR = Path("/opt/codestra/operations/backup/check-backup-state.sh")
 READINESS_BACKUP_ROOT = Path("/opt/codestra/backups/production-readiness-local")
 READINESS_RESTORE_ROOT = Path("/opt/codestra/evidence/production-readiness-restore")
+DATABASE_MANIFEST = Path("/etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml")
+DATABASE_MANIFEST_VALIDATOR = Path("/usr/local/libexec/validate-production-database-manifest")
+DATABASE_EVIDENCE_ROOT = Path("/opt/codestra/evidence/database-certification")
 CONFIG_DIR = Path("/etc/codestra/production-operator")
 RELEASE_CONFIG = CONFIG_DIR / "release.json"
 MAINTENANCE_DATE = CONFIG_DIR / "maintenance-date"
@@ -310,7 +313,9 @@ def load_release_config() -> dict[str, str]:
     return config
 
 
-def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
+def run_fixed(
+    command: list[str], *, timeout: int = 1800
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         check=False,
@@ -318,7 +323,7 @@ def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        timeout=1800,
+        timeout=timeout,
         env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
     )
 
@@ -2168,6 +2173,7 @@ def load_pointer(path: Path) -> dict[str, object] | None:
 
 def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
     """Commit the exact staged tuple only after every recovery gate passes."""
+    database_certification = validate_database_certification()
     stage_evidence = require_action_evidence("stage-control-plane", config)
     validation_evidence = require_action_evidence("validate-control-plane", config)
     restore_evidence = require_action_evidence("restore-test", config)
@@ -2209,6 +2215,7 @@ def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
     return {
         **control_plane,
         **middleware,
+        **database_certification,
         "active_platform_sha": config["protected_sha"],
         "active_middleware_digest": config["image_digest"],
         "rollback_ready": "PASS",
@@ -2216,6 +2223,7 @@ def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
 
 
 def core_web_health(config: dict[str, str]) -> dict[str, object]:
+    validate_database_certification()
     active = load_pointer(ACTIVE_RELEASE_POINTER)
     if not active or active.get("protected_sha") != config["protected_sha"] or active.get("image_digest") != config["image_digest"]:
         raise OperatorError("exact control-plane release is not active")
@@ -2233,6 +2241,24 @@ def core_web_health(config: dict[str, str]) -> dict[str, object]:
         "auth_gateway_readiness": "PASS",
         "caddy_serving_path": "PASS",
     }
+
+
+def validate_database_certification() -> dict[str, str]:
+    """Require checksum-bound evidence for every production persistence authority."""
+    result = run_fixed(
+        [
+            str(DATABASE_MANIFEST_VALIDATOR),
+            str(DATABASE_MANIFEST),
+            str(DATABASE_EVIDENCE_ROOT),
+        ],
+        timeout=30,
+    )
+    if result.returncode != 0 or "PRODUCTION_DATABASE_MANIFEST=PASS" not in result.stdout:
+        raise OperatorError("production database certification is not PASS")
+    manifest = checked_root_file(DATABASE_MANIFEST, expected_mode=0o644)
+    if not re.search(r"(?m)^certification_status: PASS$", manifest):
+        raise OperatorError("production database certification is not PASS")
+    return {"production_database_certification": "PASS"}
 
 
 def kong_json(method: str, path: str, payload: dict[str, object] | None = None) -> dict[str, object]:
