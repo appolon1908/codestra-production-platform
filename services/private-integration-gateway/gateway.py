@@ -475,16 +475,15 @@ def forwarding_tenant(payload: dict[str, Any]) -> str:
 def legacy_sms_tenant(customer_id: str, payload: dict[str, Any]) -> str:
     """Resolve one pre-tenant SMS row using its existing isolation authority."""
 
-    try:
+    if "tenant_id" in payload:
         return forwarding_tenant(payload)
-    except ValueError:
-        policy = customer_policy().get(customer_id)
-        policy_tenant = (
-            policy.get("tenant_id", customer_id)
-            if isinstance(policy, dict)
-            else customer_id
-        )
-        return forwarding_tenant({"tenant_id": policy_tenant})
+    policy = customer_policy().get(customer_id)
+    policy_tenant = (
+        policy.get("tenant_id", customer_id)
+        if isinstance(policy, dict)
+        else customer_id
+    )
+    return forwarding_tenant({"tenant_id": policy_tenant})
 
 
 def canonical_customer_id(value: Any) -> str:

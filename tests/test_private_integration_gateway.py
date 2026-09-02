@@ -1459,6 +1459,11 @@ def test_legacy_sms_migration_prefers_explicit_customer_tenant_policy(
         )
         == "tenant-b"
     )
+    for invalid in (None, "", " tenant-b", "tenant-b ", "x" * 129):
+        with pytest.raises(ValueError, match="tenant_id_required"):
+            gateway.legacy_sms_tenant(
+                "shared-customer", {"tenant_id": invalid, "body": "malformed"}
+            )
 
 
 def test_ingress_rejects_stale_and_invalid_signatures(
