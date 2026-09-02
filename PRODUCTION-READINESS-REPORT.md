@@ -37,7 +37,7 @@ The count change is not attributed to this remediation session; no container mut
 | SBOM | FAIL |
 | PROVENANCE | FAIL |
 | VULNERABILITY_GATE | FAIL |
-| CADDY | FAIL |
+| CADDY | FAIL — active and syntactically valid, but the approved health gate returns 503 for `api.breero.com`; readiness/version, exact source alignment, and structural secret-redaction proof remain failed (`evidence/server65/CADDY-RUNTIME-READBACK-20260902.md`) |
 | KEYCLOAK | FAIL — public discovery, issuer, JWKS, TLS, and advertised S256 read-back pass; authenticated client, audience, tenant, MFA, service-account, and session controls remain uncertified (`evidence/server65/KEYCLOAK-RUNTIME-READBACK-20260902.md`) |
 | KONG | FAIL |
 | MIDDLEWARE | FAIL |
