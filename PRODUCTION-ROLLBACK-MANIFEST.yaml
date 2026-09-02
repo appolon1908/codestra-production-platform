@@ -1,0 +1,15 @@
+schema_version: codestra.production-rollback-manifest.v1
+target: 65.109.65.169
+status: FAIL
+appolon_middleware:
+  before_source_sha: f6748a58f8d2590520a4f28776770957061cdea1
+  before_image_digest: sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820
+  before_migration_head: 0003_immutable_event_ledger
+  candidate_source_sha: f3437709c06747249586598590145234ea2c7327
+  candidate_image_digest: sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484
+  candidate_migration_head: 0006_outbox_attempt_events
+  compose_override: deploy/middleware/compose.appolon-integration-api.rollback.yaml
+  source_controls: PASS
+  production_rehearsal: FAIL
+  failure_reason: Candidate lacks a matching installed exact-tuple production deployment authority and isolated restore proof.
+

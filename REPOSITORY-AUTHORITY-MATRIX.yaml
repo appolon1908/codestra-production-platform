@@ -1,0 +1,16 @@
+schema_version: codestra.repository-authority.v1
+status: FAIL
+authoritative_evidence: evidence/repository-review/REPOSITORY-AUTHORITY-MATRIX.yaml
+repository_count_reviewed: 36
+fixed_roles:
+  protected_release_authority: appolon1908-hue/codestra-production-platform
+  adopted_orphan_runtime_authority: appolon1908-hue/codestra-production-runtime-authority
+  infrastructure_and_certification_authority: appolon1908-hue/Infustruction-repo
+unsettled_relationships:
+  - appolon1908-hue/Middleware- vs Codestra-SRL/codestra-middleware
+  - appolon1908-hue/Odoo vs Codestra-SRL/codestra-odoo-addons
+  - appolon1908-hue/codestra-backend vs appolon1908-hue/backend2
+  - appolon1908-hue/Codesrea-Social- vs appolon1908-hue/social.codestra.co
+  - appolon1908-hue/communication-platform- vs appolon1908-hue/Codestra-Communication-CC
+reason: Source, database, runtime, security, and business ownership is not uniquely approved for every service.
+

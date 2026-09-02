@@ -1,0 +1,21 @@
+schema_version: codestra.external-capability-activation.v1
+status: NOT_AUTHORIZED
+capabilities:
+  - LIVE_EMAIL_DELIVERY
+  - LIVE_SMS_DELIVERY
+  - LIVE_PSTN_DIALING
+  - SOCIAL_PUBLISHING_ENABLED
+  - LIVE_ADVERTISING_ENABLED
+  - EXTERNAL_MODEL_CALLS_ENABLED
+  - N8N_EXTERNAL_PROVIDER_WRITES
+requirements:
+  named_owner: FAIL
+  change_id: FAIL
+  approved_provider_account: FAIL
+  tenant_and_identity_scope: FAIL
+  volume_or_budget_limit: FAIL
+  start_and_expiry: FAIL
+  monitoring_and_alert_owner: FAIL
+  bounded_canary: FAIL
+  rollback_and_kill_switch: FAIL
+

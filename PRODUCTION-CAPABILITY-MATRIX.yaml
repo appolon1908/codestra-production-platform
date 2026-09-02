@@ -1,0 +1,16 @@
+schema_version: codestra.production-capability-matrix.v1
+target: 65.109.65.169
+status: FAIL
+capabilities:
+  LIVE_ADVERTISING_ENABLED: {state: false, activation_authorized: false}
+  EXTERNAL_DELIVERY_ENABLED: {state: false, activation_authorized: false}
+  SOCIAL_PUBLISHING_ENABLED: {state: false, activation_authorized: false}
+  EXTERNAL_MODEL_CALLS_ENABLED: {state: false, activation_authorized: false}
+  LIVE_SMS_DELIVERY: {state: false, activation_authorized: false}
+  LIVE_EMAIL_DELIVERY: {state: false, activation_authorized: false}
+  LIVE_PSTN_DIALING: {state: false, activation_authorized: false}
+  N8N_EXTERNAL_PROVIDER_WRITES: {state: false, activation_authorized: false}
+  PRODUCTION_DIALING: {state: DISABLED, activation_authorized: false}
+observed_effects:
+  calls_placed: 0
+
