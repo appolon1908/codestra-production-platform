@@ -7,6 +7,7 @@ on:
     paths:
       - 'config/repository-name-aliases.v1.json'
       - 'scripts/capture_repository_review.py'
+      - 'scripts/capture_repository_review_core.py'
       - 'scripts/validate_repository_name_authority.py'
       - 'tests/test_capture_repository_review.py'
       - '.github/workflows/repository-name-authority.yml'
@@ -16,6 +17,7 @@ on:
     paths:
       - 'config/repository-name-aliases.v1.json'
       - 'scripts/capture_repository_review.py'
+      - 'scripts/capture_repository_review_core.py'
       - 'scripts/validate_repository_name_authority.py'
       - 'tests/test_capture_repository_review.py'
       - '.github/workflows/repository-name-authority.yml'
@@ -40,7 +42,10 @@ jobs:
           python -m pip install --disable-pip-version-check --no-input
           PyYAML==6.0.3 pytest==8.4.2
       - name: Compile repository review capture
-        run: python -m py_compile scripts/capture_repository_review.py
+        run: >-
+          python -m py_compile
+          scripts/capture_repository_review.py
+          scripts/capture_repository_review_core.py
       - name: Validate stable repository identities
         run: python scripts/validate_repository_name_authority.py
       - name: Run repository capture regression tests
