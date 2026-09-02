@@ -11,6 +11,11 @@ mkdir -p "$state"; chmod 0700 "$state"
 deleted=0; failed=0
 [[ ! -f "$state/wal_cleanup_deleted_total" ]] || deleted="$(<"$state/wal_cleanup_deleted_total")"
 [[ ! -f "$state/wal_cleanup_failures_total" ]] || failed="$(<"$state/wal_cleanup_failures_total")"
+# Retention is measured from WAL generation (the staged source mtime), not
+# from completion of a delayed off-host upload. A marker may be recent after
+# an offload backlog, but it only authorizes deletion; it must not restart the
+# local retention clock.
+retention_minutes=$((retention_days * 1440))
 while IFS= read -r -d '' marker; do
   source_path="${marker%.offhost}"
   if [[ "$source_path" != "$stage"/[0-9A-F]* || ! -f "$source_path" || -L "$source_path" || -L "$marker" ]] \
@@ -20,11 +25,7 @@ while IFS= read -r -d '' marker; do
   fi
   find "$source_path" "$marker" -delete
   deleted=$((deleted + 1))
-# Retention is measured from WAL generation (the staged source mtime), not
-# from completion of a delayed off-host upload. A marker may be recent after
-# an offload backlog, but it only authorizes deletion; it must not restart the
-# local retention clock.
-done < <(find "$stage" -maxdepth 1 -type f ! -name '*.offhost' -mtime "+$retention_days" -print0 |
+done < <(find "$stage" -maxdepth 1 -type f ! -name '*.offhost' -mmin "+$retention_minutes" -print0 |
   while IFS= read -r -d '' source_path; do
     marker="${source_path}.offhost"
     [[ -f "$marker" && ! -L "$marker" ]] && printf '%s\0' "$marker"
