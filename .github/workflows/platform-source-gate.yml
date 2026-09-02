@@ -12,6 +12,7 @@ on:
       - "integrations/**"
       - "services/private-integration-gateway/**"
       - "operations/**"
+      - "orbit/**"
       - "evidence/**"
       - "config/**"
       - "deploy/**"
