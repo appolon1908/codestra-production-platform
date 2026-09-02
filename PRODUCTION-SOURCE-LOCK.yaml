@@ -1,5 +1,5 @@
 schema_version: codestra.production-source-lock.v1
-generated_at: "2026-09-02T16:56:17Z"
+generated_at: "2026-09-02T22:52:00Z"
 status: FAIL
 target: 65.109.65.169
 protected_platform:
@@ -31,6 +31,25 @@ middleware_authorities:
     signed_head_sha: e48ec614a2da680802ee106e271b52f3006e72dc
     runtime_state: IMPLEMENTED_PENDING_EXACT_HEAD_CI
     image_digest: null
+    deployment_authorized: false
+custom_release_candidates:
+  codestra_ai:
+    repository: appolon1908-hue/Codestra-AI
+    protected_source_sha: 7d31ef8de1c15bcc71b61de50917c81e3bcf557d
+    image: ghcr.io/appolon1908-hue/codestra-ai
+    image_digest: sha256:908c59e54a2620142e597523fa31b5d1d710dc00156b35c5a642e5437362df3e
+    migration_head: 003_api_completion
+    runtime_state: IMMUTABLE_CANDIDATE_NOT_DEPLOYED
+    evidence: evidence/server65/AI-MARKETING-IMMUTABLE-CANDIDATES-20260902.md
+    deployment_authorized: false
+  codestra_marketing:
+    repository: appolon1908-hue/Codestra-Marketing-
+    protected_source_sha: fe784f1e91bb0f0fd49f2b2f741a4020a337c149
+    image: ghcr.io/appolon1908-hue/codestra-marketing
+    image_digest: sha256:3d9bd44922ad02d865f191cac5c9e454b88bb7cbfc8cd643f81e7b57f132c391
+    migration_head: 003_operations
+    runtime_state: IMMUTABLE_CANDIDATE_NOT_DEPLOYED
+    evidence: evidence/server65/AI-MARKETING-IMMUTABLE-CANDIDATES-20260902.md
     deployment_authorized: false
 blockers:
   - id: middleware-authority-split
