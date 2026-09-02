@@ -1,0 +1,32 @@
+schema_version: codestra.production-bom.v1
+generated_at: "2026-09-02T14:30:00Z"
+target: 65.109.65.169
+status: FAIL
+inventory_baseline:
+  running_containers: 102
+  live_kong_routes: 29
+  endpoint_records: 641
+  runtime_openapi_applications: 20
+components:
+  - service: appolon-middleware-integration-api
+    state: CURRENT_RUNTIME
+    source_repository: appolon1908-hue/Middleware-
+    source_sha: f6748a58f8d2590520a4f28776770957061cdea1
+    image: ghcr.io/appolon1908-hue/codestra-middleware
+    image_digest: sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820
+    migration_head: 0003_immutable_event_ledger
+    rollback_digest: sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820
+  - service: appolon-middleware-integration-api
+    state: SIGNED_CANDIDATE_NOT_DEPLOYED
+    source_repository: appolon1908-hue/Middleware-
+    source_sha: f3437709c06747249586598590145234ea2c7327
+    image: ghcr.io/appolon1908-hue/codestra-middleware
+    image_digest: sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484
+    migration_head: 0006_outbox_attempt_events
+    sbom: VERIFIED
+    provenance: VERIFIED
+    signature: VERIFIED
+    rollback_digest: sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820
+unresolved_components:
+  count: 24
+  evidence: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml
