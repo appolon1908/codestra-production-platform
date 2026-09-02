@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_codestra_crm_post_call_wizard_form" model="ir.ui.view">
+        <field name="name">codestra.crm.post.call.wizard.form</field>
+        <field name="model">codestra.crm.post.call.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Complete Post-call Follow-up" class="o_codestra_post_call_dialog">
+                <field name="followup_id" invisible="1"/>
+                <div class="o_codestra_call_header">
+                    <div>
+                        <div class="o_codestra_eyebrow">CALL COMPLETED</div>
+                        <h2 class="mb-1">Finish the customer follow-up</h2>
+                        <p class="text-muted mb-0">Capture the outcome, schedule the next step, and review the client email.</p>
+                    </div>
+                    <div class="o_codestra_call_meta">
+                        <field name="call_ended_at" readonly="1"/>
+                        <field name="call_duration_seconds" readonly="1" string="Duration (seconds)"/>
+                    </div>
+                </div>
+
+                <div class="o_codestra_identity_card">
+                    <group col="3">
+                        <field name="partner_id" readonly="1"/>
+                        <field name="lead_id" readonly="1"/>
+                        <field name="agent_id" readonly="1"/>
+                    </group>
+                </div>
+
+                <notebook>
+                    <page string="Outcome &amp; Notes" name="outcome_notes">
+                        <div class="o_codestra_section_intro">
+                            <h3>Call outcome</h3>
+                            <p class="text-muted">Select the final outcome before closing the popup.</p>
+                        </div>
+                        <field name="disposition" widget="radio" options="{'horizontal': true}"/>
+                        <separator string="Agent notes"/>
+                        <field name="notes" widget="html" placeholder="Add the client's request, objections, commitments, and preparation notes..."/>
+                    </page>
+
+                    <page string="Callback / Appointment" name="schedule">
+                        <div class="o_codestra_section_intro">
+                            <h3>Schedule the next client contact</h3>
+                            <p class="text-muted">The meeting is added to the assigned agent's Odoo calendar.</p>
+                        </div>
+                        <field name="schedule_kind" widget="radio" options="{'horizontal': true}"/>
+                        <group invisible="schedule_kind == 'none'">
+                            <field name="callback_at" required="schedule_kind != 'none'"/>
+                            <field name="duration_minutes"/>
+                            <field name="reminder_email_enabled"/>
+                        </group>
+                        <div class="alert alert-info" role="alert" invisible="schedule_kind == 'none'">
+                            Odoo will show the agent a preparation popup 30 minutes before the event. When email reminders are enabled, both the linked client and assigned agent receive a reminder 15 minutes before the event.
+                        </div>
+                    </page>
+
+                    <page string="Client Email" name="email">
+                        <div class="o_codestra_email_toolbar">
+                            <div>
+                                <h3>Follow-up email</h3>
+                                <p class="text-muted mb-0">Review and edit the professional message before it is queued.</p>
+                            </div>
+                            <field name="send_post_call_email" widget="boolean_toggle"/>
+                        </div>
+                        <group invisible="not send_post_call_email">
+                            <field name="email_to" required="send_post_call_email"/>
+                            <field name="email_cc"/>
+                            <field name="email_subject" required="send_post_call_email"/>
+                        </group>
+                        <field name="email_body" widget="html" invisible="not send_post_call_email" required="send_post_call_email"/>
+                        <div class="alert alert-secondary" role="alert" invisible="send_post_call_email">
+                            No immediate email will be sent. Scheduled reminder rules remain controlled by the Callback / Appointment tab.
+                        </div>
+                    </page>
+                </notebook>
+
+                <footer>
+                    <button name="action_complete" type="object" string="Save &amp; Complete" class="btn-primary"/>
+                    <button name="action_complete_without_email" type="object" string="Complete Without Email" class="btn-secondary" invisible="not send_post_call_email"/>
+                    <button string="Close for Now" special="cancel" class="btn-link"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>
