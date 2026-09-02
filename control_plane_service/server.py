@@ -129,7 +129,7 @@ def operator(token: str) -> tuple[str, str, str | None] | None:
     return None
 
 
-def apply_provider_projection(store: Store, source: str, value: dict) -> None:
+def apply_provider_projection(store: Store, source: str, value: dict) -> dict | None:
     try:
         store.apply_provider_event(source, value)
     except ControlPlaneError as exc:
@@ -138,6 +138,36 @@ def apply_provider_projection(store: Store, source: str, value: dict) -> None:
         # optional local projection when the originating message is absent.
         if str(exc) != "message_not_found":
             raise
+        return None
+    return store.provider_projection_receipt(value["event_id"])
+
+
+def requires_telnexa_projection(value: dict) -> bool:
+    metadata = value.get("metadata")
+    return isinstance(metadata, dict) and metadata.get("private_gateway_projection_required") is True and value.get("event_type") in {
+        "telnexa.sms.submitted",
+        "telnexa.sms.failed",
+    }
+
+
+def projection_for_exact_replay(
+    store: Store, source: str, value: dict
+) -> dict | None:
+    """Idempotently repair any applicable provider projection on replay."""
+
+    payload = value.get("payload")
+    metadata = value.get("metadata")
+    externally_authoritative = (
+        isinstance(metadata, dict) and metadata.get("sms_postgres_authority") is True
+    )
+    if (
+        source in {"telnexa", "klyrow"}
+        and isinstance(payload, dict)
+        and payload.get("message_id")
+        and not externally_authoritative
+    ):
+        return apply_provider_projection(store, source, value)
+    return store.provider_projection_receipt(value["event_id"])
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -414,7 +444,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 verify_signature(secret, timestamp, event_id, source, body, signature, TTL)
                 value = validate_envelope(json.loads(body), source, event_id)
+                reconciliation_only = self.headers.get("X-Reconciliation-Only", "")
+                if reconciliation_only not in {"", "true"}:
+                    raise ControlPlaneError("invalid_reconciliation_mode")
                 if source == "telnexa" and value["event_type"] == "telnexa.sms.received" and not value["payload"].get("message_id"):
+                    if reconciliation_only:
+                        raise ControlPlaneError("reconciliation_event_missing")
                     inbound,_ = STORE.create_inbound_sms(value); value["payload"]["message_id"] = inbound["message_id"]
                 # Odoo signs a unique immutable event ID. Reject its reuse
                 # atomically; legitimate retries use a fresh event ID with the
@@ -423,16 +458,52 @@ class Handler(BaseHTTPRequestHandler):
                 # must use a fresh event ID and retain the original idempotency
                 # key; reusing the signed ID is a replay attack for every
                 # external producer, not only Odoo.
-                result = STORE.ingest(
-                    value,
-                    reject_event_replay=source in {"odoo", "telnexa", "klyrow"},
-                )
+                projection = None
+                if reconciliation_only:
+                    replay = STORE.exact_event_replay(value)
+                    if replay is None:
+                        return self.send_json(404, {
+                            "error": "reconciliation_event_missing",
+                            "event_id": value["event_id"],
+                        })
+                    projection = projection_for_exact_replay(STORE, source, value)
+                    if requires_telnexa_projection(value) and projection is None:
+                        raise ControlPlaneError("provider_projection_missing")
+                    return self.send_json(409, {
+                        "error": "replayed_event_id",
+                        "event_id": replay.event_id,
+                        "projection": projection,
+                    })
+                try:
+                    result = STORE.ingest(
+                        value,
+                        reject_event_replay=source in {"odoo", "telnexa", "klyrow"},
+                    )
+                except ControlPlaneError as ingest_error:
+                    if str(ingest_error) != "replayed_event_id":
+                        raise
+                    replay = STORE.exact_event_replay(value)
+                    if replay is None:
+                        raise ControlPlaneError("idempotency_conflict") from ingest_error
+                    projection = projection_for_exact_replay(STORE, source, value)
+                    if requires_telnexa_projection(value) and projection is None:
+                        raise ControlPlaneError("provider_projection_missing")
+                    return self.send_json(409, {
+                        "error": "replayed_event_id",
+                        "event_id": replay.event_id,
+                        "projection": projection,
+                    })
                 if not result.duplicate and source in {"telnexa","klyrow"} and value.get("payload",{}).get("message_id") and not value.get("metadata", {}).get("sms_postgres_authority"):
-                    apply_provider_projection(STORE, source, value)
+                    projection = apply_provider_projection(STORE, source, value)
+                if requires_telnexa_projection(value) and projection is None:
+                    raise ControlPlaneError("provider_projection_missing")
             except (ControlPlaneError, json.JSONDecodeError) as exc:
                 code = 409 if str(exc) in {"idempotency_conflict", "replayed_event_id"} else 401 if "signature" in str(exc) or "timestamp" in str(exc) else 422
                 return self.send_json(code, {"error": str(exc)})
-            return self.send_json(200 if result.duplicate else 202, result.__dict__)
+            return self.send_json(
+                200 if result.duplicate else 202,
+                {**result.__dict__, "projection": projection},
+            )
         op = self.auth_operator({"platform_admin", "operations", "support", "tenant_admin"})
         if not op: return
         try: value = json.loads(body)

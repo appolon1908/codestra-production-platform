@@ -1,0 +1,8 @@
+schema: codestra.production-workload-bom.v1
+captured_at: "2026-09-02T14:25:00Z"
+target_host: 65.109.65.169
+status: IN_PROGRESS
+authoritative_inventory: production immutable candidate and runtime inventories
+workload_count_expected: 15
+workload_count_attributed: 0
+note: Exact 15-workload application subset must be reconciled from protected BOM before certification; no names are inferred.

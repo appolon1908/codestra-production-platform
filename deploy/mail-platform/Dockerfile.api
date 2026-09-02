@@ -1,0 +1,13 @@
+FROM python@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df
+ARG VCS_REF
+ARG SOURCE_URL=https://github.com/appolon1908-hue/codestra-production-platform
+ARG VERSION
+LABEL org.opencontainers.image.revision=$VCS_REF org.opencontainers.image.source=$SOURCE_URL org.opencontainers.image.version=$VERSION
+RUN apk upgrade --no-cache \
+ && addgroup -S codestra && adduser -S -G codestra codestra \
+ && pip install --no-cache-dir fastapi==0.141.1 starlette==1.6.0 uvicorn==0.52.4 PyJWT[crypto]==2.13.0 prometheus-client==0.22.1
+WORKDIR /app
+COPY mail_platform /app/mail_platform
+USER codestra
+EXPOSE 8098
+CMD ["uvicorn", "mail_platform.api:app", "--host", "0.0.0.0", "--port", "8098", "--proxy-headers", "--forwarded-allow-ips", "*"]

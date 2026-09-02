@@ -4,6 +4,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/control-plane/Dockerfile
+    image: ghcr.io/appolon1908-hue/integration-control-plane@sha256:dd288a88c745d8336d2e30e7c89f986a67563ce67f916d11b3905197187ac8e6
     restart: unless-stopped
     env_file: ${CONTROL_PLANE_ENV_FILE:-/etc/codestra/secrets/control-plane.env}
     environment:
@@ -55,6 +56,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/control-plane/Dockerfile
+    image: ghcr.io/appolon1908-hue/integration-control-plane@sha256:dd288a88c745d8336d2e30e7c89f986a67563ce67f916d11b3905197187ac8e6
     command: [python, -m, control_plane_service.worker]
     restart: unless-stopped
     env_file: ${CONTROL_PLANE_ENV_FILE:-/etc/codestra/secrets/control-plane.env}
@@ -69,6 +71,8 @@ services:
       KLYROW_MTLS_CA_FILE: /run/secrets/klyrow_mtls_ca
       KLYROW_MTLS_CERT_FILE: /run/secrets/klyrow_mtls_cert
       KLYROW_MTLS_KEY_FILE: /run/secrets/klyrow_mtls_key
+      TELNEXA_OUTBOUND_API_KEY_FILE: /run/secrets/telnexa_outbound_api_key
+      TELNEXA_OUTBOUND_HMAC_SECRET_FILE: /run/secrets/telnexa_outbound_hmac_secret
     secrets:
       - control_plane_database_url
     volumes:
@@ -77,6 +81,8 @@ services:
       - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-ca:/run/secrets/klyrow_mtls_ca:ro
       - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-cert:/run/secrets/klyrow_mtls_cert:ro
       - /etc/codestra/runtime-secrets/control-plane/klyrow-mtls-key:/run/secrets/klyrow_mtls_key:ro
+      - /etc/codestra/runtime-secrets/control-plane/telnexa-outbound-api-key:/run/secrets/telnexa_outbound_api_key:ro
+      - /etc/codestra/runtime-secrets/control-plane/telnexa-outbound-hmac-secret:/run/secrets/telnexa_outbound_hmac_secret:ro
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]

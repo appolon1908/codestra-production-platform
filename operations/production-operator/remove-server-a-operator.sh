@@ -16,6 +16,7 @@ tar -cf "$archive" --ignore-failed-read \
   /etc/ssh/sshd_config.d/60-codestra-production-operator.conf \
   /etc/codestra/production-operator/release.json \
   /etc/codestra/production-operator/maintenance-date \
+  /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh \
   /var/lib/codestra-production-operator/.ssh/authorized_keys
 chmod 0600 "$archive"
 sha256sum "$archive" > "$archive.sha256"

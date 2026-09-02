@@ -1,0 +1,106 @@
+#!/usr/bin/python3
+"""Fail-closed no-effect gate; does not fabricate a production-safe harness."""
+
+from __future__ import annotations
+
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+from kpv_probe_core import emit, safe_json_file
+
+
+READBACK = Path("/var/lib/codestra/klyrow-production-validator/readback/no-effect-capability.json")
+ALLOWED = {
+    "adapter",
+    "adapter_sha256",
+    "suppressed_synthetic_recipient_authorized",
+    "denied_consent_synthetic_recipient_authorized",
+    "provider_submission_impossible",
+    "approved_by",
+    "expires_at_utc",
+}
+ADAPTER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}\Z")
+SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+APPROVER_RE = re.compile(r"[A-Za-z0-9_.-]{2,80}\Z")
+
+
+def project_authority(authority: dict[str, object]) -> dict[str, object]:
+    if set(authority) != ALLOWED:
+        raise ValueError("no-effect authority schema rejected")
+    adapter = authority.get("adapter")
+    adapter_sha256 = authority.get("adapter_sha256")
+    approved_by = authority.get("approved_by")
+    expires_at = authority.get("expires_at_utc")
+    if not isinstance(adapter, str) or not ADAPTER_RE.fullmatch(adapter):
+        raise ValueError("no-effect adapter rejected")
+    if not isinstance(adapter_sha256, str) or not SHA256_RE.fullmatch(adapter_sha256):
+        raise ValueError("no-effect adapter digest rejected")
+    if not isinstance(approved_by, str) or not APPROVER_RE.fullmatch(approved_by):
+        raise ValueError("no-effect approver rejected")
+    if not isinstance(expires_at, str) or len(expires_at) > 40 or not expires_at.endswith("Z"):
+        raise ValueError("no-effect expiry rejected")
+    try:
+        expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("no-effect expiry rejected") from exc
+    if expiry.tzinfo is None or expiry.utcoffset() != timezone.utc.utcoffset(None):
+        raise ValueError("no-effect expiry rejected")
+    for field in (
+        "suppressed_synthetic_recipient_authorized",
+        "denied_consent_synthetic_recipient_authorized",
+        "provider_submission_impossible",
+    ):
+        if not isinstance(authority.get(field), bool):
+            raise ValueError("no-effect boolean rejected")
+    return {
+        "adapter": adapter,
+        "adapter_sha256": adapter_sha256,
+        "suppressed_synthetic_recipient_authorized": authority[
+            "suppressed_synthetic_recipient_authorized"
+        ],
+        "denied_consent_synthetic_recipient_authorized": authority[
+            "denied_consent_synthetic_recipient_authorized"
+        ],
+        "provider_submission_impossible": authority["provider_submission_impossible"],
+        "approved_by": approved_by,
+        "expires_at_utc": expires_at,
+        "unexpired": expiry > datetime.now(timezone.utc),
+    }
+
+
+def main() -> int:
+    try:
+        authority = project_authority(safe_json_file(READBACK, ALLOWED))
+        safe = (
+            authority.get("suppressed_synthetic_recipient_authorized") is True
+            and authority.get("denied_consent_synthetic_recipient_authorized") is True
+            and authority.get("provider_submission_impossible") is True
+            and authority.get("unexpired") is True
+        )
+        emit(
+            {
+                "no_effect_authority": "PASS" if safe else "FAIL",
+                "adapter": authority.get("adapter", "unavailable"),
+                "adapter_sha256": authority.get("adapter_sha256", "unavailable"),
+                "tests_executed": False,
+                "provider_submissions": 0,
+                "reason": "ADAPTER_EXECUTION_REQUIRES_SEPARATE_REVIEWED_SOURCE",
+            }
+        )
+        return 3
+    except (OSError, ValueError, json.JSONDecodeError):
+        emit(
+            {
+                "no_effect_authority": "BLOCKED",
+                "tests_executed": False,
+                "provider_submissions": 0,
+                "reason": "NO_AUTHENTICATED_NO_EFFECT_ADAPTER",
+            }
+        )
+        return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

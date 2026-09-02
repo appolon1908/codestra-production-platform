@@ -24,6 +24,7 @@ EVENT_PREFIXES = {
 }
 CHANNEL_EVENTS = {
     "telnexa.sms.received": "sms",
+    "telnexa.sms.submitted": "sms",
     "telnexa.sms.delivered": "sms",
     "telnexa.sms.failed": "sms",
     "klyrow.email.sent": "email",
@@ -172,6 +173,7 @@ class Store:
               downstream_provider TEXT, status TEXT NOT NULL, raw_provider_status TEXT,
               estimated_cost_minor INTEGER NOT NULL DEFAULT 0, final_cost_minor INTEGER, customer_charge_minor INTEGER,
               currency TEXT NOT NULL, provider_message_id TEXT, provider_error_code TEXT, retry_count INTEGER NOT NULL DEFAULT 0,
+              provider_attempt INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL, submitted_at TEXT, accepted_at TEXT, sent_at TEXT, delivered_at TEXT, failed_at TEXT,
               UNIQUE(tenant_id,idempotency_key));
             CREATE INDEX IF NOT EXISTS messages_tenant_created ON messages(tenant_id,created_at);
@@ -213,6 +215,13 @@ class Store:
               permitted_fields TEXT NOT NULL, result TEXT NOT NULL, http_status INTEGER NOT NULL,
               correlation_id TEXT NOT NULL, created_at TEXT NOT NULL);
             """)
+            message_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(messages)")
+            }
+            if "provider_attempt" not in message_columns:
+                db.execute(
+                    "ALTER TABLE messages ADD COLUMN provider_attempt INTEGER NOT NULL DEFAULT 0"
+                )
             for name in ("odoo", "n8n", "kyqra", "telnexa", "klyrow"):
                 db.execute("INSERT INTO integrations VALUES(?,0,?) ON CONFLICT DO NOTHING", (name, now_iso()))
                 db.execute("INSERT INTO circuits(name) VALUES(?) ON CONFLICT DO NOTHING", (name,))
@@ -361,6 +370,48 @@ class Store:
                 return IngestResult(row["event_id"], row["correlation_id"], True, row["state"])
             raise ControlPlaneError("idempotency_conflict")
 
+    def exact_event_replay(self, envelope: dict[str, Any]) -> IngestResult | None:
+        """Read back one byte-equivalent producer event after a strict replay."""
+
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT event_id,correlation_id,envelope,state FROM events WHERE event_id=?",
+                (envelope["event_id"],),
+            ).fetchone()
+        if row is None:
+            return None
+        keys = (
+            "event_type", "event_version", "occurred_at", "tenant_id",
+            "customer_id", "causation_id", "idempotency_key", "payload", "metadata",
+        )
+        stored = json.loads(row["envelope"])
+        if {key: stored.get(key) for key in keys} != {
+            key: envelope.get(key) for key in keys
+        }:
+            return None
+        return IngestResult(row["event_id"], row["correlation_id"], True, row["state"])
+
+    def provider_projection_receipt(self, event_id: str) -> dict[str, Any] | None:
+        """Return the durable message-event projection committed for an event."""
+
+        with self.connect() as db:
+            row = db.execute(
+                """SELECT event_id,message_id,tenant_id,normalized_status,raw_status,envelope
+                FROM message_events WHERE event_id=?""",
+                (event_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        envelope = json.loads(row["envelope"])
+        payload = envelope.get("payload") or {}
+        return {
+            "event_id": row["event_id"],
+            "message_id": row["message_id"],
+            "provider_message_id": payload.get("provider_message_id"),
+            "raw_status": row["raw_status"],
+            "status": row["normalized_status"],
+        }
+
     def event_exists(self, event_id: str) -> bool:
         """Return whether an immutable producer event ID was already accepted."""
         with self.connect() as db:
@@ -411,10 +462,11 @@ class Store:
         if value.get("business_unit_id"):
             metadata["business_unit_id"] = str(value["business_unit_id"])
         content_payload={key:value[key] for key in ("content","subject","template_data","html","text","reply_to","template_id") if key in value}
-        fields = (message_id,channel,tenant,customer,value.get("external_reference"),value["correlation_id"],value["request_id"],value["idempotency_key"],"outbound",value["source_application"],value.get("campaign_id"),value.get("workflow_id"),value["sender"],value["recipient"],destination,value["classification"],json.dumps(metadata,sort_keys=True),json.dumps(content_payload,separators=(",",":")),provider,None,"queued",None,int(value.get("estimated_cost_minor",0)),None,None,value.get("currency","USD"),None,None,0,stamp,None,None,None,None,None)
+        columns = ("message_id","channel","tenant_id","customer_id","external_reference","correlation_id","request_id","idempotency_key","direction","source_application","campaign_id","workflow_id","sender","recipient","normalized_destination","classification","content_metadata","content_payload","provider","downstream_provider","status","raw_provider_status","estimated_cost_minor","final_cost_minor","customer_charge_minor","currency","provider_message_id","provider_error_code","retry_count","provider_attempt","created_at","submitted_at","accepted_at","sent_at","delivered_at","failed_at")
+        fields = (message_id,channel,tenant,customer,value.get("external_reference"),value["correlation_id"],value["request_id"],value["idempotency_key"],"outbound",value["source_application"],value.get("campaign_id"),value.get("workflow_id"),value["sender"],value["recipient"],destination,value["classification"],json.dumps(metadata,sort_keys=True),json.dumps(content_payload,separators=(",",":")),provider,None,"queued",None,int(value.get("estimated_cost_minor",0)),None,None,value.get("currency","USD"),None,None,0,0,stamp,None,None,None,None,None)
         try:
             with self.connect() as db:
-                db.execute("INSERT INTO messages VALUES(" + ",".join("?" for _ in fields) + ")", fields)
+                db.execute("INSERT INTO messages(" + ",".join(columns) + ") VALUES(" + ",".join("?" for _ in fields) + ")", fields)
                 units = sms_segments(str(value.get("content", ""))) if channel == "sms" else 1
                 db.execute("INSERT INTO usage_meter VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (str(uuid.uuid4()),message_id,tenant,channel,units,int(value.get("estimated_cost_minor",0)),None,None,value.get("currency","USD"),"reserved",stamp[:7],stamp))
                 self._append_message_event(db, message_id, tenant, f"{channel}.queued", "queued", "queued", value["correlation_id"])
@@ -468,7 +520,7 @@ class Store:
         self.get_message(message_id,tenant)
         with self.connect() as db: return [json.loads(r["envelope"]) for r in db.execute("SELECT envelope FROM message_events WHERE message_id=? AND tenant_id=? ORDER BY created_at",(message_id,tenant))]
 
-    def transition_message(self, message_id: str, tenant: str, status: str, raw_status: str, event_id: str | None = None, provider_message_id: str | None = None, error_code: str | None = None, payload: dict[str, Any] | None = None) -> bool:
+    def transition_message(self, message_id: str, tenant: str, status: str, raw_status: str, event_id: str | None = None, provider_message_id: str | None = None, error_code: str | None = None, payload: dict[str, Any] | None = None, allow_ambiguous_reconciliation: bool = False) -> bool:
         if status not in MESSAGE_STATES: raise ControlPlaneError("invalid_message_status")
         message=self.get_message(message_id,tenant); stamp=now_iso(); timestamp_col={"accepted":"accepted_at","sent":"sent_at","delivered":"delivered_at","failed":"failed_at","rejected":"failed_at","bounced":"failed_at"}.get(status)
         with self.connect() as db:
@@ -478,7 +530,14 @@ class Store:
                   "undeliverable":6,"bounced":7,"complained":8,"unsubscribed":9,
                   "cancelled":9,"opted_out":9,"blocked":9}
             current=str(message["status"])
-            if rank.get(status,0) < rank.get(current,0):
+            reconciles_ambiguous_submission = (
+                allow_ambiguous_reconciliation
+                and current == "deferred"
+                and status == "accepted"
+                and raw_status == "submitted"
+                and bool(provider_message_id)
+            )
+            if rank.get(status,0) < rank.get(current,0) and not reconciles_ambiguous_submission:
                 return True
             sql="UPDATE messages SET status=?,raw_provider_status=?,provider_message_id=COALESCE(?,provider_message_id),provider_error_code=?"; args:list[Any]=[status,raw_status,provider_message_id,error_code]
             if timestamp_col: sql+=f",{timestamp_col}=?"; args.append(stamp)
@@ -493,17 +552,25 @@ class Store:
     def retry_message(self, message_id: str, tenant: str) -> dict[str, Any]:
         message=self.get_message(message_id,tenant)
         if message["status"] not in {"failed","rejected","deferred"}: raise ControlPlaneError("message_not_retryable")
-        with self.connect() as db: db.execute("UPDATE messages SET status='queued',retry_count=retry_count+1,provider_error_code=NULL WHERE message_id=? AND tenant_id=?",(message_id,tenant))
+        with self.connect() as db:
+            cursor=db.execute("UPDATE messages SET status='queued',retry_count=retry_count+1,provider_attempt=provider_attempt+1,provider_error_code=NULL WHERE message_id=? AND tenant_id=? AND status IN ('failed','rejected','deferred')",(message_id,tenant))
+            if cursor.rowcount != 1: raise ControlPlaneError("message_not_retryable")
         return self.get_message(message_id,tenant)
 
     def apply_provider_event(self, source: str, envelope: dict[str, Any]) -> bool:
         payload=envelope["payload"]; message_id=str(payload.get("message_id", "")); tenant=envelope["tenant_id"]
         raw=str(payload.get("status") or envelope["event_type"].rsplit(".",1)[-1]); status=normalize_status(source,raw)
         message=self.get_message(message_id,tenant); destination=message["normalized_destination"]
-        changed=self.transition_message(message_id,tenant,status,raw,envelope["event_id"],payload.get("provider_message_id"),payload.get("error_code"),payload)
-        if changed and source=="telnexa" and envelope["event_type"] in {"telnexa.sms.received","telnexa.sms.opted_out"} and str(payload.get("text","")).strip().upper() in {"STOP","UNSUBSCRIBE"}:
+        reconcile_ambiguous = (
+            source == "telnexa"
+            and envelope["event_type"] == "telnexa.sms.submitted"
+            and status == "accepted"
+            and raw == "submitted"
+        )
+        changed=self.transition_message(message_id,tenant,status,raw,envelope["event_id"],payload.get("provider_message_id"),payload.get("error_code"),payload,allow_ambiguous_reconciliation=reconcile_ambiguous)
+        if source=="telnexa" and envelope["event_type"] in {"telnexa.sms.received","telnexa.sms.opted_out"} and str(payload.get("text","")).strip().upper() in {"STOP","UNSUBSCRIBE"}:
             self.set_preference(tenant,message["customer_id"],"sms","unsubscribed","telnexa",str(payload.get("text")).upper()); self.suppress(tenant,"sms",destination,"optout","inbound_keyword","telnexa")
-        if changed and source=="klyrow" and status in {"bounced","complained","unsubscribed"}:
+        if source=="klyrow" and status in {"bounced","complained","unsubscribed"}:
             self.suppress(tenant,"email",destination,status,raw,"klyrow")
             if status in {"complained","unsubscribed"}: self.set_preference(tenant,message["customer_id"],"email","unsubscribed","klyrow",status)
         return changed

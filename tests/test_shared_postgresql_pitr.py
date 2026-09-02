@@ -6,9 +6,44 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "operations" / "shared-postgresql"
+
+
+def test_activation_compose_projects_stage_helper_without_secrets() -> None:
+    activation = yaml.safe_load((PACKAGE / "compose.pitr-activation.yaml").read_text())
+    postgres = activation["services"]["postgres"]
+    command = postgres["command"]
+    volumes = postgres["volumes"]
+    assert "archive_mode=on" in command
+    assert any(value.startswith("archive_command=") for value in command)
+    assert (
+        "/usr/local/sbin/codestra-shared-postgres-stage-wal.sh:"
+        "/usr/local/sbin/codestra-shared-postgres-stage-wal.sh:ro"
+    ) in volumes
+    assert (
+        "/var/spool/codestra/postgresql-shared/wal:"
+        "/var/spool/codestra/postgresql-shared/wal"
+    ) in volumes
+    serialized = str(activation).lower()
+    assert "password" not in serialized
+    assert "private" not in serialized
+
+
+def test_backup_hba_is_role_specific_scram_and_reload_only() -> None:
+    script = (PACKAGE / "install-backup-hba.sh").read_text()
+    assert "host replication $role $cidr scram-sha-256" in script
+    assert "select pg_reload_conf()" in script
+    assert "pg_hba_file_rules" in script
+    assert "requested.is_private" in script
+    assert "requested not in attached" in script
+    assert "trap rollback EXIT" in script
+    assert 'equivalent=$(psql' in script
+    assert "host replication all" not in script
+    assert "trust" not in script
+    assert "docker restart" not in script
 
 
 def run_validator(authority: Path):
@@ -66,6 +101,27 @@ def test_source_has_valid_pitr_and_base_backup_contracts():
     assert 'restic backup --quiet --json' in base and 'get("snapshot_id", value)' in base
     restore = (PACKAGE / "codestra-shared-postgres-restore-wal.sh").read_text()
     assert 'mktemp -d' in restore and 'cp -a "$secrets/gpg/."' in restore and "shred -u" in restore
+
+
+def test_offload_service_uses_protected_non_home_ssh_authority():
+    unit = (PACKAGE / "codestra-shared-postgres-wal-offload.service").read_text()
+    ssh_config = (PACKAGE / "codestra-shared-backup.ssh.conf").read_text()
+    assert "ProtectHome=true" in unit
+    assert "Environment=HOME=/etc/codestra/secrets/shared-postgresql/ssh-home" in unit
+    assert "ReadOnlyPaths=/etc/codestra/secrets/shared-postgresql" in unit
+    assert "Host codestra-shared-backup" in ssh_config
+    assert "IdentityFile /etc/codestra/secrets/shared-postgresql/ssh-home/.ssh/id_ed25519" in ssh_config
+    assert "StrictHostKeyChecking yes" in ssh_config and "BatchMode yes" in ssh_config
+    resolved = subprocess.run(
+        ["ssh", "-F", str(PACKAGE / "codestra-shared-backup.ssh.conf"), "-G", "codestra-shared-backup"],
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.lower()
+    assert "hostname 10.40.0.2" in resolved
+    assert "identitiesonly yes" in resolved
+    assert "stricthostkeychecking true" in resolved
+    assert "identityfile /etc/codestra/secrets/shared-postgresql/ssh-home/.ssh/id_ed25519" in resolved
 
 
 def test_nonroot_stage_and_portable_checksum_relocation(tmp_path):
@@ -154,11 +210,17 @@ def test_validator_template_and_inactive_window_fail_closed(tmp_path):
 
 def test_wal_worker_has_verified_bounded_retention_and_metrics():
     worker = (PACKAGE / "codestra-shared-postgres-archive-wal.sh").read_text()
+    assert "--no-options --lock-never" in worker
+    assert "--no-auto-check-trustdb" in worker
     rules = (PACKAGE / "shared-postgres.rules.yml").read_text()
     assert "restic dump" in worker and "OFFHOST_STATUS=PASS" not in worker
     assert "STATUS=PASS" in worker and "wal-retention-days" in worker and "-mtime" in worker
-    assert "recorded_artifact" in worker and "continue" in worker
+    assert "recorded_snapshot" in worker and "continue" in worker
     assert "wal_spool_disk_critical" in worker and "critical WAL spool filesystem usage" in worker
+    assert "CODESTRA_SHARED_WAL_MAX_FILES_PER_RUN" in worker
+    assert "processed < max_files" in worker
+    assert 'df -P "$spool"' in worker
+    assert 'find "$artifact" "$artifact.sha256" -delete' in worker
     assert "exit 1" not in worker
     assert "SharedPostgresWALSpoolCleanupFailure" in rules
 
