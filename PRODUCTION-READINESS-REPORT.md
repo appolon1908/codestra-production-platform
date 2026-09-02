@@ -15,6 +15,7 @@ Decision: **NO-GO**
 - Appolon Middleware source `f3437709c06747249586598590145234ea2c7327` and digest `sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484` implement the three n8n API gaps, but are not deployed.
 - Branch protections retain strict status checks, conversation resolution, admin enforcement, and force-push/deletion denial. No bypass was used.
 - All dangerous external-effect switches remain disabled. No email, SMS, social post, advertisement, model request, payment, or PSTN call was initiated.
+- Klyrow and Telnexa source-defined public health/readiness endpoints pass with authoritative DNS, exact peer, and TLS hostname verification; private mTLS/service-identity integration gates remain FAIL (`evidence/server65/PROVIDER-READONLY-HEALTH-20260902.md`).
 
 ## Runtime baseline
 
