@@ -16,6 +16,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "evidence" / "repository-review"
 ALIASES = ROOT / "config" / "repository-name-aliases.v1.json"
+POSTGRES_EXPORTER_REPOSITORY = "appolon1908-hue/Codestra-Postgres-Exporter"
+POSTGRES_EXPORTER_REPOSITORY_ID = 1350839865
+
 KNOWN_REPOSITORIES = (
     "appolon1908-hue/codestra-production-platform",
     "appolon1908-hue/codestra-production-runtime-authority",
@@ -55,7 +58,7 @@ KNOWN_REPOSITORIES = (
     "appolon1908-hue/Codestra-cAdvisor",
     "appolon1908-hue/Codestra-Redis-Exporter",
     "appolon1908-hue/Codestra-Blackbox-Exporter",
-    "appolon1908-hue/Codestra-Postgres-Exporter",
+    POSTGRES_EXPORTER_REPOSITORY,
     "appolon1908-hue/Superset",
 )
 
@@ -67,10 +70,11 @@ def gh(path: str, *, paginate: bool = False) -> tuple[Any | None, str | None]:
     command.append(path)
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     if result.returncode:
-        return None, result.stderr.strip().splitlines()[-1]
+        message = result.stderr.strip().splitlines()
+        return None, message[-1] if message else "GitHub API request failed"
     try:
         if paginate:
-            values = []
+            values: list[Any] = []
             decoder = json.JSONDecoder()
             text = result.stdout.lstrip()
             while text:
@@ -87,21 +91,30 @@ def endpoint(repo: str, suffix: str = "") -> str:
     return f"repos/{repo}{suffix}"
 
 
-def load_repository_aliases() -> dict[str, dict[str, Any]]:
+def load_authority_document() -> dict[str, Any]:
     try:
         document = json.loads(ALIASES.read_text(encoding="utf-8"))
     except Exception as exc:
         raise SystemExit(f"invalid repository alias manifest: {exc}") from exc
-
+    if not isinstance(document, dict):
+        raise SystemExit("repository alias manifest root must be an object")
     if document.get("schema_version") != "1.0":
         raise SystemExit("repository alias schema_version must be 1.0")
     if document.get("status") != "PREPARED_NOT_RENAMED":
-        raise SystemExit("repository aliases must remain PREPARED_NOT_RENAMED before cutover")
+        raise SystemExit(
+            "repository aliases must remain PREPARED_NOT_RENAMED before cutover"
+        )
     if document.get("identity_key") != "repository_id":
         raise SystemExit("repository_id must be the stable repository identity")
     if document.get("historical_evidence_immutable") is not True:
         raise SystemExit("historical repository evidence must remain immutable")
+    return document
 
+
+def load_repository_aliases() -> dict[str, dict[str, Any]]:
+    """Return validated rename mappings without coupling them to a test inventory."""
+
+    document = load_authority_document()
     mappings = document.get("mappings")
     if not isinstance(mappings, list) or len(mappings) != 6:
         raise SystemExit("repository alias manifest must contain exactly six mappings")
@@ -119,28 +132,62 @@ def load_repository_aliases() -> dict[str, dict[str, Any]]:
         if not isinstance(repository_id, int) or repository_id <= 0:
             raise SystemExit("repository alias contains an invalid repository ID")
         if repository_id in ids:
-            raise SystemExit(f"duplicate repository ID in alias manifest: {repository_id}")
+            raise SystemExit(
+                f"duplicate repository ID in alias manifest: {repository_id}"
+            )
         if not isinstance(current, str) or not current.startswith("appolon1908-hue/"):
             raise SystemExit(f"invalid current repository in alias manifest: {current}")
         if not isinstance(target, str) or not target.startswith("appolon1908-hue/"):
             raise SystemExit(f"invalid target repository in alias manifest: {target}")
         if current == target:
-            raise SystemExit(f"current and target repository names are identical: {current}")
+            raise SystemExit(
+                f"current and target repository names are identical: {current}"
+            )
         if current in by_current or target in targets:
             raise SystemExit("duplicate current or target repository in alias manifest")
         if status != "PREPARED_NOT_RENAMED":
-            raise SystemExit(f"repository alias changed state without cutover: {current}")
+            raise SystemExit(
+                f"repository alias changed state without cutover: {current}"
+            )
         ids.add(repository_id)
         targets.add(target)
         by_current[current] = item
-
-    missing = set(by_current) - set(KNOWN_REPOSITORIES)
-    if missing:
-        raise SystemExit(
-            "repository-review inventory omits rename-controlled repositories: "
-            + ", ".join(sorted(missing))
-        )
     return by_current
+
+
+def load_postgres_exporter_authority() -> dict[str, Any]:
+    document = load_authority_document()
+    exporter = document.get("postgres_exporter_authority")
+    if not isinstance(exporter, dict):
+        raise SystemExit("PostgreSQL Exporter authority is missing")
+    expected = {
+        "repository_id": POSTGRES_EXPORTER_REPOSITORY_ID,
+        "repository": POSTGRES_EXPORTER_REPOSITORY,
+        "public_hostname": None,
+        "private_service_identity": "postgres-exporter:9187",
+        "forbidden_public_hostname": "pgex.codestra.media",
+        "exposure": "PRIVATE_INTERNAL_ONLY",
+    }
+    for key, value in expected.items():
+        if exporter.get(key) != value:
+            raise SystemExit(f"PostgreSQL Exporter authority field is invalid: {key}")
+    return exporter
+
+
+def configured_repository_ids(
+    aliases: dict[str, dict[str, Any]],
+    exporter: dict[str, Any],
+) -> dict[str, int]:
+    values = {
+        repository: int(mapping["repository_id"])
+        for repository, mapping in aliases.items()
+    }
+    exporter_repo = exporter["repository"]
+    exporter_id = int(exporter["repository_id"])
+    if exporter_repo in values and values[exporter_repo] != exporter_id:
+        raise SystemExit("conflicting PostgreSQL Exporter stable repository IDs")
+    values[exporter_repo] = exporter_id
+    return values
 
 
 def role(repo: str, alias: dict[str, Any] | None = None) -> str:
@@ -158,195 +205,253 @@ def role(repo: str, alias: dict[str, Any] | None = None) -> str:
         return "SOCIAL_CONTROL_PLANE_ARCHITECTURE"
     if repository_id in {1221155447, 1343761049, 1343962199}:
         return "INDEPENDENT_PRODUCT_FRONTEND"
+    if repo == POSTGRES_EXPORTER_REPOSITORY:
+        return "PRIVATE_POSTGRESQL_METRICS_EXPORTER_AUTHORITY"
     if name in {"sdk-repository", "codestra"}:
         return "PLATFORM_CONTRACT_OR_CLIENT_SOURCE"
     return "SERVICE_SOURCE_CANDIDATE_REQUIRES_OWNER_CONFIRMATION"
 
 
-def main() -> None:
-    aliases = load_repository_aliases()
-    OUT.mkdir(parents=True, exist_ok=True)
-    captured_at = datetime.now(timezone.utc).isoformat()
-    inventory: list[dict[str, Any]] = []
-    pr_rows: list[dict[str, Any]] = []
-    blockers: list[str] = []
+def metadata_blocked_record(
+    repo: str,
+    error: str,
+    migration: dict[str, Any] | None,
+    expected_repository_id: int | None,
+) -> dict[str, Any]:
+    return {
+        "repository": repo,
+        "status": "BLOCKED",
+        "error": error,
+        "repository_id": None,
+        "expected_repository_id": expected_repository_id,
+        "target_repository_after_cutover": (
+            migration.get("target_repository_after_cutover") if migration else None
+        ),
+        "rename_status": migration.get("status") if migration else None,
+        "canonical_role": role(repo, migration),
+    }
 
-    for repo in KNOWN_REPOSITORIES:
-        migration = aliases.get(repo)
-        metadata, error = gh(endpoint(repo))
-        if error:
-            inventory.append(
-                {
-                    "repository": repo,
-                    "status": "BLOCKED",
-                    "error": error,
-                    "repository_id": migration.get("repository_id") if migration else None,
-                    "target_repository_after_cutover": (
-                        migration.get("target_repository_after_cutover")
-                        if migration
-                        else None
-                    ),
-                    "rename_status": migration.get("status") if migration else None,
-                }
-            )
-            blockers.append(f"- `{repo}` metadata: {error}")
-            continue
 
-        if migration and metadata.get("id") != migration["repository_id"]:
-            message = (
-                "stable repository ID mismatch: "
-                f"expected {migration['repository_id']}, received {metadata.get('id')}"
-            )
-            inventory.append(
-                {
-                    "repository": repo,
-                    "status": "BLOCKED",
-                    "error": message,
-                    "repository_id": metadata.get("id"),
-                    "expected_repository_id": migration["repository_id"],
-                    "target_repository_after_cutover": migration[
-                        "target_repository_after_cutover"
-                    ],
-                    "rename_status": migration["status"],
-                }
-            )
-            blockers.append(f"- `{repo}` metadata: {message}")
-            continue
+def identity_mismatch_record(
+    repo: str,
+    metadata: dict[str, Any],
+    migration: dict[str, Any] | None,
+    expected_repository_id: int,
+) -> tuple[dict[str, Any], str]:
+    message = (
+        "stable repository ID mismatch: "
+        f"expected {expected_repository_id}, received {metadata.get('id')}"
+    )
+    return (
+        {
+            "repository": repo,
+            "status": "BLOCKED",
+            "error": message,
+            "repository_id": metadata.get("id"),
+            "expected_repository_id": expected_repository_id,
+            "target_repository_after_cutover": (
+                migration.get("target_repository_after_cutover")
+                if migration
+                else None
+            ),
+            "rename_status": migration.get("status") if migration else None,
+            "canonical_role": role(repo, migration),
+        },
+        message,
+    )
 
-        branches, branches_error = gh(endpoint(repo, "/branches?per_page=100"), paginate=True)
-        prs, prs_error = gh(endpoint(repo, "/pulls?state=all&per_page=100"), paginate=True)
-        rulesets, rulesets_error = gh(endpoint(repo, "/rulesets?per_page=100"), paginate=True)
-        workflows, workflows_error = gh(endpoint(repo, "/actions/workflows?per_page=100"))
-        runs, runs_error = gh(endpoint(repo, "/actions/runs?per_page=20"))
-        releases, releases_error = gh(endpoint(repo, "/releases?per_page=20"))
-        codeowners_present = False
-        for candidate in ("CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"):
-            value, _ = gh(
-                endpoint(repo, f"/contents/{candidate}?ref={metadata.get('default_branch')}")
-            )
-            if value:
-                codeowners_present = True
-                break
-        alerts: dict[str, Any] = {}
-        for alert_name, path in (
-            ("dependabot", "/dependabot/alerts?state=open&per_page=100"),
-            ("secret_scanning", "/secret-scanning/alerts?state=open&per_page=100"),
-            ("code_scanning", "/code-scanning/alerts?state=open&per_page=100"),
-        ):
-            value, alert_error = gh(endpoint(repo, path), paginate=True)
-            alerts[alert_name] = {"count": len(value or []), "error": alert_error}
-            if alert_error:
-                blockers.append(
-                    f"- `{repo}` {alert_name} security alerts: {alert_error}"
-                )
 
-        for label, value in (
-            ("branches", branches_error),
-            ("pull_requests", prs_error),
-            ("rulesets", rulesets_error),
-            ("workflows", workflows_error),
-            ("workflow_runs", runs_error),
-            ("releases", releases_error),
-        ):
-            if value:
-                blockers.append(f"- `{repo}` {label}: {value}")
-
-        branch_rows = branches or []
-        pr_values = prs or []
-        run_values = (
-            (runs or {}).get("workflow_runs", []) if isinstance(runs, dict) else []
+def capture_repository(
+    repo: str,
+    migration: dict[str, Any] | None,
+    expected_repository_id: int | None,
+    blockers: list[str],
+    pr_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    metadata, error = gh(endpoint(repo))
+    if error:
+        blockers.append(f"- `{repo}` metadata: {error}")
+        return metadata_blocked_record(
+            repo,
+            error,
+            migration,
+            expected_repository_id,
         )
-        workflow_values = (
-            (workflows or {}).get("workflows", [])
-            if isinstance(workflows, dict)
-            else []
+    if not isinstance(metadata, dict):
+        error = "GitHub metadata response was not an object"
+        blockers.append(f"- `{repo}` metadata: {error}")
+        return metadata_blocked_record(
+            repo,
+            error,
+            migration,
+            expected_repository_id,
         )
-        release_values = releases or []
-        inventory.append(
+
+    if (
+        expected_repository_id is not None
+        and metadata.get("id") != expected_repository_id
+    ):
+        record, mismatch = identity_mismatch_record(
+            repo,
+            metadata,
+            migration,
+            expected_repository_id,
+        )
+        blockers.append(f"- `{repo}` metadata: {mismatch}")
+        return record
+
+    branches, branches_error = gh(
+        endpoint(repo, "/branches?per_page=100"),
+        paginate=True,
+    )
+    prs, prs_error = gh(
+        endpoint(repo, "/pulls?state=all&per_page=100"),
+        paginate=True,
+    )
+    rulesets, rulesets_error = gh(
+        endpoint(repo, "/rulesets?per_page=100"),
+        paginate=True,
+    )
+    workflows, workflows_error = gh(endpoint(repo, "/actions/workflows?per_page=100"))
+    runs, runs_error = gh(endpoint(repo, "/actions/runs?per_page=20"))
+    releases, releases_error = gh(endpoint(repo, "/releases?per_page=20"))
+
+    codeowners_present = False
+    for candidate in ("CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"):
+        value, _ = gh(
+            endpoint(repo, f"/contents/{candidate}?ref={metadata.get('default_branch')}")
+        )
+        if value:
+            codeowners_present = True
+            break
+
+    alerts: dict[str, Any] = {}
+    for alert_name, path in (
+        ("dependabot", "/dependabot/alerts?state=open&per_page=100"),
+        ("secret_scanning", "/secret-scanning/alerts?state=open&per_page=100"),
+        ("code_scanning", "/code-scanning/alerts?state=open&per_page=100"),
+    ):
+        value, alert_error = gh(endpoint(repo, path), paginate=True)
+        alerts[alert_name] = {"count": len(value or []), "error": alert_error}
+        if alert_error:
+            blockers.append(f"- `{repo}` {alert_name} security alerts: {alert_error}")
+
+    for label, value in (
+        ("branches", branches_error),
+        ("pull_requests", prs_error),
+        ("rulesets", rulesets_error),
+        ("workflows", workflows_error),
+        ("workflow_runs", runs_error),
+        ("releases", releases_error),
+    ):
+        if value:
+            blockers.append(f"- `{repo}` {label}: {value}")
+
+    branch_rows = branches if isinstance(branches, list) else []
+    pr_values = prs if isinstance(prs, list) else []
+    ruleset_values = rulesets if isinstance(rulesets, list) else []
+    run_values = (
+        runs.get("workflow_runs", []) if isinstance(runs, dict) else []
+    )
+    workflow_values = (
+        workflows.get("workflows", []) if isinstance(workflows, dict) else []
+    )
+    release_values = releases if isinstance(releases, list) else []
+
+    for pr in pr_values:
+        if not isinstance(pr, dict):
+            continue
+        pr_rows.append(
             {
                 "repository": repo,
-                "repository_id": metadata.get("id"),
-                "expected_repository_id": (
-                    migration.get("repository_id") if migration else metadata.get("id")
-                ),
-                "target_repository_after_cutover": (
-                    migration.get("target_repository_after_cutover")
-                    if migration
-                    else None
-                ),
-                "rename_status": migration.get("status") if migration else None,
-                "status": "CAPTURED",
-                "visibility": metadata.get("visibility"),
-                "archived": metadata.get("archived"),
-                "default_branch": metadata.get("default_branch"),
-                "html_url": metadata.get("html_url"),
-                "pushed_at": metadata.get("pushed_at"),
-                "open_issues_count": metadata.get("open_issues_count"),
-                "canonical_role": role(repo, migration),
-                "codeowners_present": codeowners_present,
-                "branches": [
-                    {
-                        "name": x.get("name"),
-                        "sha": (x.get("commit") or {}).get("sha"),
-                        "protected": x.get("protected"),
-                    }
-                    for x in branch_rows
-                ],
-                "rulesets": [
-                    {
-                        "id": x.get("id"),
-                        "name": x.get("name"),
-                        "enforcement": x.get("enforcement"),
-                        "target": x.get("target"),
-                    }
-                    for x in (rulesets or [])
-                ],
-                "workflows": [
-                    {
-                        "name": x.get("name"),
-                        "path": x.get("path"),
-                        "state": x.get("state"),
-                    }
-                    for x in workflow_values
-                ],
-                "latest_workflow_runs": [
-                    {
-                        "name": x.get("name"),
-                        "head_sha": x.get("head_sha"),
-                        "status": x.get("status"),
-                        "conclusion": x.get("conclusion"),
-                        "html_url": x.get("html_url"),
-                    }
-                    for x in run_values
-                ],
-                "latest_releases": [
-                    {
-                        "tag_name": x.get("tag_name"),
-                        "target": x.get("target_commitish"),
-                        "published_at": x.get("published_at"),
-                        "html_url": x.get("html_url"),
-                    }
-                    for x in release_values
-                ],
-                "security_alerts": alerts,
+                "number": pr.get("number"),
+                "state": pr.get("state"),
+                "draft": pr.get("draft"),
+                "title": pr.get("title"),
+                "head_sha": (pr.get("head") or {}).get("sha"),
+                "base": (pr.get("base") or {}).get("ref"),
+                "merge_commit_sha": pr.get("merge_commit_sha"),
+                "updated_at": pr.get("updated_at"),
+                "url": pr.get("html_url"),
             }
         )
-        for pr in pr_values:
-            pr_rows.append(
-                {
-                    "repository": repo,
-                    "number": pr.get("number"),
-                    "state": pr.get("state"),
-                    "draft": pr.get("draft"),
-                    "title": pr.get("title"),
-                    "head_sha": (pr.get("head") or {}).get("sha"),
-                    "base": (pr.get("base") or {}).get("ref"),
-                    "merge_commit_sha": pr.get("merge_commit_sha"),
-                    "updated_at": pr.get("updated_at"),
-                    "url": pr.get("html_url"),
-                }
-            )
 
+    return {
+        "repository": repo,
+        "repository_id": metadata.get("id"),
+        "expected_repository_id": expected_repository_id,
+        "target_repository_after_cutover": (
+            migration.get("target_repository_after_cutover") if migration else None
+        ),
+        "rename_status": migration.get("status") if migration else None,
+        "status": "CAPTURED",
+        "visibility": metadata.get("visibility"),
+        "archived": metadata.get("archived"),
+        "default_branch": metadata.get("default_branch"),
+        "html_url": metadata.get("html_url"),
+        "pushed_at": metadata.get("pushed_at"),
+        "open_issues_count": metadata.get("open_issues_count"),
+        "canonical_role": role(repo, migration),
+        "codeowners_present": codeowners_present,
+        "branches": [
+            {
+                "name": item.get("name"),
+                "sha": (item.get("commit") or {}).get("sha"),
+                "protected": item.get("protected"),
+            }
+            for item in branch_rows
+            if isinstance(item, dict)
+        ],
+        "rulesets": [
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "enforcement": item.get("enforcement"),
+                "target": item.get("target"),
+            }
+            for item in ruleset_values
+            if isinstance(item, dict)
+        ],
+        "workflows": [
+            {
+                "name": item.get("name"),
+                "path": item.get("path"),
+                "state": item.get("state"),
+            }
+            for item in workflow_values
+            if isinstance(item, dict)
+        ],
+        "latest_workflow_runs": [
+            {
+                "name": item.get("name"),
+                "head_sha": item.get("head_sha"),
+                "status": item.get("status"),
+                "conclusion": item.get("conclusion"),
+                "html_url": item.get("html_url"),
+            }
+            for item in run_values
+            if isinstance(item, dict)
+        ],
+        "latest_releases": [
+            {
+                "tag_name": item.get("tag_name"),
+                "target": item.get("target_commitish"),
+                "published_at": item.get("published_at"),
+                "html_url": item.get("html_url"),
+            }
+            for item in release_values
+            if isinstance(item, dict)
+        ],
+        "security_alerts": alerts,
+    }
+
+
+def write_outputs(
+    captured_at: str,
+    inventory: list[dict[str, Any]],
+    pr_rows: list[dict[str, Any]],
+    blockers: list[str],
+) -> None:
     payload = {
         "schema_version": 2,
         "captured_at": captured_at,
@@ -355,8 +460,10 @@ def main() -> None:
         "repositories": inventory,
     }
     (OUT / "REPOSITORY-INVENTORY.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
+
     fields = (
         "repository",
         "number",
@@ -369,7 +476,11 @@ def main() -> None:
         "updated_at",
         "url",
     )
-    with (OUT / "REPOSITORY-PR-MATRIX.csv").open("w", newline="") as handle:
+    with (OUT / "REPOSITORY-PR-MATRIX.csv").open(
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(
@@ -388,6 +499,8 @@ def main() -> None:
         "repositories": [
             {
                 "repository": item["repository"],
+                "capture_status": item.get("status"),
+                "capture_error": item.get("error"),
                 "repository_id": item.get("repository_id"),
                 "expected_repository_id": item.get("expected_repository_id"),
                 "target_repository_after_cutover": item.get(
@@ -406,17 +519,61 @@ def main() -> None:
         ],
     }
     (OUT / "REPOSITORY-AUTHORITY-MATRIX.yaml").write_text(
-        yaml.safe_dump(authority, sort_keys=False, width=120)
+        yaml.safe_dump(authority, sort_keys=False, width=120),
+        encoding="utf-8",
     )
+
     blocker_text = [
         "# Repository Review Blockers",
         "",
         f"Captured: {captured_at}",
         "",
-        "A missing permission, unavailable API, or repository-ID mismatch is a blocker, never a PASS.",
+        (
+            "A missing permission, unavailable API, or repository-ID mismatch "
+            "is a blocker, never a PASS."
+        ),
         "",
     ] + (blockers or ["- None observed during API capture."])
-    (OUT / "REPOSITORY-BLOCKERS.md").write_text("\n".join(blocker_text) + "\n")
+    (OUT / "REPOSITORY-BLOCKERS.md").write_text(
+        "\n".join(blocker_text) + "\n",
+        encoding="utf-8",
+    )
+
+
+def main() -> None:
+    aliases = load_repository_aliases()
+    exporter = load_postgres_exporter_authority()
+
+    missing = set(aliases) - set(KNOWN_REPOSITORIES)
+    if missing:
+        raise SystemExit(
+            "repository-review inventory omits rename-controlled repositories: "
+            + ", ".join(sorted(missing))
+        )
+    if exporter["repository"] not in KNOWN_REPOSITORIES:
+        raise SystemExit(
+            "repository-review inventory omits PostgreSQL Exporter authority"
+        )
+
+    expected_ids = configured_repository_ids(aliases, exporter)
+    OUT.mkdir(parents=True, exist_ok=True)
+    captured_at = datetime.now(timezone.utc).isoformat()
+    inventory: list[dict[str, Any]] = []
+    pr_rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+
+    for repo in KNOWN_REPOSITORIES:
+        inventory.append(
+            capture_repository(
+                repo,
+                aliases.get(repo),
+                expected_ids.get(repo),
+                blockers,
+                pr_rows,
+            )
+        )
+
+    write_outputs(captured_at, inventory, pr_rows, blockers)
     print(f"REPOSITORIES={len(inventory)}")
     print(f"PULL_REQUESTS={len(pr_rows)}")
     print(f"BLOCKERS={len(blockers)}")
