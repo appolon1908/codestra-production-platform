@@ -11,7 +11,7 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./rules:/etc/prometheus/rules:ro
-      - /etc/codestra/secrets/monitoring-runtime/staging_metrics_client_secret:/run/secrets/staging_metrics_client_secret:ro
+      - /opt/codestra/secrets/identity-staging/monitoring-readonly-client-secret:/run/secrets/staging_metrics_client_secret:ro
       - prometheus_data:/prometheus
     networks:
       monitoring: {}

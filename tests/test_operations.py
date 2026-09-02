@@ -261,6 +261,10 @@ class MonitoringGovernanceTests(unittest.TestCase):
             "https://auth-staging.codestra.co/realms/codestra/protocol/openid-connect/token",
         )
         self.assertIn("operations_dashboard_staging", compose["services"]["prometheus"]["networks"])
+        self.assertIn(
+            "/opt/codestra/secrets/identity-staging/monitoring-readonly-client-secret:/run/secrets/staging_metrics_client_secret:ro",
+            compose["services"]["prometheus"]["volumes"],
+        )
         self.assertEqual(
             compose["networks"]["operations_dashboard_staging"],
             {
