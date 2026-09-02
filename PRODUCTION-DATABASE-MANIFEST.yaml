@@ -263,6 +263,22 @@ components:
     off_host_backup: NOT_PROVEN
     isolated_restore: NOT_PROVEN
     evidence_bundle: null
+  - id: identity-registry-postgresql
+    service: kong-standby-auth
+    store: oidc_tenant_registry PostgreSQL authority
+    kind: postgresql
+    source_authority: appolon1908-hue/codestra-production-platform
+    database_owner: identity security owner
+    application_role: restricted standby authorization reader
+    migration_framework: one-shot identity registry migrations
+    backup_method: pg_dump custom format plus checksum and encryption
+    restore_method: isolated PostgreSQL restore and tenant authorization readback
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
   - id: prometheus-tsdb
     service: prometheus
     store: prometheus_data

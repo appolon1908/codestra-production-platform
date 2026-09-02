@@ -24,6 +24,7 @@ REQUIRED_IDS = {
     "vicidial-adapter-state",
     "telephony-event-ledger",
     "kong-standby-auth-state",
+    "identity-registry-postgresql",
     "prometheus-tsdb",
     "alertmanager-state",
     "stalwart-mail-state",
@@ -151,7 +152,13 @@ def validate(path: Path, evidence_root: Path | None = None) -> None:
             assert re.fullmatch(r"[0-9a-f]{64}", evidence["sha256"])
             captured = datetime.fromisoformat(evidence["captured_at"].replace("Z", "+00:00"))
             assert captured.tzinfo is not None
-            assert captured <= datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+            assert captured <= now
+            age_hours = (now - captured).total_seconds() / 3600
+            if component["kind"] != "redis":
+                assert age_hours <= component["target_rpo_hours"], (
+                    f"stale certification evidence: {component['id']}"
+                )
             evidence_path = evidence_root / evidence["path"]
             assert evidence_path.is_file()
             assert hashlib.sha256(evidence_path.read_bytes()).hexdigest() == evidence["sha256"]

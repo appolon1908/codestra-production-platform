@@ -49,8 +49,8 @@ f986169593a78ead4133a6b102fbdaddc7f611607a6c26b9f191ad2f9e4e61f9  codestra-produ
 6d7432e9765474f86e93a711962ddf6b1f8edb3eab6098ace8d19d575f9ddec4  codestra-production-forced-command
 2969c70ff9e6568a6958f0e6c760a34e538aeb5934049f59dc4f69eab7ab018c  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
-bbe2a5edc8c3e43b56cb5e1decd2267c8756d2c5874a6168d968d33415beea64  ../../PRODUCTION-DATABASE-MANIFEST.yaml
-98be9f795f5fc45892a766138ae25cbf87c0884aa9545ecebc1b4bfa7df15d90  ../../tools/validate_production_database_manifest.py
+dad62a1dcb35fabb97991ad2f0a1079d13d949528daa7bebe0d35d291ec23f67  ../../PRODUCTION-DATABASE-MANIFEST.yaml
+de4d9ed07a33d4a9addf7cbef1df2d6f72125d3d67113662e64eab29e6124ec3  ../../tools/validate_production_database_manifest.py
 EOF
 }
 verify_payload || fail

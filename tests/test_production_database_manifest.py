@@ -1,5 +1,6 @@
 from copy import deepcopy
 import hashlib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ def test_production_database_manifest_is_complete_and_fail_closed():
     validate(MANIFEST)
     document = yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))
     assert document["certification_status"] == "FAIL"
-    assert len(document["components"]) == 20
+    assert len(document["components"]) == 21
     assert any(c["isolated_restore"] != "PASS" for c in document["components"])
 
 
@@ -85,10 +86,37 @@ def test_complete_checksum_bound_evidence_can_pass(tmp_path):
         component["evidence_bundle"] = {
             "path": relative,
             "sha256": hashlib.sha256(payload).hexdigest(),
-            "captured_at": "2026-09-02T00:00:00Z",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
         }
     candidate = tmp_path / "manifest.yaml"
     candidate.write_text(
         yaml.safe_dump(document, sort_keys=False, width=10000), encoding="utf-8"
     )
     validate(candidate, evidence_root)
+
+
+def test_stale_evidence_is_rejected(tmp_path):
+    document = yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))
+    document["certification_status"] = "PASS"
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    stale = datetime.now(timezone.utc) - timedelta(hours=25)
+    for component in document["components"]:
+        component["isolated_restore"] = "PASS"
+        if component["kind"] != "redis":
+            component["local_backup"] = "PASS"
+            component["off_host_backup"] = "PASS"
+        payload = component["id"].encode()
+        relative = f"{component['id']}.txt"
+        (evidence_root / relative).write_bytes(payload)
+        component["evidence_bundle"] = {
+            "path": relative,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "captured_at": stale.isoformat(),
+        }
+    candidate = tmp_path / "manifest.yaml"
+    candidate.write_text(
+        yaml.safe_dump(document, sort_keys=False, width=10000), encoding="utf-8"
+    )
+    with pytest.raises(AssertionError, match="stale certification evidence"):
+        validate(candidate, evidence_root)
