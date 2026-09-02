@@ -1,0 +1,95 @@
+{
+  "schema": "codestra.database-backup-targets.v2",
+  "environment": "production",
+  "postgres_instances": [
+    {
+      "id": "shared",
+      "compose_project": "codestra",
+      "compose_service": "postgres",
+      "os_user": "postgres",
+      "backup_login_user": "postgres",
+      "databases": [
+        {"id":"odoo","name":"codestra_odoo","required":true,"application":"odoo"},
+        {"id":"middleware","name":"codestra_middleware","required":true,"application":"middleware"},
+        {"id":"n8n","name":"codestra_n8n","required":true,"application":"n8n"},
+        {"id":"control-plane","name":"control_plane","required":true,"application":"control-plane"},
+        {"id":"appolon","name":"codestra_middleware_appolon","required":true,"application":"appolon"},
+        {"id":"beyvra-email","name":"beyvra_email","required":true,"application":"beyvra-email"},
+        {"id":"email-reseller","name":"email_reseller","required":true,"application":"email-reseller"}
+      ]
+    },
+    {
+      "id": "kong",
+      "compose_project": "codestra-kong",
+      "compose_service": "kong-db",
+      "os_user": "postgres",
+      "backup_login_user": "kong",
+      "databases": [{"id":"kong","name":"kong","required":true,"application":"kong"}]
+    },
+    {
+      "id": "identity",
+      "compose_project": "codestra-identity",
+      "compose_service": "identity-db",
+      "os_user": "postgres",
+      "backup_login_user": "keycloak",
+      "databases": [{"id":"keycloak","name":"keycloak","required":true,"application":"keycloak"}]
+    },
+    {
+      "id": "realtime-primary",
+      "compose_project": "codestra-websocket-gateway",
+      "compose_service": "postgres",
+      "os_user": "postgres",
+      "backup_login_user": "codestra_realtime",
+      "databases": [{"id":"realtime","name":"codestra_realtime","required":true,"application":"realtime"}]
+    },
+    {
+      "id": "realtime-standby",
+      "compose_project": "codestra-websocket-replica",
+      "compose_service": "postgres",
+      "os_user": "postgres",
+      "backup_login_user": "codestra_realtime",
+      "standby": true,
+      "maximum_replay_lag_bytes": 16777216,
+      "databases": [{"id":"realtime-standby","name":"codestra_realtime","required":true,"application":"realtime-standby"}]
+    },
+    {
+      "id": "reseller-portal",
+      "compose_project": "codestra-reseller-portal",
+      "compose_service": "postgres",
+      "os_user": "postgres",
+      "backup_login_user": "reseller_portal",
+      "databases": [{"id":"reseller-portal","name":"reseller_portal","required":true,"application":"reseller-portal"}]
+    },
+    {
+      "id": "sms-api",
+      "compose_project": "codestra-sms-api",
+      "compose_service": "postgres",
+      "os_user": "postgres",
+      "backup_login_user": "codestra_sms",
+      "databases": [{"id":"sms-api","name":"codestra_sms","required":true,"application":"sms-api"}]
+    }
+  ],
+  "sqlite_targets": [
+    {
+      "id": "provisioning",
+      "compose_project": "codestra-provisioning-production",
+      "compose_service": "provisioning-service",
+      "state_path_environment": "STATE_DATABASE_PATH",
+      "expected_state_path": "/var/lib/codestra/provisioning.db",
+      "mount_destination": "/var/lib/codestra",
+      "required": true
+    }
+  ],
+  "volume_archives": [
+    {
+      "id": "odoo-filestore",
+      "compose_project": "codestra",
+      "compose_service": "odoo",
+      "mount_destination": "/var/lib/odoo",
+      "required": true
+    }
+  ],
+  "quiesce_services": [
+    {"id":"odoo","compose_project":"codestra","compose_service":"odoo","required":true}
+  ]
+}
