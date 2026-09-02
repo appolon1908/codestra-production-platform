@@ -8,8 +8,10 @@ Decision: **NO-GO**
 ## Verified progress
 
 - Platform PR [#181](https://github.com/appolon1908-hue/codestra-production-platform/pull/181) merged through protected automation at `5aec485814149434750f2313370ae0ae39db5bd8`.
+- Platform PR [#183](https://github.com/appolon1908-hue/codestra-production-platform/pull/183) established the fail-closed readiness artifacts at protected merge `b122da8d5ba51417c1887c2b796a2934f13ba1f9`.
+- Platform PR [#185](https://github.com/appolon1908-hue/codestra-production-platform/pull/185) refreshed the Server 65 runtime count at protected merge `491041d5d0d66c4434470e8a03e5846a810f60ec`.
 - Exact PR head `9cf4927f4019af71fc397b311a1f3d404d499b45` passed the required check.
-- Protected release `protected-5aec485814149434750f2313370ae0ae39db5bd8` passed complete source tests, SBOM/provenance generation, signature verification, and immutable publication.
+- Latest protected platform release `protected-491041d5d0d66c4434470e8a03e5846a810f60ec` passed complete source tests, SBOM/provenance generation, signature verification, and immutable publication.
 - Appolon Middleware source `f3437709c06747249586598590145234ea2c7327` and digest `sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484` implement the three n8n API gaps, but are not deployed.
 - Branch protections retain strict status checks, conversation resolution, admin enforcement, and force-push/deletion denial. No bypass was used.
 - All dangerous external-effect switches remain disabled. No email, SMS, social post, advertisement, model request, payment, or PSTN call was initiated.
