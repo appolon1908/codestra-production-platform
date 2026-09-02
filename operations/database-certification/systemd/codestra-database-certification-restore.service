@@ -1,0 +1,15 @@
+[Unit]
+Description=Codestra isolated all-database restore rehearsal
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/codestra/operations/database-certification/restore-all-databases.sh
+ExecStartPost=/opt/codestra/operations/monitoring/exporters/database_certification_metrics.sh
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/codestra/evidence/database-restore /var/lib/docker /etc/codestra/backup-gpg
+NoNewPrivileges=true
