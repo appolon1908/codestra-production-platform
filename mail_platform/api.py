@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from functools import lru_cache
 from typing import Any
 
@@ -10,12 +11,23 @@ import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from jwt import PyJWKClient
 from pydantic import BaseModel, Field
+from prometheus_client import Counter, Histogram, make_asgi_app
 
 from .registry import MailRegistry, PolicyError
 
 ISSUER = os.getenv("MAIL_OIDC_ISSUER", "https://auth.codestra.co/realms/codestra")
 AUDIENCE = os.getenv("MAIL_OIDC_AUDIENCE", "codestra-mail-api")
 DATABASE = os.getenv("MAIL_REGISTRY_DATABASE", "/var/lib/codestra-mail/registry.db")
+HTTP_REQUESTS = Counter(
+    "codestra_mail_http_requests_total",
+    "Mail API HTTP requests by method, route, and status.",
+    ("method", "route", "status"),
+)
+HTTP_DURATION = Histogram(
+    "codestra_mail_http_request_duration_seconds",
+    "Mail API HTTP request duration by method and route.",
+    ("method", "route"),
+)
 
 
 class Principal(BaseModel):
@@ -75,6 +87,21 @@ def require_scope(name: str):
 app = FastAPI(title="Codestra Mail Control Plane", version="1.0.0")
 
 
+@app.middleware("http")
+async def observe_request(request: Request, call_next):
+    started = time.monotonic()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", "unmatched")
+        HTTP_REQUESTS.labels(request.method, route_path, str(status_code)).inc()
+        HTTP_DURATION.labels(request.method, route_path).observe(time.monotonic() - started)
+
+
 def registry() -> MailRegistry:
     value = MailRegistry(DATABASE)
     value.migrate()
@@ -88,6 +115,11 @@ def actor(reg: MailRegistry, subject: str) -> str:
     return row[0]
 
 
+@app.get("/healthz")
+def health() -> dict[str, str]:
+    return {"status": "live"}
+
+
 @app.get("/healthz/ready")
 def ready() -> dict[str, str]:
     reg = registry()
@@ -95,6 +127,9 @@ def ready() -> dict[str, str]:
     if result != "ok":
         raise HTTPException(status_code=503, detail="registry_unhealthy")
     return {"status": "ready"}
+
+
+app.mount("/metrics", make_asgi_app())
 
 
 @app.get("/api/v1/mail/messages")
