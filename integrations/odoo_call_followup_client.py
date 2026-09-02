@@ -6,11 +6,12 @@ database, login, and API key from the runtime secret store.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import random
 import time
 import xmlrpc.client
 from typing import Any
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True)
@@ -18,9 +19,34 @@ class OdooRpcConfig:
     base_url: str
     database: str
     login: str
-    api_key: str
+    api_key: str = field(repr=False)
     timeout_seconds: float = 8.0
     max_attempts: int = 5
+
+    def __post_init__(self) -> None:
+        base_url = self.base_url.strip().rstrip("/")
+        parsed = urlsplit(base_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "Odoo base_url must be credential-free HTTPS without "
+                "a query string or fragment"
+            )
+        if not self.database.strip() or not self.login.strip():
+            raise ValueError("Odoo database and login are required")
+        if len(self.api_key) < 16:
+            raise ValueError("Odoo API key is shorter than the minimum length")
+        if not 1.0 <= float(self.timeout_seconds) <= 30.0:
+            raise ValueError("Odoo timeout_seconds must be between 1 and 30")
+        if not 1 <= int(self.max_attempts) <= 10:
+            raise ValueError("Odoo max_attempts must be between 1 and 10")
+        object.__setattr__(self, "base_url", base_url)
 
 
 class TimeoutTransport(xmlrpc.client.SafeTransport):
@@ -39,12 +65,12 @@ class OdooCallFollowupClient:
         self.config = config
         transport = TimeoutTransport(config.timeout_seconds)
         self.common = xmlrpc.client.ServerProxy(
-            f"{config.base_url.rstrip('/')}/xmlrpc/2/common",
+            f"{config.base_url}/xmlrpc/2/common",
             allow_none=True,
             transport=transport,
         )
         self.models = xmlrpc.client.ServerProxy(
-            f"{config.base_url.rstrip('/')}/xmlrpc/2/object",
+            f"{config.base_url}/xmlrpc/2/object",
             allow_none=True,
             transport=transport,
         )
@@ -83,7 +109,9 @@ class OdooCallFollowupClient:
                     "request_fingerprint",
                 }
                 if not isinstance(result, dict) or not required.issubset(result):
-                    raise RuntimeError("Odoo returned an invalid registration response")
+                    raise RuntimeError(
+                        "Odoo returned an invalid registration response"
+                    )
                 return result
             except (OSError, TimeoutError, xmlrpc.client.ProtocolError) as exc:
                 last_error = exc
