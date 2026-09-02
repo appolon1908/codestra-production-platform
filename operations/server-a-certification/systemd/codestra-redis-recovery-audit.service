@@ -1,0 +1,22 @@
+[Unit]
+Description=Codestra Server A Redis classification and recovery audit
+Wants=docker.service
+After=docker.service
+ConditionPathExists=/etc/codestra/server-a-certification/redis-recovery.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/codestra/production-controls/current/operations/server-a-certification/audit-redis-recovery.py
+TimeoutStartSec=10m
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/codestra/evidence/server-a-certification/redis-recovery /var/lib/node_exporter/textfile_collector
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

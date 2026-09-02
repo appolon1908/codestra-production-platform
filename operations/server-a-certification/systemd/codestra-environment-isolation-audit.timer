@@ -1,0 +1,12 @@
+[Unit]
+Description=Audit Codestra environment isolation every fifteen minutes
+
+[Timer]
+OnBootSec=6m
+OnUnitActiveSec=15m
+AccuracySec=1m
+Persistent=true
+Unit=codestra-environment-isolation-audit.service
+
+[Install]
+WantedBy=timers.target

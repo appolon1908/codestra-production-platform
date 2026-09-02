@@ -1,0 +1,22 @@
+[Unit]
+Description=Codestra Server A Odoo copy governance audit
+Wants=docker.service network-online.target
+After=docker.service network-online.target
+ConditionPathExists=/etc/codestra/server-a-certification/odoo-copy-governance.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/codestra/production-controls/current/operations/server-a-certification/audit-odoo-copy-governance.py
+TimeoutStartSec=30m
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/codestra/evidence/server-a-certification/odoo-copy-governance /var/lib/node_exporter/textfile_collector
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

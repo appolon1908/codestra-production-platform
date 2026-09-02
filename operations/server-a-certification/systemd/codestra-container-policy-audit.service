@@ -1,0 +1,22 @@
+[Unit]
+Description=Audit Codestra production container health, resources, restart, ports, and image identity
+Wants=docker.service
+After=docker.service
+ConditionPathExists=/etc/codestra/server-a-certification/runtime-policy.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/codestra/production-controls/current/operations/server-a-certification/audit-container-policy.py
+TimeoutStartSec=5m
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/codestra/evidence/server-a-certification /var/lib/node_exporter/textfile_collector
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

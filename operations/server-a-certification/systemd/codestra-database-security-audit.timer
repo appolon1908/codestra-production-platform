@@ -1,0 +1,12 @@
+[Unit]
+Description=Audit Codestra PostgreSQL security contracts every thirty minutes
+
+[Timer]
+OnBootSec=8m
+OnUnitActiveSec=30m
+AccuracySec=2m
+Persistent=true
+Unit=codestra-database-security-audit.service
+
+[Install]
+WantedBy=timers.target

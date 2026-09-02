@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Codestra Server A realtime PostgreSQL HA audit
+
+[Timer]
+OnBootSec=3m
+OnUnitActiveSec=1m
+AccuracySec=10s
+Persistent=true
+Unit=codestra-realtime-ha-audit.service
+
+[Install]
+WantedBy=timers.target

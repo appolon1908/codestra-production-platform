@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Codestra Server A Redis classification and recovery audit
+
+[Timer]
+OnBootSec=9m
+OnUnitActiveSec=1h
+AccuracySec=2m
+Persistent=true
+Unit=codestra-redis-recovery-audit.service
+
+[Install]
+WantedBy=timers.target

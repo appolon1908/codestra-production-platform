@@ -1,0 +1,22 @@
+[Unit]
+Description=Codestra Server A exact runtime source-lock audit
+Wants=docker.service
+After=docker.service
+ConditionPathExists=/etc/codestra/server-a-certification/runtime-source-lock.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/codestra/production-controls/current/operations/server-a-certification/audit-runtime-source-lock.py
+TimeoutStartSec=10m
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/codestra/evidence/server-a-certification/runtime-source-lock /var/lib/node_exporter/textfile_collector
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

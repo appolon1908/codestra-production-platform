@@ -1,0 +1,23 @@
+[Unit]
+Description=Codestra Server A realtime PostgreSQL HA audit
+Wants=docker.service network-online.target
+After=docker.service network-online.target
+ConditionPathExists=/etc/codestra/server-a-certification/realtime-ha.json
+ConditionPathExists=/etc/codestra/server-a-certification/realtime-routing-evidence.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/codestra/production-controls/current/operations/server-a-certification/audit-realtime-ha.py
+TimeoutStartSec=10m
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/codestra/evidence/server-a-certification/realtime-ha /var/lib/node_exporter/textfile_collector
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

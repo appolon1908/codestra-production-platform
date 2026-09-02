@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Codestra Server A Odoo copy governance audit
+
+[Timer]
+OnBootSec=7m
+OnUnitActiveSec=30m
+AccuracySec=1m
+Persistent=true
+Unit=codestra-odoo-copy-governance-audit.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Codestra Server A exact runtime source-lock audit
+
+[Timer]
+OnBootSec=4m
+OnUnitActiveSec=5m
+AccuracySec=30s
+Persistent=true
+Unit=codestra-runtime-source-lock-audit.service
+
+[Install]
+WantedBy=timers.target
