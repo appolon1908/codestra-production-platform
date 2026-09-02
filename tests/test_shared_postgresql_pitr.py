@@ -244,7 +244,8 @@ def test_spool_cleanup_removes_only_verified_expired_wal(tmp_path):
     failed_marker = Path(str(failed) + ".offhost")
     failed_marker.write_text("EVIDENCE_TYPE=WAL_OFFHOST\nSTATUS=FAIL\n")
     old = (datetime.now().timestamp() - 9 * 86400)
-    os.utime(verified_marker, (old, old)); os.utime(failed_marker, (old, old))
+    # A delayed off-host upload must not restart the WAL retention clock.
+    os.utime(verified, (old, old)); os.utime(failed, (old, old))
     env = {**os.environ, "CODESTRA_SHARED_WAL_STAGE": str(stage), "CODESTRA_SHARED_POSTGRES_STATE": str(state)}
     subprocess.run(["bash", str(PACKAGE / "codestra-shared-postgres-prune-wal.sh"), "7"], env=env, check=True)
     assert not verified.exists() and not verified_marker.exists()
