@@ -5,8 +5,10 @@ target: 65.109.65.169
 protected_platform:
   repository: appolon1908-hue/codestra-production-platform
   branch: release/production-activation
-  sha: 491041d5d0d66c4434470e8a03e5846a810f60ec
-  release_tag: protected-491041d5d0d66c4434470e8a03e5846a810f60ec
+  identity_authority: signed exact-release provenance generated after protected merge
+  manifest_parent_sha: 491041d5d0d66c4434470e8a03e5846a810f60ec
+  manifest_parent_release_tag: protected-491041d5d0d66c4434470e8a03e5846a810f60ec
+  note: The resulting commit SHA cannot be embedded in its own source tree; release provenance supplies that exact identity.
 middleware_authorities:
   protected_production_tuple:
     repository: Codestra-SRL/codestra-middleware
