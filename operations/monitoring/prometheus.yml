@@ -39,7 +39,7 @@ scrape_configs:
     oauth2:
       client_id: monitoring-readonly
       client_secret_file: /run/secrets/staging_metrics_client_secret
-      token_url: https://auth.codestra.co/realms/codestra/protocol/openid-connect/token
+      token_url: https://auth-staging.codestra.co/realms/codestra/protocol/openid-connect/token
       scopes: [metrics.read]
     sample_limit: 250000
     label_limit: 40
