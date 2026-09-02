@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codestra.co/schemas/odoo/call-followup-automation-event-v1.json",
+  "title": "Codestra Call Follow-up Automation Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "event_version",
+    "occurred_at",
+    "tenant_id",
+    "company_id",
+    "idempotency_key",
+    "aggregate",
+    "payload",
+    "metadata"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_type": {
+      "enum": [
+        "post_call.completed",
+        "callback.scheduled",
+        "appointment.scheduled",
+        "post_call.email_queued",
+        "calendar.rescheduled",
+        "calendar.cancelled"
+      ]
+    },
+    "event_version": {
+      "const": "1.0"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "company_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "correlation_id": {
+      "type": [
+        "string",
+        "boolean"
+      ],
+      "maxLength": 255
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "const": "crm_call_followup"
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "payload": {
+      "type": "object"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "delivery_attempt"
+      ],
+      "properties": {
+        "source": {
+          "const": "odoo"
+        },
+        "delivery_attempt": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}
