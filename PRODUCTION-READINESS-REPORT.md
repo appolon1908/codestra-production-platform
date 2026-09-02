@@ -16,11 +16,13 @@ Decision: **NO-GO**
 
 ## Runtime baseline
 
-Running containers: 102
+Running containers: 106 (refreshed after the initial 102-container baseline)
 Live Kong routes: 29
 Endpoint records: 641
 Runtime OpenAPI applications: 20
 Monitoring coverage: 4/20
+
+The count change is not attributed to this remediation session; no container mutation was performed. See `evidence/server65/RUNTIME-REFRESH-20260902.md`.
 
 ## Mandatory gate matrix
 
