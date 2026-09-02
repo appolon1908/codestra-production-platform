@@ -251,6 +251,19 @@ class MonitoringGovernanceTests(unittest.TestCase):
             jobs["postgres-exporter"]["static_configs"][0]["targets"],
             ["postgres-exporter:9187"],
         )
+        staging = jobs["operations-dashboard-middleware-staging"]
+        self.assertEqual(
+            staging["static_configs"][0]["targets"],
+            ["middleware-intake-staging:8080"],
+        )
+        self.assertIn("operations_dashboard_staging", compose["services"]["prometheus"]["networks"])
+        self.assertEqual(
+            compose["networks"]["operations_dashboard_staging"],
+            {
+                "external": True,
+                "name": "codestra-operations-dashboard-staging_private",
+            },
+        )
 
     def test_middleware_database_recovery_metrics_are_fail_closed(self) -> None:
         source = (MONITORING / "exporters" / "recovery_metrics.sh").read_text()

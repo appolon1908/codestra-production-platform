@@ -46,7 +46,7 @@ scrape_configs:
     label_name_length_limit: 128
     label_value_length_limit: 2048
     static_configs:
-      - targets: [operations-dashboard-staging-middleware:8080]
+      - targets: [middleware-intake-staging:8080]
         labels:
           codestra_business: platform
           environment: staging
