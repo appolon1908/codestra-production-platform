@@ -5,7 +5,7 @@
   "protectedBranch": "release/production-activation",
   "reviewStartSha": "f1788b0bc7b15d210ddb191bb0a6e9151b8ab59d",
   "consolidationBranch": "consolidation/draft-review-20260902",
-  "consolidationPullRequest": null,
+  "consolidationPullRequest": 213,
   "allDraftsReviewed": true,
   "runtimeMutation": false,
   "drafts": [
