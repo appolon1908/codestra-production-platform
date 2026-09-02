@@ -11,6 +11,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "deploy/middleware/compose.appolon-integration-api.yaml"
 LOCK = ROOT / "deploy/middleware/appolon-integration-api-lock.json"
+ROLLBACK_COMPOSE = ROOT / "deploy/middleware/compose.appolon-integration-api.rollback.yaml"
 EXPECTED_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware@sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484"
 DISABLED = {
     "OUTBOX_DISPATCH_ENABLED",
@@ -51,6 +52,8 @@ def validate() -> None:
     raw = COMPOSE.read_text(encoding="utf-8")
     compose = yaml.safe_load(raw)
     lock = json.loads(LOCK.read_text(encoding="utf-8"))
+    rollback_raw = ROLLBACK_COMPOSE.read_text(encoding="utf-8")
+    rollback_compose = yaml.safe_load(rollback_raw)
     assert "middleware-integration-api" not in compose["services"]
     service = compose["services"]["appolon-middleware-integration-api"]
     assert service["image"] == EXPECTED_IMAGE == lock["image"]
@@ -93,13 +96,26 @@ def validate() -> None:
     assert lock["rollback"]["pre_migration_head"] == "0003_immutable_event_ledger"
     assert lock["rollback"]["candidate_migration_head"] == "0006_outbox_attempt_events"
     assert lock["rollback"]["requires_pre_migration_database_backup"] is True
+    assert lock["rollback"]["rollback_compose_override"] == str(ROLLBACK_COMPOSE.relative_to(ROOT))
+    assert lock["rollback"]["previous_source_revision"] == "f6748a58f8d2590520a4f28776770957061cdea1"
+    assert lock["rollback"]["previous_build_time"] == "2026-08-30T13:24:37Z"
     assert lock["rollback"]["restore_order"] == [
         "stop_candidate",
         "restore_verified_pre_migration_database_backup",
         "verify_pre_migration_head",
-        "redeploy_previous_image_digest",
+        "redeploy_previous_image_digest_with_pinned_runtime_metadata",
         "verify_health_readiness_and_runtime_version",
     ]
+    rollback_service = rollback_compose["services"]["appolon-middleware-integration-api"]
+    assert rollback_service["image"].endswith("@" + lock["rollback"]["previous_image_digest"])
+    rollback_environment = rollback_service["environment"]
+    assert rollback_environment == {
+        "APP_SOURCE_SHA": lock["rollback"]["previous_source_revision"],
+        "IMAGE_DIGEST": lock["rollback"]["previous_image_digest"],
+        "BUILD_TIME": lock["rollback"]["previous_build_time"],
+        "SCHEMA_HEAD": lock["rollback"]["pre_migration_head"],
+    }
+    assert SECRET_PATTERN.search(rollback_raw) is None
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", lock["rollback"]["previous_image_digest"])
 
 

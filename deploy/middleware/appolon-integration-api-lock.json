@@ -21,11 +21,14 @@
     "pre_migration_head": "0003_immutable_event_ledger",
     "candidate_migration_head": "0006_outbox_attempt_events",
     "requires_pre_migration_database_backup": true,
+    "rollback_compose_override": "deploy/middleware/compose.appolon-integration-api.rollback.yaml",
+    "previous_source_revision": "f6748a58f8d2590520a4f28776770957061cdea1",
+    "previous_build_time": "2026-08-30T13:24:37Z",
     "restore_order": [
       "stop_candidate",
       "restore_verified_pre_migration_database_backup",
       "verify_pre_migration_head",
-      "redeploy_previous_image_digest",
+      "redeploy_previous_image_digest_with_pinned_runtime_metadata",
       "verify_health_readiness_and_runtime_version"
     ],
     "requires_separate_protected_apply": true

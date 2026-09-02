@@ -37,8 +37,12 @@ integrity-verified backup of dedicated database `codestra_middleware_appolon`
 at head `0003_immutable_event_ledger`. Rollback must stop the candidate,
 restore that verified pre-migration backup into the dedicated database, verify
 the restored head is exactly `0003_immutable_event_ledger`, and only then
-redeploy this exact digest with the protected Appolon Compose profile and
-existing protected environment input. It must verify health, readiness, image
+redeploy this exact digest with the protected Appolon Compose profile,
+`compose.appolon-integration-api.rollback.yaml`, and existing protected
+environment input. The rollback override restores source revision
+`f6748a58...`, image digest `695fa3...`, build time
+`2026-08-30T13:24:37Z`, and schema head `0003_immutable_event_ledger`; reusing
+the candidate metadata is prohibited. It must verify health, readiness, image
 digest, source revision, and schema head after restart. It must not remove the
 active service or fall back to the older legacy runtime. The older `09d4bd...`
 runtime remains historical recovery evidence only.
