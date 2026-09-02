@@ -22,6 +22,39 @@ components:
     local_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
     off_host_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
     isolated_restore: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    evidence_bundle: null
+  - id: control-plane-postgresql
+    service: control-plane
+    store: control_plane
+    kind: postgresql
+    source_authority: appolon1908-hue/codestra-production-platform
+    database_owner: control-plane database owner
+    application_role: restricted control-plane runtime role
+    migration_framework: one-shot SQL migrations
+    backup_method: pg_dump custom format plus checksum and encryption
+    restore_method: pg_restore into an isolated PostgreSQL database
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
+  - id: email-postgresql
+    service: email
+    store: codestra_email
+    kind: postgresql
+    source_authority: appolon1908-hue/codestra-production-runtime-authority
+    database_owner: email database owner
+    application_role: restricted email runtime role
+    migration_framework: one-shot SQL migrations
+    backup_method: pg_dump custom format plus checksum and encryption
+    restore_method: pg_restore into an isolated PostgreSQL database
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+    evidence_bundle: null
   - id: odoo-postgresql-filestore
     service: odoo
     store: codestra_odoo and matching filestore
@@ -37,6 +70,7 @@ components:
     local_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
     off_host_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
     isolated_restore: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    evidence_bundle: null
   - id: n8n-postgresql-state
     service: n8n
     store: codestra_n8n and n8n state volume
@@ -52,6 +86,7 @@ components:
     local_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
     off_host_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
     isolated_restore: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    evidence_bundle: null
   - id: keycloak-postgresql
     service: keycloak
     store: keycloak
@@ -67,6 +102,7 @@ components:
     local_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
     off_host_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
     isolated_restore: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    evidence_bundle: null
   - id: kong-postgresql-configuration
     service: kong
     store: kong database and declarative configuration
@@ -82,6 +118,7 @@ components:
     local_backup: PARTIAL
     off_host_backup: NOT_PROVEN
     isolated_restore: NOT_PROVEN
+    evidence_bundle: null
   - id: openbao-raft
     service: openbao
     store: raft snapshot and non-secret configuration
@@ -97,6 +134,7 @@ components:
     local_backup: NOT_PROVEN
     off_host_backup: NOT_PROVEN
     isolated_restore: NOT_PROVEN
+    evidence_bundle: null
   - id: caddy-configuration
     service: caddy
     store: active configuration and PKI state
@@ -112,6 +150,7 @@ components:
     local_backup: PARTIAL
     off_host_backup: NOT_PROVEN
     isolated_restore: NOT_PROVEN
+    evidence_bundle: null
   - id: platform-release-authority
     service: production-platform
     store: manifests, compose authority, release evidence, workflow exports
@@ -127,6 +166,7 @@ components:
     local_backup: PARTIAL
     off_host_backup: NOT_PROVEN
     isolated_restore: NOT_PROVEN
+    evidence_bundle: null
   - id: redis-ephemeral-coordination
     service: redis
     store: coordination cache and queues
@@ -142,3 +182,4 @@ components:
     local_backup: N/A
     off_host_backup: N/A
     isolated_restore: NOT_PROVEN
+    evidence_bundle: null

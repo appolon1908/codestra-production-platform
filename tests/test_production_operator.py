@@ -23,6 +23,16 @@ SPEC = importlib.util.spec_from_loader("production_operator", LOADER)
 OPERATOR = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(OPERATOR)
+REAL_VALIDATE_DATABASE_CERTIFICATION = OPERATOR.validate_database_certification
+
+
+@pytest.fixture(autouse=True)
+def _validated_database_certification(monkeypatch):
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_database_certification",
+        lambda: {"production_database_certification": "PASS"},
+    )
 
 
 def _model_root_owned_test_files(monkeypatch) -> None:
@@ -108,6 +118,39 @@ def test_action_set_is_exact() -> None:
         "backup": "codestra-readiness-backup.service",
         "restore-test": "codestra-readiness-restore.service",
     }
+
+
+def test_database_certification_blocks_activation_without_manifest_pass(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_fixed",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "PRODUCTION_DATABASE_MANIFEST=PASS\n", ""),
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "checked_root_file",
+        lambda *args, **kwargs: "certification_status: FAIL\n",
+    )
+    with pytest.raises(OPERATOR.OperatorError, match="certification is not PASS"):
+        REAL_VALIDATE_DATABASE_CERTIFICATION()
+
+
+def test_database_certification_requires_validator_success(monkeypatch):
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_fixed",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, "", "invalid evidence"),
+    )
+    with pytest.raises(OPERATOR.OperatorError, match="certification is not PASS"):
+        REAL_VALIDATE_DATABASE_CERTIFICATION()
+
+
+def test_web_traffic_health_revalidates_database_certification():
+    source = OPERATOR_PATH.read_text()
+    function = source.split("def core_web_health", 1)[1].split("\ndef ", 1)[0]
+    assert "validate_database_certification()" in function
 
 
 def test_control_plane_stage_builds_and_reads_back_protected_sha() -> None:
@@ -1987,6 +2030,14 @@ def test_payload_checksums_are_real() -> None:
     ):
         digest = subprocess.check_output(["sha256sum", str(PACKAGE / name)], text=True).split()[0]
         assert f"{digest}  {name}" in installer
+    for relative in (
+        "../../PRODUCTION-DATABASE-MANIFEST.yaml",
+        "../../tools/validate_production_database_manifest.py",
+    ):
+        digest = subprocess.check_output(
+            ["sha256sum", str(PACKAGE / relative)], text=True
+        ).split()[0]
+        assert f"{digest}  {relative}" in installer
     restore = ROOT / "operations" / "readiness" / "codestra-isolated-restore-rehearsal.sh"
     restore_digest = subprocess.check_output(["sha256sum", str(restore)], text=True).split()[0]
     assert restore_digest in installer
