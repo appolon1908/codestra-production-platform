@@ -1,0 +1,144 @@
+schema_version: codestra.production-database-manifest.v1
+target: 65.109.65.169
+certification_status: FAIL
+policy:
+  backup_over_production_restore_allowed: false
+  normal_startup_migrations_allowed: false
+  plaintext_off_host_backup_allowed: false
+  certified_only_after_isolated_restore: true
+components:
+  - id: middleware-postgresql
+    service: middleware
+    store: codestra_middleware
+    kind: postgresql
+    source_authority: Codestra-SRL/codestra-middleware
+    database_owner: middleware database owner
+    application_role: restricted middleware runtime role
+    migration_framework: alembic
+    backup_method: pg_dump custom format plus checksum and encryption
+    restore_method: pg_restore into an isolated PostgreSQL database
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    off_host_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    isolated_restore: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+  - id: odoo-postgresql-filestore
+    service: odoo
+    store: codestra_odoo and matching filestore
+    kind: postgresql_plus_filestore
+    source_authority: appolon1908-hue/Odoo
+    database_owner: odoo database owner
+    application_role: restricted odoo runtime role
+    migration_framework: odoo module migrations
+    backup_method: paired pg_dump and content-addressed filestore archive
+    restore_method: paired restore into isolated database and volume
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    off_host_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    isolated_restore: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+  - id: n8n-postgresql-state
+    service: n8n
+    store: codestra_n8n and n8n state volume
+    kind: postgresql_plus_volume
+    source_authority: appolon1908-hue/N8N
+    database_owner: n8n database owner
+    application_role: restricted n8n runtime role
+    migration_framework: n8n bundled migrations
+    backup_method: pg_dump custom format plus state-volume archive
+    restore_method: restore into isolated database and volume
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    off_host_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    isolated_restore: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+  - id: keycloak-postgresql
+    service: keycloak
+    store: keycloak
+    kind: postgresql
+    source_authority: appolon1908-hue/Keycloak
+    database_owner: keycloak database owner
+    application_role: restricted keycloak runtime role
+    migration_framework: keycloak schema migration
+    backup_method: pg_dump custom format plus realm export metadata
+    restore_method: pg_restore into an isolated Keycloak database
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    off_host_backup: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+    isolated_restore: IMPLEMENTED_NOT_RUNTIME_VERIFIED
+  - id: kong-postgresql-configuration
+    service: kong
+    store: kong database and declarative configuration
+    kind: postgresql_plus_configuration
+    source_authority: appolon1908-hue/Kong
+    database_owner: kong database owner
+    application_role: restricted kong runtime role
+    migration_framework: kong migrations
+    backup_method: encrypted logical dump and sanitized configuration checksum
+    restore_method: isolated PostgreSQL restore and kong configuration validation
+    target_rpo_hours: 24
+    target_rto_hours: 4
+    local_backup: PARTIAL
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+  - id: openbao-raft
+    service: openbao
+    store: raft snapshot and non-secret configuration
+    kind: raft
+    source_authority: appolon1908-hue/Codestra-OpenBao
+    database_owner: security owner
+    application_role: workload identities
+    migration_framework: N/A
+    backup_method: approved encrypted raft snapshot ceremony
+    restore_method: isolated sealed cluster restore under security-owner custody
+    target_rpo_hours: 24
+    target_rto_hours: 8
+    local_backup: NOT_PROVEN
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+  - id: caddy-configuration
+    service: caddy
+    store: active configuration and PKI state
+    kind: configuration_plus_pki_state
+    source_authority: appolon1908-hue/Caddy
+    database_owner: N/A
+    application_role: caddy service account
+    migration_framework: N/A
+    backup_method: protected encrypted configuration and state archive
+    restore_method: isolated caddy validate and TLS-state readback
+    target_rpo_hours: 24
+    target_rto_hours: 2
+    local_backup: PARTIAL
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+  - id: platform-release-authority
+    service: production-platform
+    store: manifests, compose authority, release evidence, workflow exports
+    kind: protected_git_plus_artifacts
+    source_authority: appolon1908-hue/codestra-production-platform
+    database_owner: N/A
+    application_role: protected deployment workflow
+    migration_framework: N/A
+    backup_method: protected Git and immutable release artifacts plus encrypted host copy
+    restore_method: isolated checkout and manifest/artifact verification
+    target_rpo_hours: 24
+    target_rto_hours: 2
+    local_backup: PARTIAL
+    off_host_backup: NOT_PROVEN
+    isolated_restore: NOT_PROVEN
+  - id: redis-ephemeral-coordination
+    service: redis
+    store: coordination cache and queues
+    kind: redis
+    source_authority: appolon1908-hue/codestra-production-platform
+    database_owner: platform operations
+    application_role: authenticated restricted clients
+    migration_framework: N/A
+    backup_method: no durable business authority; recreate from PostgreSQL
+    restore_method: isolated reconstruction and reconnect test
+    target_rpo_hours: 0
+    target_rto_hours: 1
+    local_backup: N/A
+    off_host_backup: N/A
+    isolated_restore: NOT_PROVEN
