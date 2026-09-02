@@ -26,7 +26,13 @@ Running containers: 106 (refreshed after the initial 102-container baseline)
 Live Kong routes: 29
 Endpoint records: 641
 Runtime OpenAPI applications: 20
-Monitoring coverage: 4/20
+Monitoring coverage: 2/20
+
+The prior `4/20` numerator included one explicitly staging application and one
+non-container Caddy proxy observation. The reconciled production denominator
+contains 20 runtime applications, of which two expose explicit health,
+readiness, and metrics contracts. See
+`evidence/server65/OPENAPI-MONITORING-COVERAGE-20260902.yaml`.
 
 The count change is not attributed to this remediation session; no container mutation was performed. See `evidence/server65/RUNTIME-REFRESH-20260902.md`.
 
