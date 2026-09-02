@@ -210,6 +210,8 @@ def test_validator_template_and_inactive_window_fail_closed(tmp_path):
 
 def test_wal_worker_has_verified_bounded_retention_and_metrics():
     worker = (PACKAGE / "codestra-shared-postgres-archive-wal.sh").read_text()
+    assert "--no-options --lock-never" in worker
+    assert "--no-auto-check-trustdb" in worker
     rules = (PACKAGE / "shared-postgres.rules.yml").read_text()
     assert "restic dump" in worker and "OFFHOST_STATUS=PASS" not in worker
     assert "STATUS=PASS" in worker and "wal-retention-days" in worker and "-mtime" in worker

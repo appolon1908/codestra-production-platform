@@ -56,7 +56,11 @@ for source_path in "$stage"/[0-9A-F]*; do
   artifact="$spool/$wal_name.gpg"
   if [[ ! -s "$artifact" ]]; then
     temporary="$(mktemp "$spool/.${wal_name}.XXXXXX")"
-    gpg --homedir "$authority/gpg" --batch --yes --trust-model always \
+    # Encryption needs only the protected public keyring. Disable option-file,
+    # trustdb and lock writes so a read-only authority directory remains truly
+    # read-only and cannot emit misleading successful-unit warnings.
+    gpg --homedir "$authority/gpg" --no-options --lock-never \
+      --no-auto-check-trustdb --batch --yes --trust-model always \
       --recipient "$recipient" --encrypt --output "$temporary" "$source_path"
     mv "$temporary" "$artifact"
     (cd "$spool" && sha256sum "$wal_name.gpg" >"$wal_name.gpg.sha256")
