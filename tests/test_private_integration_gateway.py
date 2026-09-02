@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from openapi_spec_validator import validate
 import yaml
 
 
@@ -108,6 +109,7 @@ def test_delivery_defaults_fail_closed(tmp_path: Path, monkeypatch: pytest.Monke
 
 def test_private_gateway_openapi_contains_required_routes():
     document = gateway.openapi_document()
+    validate(document)
     paths = document["paths"]
     expected = {
         "/health",
