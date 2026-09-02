@@ -3,7 +3,7 @@ generated_at: "2026-09-02T14:30:00Z"
 target: 65.109.65.169
 status: FAIL
 inventory_baseline:
-  running_containers: 102
+  running_containers: 106
   live_kong_routes: 29
   endpoint_records: 641
   runtime_openapi_applications: 20
@@ -30,3 +30,6 @@ components:
 unresolved_components:
   count: 24
   evidence: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml
+runtime_refresh:
+  captured_at: "2026-09-02T16:27:00Z"
+  evidence: evidence/server65/RUNTIME-REFRESH-20260902.md
