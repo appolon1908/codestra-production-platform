@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ADDON = ROOT / "odoo_addons" / "codestra_crm_call_followup_api"
 SCHEMA = ROOT / "api" / "completed_call_v1.schema.json"
 CLIENT = ROOT / "integrations" / "odoo_call_followup_client.py"
+VIEW = ADDON / "views" / "call_followup_api_views.xml"
 
 
 def main() -> int:
@@ -19,7 +20,7 @@ def main() -> int:
     required = [
         ADDON / "__manifest__.py",
         ADDON / "models" / "call_followup_api.py",
-        ADDON / "views" / "call_followup_api_views.xml",
+        VIEW,
         ADDON / "tests" / "test_call_followup_api.py",
         SCHEMA,
         CLIENT,
@@ -43,6 +44,17 @@ def main() -> int:
             ET.parse(path)
         except ET.ParseError as exc:
             errors.append(f"xml parse error in {path.relative_to(ROOT)}: {exc}")
+
+    if VIEW.is_file():
+        view_source = VIEW.read_text(encoding="utf-8")
+        if "@string=" in view_source:
+            errors.append(
+                "Odoo inherited views may not select translated string attributes"
+            )
+        if "//field[@name='correlation_id']" not in view_source:
+            errors.append(
+                "API integration fields must anchor to the stable correlation_id field"
+            )
 
     try:
         schema = json.loads(SCHEMA.read_text(encoding="utf-8"))

@@ -5,7 +5,7 @@
         <field name="model">codestra.crm.call.followup</field>
         <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_form"/>
         <field name="arch" type="xml">
-            <xpath expr="//page[@string='Integration']//group" position="inside">
+            <xpath expr="//field[@name='correlation_id']" position="after">
                 <field name="api_version" readonly="1"/>
                 <field name="producer" readonly="1"/>
                 <field name="request_received_at" readonly="1"/>
