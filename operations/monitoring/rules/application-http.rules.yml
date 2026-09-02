@@ -1,0 +1,31 @@
+groups:
+  - name: application-http
+    rules:
+      - alert: CodestraApplicationMetricsUnavailable
+        expr: up{job=~"codestra-mail-api|codestra-reseller-portal"} == 0
+        for: 2m
+        labels: {severity: critical, owner_ref: monitoring-owner-registry}
+        annotations:
+          summary: Production application metrics are unavailable
+          runbook: operations/runbooks/alerts/application-http-runtime.md
+      - alert: CodestraApplicationReadinessFailed
+        expr: (up{job="blackbox_application_readiness"} == 0) or (probe_success{job="blackbox_application_readiness"} == 0)
+        for: 2m
+        labels: {severity: critical, owner_ref: monitoring-owner-registry}
+        annotations:
+          summary: Production application readiness probe is failing
+          runbook: operations/runbooks/alerts/application-http-runtime.md
+      - alert: CodestraApplicationHttp5xx
+        expr: sum by (application) (rate({__name__=~"codestra_(mail|reseller_portal)_http_requests_total",status=~"5.."}[5m])) > 0
+        for: 5m
+        labels: {severity: critical, owner_ref: monitoring-owner-registry}
+        annotations:
+          summary: Production application is returning HTTP 5xx responses
+          runbook: operations/runbooks/alerts/application-http-runtime.md
+      - alert: CodestraApplicationHttpLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le, application) (rate({__name__=~"codestra_(mail|reseller_portal)_http_request_duration_seconds_bucket"}[10m]))) > 2
+        for: 10m
+        labels: {severity: warning, owner_ref: monitoring-owner-registry}
+        annotations:
+          summary: Production application p95 HTTP latency exceeds two seconds
+          runbook: operations/runbooks/alerts/application-http-runtime.md
