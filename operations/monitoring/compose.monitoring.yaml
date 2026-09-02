@@ -17,6 +17,7 @@ services:
       monitoring: {}
       backend: {}
       edge: {}
+      operations_dashboard_staging: {}
       alerting:
         ipv4_address: 10.253.127.2
     read_only: true
@@ -164,6 +165,9 @@ networks:
   edge:
     external: true
     name: codestra_edge
+  operations_dashboard_staging:
+    external: true
+    name: codestra-operations-dashboard-staging_private
 
 volumes:
   prometheus_data: {}
