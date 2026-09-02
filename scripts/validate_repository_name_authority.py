@@ -11,7 +11,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "config" / "repository-name-aliases.v1.json"
-CAPTURE = ROOT / "scripts" / "capture_repository_review.py"
+CAPTURE = ROOT / "scripts" / "capture_repository_review_core.py"
 EXPECTED = {
     1221155447: (
         "appolon1908-hue/Frontend-Resturant-",
@@ -83,14 +83,17 @@ def known_repositories() -> tuple[str, ...]:
     try:
         module = ast.parse(CAPTURE.read_text(encoding="utf-8"), filename=str(CAPTURE))
     except SyntaxError as exc:
-        fail(f"capture script has invalid syntax: {exc}")
+        fail(f"capture core has invalid syntax: {exc}")
 
     constants = string_assignments(module)
     for node in module.body:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        if not any(isinstance(target, ast.Name) and target.id == "KNOWN_REPOSITORIES" for target in targets):
+        if not any(
+            isinstance(target, ast.Name) and target.id == "KNOWN_REPOSITORIES"
+            for target in targets
+        ):
             continue
         if not isinstance(node.value, ast.Tuple):
             fail("KNOWN_REPOSITORIES must be a literal tuple")
@@ -98,7 +101,7 @@ def known_repositories() -> tuple[str, ...]:
         if len(repositories) != len(set(repositories)):
             fail("KNOWN_REPOSITORIES contains duplicate repository names")
         return repositories
-    fail("capture script does not define KNOWN_REPOSITORIES")
+    fail("capture core does not define KNOWN_REPOSITORIES")
     raise AssertionError("unreachable")
 
 
