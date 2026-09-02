@@ -21,6 +21,8 @@ Decision: **NO-GO**
 - The three required n8n gaps are reconciled without inflating the 641 runtime-derived record count: two absent contracts remain in the required-gap register and live Kong record `ep-0577` is the broken collection route (`evidence/server65/API-GAP-RECONCILIATION-20260902.yaml`).
 - Canonical Middleware protected release CI is externally blocked before job creation: the `Codestra-SRL` organization Actions budget is zero and prevents further usage. No billing control was changed (`evidence/repository-review/CANONICAL-MIDDLEWARE-ACTIONS-BLOCKER-20260902.md`).
 - The three n8n operation gaps are now implemented on canonical Middleware PR `Codestra-SRL/codestra-middleware#283` at signed head `e48ec614a2da680802ee106e271b52f3006e72dc`; local Ruff, MyPy, and all 1,261 repository tests pass. Exact-head CI and image publication remain blocked by the same Actions entitlement, so runtime gap count remains three and no deployment is authorized.
+- Codestra AI protected source `7d31ef8de1c15bcc71b61de50917c81e3bcf557d` produced immutable candidate `ghcr.io/appolon1908-hue/codestra-ai@sha256:908c59e54a2620142e597523fa31b5d1d710dc00156b35c5a642e5437362df3e`; registry read-back confirms non-root execution and exact OCI source/revision/version/created labels. It is not deployed and does not change the AI gate from FAIL.
+- Codestra Marketing protected source `fe784f1e91bb0f0fd49f2b2f741a4020a337c149` produced immutable candidate `ghcr.io/appolon1908-hue/codestra-marketing@sha256:3d9bd44922ad02d865f191cac5c9e454b88bb7cbfc8cd643f81e7b57f132c391`; registry read-back confirms non-root execution and exact OCI source/revision/version/created labels. It is not deployed and does not change the Marketing gate from FAIL.
 
 ## Runtime baseline
 
