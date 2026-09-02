@@ -59,18 +59,21 @@ trap 'rm -f "$temporary"' EXIT
     standby_recovery=$(status_value WEBSOCKET_STANDBY_IN_RECOVERY "$backup_status")
     replication_streaming=$(status_value WEBSOCKET_REPLICATION_STREAMING "$backup_status")
     replication_lag=$(status_value WEBSOCKET_REPLICATION_LAG_BYTES "$backup_status")
-    [[ "$database_count" =~ ^[0-9]+$ && "$sqlite_count" =~ ^[0-9]+$ ]]
-    [[ "$standby_recovery" =~ ^[01]$ && "$replication_streaming" =~ ^[01]$ ]]
-    [[ "$replication_lag" =~ ^[0-9]+$ ]]
-    offhost=$(grep -qx OFFHOST_COPY=PASS "$backup_status" && echo 1 || echo 0)
-    printf 'codestra_database_backup_last_success_timestamp_seconds %s\n' "$(to_epoch "$backup_stamp")"
-    printf 'codestra_database_backup_database_count %s\n' "$((database_count + sqlite_count))"
-    printf 'codestra_database_backup_checksum_ok 1\n'
-    printf 'codestra_database_backup_encryption_ok 1\n'
-    printf 'codestra_database_backup_offhost_ok %s\n' "$offhost"
-    printf 'codestra_websocket_db_standby_in_recovery %s\n' "$standby_recovery"
-    printf 'codestra_websocket_db_replication_streaming %s\n' "$replication_streaming"
-    printf 'codestra_websocket_db_replication_lag_bytes %s\n' "$replication_lag"
+    # A retained backup from the prior evidence schema remains restorable, but
+    # must not abort publication of an independently valid restore metric.
+    if [[ "$database_count" =~ ^[0-9]+$ && "$sqlite_count" =~ ^[0-9]+$ ]] &&
+      [[ "$standby_recovery" =~ ^[01]$ && "$replication_streaming" =~ ^[01]$ ]] &&
+      [[ "$replication_lag" =~ ^[0-9]+$ ]] && backup_epoch=$(to_epoch "$backup_stamp"); then
+      offhost=$(grep -qx OFFHOST_COPY=PASS "$backup_status" && echo 1 || echo 0)
+      printf 'codestra_database_backup_last_success_timestamp_seconds %s\n' "$backup_epoch"
+      printf 'codestra_database_backup_database_count %s\n' "$((database_count + sqlite_count))"
+      printf 'codestra_database_backup_checksum_ok 1\n'
+      printf 'codestra_database_backup_encryption_ok 1\n'
+      printf 'codestra_database_backup_offhost_ok %s\n' "$offhost"
+      printf 'codestra_websocket_db_standby_in_recovery %s\n' "$standby_recovery"
+      printf 'codestra_websocket_db_replication_streaming %s\n' "$replication_streaming"
+      printf 'codestra_websocket_db_replication_lag_bytes %s\n' "$replication_lag"
+    fi
   fi
 
   if [[ -n "$latest_restore" ]]; then

@@ -24,7 +24,6 @@ flock -n 9
 [[ "$minimum_free_percent" =~ ^[0-9]+$ ]] && (( minimum_free_percent <= 50 ))
 [[ "$retention_days" =~ ^[0-9]+$ ]] && (( retention_days >= 7 && retention_days <= 365 ))
 available_percent=$(df -P "$backup_root" | awk 'NR==2 {gsub(/%/, "", $5); print 100-$5}')
-(( available_percent >= minimum_free_percent ))
 
 work=$(mktemp -d "${backup_root}/.work-${stamp}.XXXXXX")
 archive="${work}.tar.gz"
@@ -124,8 +123,9 @@ verify_streaming_standby() {
   [[ "$primary_lsn" =~ ^[0-9A-F]+/[0-9A-F]+$ ]]
 
   lag=$(db_client "$primary" "$user" "$database" psql -X -At -v ON_ERROR_STOP=1 \
-    -c "select greatest(pg_wal_lsn_diff('${primary_lsn}'::pg_lsn,'${replay_lsn}'::pg_lsn)::bigint,0)")
-  [[ "$lag" =~ ^[0-9]+$ ]]
+    -c "select pg_wal_lsn_diff('${primary_lsn}'::pg_lsn,'${replay_lsn}'::pg_lsn)::bigint")
+  [[ "$lag" =~ ^-?[0-9]+$ ]]
+  (( lag >= 0 ))
   (( lag <= standby_max_lag_bytes ))
 
   websocket_standby_in_recovery=1
@@ -151,6 +151,13 @@ prune_completed_backups() {
     ((pruned_backup_count += 1))
   done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d -name '20*T*Z' -print0)
 }
+
+# Reclaim only expired, checksum-verified generations before enforcing the
+# capacity floor. This prevents expired backups from permanently blocking the
+# next run while retaining the fail-closed disk guard.
+prune_completed_backups
+available_percent=$(df -P "$backup_root" | awk 'NR==2 {gsub(/%/, "", $5); print 100-$5}')
+(( available_percent >= minimum_free_percent ))
 
 dump codestra-postgres-1 postgres codestra_odoo shared-odoo
 dump codestra-postgres-1 postgres codestra_middleware shared-middleware
@@ -223,7 +230,6 @@ if [[ -n "$remote" ]]; then
   offhost=PASS
 fi
 
-prune_completed_backups
 cat > "$final/STATUS.txt" <<EOF
 DATABASE_BACKUP=PASS
 BACKUP_TIMESTAMP=${stamp}

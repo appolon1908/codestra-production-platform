@@ -36,6 +36,8 @@ def test_standby_lag_is_measured_against_primary_flush_position() -> None:
     assert '[[ "$primary_recovery" == f ]]' in BACKUP
     assert '[[ "$recovery" == t && "$receiving" == t ]]' in BACKUP
     assert "lag <= standby_max_lag_bytes" in BACKUP
+    assert "greatest(pg_wal_lsn_diff" not in BACKUP
+    assert "lag >= 0" in BACKUP
     assert (
         "pg_wal_lsn_diff(pg_last_wal_receive_lsn(),"
         "pg_last_wal_replay_lsn())"
@@ -74,8 +76,8 @@ def test_successful_backups_apply_bounded_verified_retention() -> None:
     assert "sha256sum -c EVIDENCE-SHA256SUMS" in BACKUP
     assert 'find "$candidate" -xdev -depth -delete' in BACKUP
     assert "LOCAL_RETENTION_DAYS=${retention_days}" in BACKUP
-    assert BACKUP.index("prune_completed_backups\ncat >") < BACKUP.index(
-        "backup_complete=true"
+    assert BACKUP.index("prune_completed_backups\navailable_percent=") < BACKUP.index(
+        '(( available_percent >= minimum_free_percent ))'
     )
 
 
@@ -100,11 +102,14 @@ def test_restore_verifies_cleanup_before_zero_residual_pass() -> None:
     cleanup = RESTORE.index("# Remove and positively verify disposable resources")
     evidence = RESTORE.index('cat > "$final/RESTORE-RESULT.txt"')
     assert cleanup < evidence
-    assert 'docker inspect "$container"' in RESTORE[cleanup:evidence]
-    assert 'docker volume inspect "$volume"' in RESTORE[cleanup:evidence]
+    assert 'assert_runtime_resource_absent container "$container"' in RESTORE[cleanup:evidence]
+    assert 'assert_runtime_resource_absent volume "$volume"' in RESTORE[cleanup:evidence]
     assert "REASON=residual-container" in RESTORE
     assert "REASON=residual-volume" in RESTORE
     assert "RESTORE_RESIDUAL_RESOURCES=0" in RESTORE[evidence:]
+    assert "assert_runtime_resource_absent" in RESTORE
+    assert "No such object" in RESTORE
+    assert "No such volume" in RESTORE
 
 
 def test_metrics_publish_each_available_evidence_class_independently() -> None:
@@ -116,6 +121,8 @@ def test_metrics_publish_each_available_evidence_class_independently() -> None:
     assert 'if [[ -n "$latest_restore" ]]; then' in METRICS
     assert 'test -n "$latest_backup" -a -n "$latest_restore"' not in METRICS
     assert "codestra_websocket_db_replication_lag_bytes" in METRICS
+    assert "must not abort publication" in METRICS
+    assert "backup_epoch=$(to_epoch" in METRICS
 
 
 def test_systemd_units_invoke_packaged_metrics_and_allow_atomic_output() -> None:

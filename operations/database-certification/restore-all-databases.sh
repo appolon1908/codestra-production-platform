@@ -37,11 +37,31 @@ started=$(date +%s)
 restore_complete=false
 
 cleanup_runtime_resources() {
-  if docker inspect "$container" >/dev/null 2>&1; then
+  local output status
+  if output=$(docker inspect "$container" 2>&1); then
     docker rm -f "$container" >/dev/null
+  else
+    status=$?
+    [[ "$status" -eq 1 && "$output" == *"No such object"* ]] || return "$status"
   fi
-  if docker volume inspect "$volume" >/dev/null 2>&1; then
+  if output=$(docker volume inspect "$volume" 2>&1); then
     docker volume rm "$volume" >/dev/null
+  else
+    status=$?
+    [[ "$status" -eq 1 && "$output" == *"No such volume"* ]] || return "$status"
+  fi
+}
+
+assert_runtime_resource_absent() {
+  local kind=$1 resource=$2 output status
+  if output=$(docker "$kind" inspect "$resource" 2>&1); then
+    return 1
+  fi
+  status=$?
+  if [[ "$kind" == volume ]]; then
+    [[ "$status" -eq 1 && "$output" == *"No such volume"* ]]
+  else
+    [[ "$status" -eq 1 && "$output" == *"No such object"* ]]
   fi
 }
 
@@ -96,11 +116,11 @@ test "$count" -eq 10
 
 # Remove and positively verify disposable resources before recording a PASS.
 cleanup_runtime_resources
-if docker inspect "$container" >/dev/null 2>&1; then
+if ! assert_runtime_resource_absent container "$container"; then
   printf 'DATABASE_RESTORE=FAIL\nREASON=residual-container\n' >&2
   exit 1
 fi
-if docker volume inspect "$volume" >/dev/null 2>&1; then
+if ! assert_runtime_resource_absent volume "$volume"; then
   printf 'DATABASE_RESTORE=FAIL\nREASON=residual-volume\n' >&2
   exit 1
 fi
