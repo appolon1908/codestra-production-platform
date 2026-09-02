@@ -87,6 +87,8 @@ def validate() -> None:
     assert lock["deployment_state"] == "ISOLATED_DATABASE_REVIEW_REQUIRED"
     assert lock["rollback"]["requires_separate_protected_apply"] is True
     assert lock["rollback"]["action"] == "redeploy_previous_appolon_image_digest"
+    assert lock["rollback"].get("previous_command") is None
+    assert lock["rollback"]["previous_entrypoint"] == "image-default-app.main:create_app"
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", lock["rollback"]["previous_image_digest"])
 
 

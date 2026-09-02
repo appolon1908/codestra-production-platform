@@ -16,11 +16,7 @@
   "rollback": {
     "action": "redeploy_previous_appolon_image_digest",
     "previous_image_digest": "sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820",
-    "previous_command": [
-      "/opt/venv/bin/python",
-      "-m",
-      "app.entrypoints.integration_api"
-    ],
+    "previous_entrypoint": "image-default-app.main:create_app",
     "requires_separate_protected_apply": true
   }
 }
