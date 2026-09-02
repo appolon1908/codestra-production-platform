@@ -1,0 +1,78 @@
+name: Odoo CRM Call Follow-up Extensions
+
+on:
+  pull_request:
+    paths:
+      - "odoo_addons/codestra_crm_call_followup_api/**"
+      - "odoo_addons/codestra_crm_call_followup_ux/**"
+      - "odoo_addons/codestra_crm_call_followup_automation/**"
+      - "api/completed_call_v1.schema.json"
+      - "api/call_followup_automation_event_v1.schema.json"
+      - "integrations/odoo_call_followup_client.py"
+      - "scripts/validate_odoo_crm_call_followup_api.py"
+      - "scripts/validate_odoo_crm_call_followup_ux.py"
+      - "scripts/validate_odoo_crm_call_followup_automation.py"
+      - "scripts/validate_odoo_crm_call_followup_extensions.py"
+      - "scripts/test_odoo_crm_call_followup_extensions_disposable.sh"
+      - "config/draft-pr-disposition-2026-09-02.json"
+      - "docs/governance/DRAFT_PR_REVIEW_2026-09-02.md"
+      - "REPOSITORY_PROFILE.md"
+      - ".github/workflows/odoo-crm-call-followup-extensions.yml"
+  push:
+    branches:
+      - "release/production-activation"
+    paths:
+      - "odoo_addons/codestra_crm_call_followup_api/**"
+      - "odoo_addons/codestra_crm_call_followup_ux/**"
+      - "odoo_addons/codestra_crm_call_followup_automation/**"
+      - "api/completed_call_v1.schema.json"
+      - "api/call_followup_automation_event_v1.schema.json"
+      - "integrations/odoo_call_followup_client.py"
+      - "scripts/validate_odoo_crm_call_followup_api.py"
+      - "scripts/validate_odoo_crm_call_followup_ux.py"
+      - "scripts/validate_odoo_crm_call_followup_automation.py"
+      - "scripts/validate_odoo_crm_call_followup_extensions.py"
+      - "scripts/test_odoo_crm_call_followup_extensions_disposable.sh"
+      - ".github/workflows/odoo-crm-call-followup-extensions.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: call-followup-extensions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile all extension sources
+        run: >-
+          python -m compileall -q
+          odoo_addons/codestra_crm_call_followup_api
+          odoo_addons/codestra_crm_call_followup_ux
+          odoo_addons/codestra_crm_call_followup_automation
+          integrations/odoo_call_followup_client.py
+          scripts/validate_odoo_crm_call_followup_api.py
+          scripts/validate_odoo_crm_call_followup_ux.py
+          scripts/validate_odoo_crm_call_followup_automation.py
+          scripts/validate_odoo_crm_call_followup_extensions.py
+
+      - name: Validate consolidated source contracts
+        run: python scripts/validate_odoo_crm_call_followup_extensions.py
+
+      - name: Install, test, and upgrade all extensions in disposable Odoo 19
+        run: bash scripts/test_odoo_crm_call_followup_extensions_disposable.sh
+
+      - name: Validate Git whitespace
+        run: git diff --check
