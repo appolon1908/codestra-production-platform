@@ -9,4 +9,3 @@ Unit=codestra-database-certification-backup.service
 
 [Install]
 WantedBy=timers.target
-

@@ -33,4 +33,3 @@ trap 'rm -f "$temporary"' EXIT
 chmod 0644 "$temporary"
 mv -f "$temporary" "$output"
 trap - EXIT
-
