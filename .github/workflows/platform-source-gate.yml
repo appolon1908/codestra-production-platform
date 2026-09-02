@@ -51,7 +51,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends nats-server
           python -m pip install pytest pytest-subtests PyYAML requests "bandit==1.9.4" "nats-py==2.15.0" \
-            "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9"
+            "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9" \
+            "openapi-spec-validator==0.7.2"
 
       - name: Verify recovered source evidence hashes
         run: |
