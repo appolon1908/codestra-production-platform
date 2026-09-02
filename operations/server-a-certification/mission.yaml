@@ -1,0 +1,57 @@
+schema: codestra.server-a-production-certification-mission.v1
+mission_id: CODESTRA-SERVER-A-PRODUCTION-CERTIFICATION-20260902
+target:
+  public_ip: 65.109.65.169
+  private_ip: 10.40.0.1
+  role: core_production_application_and_platform_host
+execution:
+  repository_first: true
+  stop_at_first_failure: false
+  fix_root_cause_and_rerun: true
+  exact_head_validation: true
+  immutable_artifacts: true
+  rollback_required: true
+  evidence_required: true
+safety:
+  ssh_configuration_changes: prohibited
+  ssh_key_changes: prohibited
+  ssh_port_or_listener_changes: prohibited
+  ssh_service_restart: prohibited
+  active_ssh_session_termination: prohibited
+  production_business_writes: prohibited
+  docker_volume_deletion: prohibited
+  unclassified_database_deletion: prohibited
+  routine_host_reboot: prohibited
+  required_false_flags:
+    - LIVE_SMS_DELIVERY
+    - LIVE_EMAIL_DELIVERY
+    - LIVE_PSTN_DIALING
+    - LIVE_WRITE
+    - ODOO_WRITE
+    - CALLBACK_DISPATCH
+    - ENABLE_EXTERNAL_DELIVERY
+    - SEND_EVENTS
+    - N8N_DELIVERY_ENABLED
+    - LIVE_TRADING_ENABLED
+phases:
+  - source_authority_and_runtime_lock
+  - encrypted_offhost_backup_and_isolated_restore
+  - realtime_ha_database_rbac_and_connect_isolation
+  - centrifugo_probe_and_financial_governance_publisher
+  - host_and_docker_default_deny_firewall
+  - redis_and_selective_application_recovery
+  - container_health_resources_restart_and_log_rotation
+  - production_staging_network_secret_database_and_volume_isolation
+  - immutable_release_conversion
+  - monitoring_log_trace_and_alert_delivery
+  - authenticated_authorization_security_and_staging_load_tests
+  - production_read_only_canary
+  - scheduled_job_soak_and_final_certification
+status_vocabulary:
+  - PASS
+  - WARNING
+  - FAIL
+  - N/A
+final_verdicts:
+  - PRODUCTION_CERTIFIED_WITH_ACCEPTED_SSH_SECURITY_EXCEPTION
+  - NOT_CERTIFIED
