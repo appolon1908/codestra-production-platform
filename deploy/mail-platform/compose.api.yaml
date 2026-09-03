@@ -1,8 +1,5 @@
 services:
   mail-api:
-    build:
-      context: ../..
-      dockerfile: deploy/mail-platform/Dockerfile.api
     image: ghcr.io/appolon1908-hue/mail-api@sha256:586ed6aaded359b4cad64905d027079ea910eda5202bae0bac0d44d8baf0df09
     restart: unless-stopped
     user: "65534:65534"
