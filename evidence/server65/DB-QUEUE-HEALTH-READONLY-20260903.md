@@ -18,6 +18,11 @@ DATABASE_PROCESS_HEALTH=PASS
 QUEUE_PROCESS_HEALTH=PASS
 DATABASES=FAIL
 QUEUES=FAIL
+`codestra-redis-1` rejects unauthenticated `CONFIG GET` with `NOAUTH
+Authentication required`, which is a positive authentication-boundary signal;
+persistence settings remain unverified because no approved read-only credential
+was supplied.
+
 SSH_CHANGED=NO
 PRODUCTION_CHANGED=NO
 CALLS_PLACED=0
