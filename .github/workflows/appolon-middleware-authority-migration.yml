@@ -102,7 +102,7 @@ jobs:
           test "$(jq -r '.production_deployment_authorized' "$RUNNER_TEMP/authority-result.json")" = false
           test "$(jq -r '.external_effects' "$RUNNER_TEMP/authority-result.json")" = DISABLED
 
-      - name: Commit the verified review-only authority tree
+      - name: Package the exact generated review tree
         run: |
           set -Eeuo pipefail
           test -n "$(git status --porcelain)"
@@ -113,6 +113,33 @@ jobs:
           test ! -e tools/migrate_middleware_authority.py
           test ! -d .authority-payload
           ! find . -name '*.authority-new' -print -quit | grep -q .
+          git diff --no-renames --name-status > "$RUNNER_TEMP/generated-tree-name-status.txt"
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            --exclude=.git \
+            -czf "$RUNNER_TEMP/appolon-authority-generated-tree.tgz" .
+          sha256sum "$RUNNER_TEMP/appolon-authority-generated-tree.tgz" \
+            > "$RUNNER_TEMP/appolon-authority-generated-tree.tgz.sha256"
+
+      - name: Upload the exact generated review tree
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: appolon-middleware-authority-generated-tree-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/appolon-authority-generated-tree.tgz
+            ${{ runner.temp }}/appolon-authority-generated-tree.tgz.sha256
+            ${{ runner.temp }}/generated-tree-name-status.txt
+            ${{ runner.temp }}/authority-result.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Commit the verified review-only authority tree
+        run: |
+          set -Eeuo pipefail
           git config user.name 'codestra-authority-bot'
           git config user.email 'appolon1908-hue@users.noreply.github.com'
           git add --all
