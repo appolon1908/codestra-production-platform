@@ -7,6 +7,7 @@ on:
     paths:
       - PRODUCTION-SOURCE-LOCK.yaml
       - config/production-release-tuple.json
+      - tools/signed_middleware_release.py
       - tools/verify_middleware_release_evidence.py
       - tools/verify_slsa_provenance_attestation.py
       - tools/build_release_bundle.py
@@ -29,7 +30,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       EXPECTED_MIDDLEWARE_SOURCE_SHA: 1aa4d505846b7494aff94bec3d7ea68c895e2dd3
-      EXPECTED_MIDDLEWARE_IMAGE_DIGEST: sha256:cec8b5a186866a4ce77a6079cb3ab6fdb2a3487003872e678b9caa90c1ae52e5
+      EXPECTED_MIDDLEWARE_IMAGE_DIGEST: sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504
+      EXPECTED_MIDDLEWARE_ARTIFACT_DIGEST: sha256:cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
 
     steps:
       - name: Check out exact protected platform source
@@ -48,11 +50,14 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
+
           value = json.loads(Path('config/production-release-tuple.json').read_text())
           assert value['middleware_source_sha'] == '1aa4d505846b7494aff94bec3d7ea68c895e2dd3'
-          assert value['middleware_digest'] == 'sha256:cec8b5a186866a4ce77a6079cb3ab6fdb2a3487003872e678b9caa90c1ae52e5'
+          assert value['middleware_digest'] == 'sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504'
           assert value['middleware_run_id'] == '33767657962'
-          assert value['middleware_artifact']
+          assert value['middleware_artifact'].startswith(
+              'signed-middleware-release-1aa4d505846b7494aff94bec3d7ea68c895e2dd3-33767657962-'
+          )
           for key in (
               'middleware_sbom_sha256',
               'middleware_provenance_sha256',
@@ -60,6 +65,10 @@ jobs:
           ):
               assert len(value[key]) == 64
               int(value[key], 16)
+          source_lock = Path('PRODUCTION-SOURCE-LOCK.yaml').read_text()
+          assert 'status: FAIL' in source_lock
+          assert 'CANONICAL_SOURCE_AUTHORITY_PENDING_STAGING_CERTIFICATION' in source_lock
+          assert 'deployment_authorized: false' in source_lock
           PY
 
       - name: Refuse duplicate signing dispatch for this exact SHA
@@ -91,6 +100,7 @@ jobs:
             echo "PLATFORM_PROTECTED_SHA=${GITHUB_SHA}"
             echo "MIDDLEWARE_SOURCE_SHA=${EXPECTED_MIDDLEWARE_SOURCE_SHA}"
             echo "MIDDLEWARE_IMAGE_DIGEST=${EXPECTED_MIDDLEWARE_IMAGE_DIGEST}"
+            echo "MIDDLEWARE_ARTIFACT_DIGEST=${EXPECTED_MIDDLEWARE_ARTIFACT_DIGEST}"
             echo 'PRODUCTION_RUNTIME_CHANGED=NO'
             echo 'PRODUCTION_TRAFFIC_CHANGED=NO'
             echo 'PRODUCTION_EXTERNAL_EFFECTS_ENABLED=NONE'
