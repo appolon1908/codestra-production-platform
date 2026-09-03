@@ -14,6 +14,7 @@ on:
       - "operations/**"
       - "orbit/**"
       - "evidence/**"
+      - "production-green-evidence/**"
       - "config/**"
       - "deploy/**"
       - "docs/**"
