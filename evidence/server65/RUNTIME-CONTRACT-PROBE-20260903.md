@@ -23,6 +23,23 @@ application monitoring coverage.
 
 RUNTIME_CONTRACTS=FAIL
 APPLICATION_MONITORING=FAIL
+
+## Internal observability read-back
+
+Using container-local loopback (still read-only):
+
+- Prometheus `/-/healthy`: 200
+- Prometheus `/-/ready`: 200
+- Prometheus `/api/v1/status/buildinfo`: 200
+- Prometheus `/api/v1/targets`: 200
+- Alertmanager `/-/healthy`: 200
+- Alertmanager `/-/ready`: 200
+- Alertmanager `/api/v2/status`: 200
+- Alertmanager `/api/v2/alerts`: 200
+
+These internal checks prove process responsiveness only; target health,
+alert routing/acknowledgement, and application coverage remain unverified.
+
 SSH_CHANGED=NO
 PRODUCTION_CHANGED=NO
 CALLS_PLACED=0
