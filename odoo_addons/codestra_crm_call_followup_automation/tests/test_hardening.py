@@ -148,7 +148,10 @@ class TestCodestraCrmCallFollowupAutomationHardening(
         first = self.outbox.enqueue_followup_events(self.followup)
         second = self.outbox.enqueue_followup_events(self.followup)
 
-        self.assertEqual(first.ids, second.ids)
+        self.assertEqual(
+            [record.id for record in first],
+            [record.id for record in second],
+        )
 
     def test_manager_can_dead_letter_through_internal_write_boundary(self):
         event = self._event()
