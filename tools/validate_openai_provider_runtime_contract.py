@@ -213,7 +213,10 @@ def validate_contract(
         return errors
 
     require_equal(service.get("profiles"), [PROFILE], "service profile", errors)
-    require_equal(service.get("image"), image, "service image", errors)
+    service_image = service.get("image")
+    if isinstance(service_image, str) and ":latest" in service_image:
+        errors.append("mutable latest reference is forbidden")
+    require_equal(service_image, image, "service image", errors)
     require_equal(service.get("command"), ["python", "-m", "app.entrypoints.openai_worker"], "service command", errors)
     require_equal(service.get("user"), "10001:10001", "service user", errors)
     require_equal(service.get("init"), True, "service init", errors)
@@ -249,7 +252,7 @@ def validate_contract(
         errors.append("raw OPENAI_SAFETY_SALT environment entry is forbidden")
     if re.search(r"(?m)^\s*DATABASE_URL\s*:", compose_text):
         errors.append("raw DATABASE_URL environment entry is forbidden")
-    if ":latest" in compose_text:
+    if ":latest" in compose_text and "mutable latest reference is forbidden" not in errors:
         errors.append("mutable latest reference is forbidden")
     return errors
 
