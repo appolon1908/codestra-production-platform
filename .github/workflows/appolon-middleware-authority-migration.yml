@@ -1,157 +1,93 @@
-name: Generate exact Appolon Middleware authority binding repair
+name: Repair fail-closed Appolon authority validator
 
 on:
   push:
     branches:
       - fix/materialize-appolon-middleware-authority-20260903
     paths:
-      - tools/migrate_middleware_authority.py
       - .github/workflows/appolon-middleware-authority-migration.yml
 
 permissions:
-  actions: read
   contents: write
-  pull-requests: read
 
 concurrency:
-  group: appolon-middleware-authority-${{ github.ref }}
+  group: appolon-authority-validator-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  bind-exact-release:
-    name: Bind exact signed Appolon Middleware release
+  patch-validator:
     if: >-
       github.repository == 'appolon1908-hue/codestra-production-platform' &&
-      github.actor != 'github-actions[bot]' &&
-      !contains(github.event.head_commit.message, '[authority-generated]')
+      github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
-      MIDDLEWARE_REPOSITORY: appolon1908-hue/Middleware-
-      MIDDLEWARE_RELEASE_RUN_ID: '33767657962'
-      MIDDLEWARE_RELEASE_RUN_ATTEMPT: '1'
-      MIDDLEWARE_RELEASE_ARTIFACT_ID: '9898309168'
-      MIDDLEWARE_RELEASE_ARTIFACT: signed-middleware-release-1aa4d505846b7494aff94bec3d7ea68c895e2dd3-33767657962-1
-      MIDDLEWARE_ARTIFACT_ZIP_SHA256: cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
-      ARTIFACT_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN || github.token }}
       PUSH_TOKEN: ${{ secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN || github.token }}
-
     steps:
-      - name: Check out the exact review head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Prove branch and source identity
+      - name: Apply the exact fail-closed image-reference repair
         run: |
           set -Eeuo pipefail
           test "$GITHUB_REF" = 'refs/heads/fix/materialize-appolon-middleware-authority-20260903'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
-          test -n "$ARTIFACT_TOKEN"
-          test -n "$PUSH_TOKEN"
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Download and safely materialize the exact artifact
-        env:
-          GH_TOKEN: ${{ env.ARTIFACT_TOKEN }}
-        run: |
-          set -Eeuo pipefail
-          metadata="$(gh api "repos/${MIDDLEWARE_REPOSITORY}/actions/artifacts/${MIDDLEWARE_RELEASE_ARTIFACT_ID}")"
-          test "$(jq -r '.id' <<<"$metadata")" = "$MIDDLEWARE_RELEASE_ARTIFACT_ID"
-          test "$(jq -r '.name' <<<"$metadata")" = "$MIDDLEWARE_RELEASE_ARTIFACT"
-          test "$(jq -r '.expired' <<<"$metadata")" = false
-          test "$(jq -r '.workflow_run.id' <<<"$metadata")" = "$MIDDLEWARE_RELEASE_RUN_ID"
-          test "$(jq -r '.workflow_run.head_sha' <<<"$metadata")" = '1aa4d505846b7494aff94bec3d7ea68c895e2dd3'
-          gh api "repos/${MIDDLEWARE_REPOSITORY}/actions/artifacts/${MIDDLEWARE_RELEASE_ARTIFACT_ID}/zip" > "$RUNNER_TEMP/middleware-release.zip"
-          echo "$MIDDLEWARE_ARTIFACT_ZIP_SHA256  $RUNNER_TEMP/middleware-release.zip" | sha256sum --check --strict
-          mkdir "$RUNNER_TEMP/middleware-release"
-          python3 - "$RUNNER_TEMP/middleware-release.zip" "$RUNNER_TEMP/middleware-release" <<'PY'
-          import sys, zipfile
-          from pathlib import Path, PurePosixPath
-          expected = {
-              'release-manifest.v1.json',
-              'release-manifest.v1.sigstore.json',
-              'middleware.spdx.json',
-              'middleware.grype.json',
-          }
-          archive = Path(sys.argv[1])
-          destination = Path(sys.argv[2])
-          with zipfile.ZipFile(archive) as source:
-              names = set(source.namelist())
-              assert names == expected, names ^ expected
-              for name in sorted(names):
-                  path = PurePosixPath(name)
-                  assert not path.is_absolute() and '..' not in path.parts
-                  target = destination / name
-                  target.write_bytes(source.read(name))
-                  target.chmod(0o600)
+          path = Path("tools/validate_openai_provider_runtime_contract.py")
+          text = path.read_text(encoding="utf-8")
+          old_service = '''    require_equal(service.get("profiles"), [PROFILE], "service profile", errors)
+              require_equal(service.get("image"), image, "service image", errors)
+              require_equal(service.get("command"), ["python", "-m", "app.entrypoints.openai_worker"], "service command", errors)
+          '''.replace("              ", "    ")
+          new_service = '''    require_equal(service.get("profiles"), [PROFILE], "service profile", errors)
+              service_image = service.get("image")
+              if isinstance(service_image, str) and ":latest" in service_image:
+                  errors.append("mutable latest reference is forbidden")
+              require_equal(service_image, image, "service image", errors)
+              require_equal(service.get("command"), ["python", "-m", "app.entrypoints.openai_worker"], "service command", errors)
+          '''.replace("              ", "    ")
+          old_tail = '''    if ":latest" in compose_text:
+              errors.append("mutable latest reference is forbidden")
+          '''.replace("              ", "    ")
+          new_tail = '''    if ":latest" in compose_text and "mutable latest reference is forbidden" not in errors:
+              errors.append("mutable latest reference is forbidden")
+          '''.replace("              ", "    ")
+          if text.count(old_service) != 1 or text.count(old_tail) != 1:
+              raise SystemExit("validator source differs from reviewed generated tree")
+          text = text.replace(old_service, new_service).replace(old_tail, new_tail)
+          path.write_text(text, encoding="utf-8")
           PY
+          git diff --check
 
-      - name: Generate the deterministic review tree
+      - name: Run focused authority tests
         run: |
           set -Eeuo pipefail
-          python3 tools/migrate_middleware_authority.py \
-            --root . \
-            --evidence "$RUNNER_TEMP/middleware-release" \
-            --output "$RUNNER_TEMP/authority-result.json"
-          cat "$RUNNER_TEMP/authority-result.json"
-          test "$(jq -r '.status' "$RUNNER_TEMP/authority-result.json")" = GENERATED_REVIEW_ONLY
-          test "$(jq -r '.production_deployment_authorized' "$RUNNER_TEMP/authority-result.json")" = false
-          test "$(jq -r '.external_effects' "$RUNNER_TEMP/authority-result.json")" = DISABLED
+          python3 -m pip install --disable-pip-version-check --no-input 'pytest==8.4.2' 'PyYAML==6.0.2'
+          python3 -m py_compile tools/validate_openai_provider_runtime_contract.py
+          python3 tools/validate_openai_provider_runtime_contract.py
+          python3 -m pytest -q \
+            tests/test_middleware_release_evidence.py \
+            tests/test_release_bundle.py \
+            tests/test_server_a_release_tuple.py \
+            tests/test_jetstream_worker_image.py \
+            tests/test_middleware_approved_release.py \
+            tests/test_openai_provider_runtime_contract.py
 
-      - name: Package the exact generated review tree
+      - name: Push only the reviewed validator repair
         run: |
           set -Eeuo pipefail
-          test -n "$(git status --porcelain)"
-          test ! -e .github/workflows/appolon-middleware-authority-migration.yml
-          test ! -e .github/workflows/appolon-middleware-authority-gate.yml
-          test ! -e .github/workflows/appolon-middleware-authority-finalizer.yml
-          test ! -e .github/workflows/appolon-middleware-post-merge-release.yml
-          test ! -e tools/migrate_middleware_authority.py
-          test ! -d .authority-payload
-          ! find . -name '*.authority-new' -print -quit | grep -q .
-          git diff --no-renames --name-status > "$RUNNER_TEMP/generated-tree-name-status.txt"
-          tar \
-            --sort=name \
-            --mtime='UTC 1970-01-01' \
-            --owner=0 \
-            --group=0 \
-            --numeric-owner \
-            --exclude=.git \
-            -czf "$RUNNER_TEMP/appolon-authority-generated-tree.tgz" .
-          sha256sum "$RUNNER_TEMP/appolon-authority-generated-tree.tgz" \
-            > "$RUNNER_TEMP/appolon-authority-generated-tree.tgz.sha256"
-
-      - name: Upload the exact generated review tree
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: appolon-middleware-authority-generated-tree-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/appolon-authority-generated-tree.tgz
-            ${{ runner.temp }}/appolon-authority-generated-tree.tgz.sha256
-            ${{ runner.temp }}/generated-tree-name-status.txt
-            ${{ runner.temp }}/authority-result.json
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Push the verified non-workflow authority tree
-        run: |
-          set -Eeuo pipefail
-          git restore --source=HEAD -- \
-            .github/workflows/protected-release.yml \
-            .github/workflows/appolon-middleware-authority-finalizer.yml \
-            .github/workflows/appolon-middleware-authority-gate.yml \
-            .github/workflows/appolon-middleware-authority-migration.yml \
-            .github/workflows/appolon-middleware-post-merge-release.yml
-          test -n "$(git status --porcelain)"
-          test ! -e tools/migrate_middleware_authority.py
-          test ! -d .authority-payload
+          test -n "$PUSH_TOKEN"
+          test "$(git status --short | awk '{print $2}')" = 'tools/validate_openai_provider_runtime_contract.py'
           git config user.name 'codestra-authority-bot'
           git config user.email 'appolon1908-hue@users.noreply.github.com'
-          git add --all
-          git commit -m 'release: bind exact signed Appolon Middleware authority [authority-generated]'
+          git add tools/validate_openai_provider_runtime_contract.py
+          git commit -m 'fix(authority): reject mutable worker images directly [authority-validator-generated]'
           git push \
             "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             HEAD:refs/heads/fix/materialize-appolon-middleware-authority-20260903
