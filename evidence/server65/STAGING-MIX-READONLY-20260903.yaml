@@ -1,0 +1,43 @@
+server: 65.109.65.169
+date: 2026-09-03
+access: codestra-app alias, codestra-admin, read-only docker inspect
+status: FAIL
+reason: staging-named workloads remain mixed into production host
+workloads:
+  - {name: codestra-agent-desktop-sipjs-staging, project: null, image: 'ghcr.io/codestra-srl/codestra-agent-desktop@sha256:c13d32c0780b4d56934888d32193b4d5f052c7671eba01f1ff6a257f6440a0d7', health: none}
+  - {name: codestra-identity-staging-identity-db-staging-1, project: codestra-identity-staging, image: 'postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94', health: healthy}
+  - {name: codestra-identity-staging-keycloak-staging-1, project: codestra-identity-staging, image: 'quay.io/keycloak/keycloak@sha256:2eb3cd316835c990e69e26ade292ffa78f6fb0db7d5fc6377463c162e1979ac0', health: healthy}
+  - {name: codestra-middleware-staging-callback-staging-1, project: codestra-middleware-staging, image: 'codestra/middleware:current-hardened-20260723', health: healthy}
+  - {name: codestra-middleware-staging-middleware-staging-1, project: codestra-middleware-staging, image: 'codestra/middleware:staging-b29db772', health: healthy}
+  - {name: codestra-middleware-staging-notification-worker-staging-1, project: codestra-middleware-staging, image: 'codestra/middleware:staging-preflight-n8n-auth-20260801', health: none}
+  - {name: codestra-middleware-staging-odoo-result-worker-staging-1, project: codestra-middleware-staging, image: 'codestra/middleware:staging-b29db772', health: none}
+  - {name: codestra-middleware-staging-postgres-1, project: codestra-middleware-staging, image: 'postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94', health: healthy}
+  - {name: codestra-middleware-staging-redis-1, project: codestra-middleware-staging, image: 'redis@sha256:bb186d083732f669da90be8b0f975a37812b15e913465bb14d845db72a4e3e08', health: healthy}
+  - {name: codestra-middleware-staging-scheduler-staging-1, project: codestra-middleware-staging, image: 'codestra/middleware:staging-preflight-n8n-auth-20260801', health: none}
+  - {name: codestra-middleware-staging-scraper-odoo-delivery-worker-1, project: codestra-middleware-staging, image: 'codestra/middleware:scraper-protected-main-4780bd72', health: none}
+  - {name: codestra-middleware-staging-social-dead-letter-worker-staging-1, project: codestra-middleware-staging, image: 'codestra/middleware:social-staging-12cd5fc', health: none}
+  - {name: codestra-middleware-staging-social-delivery-worker-staging-1, project: codestra-middleware-staging, image: 'codestra/middleware:social-staging-12cd5fc', health: none}
+  - {name: codestra-middleware-staging-social-reconciliation-worker-staging-1, project: codestra-middleware-staging, image: 'codestra/middleware:social-staging-12cd5fc', health: none}
+  - {name: codestra-n8n-staging-n8n-1, project: codestra-n8n-staging, image: 'n8nio/n8n@sha256:cfe2704ff858395503d42548206c2c99ea351a205e941063a9d9b77b0f404478', health: healthy}
+  - {name: codestra-n8n-staging-postgres-1, project: codestra-n8n-staging, image: 'postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94', health: healthy}
+  - {name: codestra-n8n-staging-redis-1, project: codestra-n8n-staging, image: 'redis@sha256:bb186d083732f669da90be8b0f975a37812b15e913465bb14d845db72a4e3e08', health: healthy}
+  - {name: codestra-n8n-staging-webhook-1, project: codestra-n8n-staging, image: 'n8nio/n8n@sha256:cfe2704ff858395503d42548206c2c99ea351a205e941063a9d9b77b0f404478', health: healthy}
+  - {name: codestra-n8n-staging-worker-1, project: codestra-n8n-staging, image: 'n8nio/n8n@sha256:cfe2704ff858395503d42548206c2c99ea351a205e941063a9d9b77b0f404478', health: healthy}
+  - {name: codestra-n8n-staging-worker-2-1, project: codestra-n8n-staging, image: 'n8nio/n8n@sha256:cfe2704ff858395503d42548206c2c99ea351a205e941063a9d9b77b0f404478', health: healthy}
+  - {name: codestra-odoo-staging-odoo-staging-1, project: codestra-odoo-staging, image: 'odoo@sha256:f54272f31d5f77e4146b887efb3761c98480317daf687e4b4b5e76ed8bcc08c5', health: none}
+  - {name: codestra-odoo-staging-postgres-staging-1, project: codestra-odoo-staging, image: 'postgres:17-alpine', health: healthy}
+  - {name: codestra-odoo-staging-uat-loopback-proxy-1, project: codestra-odoo-staging, image: 'python:3.12-alpine', health: none}
+  - {name: codestra-odoo19-identity-menu-staging-postgres-1, project: codestra-odoo19-identity-menu-staging, image: 'postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94', health: healthy}
+  - {name: codestra-odoo19-module-staging-callback-tls-1, project: codestra-odoo19-module-staging, image: 'codestra/caddy:2.11.4-hardened-20260723', health: none}
+  - {name: codestra-odoo19-module-staging-odoo-1, project: codestra-odoo19-module-staging, image: 'odoo@sha256:f54272f31d5f77e4146b887efb3761c98480317daf687e4b4b5e76ed8bcc08c5', health: healthy}
+  - {name: codestra-odoo19-module-staging-postgres-1, project: codestra-odoo19-module-staging, image: 'postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94', health: healthy}
+  - {name: codestra-odoo19-staging-odoo19-master-staging-1, project: codestra-odoo19-staging, image: 'odoo@sha256:f54272f31d5f77e4146b887efb3761c98480317daf687e4b4b5e76ed8bcc08c5', health: healthy}
+  - {name: codestra-odoo19-staging-odoo19-scraper-canary-1, project: codestra-odoo19-staging, image: 'odoo@sha256:94a4f480b8039dc9ca2bca9e77e59f97d3311f66e2aad663cf2670be9c66d4ea', health: healthy}
+  - {name: codestra-odoo19-staging-odoo19-staging-1, project: codestra-odoo19-staging, image: 'odoo@sha256:f54272f31d5f77e4146b887efb3761c98480317daf687e4b4b5e76ed8bcc08c5', health: healthy}
+  - {name: codestra-odoo19-staging-postgres-1, project: codestra-odoo19-staging, image: 'postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94', health: healthy}
+  - {name: codestra-operations-dashboard-staging-v2-middleware-1, project: codestra-operations-dashboard-staging-v2, image: 'ghcr.io/appolon1908-hue/codestra-middleware@sha256:0e00d04d8e898463d4c59341d5ccaae02052914fb9ad69aefd0952e0f7f3ed5b', health: healthy}
+  - {name: codestra-operations-dashboard-staging-v2-postgres-1, project: codestra-operations-dashboard-staging-v2, image: 'postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73', health: healthy}
+  - {name: codestra-operations-dashboard-staging-v2-redis-1, project: codestra-operations-dashboard-staging-v2, image: 'redis:7.4-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2', health: healthy}
+ssh_changed: false
+production_changed: false
+calls_placed: 0
