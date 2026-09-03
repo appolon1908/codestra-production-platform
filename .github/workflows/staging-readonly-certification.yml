@@ -122,7 +122,6 @@ jobs:
       HAS_CODESTRA_STAGING_METRICS_BEARER_TOKEN: ${{ secrets.CODESTRA_STAGING_METRICS_BEARER_TOKEN != '' }}
       HAS_CODESTRA_STAGING_OFF_HOST_BACKUP_CREDENTIAL: ${{ secrets.CODESTRA_STAGING_OFF_HOST_BACKUP_CREDENTIAL != '' }}
       HAS_CODESTRA_RELEASE_SIGNING_PUBLIC_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_PUBLIC_KEY != '' }}
-      STAGING_ENDPOINT_MANIFEST_JSON: ${{ secrets.CODESTRA_STAGING_READONLY_ENDPOINT_MANIFEST }}
     steps:
       - name: Check out exact protected source identity
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -143,6 +142,8 @@ jobs:
           python-version: "3.12"
 
       - name: Materialize protected endpoint manifest
+        env:
+          STAGING_ENDPOINT_MANIFEST_JSON: ${{ secrets.CODESTRA_STAGING_READONLY_ENDPOINT_MANIFEST }}
         run: |
           set -Eeuo pipefail
           umask 077
