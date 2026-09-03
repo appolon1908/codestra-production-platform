@@ -5,6 +5,28 @@ Production target: `65.109.65.169`
 Staging target: `2.29.17.172`
 Decision: **NO-GO**
 
+## 2026-09-03 read-only refresh additions
+
+- The approved `codestra-app` alias successfully provided bounded access as
+  `codestra-admin`; SSH configuration was not changed.
+- Server 65 currently contains 106 containers, 34 staging-named workloads,
+  52 Docker networks (15 staging-named), 29 mutable image declarations, and
+  43 containers missing OCI source labels. See the corresponding
+  `evidence/server65/*20260903*` read-backs.
+- Database/queue host exposure and Docker socket/host-network checks pass in
+  isolation, but database durability/restore, container hardening, and
+  production/staging isolation remain uncertified.
+- Prometheus has 34/34 active targets up and 232 alerting rules loaded, while
+  Loki/Tempo/Alloy-equivalent collectors are absent from Server 65 and
+  complete 20/20 application coverage is not proven.
+- Keycloak process health, OIDC discovery, JWKS, TLS, and public edge headers
+  pass; authenticated identity controls remain FAIL.
+- Caddy service/config validation and TLS pass, but `api.breero.com` remains
+  HTTP 503 and edge secret-redaction proof is unavailable.
+- The protected platform release at head
+  `517145689b6a27c9953ffd357458d8fc8e7c100d` passed exact release and
+  immutable candidate workflows; it has not been deployed to Server 65.
+
 ## 2026-09-03 refresh
 
 - PR #181 remains merged at protected merge `5aec485814149434750f2313370ae0ae39db5bd8`.
