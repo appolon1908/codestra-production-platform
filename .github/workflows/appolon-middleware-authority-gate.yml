@@ -25,7 +25,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PUSH_TOKEN: ${{ github.token }}
       EXPECTED_SOURCE_SHA: 1aa4d505846b7494aff94bec3d7ea68c895e2dd3
-      EXPECTED_IMAGE_DIGEST: sha256:cec8b5a186866a4ce77a6079cb3ab6fdb2a3487003872e678b9caa90c1ae52e5
+      EXPECTED_IMAGE_DIGEST: sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504
+      EXPECTED_ARTIFACT_DIGEST: sha256:cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
 
     steps:
       - name: Check out exact generated head
@@ -41,13 +42,20 @@ jobs:
           test -f authority-migration-result.json
           test ! -f .github/workflows/appolon-middleware-authority-migration.yml
           python3 - <<'PY'
+          import hashlib
           import json
           from pathlib import Path
+
           result = json.loads(Path('authority-migration-result.json').read_text())
           assert result['source_sha'] == '1aa4d505846b7494aff94bec3d7ea68c895e2dd3'
-          assert result['image_digest'] == 'sha256:cec8b5a186866a4ce77a6079cb3ab6fdb2a3487003872e678b9caa90c1ae52e5'
-          assert result['image_reference'] == 'ghcr.io/appolon1908-hue/codestra-middleware@sha256:cec8b5a186866a4ce77a6079cb3ab6fdb2a3487003872e678b9caa90c1ae52e5'
+          assert result['image_digest'] == 'sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504'
+          assert result['image_reference'] == 'ghcr.io/appolon1908-hue/codestra-middleware@sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504'
+          assert result['artifact_digest'] == 'sha256:cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a'
+          assert result['migration_head'] == '0009_observability_incidents'
           assert result['builder'] == 'https://github.com/appolon1908-hue/Middleware-/.github/workflows/release.yml@refs/heads/main'
+          assert result['deployment_authorized'] is False
+          assert result['production_changed'] is False
+
           tuple_value = json.loads(Path('config/production-release-tuple.json').read_text())
           assert tuple_value['middleware_source_sha'] == result['source_sha']
           assert tuple_value['middleware_digest'] == result['image_digest']
@@ -56,6 +64,18 @@ jobs:
           assert tuple_value['middleware_sbom_sha256'] == result['sbom_sha256']
           assert tuple_value['middleware_provenance_sha256'] == result['provenance_sha256']
           assert tuple_value['middleware_openvex_sha256'] == result['openvex_sha256']
+
+          for key in ('binding_path', 'provenance_path', 'openvex_path'):
+              path = Path(result[key])
+              assert path.is_file() and not path.is_symlink()
+          assert hashlib.sha256(Path(result['provenance_path']).read_bytes()).hexdigest() == result['provenance_sha256']
+          assert hashlib.sha256(Path(result['openvex_path']).read_bytes()).hexdigest() == result['openvex_sha256']
+
+          source_lock = Path('PRODUCTION-SOURCE-LOCK.yaml').read_text()
+          assert 'status: FAIL' in source_lock
+          assert 'CANONICAL_SOURCE_AUTHORITY_PENDING_STAGING_CERTIFICATION' in source_lock
+          assert 'deployment_authorized: false' in source_lock
+          assert 'former_codestra_srl_authority:' in source_lock
           PY
           git diff --check
           python3 -m compileall -q tools
