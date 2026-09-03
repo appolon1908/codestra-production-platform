@@ -1,0 +1,227 @@
+name: Materialize canonical Middleware source-lock blobs
+
+on:
+  push:
+    branches:
+      - release/production-source-lock-reconcile-20260903
+    paths:
+      - .github/workflows/materialize-middleware-source-lock-blobs.yml
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: middleware-source-lock-materialization
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      MIDDLEWARE_REPOSITORY: appolon1908-hue/Middleware-
+      MIDDLEWARE_RELEASE_RUN_ID: '33767657962'
+      MIDDLEWARE_RELEASE_ARTIFACT_ID: '9898309168'
+      MIDDLEWARE_RELEASE_ARTIFACT: signed-middleware-release-1aa4d505846b7494aff94bec3d7ea68c895e2dd3-33767657962-1
+      MIDDLEWARE_SOURCE_SHA: 1aa4d505846b7494aff94bec3d7ea68c895e2dd3
+      MIDDLEWARE_IMAGE_DIGEST: sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504
+      MIDDLEWARE_ARTIFACT_ZIP_SHA256: cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
+      ARTIFACT_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN || github.token }}
+      PUSH_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out exact protected-base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove exact branch and clean source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/release/production-source-lock-reconcile-20260903
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          test -n "$ARTIFACT_TOKEN"
+
+      - name: Download exact signed Middleware evidence
+        env:
+          GH_TOKEN: ${{ env.ARTIFACT_TOKEN }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          metadata="$(gh api "repos/${MIDDLEWARE_REPOSITORY}/actions/artifacts/${MIDDLEWARE_RELEASE_ARTIFACT_ID}")"
+          test "$(jq -r .id <<<"$metadata")" = "$MIDDLEWARE_RELEASE_ARTIFACT_ID"
+          test "$(jq -r .name <<<"$metadata")" = "$MIDDLEWARE_RELEASE_ARTIFACT"
+          test "$(jq -r .expired <<<"$metadata")" = false
+          test "$(jq -r .workflow_run.id <<<"$metadata")" = "$MIDDLEWARE_RELEASE_RUN_ID"
+          test "$(jq -r .workflow_run.head_sha <<<"$metadata")" = "$MIDDLEWARE_SOURCE_SHA"
+          gh api "repos/${MIDDLEWARE_REPOSITORY}/actions/artifacts/${MIDDLEWARE_RELEASE_ARTIFACT_ID}/zip" > "$RUNNER_TEMP/middleware-release.zip"
+          echo "$MIDDLEWARE_ARTIFACT_ZIP_SHA256  $RUNNER_TEMP/middleware-release.zip" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/middleware-release"
+          python3 - "$RUNNER_TEMP/middleware-release.zip" "$RUNNER_TEMP/middleware-release" <<'PY'
+          import sys, zipfile
+          from pathlib import Path, PurePosixPath
+          expected = {
+              'release-manifest.v1.json',
+              'release-manifest.v1.sigstore.json',
+              'middleware.spdx.json',
+              'middleware.grype.json',
+          }
+          source = Path(sys.argv[1])
+          destination = Path(sys.argv[2])
+          with zipfile.ZipFile(source) as archive:
+              names = set(archive.namelist())
+              if names != expected:
+                  raise SystemExit(f'artifact member mismatch: {sorted(names ^ expected)}')
+              for name in sorted(names):
+                  path = PurePosixPath(name)
+                  if path.is_absolute() or '..' in path.parts:
+                      raise SystemExit(f'unsafe artifact member: {name}')
+                  target = destination / name
+                  target.write_bytes(archive.read(name))
+                  target.chmod(0o600)
+          PY
+
+      - name: Materialize reviewed authority payload
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 tools/migrate_middleware_authority.py \
+            --root . \
+            --evidence "$RUNNER_TEMP/middleware-release" \
+            --output "$RUNNER_TEMP/authority-result.json"
+          jq -e \
+            --arg source "$MIDDLEWARE_SOURCE_SHA" \
+            --arg image "ghcr.io/appolon1908-hue/codestra-middleware@$MIDDLEWARE_IMAGE_DIGEST" \
+            '.status == "GENERATED_REVIEW_ONLY" and .source_sha == $source and .image_reference == $image and .production_deployment_authorized == false and .external_effects == "DISABLED"' \
+            "$RUNNER_TEMP/authority-result.json"
+
+      - name: Validate exact generated candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m pip install --disable-pip-version-check --no-input pytest==8.4.2 PyYAML==6.0.2
+          git diff --check
+          python3 -m py_compile tools/*.py tests/test_middleware_release_evidence.py tests/test_release_bundle.py tests/test_server_a_release_tuple.py tests/test_jetstream_worker_image.py tests/test_middleware_approved_release.py
+          python3 tools/verify_middleware_release_evidence.py \
+            --directory "$RUNNER_TEMP/middleware-release" \
+            --tuple config/production-release-tuple.json \
+            --github-env "$RUNNER_TEMP/middleware-release.env"
+          python3 tools/validate_openai_provider_runtime_contract.py
+          python3 -m pytest -q \
+            tests/test_middleware_release_evidence.py \
+            tests/test_release_bundle.py \
+            tests/test_server_a_release_tuple.py \
+            tests/test_jetstream_worker_image.py \
+            tests/test_middleware_approved_release.py \
+            tests/test_openai_provider_runtime_contract.py
+          grep -Fq 'status: FAIL' PRODUCTION-SOURCE-LOCK.yaml
+          grep -Fq 'CANONICAL_SOURCE_AUTHORITY_PENDING_STAGING_CERTIFICATION' PRODUCTION-SOURCE-LOCK.yaml
+          grep -Fq 'deployment_authorized: false' PRODUCTION-SOURCE-LOCK.yaml
+          test "$(jq -r .components.middleware.source_sha config/production-release-tuple.json)" = "$MIDDLEWARE_SOURCE_SHA"
+          test "$(jq -r .components.middleware.image_digest config/production-release-tuple.json)" = "$MIDDLEWARE_IMAGE_DIGEST"
+          test ! -e .github/workflows/appolon-middleware-authority-migration.yml
+          test ! -e .github/workflows/appolon-middleware-authority-gate.yml
+          test ! -e .github/workflows/appolon-middleware-authority-finalizer.yml
+          test ! -e .github/workflows/appolon-middleware-post-merge-release.yml
+          test ! -e tools/migrate_middleware_authority.py
+          test ! -d .authority-payload
+
+      - name: Publish content-addressed final-tree manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ONE_SHOT_PATH: .github/workflows/materialize-middleware-source-lock-blobs.yml
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - "$RUNNER_TEMP/authority-result.json" <<'PY'
+          import base64
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import urllib.request
+
+          result_path = pathlib.Path(__import__('sys').argv[1])
+          raw = subprocess.check_output(['git', 'status', '--porcelain=v1', '-z'])
+          fields = [item for item in raw.split(b'\0') if item]
+          changes = []
+          seen = set()
+          for field in fields:
+              if len(field) < 4 or field[2:3] != b' ':
+                  raise SystemExit(f'unsupported git status record: {field!r}')
+              status = field[:2].decode('ascii')
+              path = field[3:].decode('utf-8')
+              if 'R' in status or 'C' in status:
+                  raise SystemExit(f'rename/copy status is not allowed: {status} {path}')
+              if path in seen:
+                  raise SystemExit(f'duplicate changed path: {path}')
+              seen.add(path)
+              if 'D' in status:
+                  changes.append({'path': path, 'sha': None, 'mode': '100644', 'operation': 'delete'})
+                  continue
+              target = pathlib.Path(path)
+              if not target.is_file() or target.is_symlink():
+                  raise SystemExit(f'changed path is not a regular file: {path}')
+              payload = json.dumps({
+                  'content': base64.b64encode(target.read_bytes()).decode('ascii'),
+                  'encoding': 'base64',
+              }).encode('utf-8')
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/git/blobs",
+                  data=payload,
+                  method='POST',
+                  headers={
+                      'Accept': 'application/vnd.github+json',
+                      'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                      'X-GitHub-Api-Version': '2022-11-28',
+                      'Content-Type': 'application/json',
+                  },
+              )
+              with urllib.request.urlopen(request) as response:
+                  blob = json.load(response)
+              mode = '100755' if target.stat().st_mode & 0o111 else '100644'
+              changes.append({'path': path, 'sha': blob['sha'], 'mode': mode, 'operation': 'upsert'})
+
+          one_shot = os.environ['ONE_SHOT_PATH']
+          if one_shot in seen:
+              raise SystemExit('one-shot workflow unexpectedly changed during materialization')
+          changes.append({'path': one_shot, 'sha': None, 'mode': '100644', 'operation': 'delete'})
+          manifest = {
+              'schema': 'codestra.middleware-source-lock-materialization-blobs.v1',
+              'base_commit': os.environ['GITHUB_SHA'],
+              'source_branch': os.environ['GITHUB_REF_NAME'],
+              'middleware_source_sha': os.environ['MIDDLEWARE_SOURCE_SHA'],
+              'middleware_image_digest': os.environ['MIDDLEWARE_IMAGE_DIGEST'],
+              'artifact_zip_sha256': os.environ['MIDDLEWARE_ARTIFACT_ZIP_SHA256'],
+              'authority_result': json.loads(result_path.read_text()),
+              'changes': sorted(changes, key=lambda item: item['path']),
+              'production_deployment_authorized': False,
+              'external_effects': 'DISABLED',
+          }
+          pathlib.Path('source-lock-materialization-blobs.json').write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          PY
+          jq -e \
+            --arg base "$GITHUB_SHA" \
+            --arg source "$MIDDLEWARE_SOURCE_SHA" \
+            --arg digest "$MIDDLEWARE_IMAGE_DIGEST" \
+            '.base_commit == $base and .middleware_source_sha == $source and .middleware_image_digest == $digest and .production_deployment_authorized == false and .external_effects == "DISABLED" and (.changes | length) > 20' \
+            source-lock-materialization-blobs.json
+
+      - name: Commit manifest only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name codestra-source-lock-bot
+          git config user.email appolon1908-hue@users.noreply.github.com
+          git add source-lock-materialization-blobs.json
+          git diff --cached --check
+          git commit -m 'build(release): publish verified Middleware source-lock blobs'
+          git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
