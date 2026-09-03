@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-09-03",
+  "phase": "PRODUCTION_CERTIFICATION_CONTINUATION",
+  "overall_verdict": "NO_GO",
+  "completed_source_work": {
+    "backup_source_authority": "PASS",
+    "staging_readonly_entry_gate_source": "PASS",
+    "telemetry_development_lock": "PASS",
+    "production_source_lock_verifier_added": true,
+    "immutable_64_workload_matrix_verifier_added": true,
+    "staging_endpoint_manifest_materializer_added": true,
+    "business_api_15_and_kong_29_evidence_validator_added": true,
+    "artifact_signature_sbom_provenance_validator_added": true,
+    "workload_identity_64_evidence_validator_added": true,
+    "recovery_rollback_canary_soak_validator_added": true
+  },
+  "protected_repository_paths": {
+    "telemetry_development_to_test": {
+      "repository": "appolon1908-hue/Codestra-Telemetry",
+      "pull_request": 41,
+      "expected_head": "4a349038712fc18ca97f9bca2e3329c337842fe6",
+      "guarded_merge_submitted": true,
+      "runtime_activation_authorized": false
+    },
+    "telemetry_test_to_staging": {
+      "repository": "appolon1908-hue/Codestra-Telemetry",
+      "pull_request": 44,
+      "fresh_exact_head_ci_required": true,
+      "fresh_independent_approval_required": true,
+      "runtime_activation_authorized": false
+    },
+    "production_certification_evidence": {
+      "repository": "appolon1908-hue/codestra-production-platform",
+      "pull_request": 236,
+      "target": "release/production-activation",
+      "independent_review_required": true,
+      "runtime_activation_authorized": false
+    },
+    "immutable_candidate_matrix": {
+      "repository": "appolon1908-hue/codestra-production-runtime-authority",
+      "pull_request": 2,
+      "target": "main",
+      "independent_review_required": true,
+      "runtime_activation_authorized": false
+    },
+    "openbao_development_to_test": {
+      "repository": "appolon1908-hue/Codestra-OpenBao",
+      "pull_request": 40,
+      "fresh_exact_head_ci_required": true,
+      "fresh_independent_approval_required": true,
+      "runtime_activation_authorized": false
+    }
+  },
+  "hard_blockers": {
+    "production_source_lock": "FAIL_REAL_CANONICAL_EVIDENCE_INCOMPLETE",
+    "immutable_candidate_matrix": "NOT_AUTHORIZED_64_COMPLETE_IDENTITIES_REQUIRED",
+    "isolated_staging_host": "NOT_RUN_HOST_NOT_CREATED",
+    "staging_readonly_environment": "ACCOUNT_VARIABLES_AND_ENCRYPTED_SECRETS_INCOMPLETE",
+    "middleware_actions": "STARTUP_FAILURE_ZERO_JOBS_EXTERNAL_BILLING",
+    "middleware_webhook_worker": "PROTECTED_SIGNED_IMAGE_NOT_AVAILABLE_OR_INSTALLED",
+    "openbao_runtime": "EXACT_IMAGE_VULNERABILITY_AND_RECOVERY_GATES_INCOMPLETE",
+    "final_artifacts": "64_SIGNED_SCANNED_ATTESTED_ARTIFACTS_NOT_PROVEN",
+    "staging_certification": "NOT_RUN",
+    "workload_identities": "NOT_PROVEN_64_OF_64",
+    "business_api_gateway_alignment": "NOT_PROVEN_15_OF_15_AND_29_OF_29",
+    "full_recovery_and_rollback": "NOT_RUN_FOR_FINAL_CANDIDATE",
+    "production_readonly_canary": "NOT_RUN",
+    "soak": "NOT_RUN"
+  },
+  "required_account_or_runtime_actions": [
+    "restore Codestra-SRL GitHub Actions billing or spending authorization",
+    "supply protected staging environment variables and encrypted secrets",
+    "provision and verify a dedicated isolated staging host through Infustruction-repo",
+    "build and cryptographically verify 64 exact-digest artifacts",
+    "execute isolated staging API identity recovery and rollback certification",
+    "execute maximum one-percent GET/HEAD-only production canary",
+    "complete minimum one-hour clean soak"
+  ],
+  "safety": {
+    "admin_bypass_used": false,
+    "force_push_used": false,
+    "ssh_configuration_changed": false,
+    "runtime_deployment_performed": false,
+    "business_writes_enabled": false,
+    "communications_delivery_enabled": false,
+    "provider_effects_enabled": false,
+    "financial_or_trading_mutation_enabled": false,
+    "secret_values_recorded": false
+  }
+}
