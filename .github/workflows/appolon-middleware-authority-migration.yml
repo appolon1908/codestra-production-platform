@@ -1,4 +1,4 @@
-name: Generate exact Appolon Middleware authority binding
+name: Stage exact Appolon Middleware authority binding review
 
 on:
   push:
