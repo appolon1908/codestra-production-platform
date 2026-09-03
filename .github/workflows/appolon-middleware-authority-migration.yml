@@ -97,12 +97,35 @@ jobs:
             --evidence "$RUNNER_TEMP/middleware-release" \
             --output "$RUNNER_TEMP/authority-result.json"
           cat "$RUNNER_TEMP/authority-result.json"
+          test "$(jq -r '.status' "$RUNNER_TEMP/authority-result.json")" = GENERATED_REVIEW_ONLY
+          test "$(jq -r '.production_deployment_authorized' "$RUNNER_TEMP/authority-result.json")" = false
+          test "$(jq -r '.external_effects' "$RUNNER_TEMP/authority-result.json")" = DISABLED
 
-      - name: Validate the exact generated tree
+      - name: Commit the verified review-only authority tree
+        run: |
+          set -Eeuo pipefail
+          test -n "$(git status --porcelain)"
+          test ! -e .github/workflows/appolon-middleware-authority-migration.yml
+          test ! -e .github/workflows/appolon-middleware-authority-gate.yml
+          test ! -e .github/workflows/appolon-middleware-authority-finalizer.yml
+          test ! -e .github/workflows/appolon-middleware-post-merge-release.yml
+          test ! -e tools/migrate_middleware_authority.py
+          test ! -d .authority-payload
+          ! find . -name '*.authority-new' -print -quit | grep -q .
+          git config user.name 'codestra-authority-bot'
+          git config user.email 'appolon1908-hue@users.noreply.github.com'
+          git add --all
+          git commit -m 'release: bind exact signed Appolon Middleware authority [authority-generated]'
+          git push \
+            "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:refs/heads/fix/materialize-appolon-middleware-authority-20260903
+
+      - name: Validate the committed exact generated tree
         run: |
           set -Eeuo pipefail
           python3 -m pip install --disable-pip-version-check --no-input 'pytest==8.4.2' 'PyYAML==6.0.2'
-          git diff --check
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^
           python3 -m py_compile \
             tools/*.py \
             tests/test_middleware_release_evidence.py \
@@ -122,25 +145,6 @@ jobs:
             tests/test_jetstream_worker_image.py \
             tests/test_middleware_approved_release.py \
             tests/test_openai_provider_runtime_contract.py
-          test ! -e .github/workflows/appolon-middleware-authority-migration.yml
-          test ! -e .github/workflows/appolon-middleware-authority-gate.yml
-          test ! -e .github/workflows/appolon-middleware-authority-finalizer.yml
-          test ! -e .github/workflows/appolon-middleware-post-merge-release.yml
-          test ! -e tools/migrate_middleware_authority.py
-          test ! -d .authority-payload
-          ! find . -name '*.authority-new' -print -quit | grep -q .
-
-      - name: Commit the generated review-only authority tree
-        run: |
-          set -Eeuo pipefail
-          test -n "$(git status --porcelain)"
-          git config user.name 'codestra-authority-bot'
-          git config user.email 'appolon1908-hue@users.noreply.github.com'
-          git add --all
-          git commit -m 'release: bind exact signed Appolon Middleware authority [authority-generated]'
-          git push \
-            "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            HEAD:refs/heads/fix/materialize-appolon-middleware-authority-20260903
 
       - name: Ready the protected review
         run: |
@@ -152,7 +156,7 @@ jobs:
             --state open \
             --json number \
             --jq 'if length == 1 then .[0].number else error("authority PR missing or ambiguous") end')"
-          gh pr ready "$pr_number" --repo "$GITHUB_REPOSITORY" || true
+          gh pr ready "$pr_number" --repo "$GITHUB_REPOSITORY"
           gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-reviewer kazan555
           gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" --body 'The exact signed Appolon Middleware release is now bound to a deterministic review-only production authority tree. Full exact-head CI, independent approval, staging restore/rollback, and canary remain mandatory. No deployment or external effect is authorized.'
           gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --auto --squash
