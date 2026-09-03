@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "configure_staging_readonly_environment.py"
+WORKFLOW = ROOT / ".github" / "workflows" / "configure-staging-readonly-environment.yml"
 SPEC = importlib.util.spec_from_file_location(
     "configure_staging_readonly_environment",
     SCRIPT,
@@ -91,6 +92,29 @@ class ConfigureStagingReadonlyEnvironmentTests(unittest.TestCase):
             }
         )
         self.assertIsNone(payload["reviewers"])
+
+    def test_admin_token_is_never_exposed_to_feature_branch_pushes(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("\n  pull_request:\n", workflow)
+        self.assertIn("\n  workflow_dispatch:\n", workflow)
+        self.assertNotIn("\n  push:\n", workflow)
+        self.assertIn(
+            "github.ref == 'refs/heads/release/production-activation'",
+            workflow,
+        )
+        self.assertIn("github.actor == github.repository_owner", workflow)
+        self.assertIn("name: repository-administration", workflow)
+        self.assertEqual(
+            workflow.count(
+                "\n          CODESTRA_REPOSITORY_ADMIN_TOKEN: "
+                "${{ secrets.CODESTRA_REPOSITORY_ADMIN_TOKEN }}"
+            ),
+            1,
+        )
+        self.assertNotIn(
+            "\n    env:\n      CODESTRA_REPOSITORY_ADMIN_TOKEN:",
+            workflow,
+        )
 
 
 if __name__ == "__main__":
