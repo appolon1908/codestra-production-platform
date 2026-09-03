@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "evidence_id": "codestra.staging-readonly.entry-gate.2026-09-03",
-  "recorded_at": "2026-09-03T14:22:19Z",
+  "recorded_at": "2026-09-03T14:42:00Z",
   "environment": "staging-readonly",
   "status": "BLOCKED",
   "next_allowed_action": "CONFIGURE_AND_REVALIDATE_PREREQUISITES",
@@ -13,28 +13,26 @@
   "secret_values_recorded": false,
   "workflow_evidence": {
     "repository": "appolon1908-hue/codestra-production-platform",
-    "workflow": ".github/workflows/staging-readonly-certification.yml",
-    "run_id": 33766384790,
-    "event": "push",
-    "head_sha": "b9dfbc0d20d6ce7d1f9099479cbb51582f704fac",
-    "conclusion": "failure_expected_fail_closed",
-    "source_policy_job": {
-      "job_id": 100685228077,
-      "conclusion": "success",
-      "tests_passed": 7,
-      "policy_result": "PASS",
-      "artifact_id": 9897675821,
-      "artifact_sha256": "920fb44ce95f63e33b93633c13b1b3be568a3e3c7f5b78c323268dea4563f1de"
-    },
-    "environment_preflight_job": {
-      "job_id": 100685310135,
-      "conclusion": "failure_expected_fail_closed",
+    "source_and_environment_preflight_run": {
+      "workflow": ".github/workflows/staging-readonly-certification.yml",
+      "run_id": 33766914118,
+      "head_sha": "50a387d9a017554165a1b824995911ae53010242",
+      "source_policy": "PASS",
+      "environment_preflight": "BLOCKED_BEFORE_SSH",
       "environment_reference_executed": true,
-      "endpoint_manifest_materialized": true,
-      "endpoint_manifest_empty": true,
-      "stopped_before_ssh": true,
-      "artifact_id": 9897690794,
-      "artifact_sha256": "f1cbfde6a57ee9edf335dac512a1031aa480ec45592b61a3f84cfb00263e6bc6"
+      "artifact_id": 9897906438,
+      "artifact_sha256": "08ab5e3e6575781a9988b90e5f805967b2e39769e9c9e07aa5894fa25ddd8ab4"
+    },
+    "environment_administration_run": {
+      "workflow": ".github/workflows/configure-staging-readonly-environment.yml",
+      "run_id": 33768347031,
+      "head_sha": "c0fddb271806615589a330263531de835f3eab23",
+      "source_policy": "PASS",
+      "configuration": "BLOCKED",
+      "administration_token_present": false,
+      "environment_changed": false,
+      "artifact_id": 9898492919,
+      "artifact_sha256": "f92d55e58e8535e9d1158cc8d37a54cee712b7635733330c8508f19701bdf454"
     }
   },
   "observations": {
@@ -49,6 +47,8 @@
     "infrastructure_ref": "f53ecf4a7d739dea8e633431e836510b2471d4d2",
     "staging_host_status": "NOT_RUN_HOST_NOT_CREATED",
     "staging_environment_reference_executed": true,
+    "staging_environment_branch_policy_configured": false,
+    "staging_environment_safe_constants_configured": false,
     "staging_environment_protection_verified": false,
     "staging_environment_configuration_verified": false,
     "complete_candidate_manifest_verified": false,
@@ -59,6 +59,7 @@
     "rollback_rehearsal_performed": false,
     "production_readonly_canary_performed": false
   },
+  "missing_account_administration_secret": "CODESTRA_REPOSITORY_ADMIN_TOKEN",
   "missing_variables": [
     "CODESTRA_STAGING_OPERATOR_HOST",
     "CODESTRA_STAGING_OPERATOR_USER",
@@ -85,13 +86,13 @@
     "scope_verified_as_environment_only": false
   },
   "blocking_conditions": [
+    "repository-scoped CODESTRA_REPOSITORY_ADMIN_TOKEN is absent, so branch-policy and environment-variable writes cannot execute",
     "source lock is FAIL rather than PASS",
     "runtime candidate matrix does not authorize deployment",
     "isolated staging host is not created and verified",
     "all ten required staging-readonly variables are absent",
     "seven required staging-readonly encrypted secrets are absent",
     "the endpoint manifest secret is empty",
-    "environment protection and credential scoping cannot be verified through the available repository connector",
     "component source approvals and exact immutable artifacts are incomplete"
   ],
   "safety_readback": {
