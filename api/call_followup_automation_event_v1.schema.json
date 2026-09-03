@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codestra.co/schemas/odoo/call-followup-automation-event-v1.json",
+  "title": "Codestra Call Follow-up Automation Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "event_version",
+    "occurred_at",
+    "tenant_id",
+    "company_id",
+    "correlation_id",
+    "idempotency_key",
+    "aggregate",
+    "payload",
+    "metadata"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Per-attempt transport nonce. It is deterministic for the current durable attempt and distinct from the logical outbox event identity."
+    },
+    "event_type": {
+      "enum": [
+        "call_followup.completed",
+        "call_followup.callback_scheduled",
+        "call_followup.appointment_scheduled",
+        "call_followup.email_queued",
+        "call_followup.calendar_rescheduled",
+        "call_followup.calendar_cancelled"
+      ]
+    },
+    "event_version": {
+      "const": "1.0"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "company_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "const": "crm_call_followup"
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "payload": {
+      "type": "object"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "logical_event_id"
+      ],
+      "properties": {
+        "source": {
+          "const": "odoo"
+        },
+        "logical_event_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    }
+  }
+}

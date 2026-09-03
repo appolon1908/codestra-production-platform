@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "1.0.0",
+  "reviewDate": "2026-09-02",
+  "repository": "appolon1908-hue/codestra-production-platform",
+  "protectedBranch": "release/production-activation",
+  "reviewStartSha": "f1788b0bc7b15d210ddb191bb0a6e9151b8ab59d",
+  "consolidationBranch": "consolidation/draft-review-20260902",
+  "consolidationPullRequest": 213,
+  "allDraftsReviewed": true,
+  "runtimeMutation": false,
+  "drafts": [
+    {"pullRequest": 5, "disposition": "close-failed-obsolete", "reason": "CI-only AMI harness is based on an old release and its exact-head validation failed."},
+    {"pullRequest": 6, "disposition": "close-obsolete-stack", "reason": "Legacy telephony section 1 targets a non-protected baseline branch."},
+    {"pullRequest": 7, "disposition": "close-obsolete-stack", "reason": "Legacy telephony section 2 is stacked on PR #6 rather than the protected release."},
+    {"pullRequest": 8, "disposition": "close-obsolete-stack", "reason": "Legacy communications section is stacked on the retired telephony chain."},
+    {"pullRequest": 9, "disposition": "close-obsolete-stack", "reason": "Legacy voice-AI section is stacked on the retired communications chain."},
+    {"pullRequest": 16, "disposition": "close-superseded", "reason": "Oversized integration snapshot overlaps newer protected component authorities."},
+    {"pullRequest": 17, "disposition": "close-superseded", "reason": "Mixed 965-file WebSocket/desktop snapshot must not replace narrower source authorities."},
+    {"pullRequest": 115, "disposition": "close-superseded", "reason": "Shared PostgreSQL draft is superseded by merged database certification and later WAL controls."},
+    {"pullRequest": 119, "disposition": "close-deferred-reference", "reason": "Competing core generation is not compatible for direct replacement of the merged core."},
+    {"pullRequest": 120, "disposition": "close-duplicate", "reason": "Realtime lease v1 is superseded by the later realtime design and deferred current-base work."},
+    {"pullRequest": 121, "disposition": "close-deferred-reference", "reason": "Email-delivery evidence remains a backlog capability requiring current-base reconstruction."},
+    {"pullRequest": 122, "disposition": "close-deferred-reference", "reason": "Advanced realtime multi-tab claims remain a backlog capability requiring current-base reconstruction."},
+    {"pullRequest": 123, "disposition": "close-deferred-reference", "reason": "SLA/reminder automation remains a backlog capability requiring current-base reconstruction."},
+    {"pullRequest": 124, "disposition": "close-deferred-reference", "reason": "Analytics remains a backlog capability requiring current-base reconstruction and load evidence."},
+    {"pullRequest": 125, "disposition": "close-duplicate", "reason": "Older workspace UX is superseded by the promoted UX from PR #128."},
+    {"pullRequest": 126, "disposition": "promote-consolidated", "reason": "Versioned replay-safe API is recovered and hardened in the consolidation change."},
+    {"pullRequest": 128, "disposition": "promote-consolidated", "reason": "Snooze and contextual UX is recovered and concurrency-hardened in the consolidation change."},
+    {"pullRequest": 131, "disposition": "promote-consolidated", "reason": "Automation outbox is recovered and secret-file-hardened in the consolidation change."},
+    {"pullRequest": 135, "disposition": "close-rebuild-required", "reason": "Historical image package names superseded SHAs and must be rebuilt after protected merge."},
+    {"pullRequest": 151, "disposition": "close-superseded", "reason": "Old runtime-fabric document predates current repository and component authority contracts."},
+    {"pullRequest": 155, "disposition": "promote-revised", "reason": "Repository profile is corrected and promoted in the consolidation change."}
+  ],
+  "deferredCapabilities": [
+    {"sourcePullRequest": 121, "capability": "auditable Odoo mail-delivery evidence and recovery"},
+    {"sourcePullRequest": 122, "capability": "server-authoritative multi-tab popup leases"},
+    {"sourcePullRequest": 123, "capability": "SLA and missed-callback automation"},
+    {"sourcePullRequest": 124, "capability": "read-only call-followup analytics and KPI APIs"}
+  ],
+  "activation": {
+    "sourceMergeAuthorizesDeployment": false,
+    "liveEmail": false,
+    "liveSms": false,
+    "livePstn": false,
+    "providerWrites": false,
+    "campaignActivation": false
+  }
+}
