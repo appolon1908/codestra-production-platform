@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import socket
+import ssl
 import sqlite3
 import stat
 import threading
@@ -631,6 +632,9 @@ class Settings:
     production_change_id: str
     middleware_forwarding_enabled: bool
     downstream_url: str
+    downstream_ca_file: str
+    downstream_client_cert_file: str
+    downstream_client_key_file: str
     jasmin_url: str
     jasmin_dlr_callback_url: str
     integration_command_intake_enabled: bool = False
@@ -654,6 +658,13 @@ class Settings:
                 "MIDDLEWARE_FORWARDING_ENABLED"
             ),
             downstream_url=os.getenv("MIDDLEWARE_EVENTS_URL", "").strip(),
+            downstream_ca_file=os.getenv("MIDDLEWARE_EVENTS_CA_FILE", "").strip(),
+            downstream_client_cert_file=os.getenv(
+                "MIDDLEWARE_EVENTS_CLIENT_CERT_FILE", ""
+            ).strip(),
+            downstream_client_key_file=os.getenv(
+                "MIDDLEWARE_EVENTS_CLIENT_KEY_FILE", ""
+            ).strip(),
             jasmin_url=os.getenv("JASMIN_HTTP_URL", "http://jasmin:1401").rstrip("/"),
             jasmin_dlr_callback_url=os.getenv(
                 "JASMIN_DLR_CALLBACK_URL",
@@ -689,6 +700,14 @@ class Settings:
             )
         if self.middleware_forwarding_enabled and not self.downstream_url:
             raise ValueError("middleware forwarding requires MIDDLEWARE_EVENTS_URL")
+        if self.middleware_forwarding_enabled and not all(
+            (
+                self.downstream_ca_file,
+                self.downstream_client_cert_file,
+                self.downstream_client_key_file,
+            )
+        ):
+            raise ValueError("middleware forwarding requires outbound mTLS material")
         for identity, tenants in self.service_tenant_bindings.items():
             if (
                 not isinstance(identity, str)
@@ -705,6 +724,13 @@ class Settings:
                 raise ValueError("service tenant bindings are invalid")
         if self.downstream_url and not self.downstream_url.startswith("https://"):
             raise ValueError("MIDDLEWARE_EVENTS_URL must use HTTPS")
+        for path_value in (
+            self.downstream_ca_file,
+            self.downstream_client_cert_file,
+            self.downstream_client_key_file,
+        ):
+            if path_value and not Path(path_value).is_absolute():
+                raise ValueError("outbound mTLS paths must be absolute")
         parsed = urllib.parse.urlsplit(self.jasmin_url)
         if parsed.scheme != "http" or not parsed.hostname or parsed.hostname != "jasmin":
             raise ValueError("JASMIN_HTTP_URL must be the private http://jasmin endpoint")
@@ -722,6 +748,25 @@ class Settings:
             raise ValueError(
                 "JASMIN_DLR_CALLBACK_URL must be the exact private gateway callback"
             )
+
+
+def build_middleware_tls_context(settings: Settings) -> ssl.SSLContext:
+    """Build the mandatory verified outbound mTLS context once at startup."""
+
+    paths = (
+        settings.downstream_ca_file,
+        settings.downstream_client_cert_file,
+        settings.downstream_client_key_file,
+    )
+    if not all(Path(value).is_file() for value in paths):
+        raise RuntimeError("outbound middleware mTLS material is unavailable")
+    context = ssl.create_default_context(cafile=settings.downstream_ca_file)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(
+        certfile=settings.downstream_client_cert_file,
+        keyfile=settings.downstream_client_key_file,
+    )
+    return context
 
 
 class Store:
@@ -2460,11 +2505,21 @@ class Gateway:
         *,
         clock: Callable[[], float] = time.time,
         urlopen: Callable[..., Any] = urllib.request.urlopen,
+        middleware_tls_context: ssl.SSLContext | object | None = None,
     ):
         self.settings = settings
         self.store = store
         self.clock = clock
         self.urlopen = urlopen
+        self.middleware_tls_context = middleware_tls_context
+        if (
+            settings.middleware_forwarding_enabled
+            and self.middleware_tls_context is None
+            and urlopen is not urllib.request.urlopen
+        ):
+            # A test transport owns its synthetic TLS boundary. The production
+            # entrypoint always injects a real verified context.
+            self.middleware_tls_context = object()
 
     def jasmin_health(self) -> str:
         try:
@@ -2691,7 +2746,13 @@ class Gateway:
                     method="POST",
                 )
                 try:
-                    with self.urlopen(request, timeout=10) as response:
+                    if self.middleware_tls_context is None:
+                        raise RuntimeError("outbound middleware mTLS is unavailable")
+                    with self.urlopen(
+                        request,
+                        timeout=10,
+                        context=self.middleware_tls_context,
+                    ) as response:
                         response_status = response.status
                         response_body = response.read(2049)
                 except urllib.error.HTTPError as error:
@@ -4285,6 +4346,8 @@ def dispatch_worker(gateway: Gateway) -> None:
 def start_dispatcher(gateway: Gateway) -> threading.Thread:
     """Validate downstream authority before starting the isolated worker."""
 
+    if gateway.middleware_tls_context is None:
+        raise RuntimeError("outbound middleware mTLS is unavailable")
     for source in SYSTEMS:
         if source not in gateway.forwarding_systems():
             continue
@@ -4302,6 +4365,21 @@ def start_dispatcher(gateway: Gateway) -> threading.Thread:
     return worker
 
 
+def production_gateway(settings: Settings, store: Store) -> Gateway:
+    """Assemble the production gateway with mandatory outbound mTLS."""
+
+    middleware_tls_context = (
+        build_middleware_tls_context(settings)
+        if settings.middleware_forwarding_enabled
+        else None
+    )
+    return Gateway(
+        settings,
+        store,
+        middleware_tls_context=middleware_tls_context,
+    )
+
+
 def main() -> None:
     os.umask(0o077)
     logging.basicConfig(
@@ -4311,7 +4389,7 @@ def main() -> None:
     settings = Settings.from_environment()
     store = Store(settings.database_path)
     store.initialize()
-    gateway = Gateway(settings, store)
+    gateway = production_gateway(settings, store)
     if settings.live_submission_enabled:
         validate_live_route_authorities()
     if settings.middleware_forwarding_enabled:

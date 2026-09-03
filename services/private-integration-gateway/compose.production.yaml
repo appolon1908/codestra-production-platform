@@ -14,7 +14,9 @@ services:
       JASMIN_DLR_CALLBACK_URL: http://gateway:8080/internal/v1/jasmin/dlr
       LIVE_SUBMISSION_ENABLED: "false"
       PRODUCTION_DELIVERY_AUTHORIZED: "false"
-      MIDDLEWARE_FORWARDING_ENABLED: "true"
+      # Forwarding is activated only with separately issued outbound mTLS
+      # material and an approved MIDDLEWARE_EVENTS_URL deployment overlay.
+      MIDDLEWARE_FORWARDING_ENABLED: "false"
       # Command persistence is a separately reviewed production activation.
       INTEGRATION_COMMAND_INTAKE_ENABLED: "false"
       SERVICE_TENANT_BINDINGS_FILE: /run/secrets/private_gateway_tenant_bindings

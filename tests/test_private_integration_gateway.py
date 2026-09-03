@@ -46,6 +46,9 @@ def clean_gateway_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "SERVICE_TENANT_BINDINGS_FILE",
         "MIDDLEWARE_FORWARDING_ENABLED",
         "MIDDLEWARE_EVENTS_URL",
+        "MIDDLEWARE_EVENTS_CA_FILE",
+        "MIDDLEWARE_EVENTS_CLIENT_CERT_FILE",
+        "MIDDLEWARE_EVENTS_CLIENT_KEY_FILE",
         "JASMIN_HTTP_URL",
         "JASMIN_DLR_CALLBACK_URL",
         "JASMIN_RECONCILIATION_SECRET",
@@ -86,6 +89,9 @@ def settings(tmp_path: Path, **changes):
         "production_change_id": "",
         "middleware_forwarding_enabled": False,
         "downstream_url": "",
+        "downstream_ca_file": str(tmp_path / "middleware-ca.crt"),
+        "downstream_client_cert_file": str(tmp_path / "middleware-client.crt"),
+        "downstream_client_key_file": str(tmp_path / "middleware-client.key"),
         "jasmin_url": "http://jasmin:1401",
         "jasmin_dlr_callback_url": "http://gateway:8080/internal/v1/jasmin/dlr",
         "service_tenant_bindings": {"telnexa": frozenset({"tenant-a"})},
@@ -167,6 +173,33 @@ def test_delivery_defaults_fail_closed(tmp_path: Path, monkeypatch: pytest.Monke
     assert value.live_submission_enabled is False
     assert value.production_delivery_authorized is False
     assert value.service_tenant_bindings == {}
+
+
+def test_forwarding_environment_binds_outbound_mtls_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    values = {
+        "INTEGRATION_DB": str(tmp_path / "forwarding.db"),
+        "MIDDLEWARE_FORWARDING_ENABLED": "true",
+        "MIDDLEWARE_EVENTS_URL": "https://middleware.invalid/v1/events",
+        "MIDDLEWARE_EVENTS_CA_FILE": str(tmp_path / "ca.crt"),
+        "MIDDLEWARE_EVENTS_CLIENT_CERT_FILE": str(tmp_path / "client.crt"),
+        "MIDDLEWARE_EVENTS_CLIENT_KEY_FILE": str(tmp_path / "client.key"),
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    settings_value = gateway.Settings.from_environment()
+    assert settings_value.middleware_forwarding_enabled is True
+    assert settings_value.downstream_url == values["MIDDLEWARE_EVENTS_URL"]
+    assert settings_value.downstream_ca_file == values["MIDDLEWARE_EVENTS_CA_FILE"]
+    assert (
+        settings_value.downstream_client_cert_file
+        == values["MIDDLEWARE_EVENTS_CLIENT_CERT_FILE"]
+    )
+    assert (
+        settings_value.downstream_client_key_file
+        == values["MIDDLEWARE_EVENTS_CLIENT_KEY_FILE"]
+    )
 
 
 def test_service_tenant_bindings_are_strict_and_file_backed(
@@ -653,6 +686,20 @@ def test_live_delivery_requires_second_gate_and_change_id(tmp_path: Path):
 def test_middleware_forwarding_is_explicit_https_and_source_bounded(tmp_path: Path):
     with pytest.raises(ValueError, match="MIDDLEWARE_EVENTS_URL"):
         settings(tmp_path, middleware_forwarding_enabled=True)
+    with pytest.raises(ValueError, match="outbound mTLS material"):
+        settings(
+            tmp_path,
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+            downstream_ca_file="",
+        )
+    with pytest.raises(ValueError, match="paths must be absolute"):
+        settings(
+            tmp_path,
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+            downstream_ca_file="relative-ca.crt",
+        )
     shared = settings(
         tmp_path,
         middleware_forwarding_enabled=True,
@@ -669,6 +716,64 @@ def test_middleware_forwarding_is_explicit_https_and_source_bounded(tmp_path: Pa
         downstream_url="https://middleware.invalid/v1/events",
     )
     assert value.middleware_forwarding_enabled is True
+
+
+def test_middleware_tls_context_requires_files_and_loads_client_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    value = settings(
+        tmp_path,
+        middleware_forwarding_enabled=True,
+        downstream_url="https://middleware.invalid/v1/events",
+    )
+    with pytest.raises(RuntimeError, match="mTLS material is unavailable"):
+        gateway.build_middleware_tls_context(value)
+
+    for path_value in (
+        value.downstream_ca_file,
+        value.downstream_client_cert_file,
+        value.downstream_client_key_file,
+    ):
+        Path(path_value).write_text("test fixture", encoding="utf-8")
+
+    class Context:
+        minimum_version = None
+        loaded = None
+
+        def load_cert_chain(self, *, certfile, keyfile):
+            self.loaded = (certfile, keyfile)
+
+    context = Context()
+    calls = []
+
+    def create_default_context(*, cafile):
+        calls.append(cafile)
+        return context
+
+    monkeypatch.setattr(gateway.ssl, "create_default_context", create_default_context)
+    assert gateway.build_middleware_tls_context(value) is context
+    assert calls == [value.downstream_ca_file]
+    assert context.minimum_version == gateway.ssl.TLSVersion.TLSv1_2
+    assert context.loaded == (
+        value.downstream_client_cert_file,
+        value.downstream_client_key_file,
+    )
+
+
+def test_gateway_builds_outbound_mtls_context_before_default_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    value = settings(
+        tmp_path,
+        middleware_forwarding_enabled=True,
+        downstream_url="https://middleware.invalid/v1/events",
+    )
+    sentinel = object()
+    monkeypatch.setattr(
+        gateway, "build_middleware_tls_context", lambda supplied: sentinel
+    )
+    app = gateway.production_gateway(value, store(tmp_path))
+    assert app.middleware_tls_context is sentinel
 
 
 def test_only_private_jasmin_service_is_accepted(tmp_path: Path):
@@ -1729,9 +1834,11 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "test-klyrow-key")
     monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "test-klyrow-secret")
     requests = []
+    transports = []
 
-    def urlopen(request, **_kwargs):
+    def urlopen(request, **kwargs):
         requests.append(request)
+        transports.append(kwargs)
         return dispatch_receipt(request)
 
     state = store(tmp_path)
@@ -1759,6 +1866,7 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     assert app.ingress("klyrow", "/api/v1/klyrow/events", body, headers)[0] == 202
     assert app.dispatch_once() == 1
     assert len(requests) == 1
+    assert transports == [{"timeout": 10, "context": app.middleware_tls_context}]
     request = requests[0]
     assert request.full_url == "https://middleware.invalid/v1/events"
     sent = json.loads(request.data)
@@ -2626,6 +2734,7 @@ def test_dispatcher_startup_requires_credentials_and_starts_daemon(
             downstream_url="https://middleware.invalid/v1/events",
         ),
         store(tmp_path),
+        middleware_tls_context=object(),
     )
     with pytest.raises(RuntimeError, match="KYQRA_MIDDLEWARE_API_KEY"):
         gateway.start_dispatcher(app)
@@ -2662,6 +2771,7 @@ def test_dispatcher_startup_requires_credentials_and_starts_daemon(
             downstream_url="https://middleware.invalid/v1/events",
         ),
         store(tmp_path),
+        middleware_tls_context=object(),
     )
     gateway.start_dispatcher(shared_app)
     assert len(started) == 2
@@ -4180,7 +4290,7 @@ def test_compose_is_digest_only_nonroot_and_fail_closed():
     )
     assert service["environment"]["LIVE_SUBMISSION_ENABLED"] == "false"
     assert service["environment"]["PRODUCTION_DELIVERY_AUTHORIZED"] == "false"
-    assert service["environment"]["MIDDLEWARE_FORWARDING_ENABLED"] == "true"
+    assert service["environment"]["MIDDLEWARE_FORWARDING_ENABLED"] == "false"
     assert compose["networks"]["private_api"]["internal"] is True
     assert "/etc/kyqra-telnexa-integration/shared.env" in service["env_file"][0]
 
