@@ -11,6 +11,8 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./rules:/etc/prometheus/rules:ro
+      # Root synchronizes this non-root-readable projection from the staging
+      # identity authority; Prometheus never receives write access.
       - /etc/codestra/secrets/monitoring-runtime/staging_metrics_client_secret:/run/secrets/staging_metrics_client_secret:ro
       - prometheus_data:/prometheus
     networks:
