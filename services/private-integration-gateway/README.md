@@ -63,8 +63,9 @@ dispatcher is paused. They are dispatched only when
 `MIDDLEWARE_EVENTS_CLIENT_CERT_FILE`, and
 `MIDDLEWARE_EVENTS_CLIENT_KEY_FILE` plus the dedicated per-source API-key and
 HMAC authorities are present. The client constructs one hostname-verifying
-TLS 1.2-or-newer context at startup and refuses to start forwarding when the
-CA, certificate, or private key is unavailable. Middleware mode can forward
+TLS 1.2-or-newer context at startup, refuses every HTTP redirect before
+presenting credentials or the client identity, and refuses to start forwarding
+when the CA, certificate, or private key is unavailable. Middleware mode can forward
 every governed provider source. Shared mode can forward only the Telnexa
 DLR/failure events it produces; it neither exposes the general provider-ingress
 routes nor consumes credentials for other provider identities. Existing

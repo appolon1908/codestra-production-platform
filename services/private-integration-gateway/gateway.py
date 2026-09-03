@@ -32,6 +32,41 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects before forwarding credentials or client identity."""
+
+    def redirect_request(
+        self,
+        request,
+        file_pointer,
+        code,
+        message,
+        headers,
+        new_url,
+    ):
+        return None
+
+
+def open_middleware_request(
+    request: urllib.request.Request,
+    *,
+    timeout: float,
+    context: ssl.SSLContext | object,
+    urlopen: Callable[..., Any] = urllib.request.urlopen,
+):
+    """Open one middleware request without allowing redirects."""
+
+    if urlopen is not urllib.request.urlopen:
+        # Injected transports own their synthetic boundary and retain the
+        # production call signature so tests can assert the verified context.
+        return urlopen(request, timeout=timeout, context=context)
+    opener = urllib.request.build_opener(
+        _NoRedirectHandler(),
+        urllib.request.HTTPSHandler(context=context),
+    )
+    return opener.open(request, timeout=timeout)
+
+
 LOG = logging.getLogger("private_integration_gateway")
 ALL_IPV4_INTERFACES = socket.inet_ntoa(bytes(4))
 SYSTEMS = {
@@ -2748,10 +2783,11 @@ class Gateway:
                 try:
                     if self.middleware_tls_context is None:
                         raise RuntimeError("outbound middleware mTLS is unavailable")
-                    with self.urlopen(
+                    with open_middleware_request(
                         request,
                         timeout=10,
                         context=self.middleware_tls_context,
+                        urlopen=self.urlopen,
                     ) as response:
                         response_status = response.status
                         response_body = response.read(2049)

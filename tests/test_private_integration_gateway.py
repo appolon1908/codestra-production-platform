@@ -776,6 +776,64 @@ def test_gateway_builds_outbound_mtls_context_before_default_transport(
     assert app.middleware_tls_context is sentinel
 
 
+def test_middleware_transport_refuses_redirects_before_presenting_identity(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    handlers = []
+    calls = []
+
+    class Response:
+        status = 202
+
+    class Opener:
+        def open(self, request, timeout):
+            calls.append((request, timeout))
+            return Response()
+
+    def build_opener(*supplied_handlers):
+        handlers.extend(supplied_handlers)
+        return Opener()
+
+    monkeypatch.setattr(gateway.urllib.request, "build_opener", build_opener)
+    request = urllib.request.Request(
+        "https://middleware.invalid/v1/events",
+        data=b"{}",
+        headers={"Authorization": "Bearer synthetic"},
+        method="POST",
+    )
+    context = gateway.ssl.SSLContext(gateway.ssl.PROTOCOL_TLS_CLIENT)
+    response = gateway.open_middleware_request(
+        request,
+        timeout=10,
+        context=context,
+        urlopen=gateway.urllib.request.urlopen,
+    )
+
+    assert response.status == 202
+    assert calls == [(request, 10)]
+    assert any(
+        isinstance(handler, gateway._NoRedirectHandler)
+        for handler in handlers
+    )
+    assert any(
+        isinstance(handler, urllib.request.HTTPSHandler)
+        for handler in handlers
+    )
+    redirect_handler = next(
+        handler
+        for handler in handlers
+        if isinstance(handler, gateway._NoRedirectHandler)
+    )
+    assert redirect_handler.redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://other.invalid/capture",
+    ) is None
+
+
 def test_only_private_jasmin_service_is_accepted(tmp_path: Path):
     with pytest.raises(ValueError, match="private"):
         settings(tmp_path, jasmin_url="https://example.invalid")
