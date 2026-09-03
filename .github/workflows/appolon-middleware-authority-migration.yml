@@ -1,3 +1,4 @@
+# Triggered after attaching the exact protected-release workflow blob.
 name: Repair fail-closed Appolon authority validator
 
 on:
