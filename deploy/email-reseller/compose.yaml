@@ -1,9 +1,6 @@
 name: codestra-email-reseller
 services:
   api:
-    build:
-      context: ../..
-      dockerfile: deploy/email-reseller/Dockerfile
     image: ghcr.io/appolon1908-hue/email-reseller@sha256:e1dddbb9055528b702dd27d99b42ee59b1929a2de826ca966075bd0b59e5e005
     restart: unless-stopped
     env_file:
