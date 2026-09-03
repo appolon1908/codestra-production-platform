@@ -1,0 +1,188 @@
+name: PR 223 refresh and redirect hardening
+
+on:
+  push:
+    branches:
+      - fix/private-gateway-outbound-mtls-20260903
+    paths:
+      - .github/workflows/pr223-refresh-and-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr223-refresh-and-fix
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact PR branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Refresh protected source and apply no-redirect transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin release/production-activation
+          git merge --no-edit origin/release/production-activation
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gateway_path = Path("services/private-integration-gateway/gateway.py")
+          source = gateway_path.read_text(encoding="utf-8")
+
+          import_marker = "from typing import Any, Callable\n\n\nLOG = logging.getLogger(\"private_integration_gateway\")"
+          transport_support = '''from typing import Any, Callable
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject every redirect before forwarding credentials or client identity."""
+
+    def redirect_request(
+        self,
+        request,
+        file_pointer,
+        code,
+        message,
+        headers,
+        new_url,
+    ):
+        return None
+
+
+def open_middleware_request(
+    request: urllib.request.Request,
+    *,
+    timeout: float,
+    context: ssl.SSLContext | object,
+    urlopen: Callable[..., Any] = urllib.request.urlopen,
+):
+    """Open one middleware request without allowing cross-origin redirects."""
+
+    if urlopen is not urllib.request.urlopen:
+        # Injected transports own their synthetic boundary and retain the
+        # production call signature so tests can assert the verified context.
+        return urlopen(request, timeout=timeout, context=context)
+    opener = urllib.request.build_opener(
+        _NoRedirectHandler(),
+        urllib.request.HTTPSHandler(context=context),
+    )
+    return opener.open(request, timeout=timeout)
+
+
+LOG = logging.getLogger("private_integration_gateway")'''
+          if import_marker not in source:
+              raise SystemExit("gateway import insertion marker not found")
+          source = source.replace(import_marker, transport_support, 1)
+
+          old_open = '''                    with self.urlopen(
+                        request,
+                        timeout=10,
+                        context=self.middleware_tls_context,
+                    ) as response:'''
+          new_open = '''                    with open_middleware_request(
+                        request,
+                        timeout=10,
+                        context=self.middleware_tls_context,
+                        urlopen=self.urlopen,
+                    ) as response:'''
+          if old_open not in source:
+              raise SystemExit("middleware transport replacement marker not found")
+          source = source.replace(old_open, new_open, 1)
+          gateway_path.write_text(source, encoding="utf-8")
+
+          tests_path = Path("tests/test_private_integration_gateway.py")
+          tests = tests_path.read_text(encoding="utf-8")
+          test_marker = '''def test_only_private_jasmin_service_is_accepted(tmp_path: Path):'''
+          redirect_tests = '''def test_middleware_transport_refuses_redirects_before_presenting_identity(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    handlers = []
+    calls = []
+
+    class Response:
+        status = 202
+
+    class Opener:
+        def open(self, request, timeout):
+            calls.append((request, timeout))
+            return Response()
+
+    def build_opener(*supplied_handlers):
+        handlers.extend(supplied_handlers)
+        return Opener()
+
+    monkeypatch.setattr(gateway.urllib.request, "build_opener", build_opener)
+    request = urllib.request.Request(
+        "https://middleware.invalid/v1/events",
+        data=b"{}",
+        headers={"Authorization": "Bearer synthetic"},
+        method="POST",
+    )
+    context = gateway.ssl.SSLContext(gateway.ssl.PROTOCOL_TLS_CLIENT)
+    response = gateway.open_middleware_request(
+        request,
+        timeout=10,
+        context=context,
+        urlopen=gateway.urllib.request.urlopen,
+    )
+
+    assert response.status == 202
+    assert calls == [(request, 10)]
+    assert any(
+        isinstance(handler, gateway._NoRedirectHandler)
+        for handler in handlers
+    )
+    assert any(
+        isinstance(handler, urllib.request.HTTPSHandler)
+        for handler in handlers
+    )
+    redirect_handler = next(
+        handler
+        for handler in handlers
+        if isinstance(handler, gateway._NoRedirectHandler)
+    )
+    assert redirect_handler.redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://other.invalid/capture",
+    ) is None
+
+
+def test_only_private_jasmin_service_is_accepted(tmp_path: Path):'''
+          if test_marker not in tests:
+              raise SystemExit("test insertion marker not found")
+          tests = tests.replace(test_marker, redirect_tests, 1)
+          tests_path.write_text(tests, encoding="utf-8")
+
+          readme_path = Path("services/private-integration-gateway/README.md")
+          readme = readme_path.read_text(encoding="utf-8")
+          readme_marker = "TLS 1.2-or-newer context at startup and refuses to start forwarding when the\nCA, certificate, or private key is unavailable."
+          readme_replacement = "TLS 1.2-or-newer context at startup, refuses every HTTP redirect before\npresenting credentials or the client identity, and refuses to start forwarding\nwhen the CA, certificate, or private key is unavailable."
+          if readme_marker not in readme:
+              raise SystemExit("README hardening marker not found")
+          readme_path.write_text(
+              readme.replace(readme_marker, readme_replacement, 1),
+              encoding="utf-8",
+          )
+          PY
+
+          python3 -m compileall -q services/private-integration-gateway/gateway.py tests/test_private_integration_gateway.py
+          git diff --check
+          git add services/private-integration-gateway/gateway.py \
+            services/private-integration-gateway/README.md \
+            tests/test_private_integration_gateway.py
+          git rm .github/workflows/pr223-refresh-and-fix.yml
+          git commit -m "fix(private-gateway): refuse redirects before outbound mTLS"
+          git push origin HEAD:fix/private-gateway-outbound-mtls-20260903
