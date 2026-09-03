@@ -11,6 +11,10 @@ Server scope: 65.109.65.169 (evidence only; no host mutation)
 - Exact head SHA: `517145689b6a27c9953ffd357458d8fc8e7c100d`
 - Result: `success`
 - Completed: `2026-09-03T00:46:59Z`
+- Protected release tag: `protected-517145689b6a27c9953ffd357458d8fc8e7c100d`
+- Protected release workflow: https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33700200216
+- Middleware release digest read back by the protected workflow:
+  `sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b`
 
 The rerun completed all four matrix builds (integration-control-plane,
 reseller-portal, mail-api, and email-reseller). Each job passed the local
