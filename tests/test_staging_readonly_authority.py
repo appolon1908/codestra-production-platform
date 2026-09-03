@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "validate_staging_readonly_authority.py"
 AUTHORITY = ROOT / "config" / "staging-readonly-authority.v1.json"
 TEMPLATE = ROOT / "config" / "staging-readonly-endpoint-manifest.template.v1.json"
+WORKFLOW = ROOT / ".github" / "workflows" / "staging-readonly-certification.yml"
 
 SPEC = importlib.util.spec_from_file_location("staging_readonly_authority", SCRIPT)
 assert SPEC and SPEC.loader
@@ -188,6 +189,26 @@ class StagingReadonlyAuthorityTests(unittest.TestCase):
         self.assertTrue(any("staging host is not created" in error for error in errors))
         self.assertEqual(evidence["status"], "BLOCKED")
         self.assertTrue(evidence["endpoint_manifest_valid"])
+
+    def test_secret_backed_preflight_is_release_branch_only(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertNotIn("- ops/staging-readonly-authority-20260903", workflow)
+        self.assertIn("\n  pull_request:\n", workflow)
+        self.assertIn("\n  push:\n", workflow)
+        self.assertIn("\n      - release/production-activation\n", workflow)
+        self.assertIn(
+            "github.ref == 'refs/heads/release/production-activation'",
+            workflow,
+        )
+        self.assertIn("github.actor == github.repository_owner", workflow)
+        self.assertIn("environment:\n      name: staging-readonly", workflow)
+        self.assertEqual(
+            workflow.count(
+                "STAGING_ENDPOINT_MANIFEST_JSON: "
+                "${{ secrets.CODESTRA_STAGING_READONLY_ENDPOINT_MANIFEST }}"
+            ),
+            1,
+        )
 
 
 if __name__ == "__main__":
