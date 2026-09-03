@@ -34,7 +34,7 @@ jobs:
       MIDDLEWARE_RELEASE_ARTIFACT: signed-middleware-release-1aa4d505846b7494aff94bec3d7ea68c895e2dd3-33767657962-1
       MIDDLEWARE_ARTIFACT_ZIP_SHA256: cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
       ARTIFACT_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN || github.token }}
-      PUSH_TOKEN: ${{ github.token }}
+      PUSH_TOKEN: ${{ secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN || github.token }}
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -52,6 +52,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
           test -n "$ARTIFACT_TOKEN"
+          test -n "$PUSH_TOKEN"
 
       - name: Download and safely materialize the exact artifact
         env:
