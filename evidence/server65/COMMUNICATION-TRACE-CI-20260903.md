@@ -7,7 +7,7 @@ Server scope: 65.109.65.169 (evidence only; no host mutation)
 
 - Repository: `appolon1908-hue/Codestra-Communication-CC`
 - Pull request: https://github.com/appolon1908-hue/Codestra-Communication-CC/pull/6
-- Exact candidate SHA: `94e23bc14bda76e0f52b97cbcc2928008716f99f`
+- Exact candidate SHA: `77d7496ee8c23ccda1140c51a4625b2159c501e5`
 - PR state: draft; not deployed
 
 ## Protected CI read-back
