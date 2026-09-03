@@ -1,0 +1,101 @@
+name: codestra-openai-provider-runtime
+
+services:
+  middleware-openai-provider-worker:
+    profiles:
+      - openai-provider
+    image: ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b
+    command:
+      - python
+      - -m
+      - app.entrypoints.openai_worker
+    user: "10001:10001"
+    init: true
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,uid=10001,gid=10001
+    environment:
+      ENVIRONMENT: production
+      SERVICE_NAME: middleware-openai-provider-worker
+      DATABASE_URL_FILE: /run/secrets/database_url
+      OPENAI_API_KEY_FILE: /run/secrets/openai/api-key
+      OPENAI_SAFETY_SALT_FILE: /run/secrets/openai/safety-salt
+      OPENAI_PROVIDER_ENABLED: "false"
+      AI_SUBMISSIONS_ENABLED: "false"
+      AI_ORCHESTRATION_ENABLED: "false"
+      AI_WORKER_CLAIMS_ENABLED: "false"
+      AI_JOB_PROJECT_ALLOWLIST: codestra-ai-console
+      OPENAI_WORKER_SERVICE_ID: openai-responses-provider
+      OPENAI_WORKER_ID: codestra-openai-01
+      OPENAI_WORKER_MAX_CONCURRENCY: "1"
+      OPENAI_CHAT_REASONING_EFFORT: low
+      OPENAI_CODING_REASONING_EFFORT: medium
+      OPENAI_REQUEST_TIMEOUT_SECONDS: "120"
+      OPENAI_MAX_RETRIES: "2"
+      OPENAI_DAILY_USER_TOKEN_LIMIT: "100000"
+      OPENAI_DAILY_PROJECT_TOKEN_LIMIT: "250000"
+      OPENAI_MAX_ESTIMATED_COST_MICRO_USD: "300000"
+      SEND_EVENTS: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      LIVE_WRITES_ENABLED: "false"
+      ODOO_WRITE_ENABLED: "false"
+      ODOO_DELIVERY_ENABLED: "false"
+      N8N_DELIVERY_ENABLED: "false"
+      CALLBACK_DISPATCH_ENABLED: "false"
+      LIVE_EMAIL_DELIVERY: "false"
+      LIVE_SMS_DELIVERY: "false"
+      LIVE_PSTN_DIALING: "false"
+      GENERAL_AI_DIALING: "false"
+    volumes:
+      - type: bind
+        source: /etc/codestra/secrets/middleware-runtime/middleware-integration-api-database-url
+        target: /run/secrets/database_url
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/codestra/secrets/openai-provider/api-key
+        target: /run/secrets/openai/api-key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/codestra/secrets/openai-provider/safety-salt
+        target: /run/secrets/openai/safety-salt
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - middleware_backend
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          from pathlib import Path;
+          children=Path('/proc/1/task/1/children').read_text().strip();
+          assert children
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+    cpus: 0.50
+    mem_limit: 512m
+    pids_limit: 64
+    stop_grace_period: 30s
+
+networks:
+  middleware_backend:
+    external: true
+    name: codestra_backend
