@@ -16,6 +16,7 @@ on:
   push:
     branches:
       - ops/staging-readonly-authority-20260903
+      - release/production-activation
     paths:
       - ".github/workflows/staging-readonly-certification.yml"
       - "config/staging-readonly-authority.v1.json"
