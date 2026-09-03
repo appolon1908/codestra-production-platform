@@ -1,36 +1,45 @@
 {
-  "schema_version": 1,
   "activation_authority": "none",
   "environment": "production-candidate-fail-closed",
-  "orchestration": {
-    "repository": "appolon1908-hue/codestra-production-platform",
-    "protected_merge_sha": "REQUIRED",
-    "configuration_bundle_sha256": "REQUIRED"
-  },
   "middleware": {
-    "repository": "Codestra-SRL/codestra-middleware",
-    "protected_merge_sha": "REQUIRED",
-    "image": "ghcr.io/codestra-srl/codestra-middleware",
-    "image_digest": "sha256:REQUIRED",
-    "production_signature_verified": false,
-    "production_provenance_verified": false
+    "image": "ghcr.io/appolon1908-hue/codestra-middleware",
+    "image_digest": "sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504",
+    "image_provenance_verified": false,
+    "image_signature_verified": false,
+    "migration_head": "0009_observability_incidents",
+    "production_deployment_authorized": false,
+    "protected_merge_sha": "1aa4d505846b7494aff94bec3d7ea68c895e2dd3",
+    "release_manifest_signature_verified": false,
+    "repository": "appolon1908-hue/Middleware-",
+    "sbom_attestation_verified": false,
+    "source_tree": "f67ed2eb19afc67dbe51624b5ba6298ec5dc5e32"
   },
-  "versions": {
-    "migration_revision": "REQUIRED",
-    "jetstream_contract_sha256": "REQUIRED",
-    "keycloak_contract_sha256": "REQUIRED",
-    "odoo_integration_source_sha": "REQUIRED",
-    "n8n_integration_source_sha": "REQUIRED",
-    "callback_adapter_source_sha": "REQUIRED",
-    "deployment_manifest_version": "1"
+  "orchestration": {
+    "configuration_bundle_sha256": "REQUIRED",
+    "protected_merge_sha": "REQUIRED",
+    "repository": "appolon1908-hue/codestra-production-platform"
   },
   "required_false_flags": {
-    "SEND_EVENTS": false,
-    "ENABLE_EXTERNAL_DELIVERY": false,
-    "ODOO_DELIVERY_ENABLED": false,
-    "N8N_DELIVERY_ENABLED": false,
     "CALLBACK_DISPATCH": false,
+    "ENABLE_EXTERNAL_DELIVERY": false,
     "ENABLE_VICIDIAL_WRITES": false,
-    "PRODUCTION_DIALING": false
+    "LIVE_EMAIL_DELIVERY": false,
+    "LIVE_PSTN_DIALING": false,
+    "LIVE_SMS_DELIVERY": false,
+    "N8N_DELIVERY_ENABLED": false,
+    "ODOO_DELIVERY_ENABLED": false,
+    "ODOO_WRITE": false,
+    "PRODUCTION_DIALING": false,
+    "SEND_EVENTS": false
+  },
+  "schema_version": 2,
+  "versions": {
+    "callback_adapter_source_sha": "REQUIRED",
+    "deployment_manifest_version": "2",
+    "jetstream_contract_sha256": "REQUIRED",
+    "keycloak_contract_sha256": "REQUIRED",
+    "migration_revision": "0009_observability_incidents",
+    "n8n_integration_source_sha": "REQUIRED",
+    "odoo_integration_source_sha": "REQUIRED"
   }
 }

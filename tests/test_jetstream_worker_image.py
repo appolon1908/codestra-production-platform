@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import subprocess
 
 import pytest
@@ -10,6 +10,7 @@ from tools.verify_jetstream_worker_image import verify
 
 
 DIGEST = "sha256:" + "a" * 64
+IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware"
 
 
 def write_manifest(path):
@@ -17,8 +18,9 @@ def write_manifest(path):
         json.dumps(
             {
                 "release_tuple": {
-                    "middleware_image": "ghcr.io/codestra-srl/codestra-middleware",
+                    "middleware_image": IMAGE,
                     "middleware_image_digest": DIGEST,
+                    "production_deployment_authorized": False,
                 }
             }
         )
@@ -48,7 +50,7 @@ def test_worker_image_must_equal_signed_release_tuple(tmp_path, monkeypatch) -> 
     manifest = tmp_path / "deployment-manifest.json"
     environment = tmp_path / "worker.env"
     write_manifest(manifest)
-    expected = f"ghcr.io/codestra-srl/codestra-middleware@{DIGEST}"
+    expected = f"{IMAGE}@{DIGEST}"
     environment.write_text(f"MIDDLEWARE_IMAGE={expected}\n")
     checksums, signature, signers, calls = signed_inputs(
         tmp_path, manifest, monkeypatch
@@ -60,11 +62,12 @@ def test_worker_image_must_equal_signed_release_tuple(tmp_path, monkeypatch) -> 
 @pytest.mark.parametrize(
     "selected",
     [
-        "ghcr.io/codestra-srl/codestra-middleware:latest",
-        "ghcr.io/codestra-srl/codestra-middleware@sha256:" + "b" * 64,
+        IMAGE + ":latest",
+        IMAGE + "@sha256:" + "b" * 64,
+        "ghcr.io/codestra-srl/codestra-middleware@sha256:" + "a" * 64,
     ],
 )
-def test_worker_image_rejects_mutable_or_different_artifact(
+def test_worker_image_rejects_mutable_different_or_former_authority(
     tmp_path, monkeypatch, selected
 ) -> None:
     manifest = tmp_path / "deployment-manifest.json"
@@ -84,11 +87,27 @@ def test_worker_image_rejects_manifest_outside_signed_checksums(
     manifest = tmp_path / "deployment-manifest.json"
     environment = tmp_path / "worker.env"
     write_manifest(manifest)
-    expected = f"ghcr.io/codestra-srl/codestra-middleware@{DIGEST}"
+    expected = f"{IMAGE}@{DIGEST}"
     environment.write_text(f"MIDDLEWARE_IMAGE={expected}\n")
     checksums, signature, signers, _calls = signed_inputs(
         tmp_path, manifest, monkeypatch
     )
     manifest.write_text(manifest.read_text() + "\n")
     with pytest.raises(ValueError, match="differs from signed manifest"):
+        verify(manifest, environment, checksums, signature, signers)
+
+
+def test_worker_image_rejects_self_authorizing_manifest(tmp_path, monkeypatch) -> None:
+    manifest = tmp_path / "deployment-manifest.json"
+    environment = tmp_path / "worker.env"
+    write_manifest(manifest)
+    value = json.loads(manifest.read_text())
+    value["release_tuple"]["production_deployment_authorized"] = True
+    manifest.write_text(json.dumps(value))
+    expected = f"{IMAGE}@{DIGEST}"
+    environment.write_text(f"MIDDLEWARE_IMAGE={expected}\n")
+    checksums, signature, signers, _calls = signed_inputs(
+        tmp_path, manifest, monkeypatch
+    )
+    with pytest.raises(ValueError, match="must not self-authorize"):
         verify(manifest, environment, checksums, signature, signers)

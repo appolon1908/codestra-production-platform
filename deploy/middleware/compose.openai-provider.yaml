@@ -4,7 +4,7 @@ services:
   middleware-openai-provider-worker:
     profiles:
       - openai-provider
-    image: ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b
+    image: ghcr.io/appolon1908-hue/codestra-middleware@sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504
     command:
       - python
       - -m

@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 IMAGE_RE = re.compile(
-    r"^ghcr[.]io/codestra-srl/codestra-middleware@sha256:[0-9a-f]{64}$"
+    r"^ghcr[.]io/appolon1908-hue/codestra-middleware@sha256:[0-9a-f]{64}$"
 )
 
 
@@ -88,6 +88,8 @@ def verify(
     selected = environment_value(environment_path, "MIDDLEWARE_IMAGE")
     if not IMAGE_RE.fullmatch(expected) or selected != expected:
         raise ValueError("worker image differs from signed release tuple")
+    if release.get("production_deployment_authorized") is not False:
+        raise ValueError("signed release tuple must not self-authorize deployment")
     return selected
 
 

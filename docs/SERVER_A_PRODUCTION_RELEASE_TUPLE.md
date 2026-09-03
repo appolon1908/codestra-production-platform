@@ -1,65 +1,21 @@
-# Server A production release tuple authority
+# Server A protected production release tuple
 
-This document removes the source-to-runtime ambiguity between the two Server A
-repositories. It is an ownership contract, not production activation.
+The release tuple is a versioned, machine-readable source authority. It does not
+self-authorize deployment.
 
-| Element | Authority | Candidate identity | Runtime artifact |
+| Element | Authority | Exact candidate | Runtime status |
 | --- | --- | --- | --- |
-| Orchestration, JetStream definitions, host policy and evidence tooling | `appolon1908-hue/codestra-production-platform` | PR 15 exact protected merge SHA | signed deployment/configuration bundle |
-| Middleware executable source | `Codestra-SRL/codestra-middleware` | PR 219 exact protected merge SHA | `ghcr.io/codestra-srl/codestra-middleware@sha256:<production-approved-digest>` |
-| Database migrations | canonical middleware image and its Alembic revision | read from the exact image | migration owner executes; runtime roles never own schemas |
-| JetStream server contract | production-platform `eventing/jetstream_contract.json` | checksum from protected configuration bundle | applied and read back by `tools/apply_jetstream_contract.py` |
-| JetStream publisher and DLQ worker | canonical middleware image | PR 219 protected merge SHA | `app.eventing.jetstream` and `app.entrypoints.jetstream_dlq_worker` |
-| Keycloak production middleware contract | `config/keycloak-production-contract.env.example` | checksum from the protected configuration bundle | production middleware issuer/client; not a webphone credential |
-| Keycloak internal staging contract | `config/keycloak-staging-contract.env.example` | checksum from the protected configuration bundle | internal staging issuer/client/secret only; production delivery prohibited |
-| Canonical TEST_SYN webphone machine contract | `config/keycloak-webphone-machine-contract.env.example`, `config/keycloak-webphone-machine-client.json`, and `config/keycloak-webphone-allowed-tenants.json` | checksums from the protected configuration bundle | canonical `.co` issuer, `codestra-provisioning-service-staging`, least-privilege service account, no production delivery |
-| Odoo and n8n integration logic | canonical middleware image | exact protected middleware SHA | versioned image digest |
-| Callback adapter contract | production-platform policy plus canonical middleware image | exact checksums and image digest | private authenticated adapter only |
+| Platform orchestration and evidence | `appolon1908-hue/codestra-production-platform` | protected merge and signed post-merge release | repository candidate |
+| Middleware source and image | `appolon1908-hue/Middleware-` | `1aa4d505846b7494aff94bec3d7ea68c895e2dd3` / `sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504` | signed immutable candidate, not deployed |
+| Former Middleware authority | `Codestra-SRL/codestra-middleware` | `f199b6c40f4e467979e9a8b255a0e686321a182d` / `sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b` | historical rollback reference only |
 
-The existing signed middleware digest
-`sha256:2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff`
-is authorized for isolated staging only. It is not a production artifact and
-must not be entered as the production digest.
+The selected Middleware evidence is artifact `signed-middleware-release-1aa4d505846b7494aff94bec3d7ea68c895e2dd3-33767657962-1` from run
+`33767657962`, artifact ID `9898309168`. The platform verifier binds the archive,
+release manifest, Sigstore bundle, SPDX SBOM, vulnerability report, image
+signature, provenance, source labels, and migration head.
 
-Production deployment requires a generated manifest in which every placeholder
-below is replaced by an exact protected merge SHA, digest or checksum. The
-release gate must reject feature-branch SHAs, mutable image tags, a staging-only
-approval, absent signatures, or any mismatch found by runtime readback.
-
-## Change ownership
-
-| Change | Owning repository | Reason | Required runtime artifact | Coverage |
-| --- | --- | --- | --- | --- |
-| Stream/consumer topology, retries, retention and replay policy | production-platform | infrastructure contract | signed configuration bundle | isolated real-NATS contract tests |
-| Keycloak production/staging contract and PostgreSQL role policy | production-platform | deployment security policy | signed configuration bundle | authorization and isolated PostgreSQL tests |
-| Event envelope validation and tenant/campaign subjects | canonical middleware | executable application behavior | middleware image | transport contract tests |
-| Stable message-ID publication | canonical middleware | executable NATS client behavior | middleware image | publisher unit tests |
-| Maximum-delivery advisory subscription and DLQ forwarding | both | platform provisions policy; middleware executes it | configuration bundle plus middleware image | real-NATS runtime and middleware worker tests |
-| Odoo/n8n/callback effective-once implementation | canonical middleware | business integration behavior | middleware image | canonical integration suite |
-
-Production flags remain false throughout candidate construction and staging.
-
-The canonical webphone machine contract is authoritative for Keycloak client
-creation only after its protected merge SHA is recorded. It does not activate
-the client or repair runtime drift by itself. In particular, the provisioning
-verifier must reject its currently deployed legacy `.agency` issuer setting and
-be reconciled to the contract's canonical `.co` issuer in a separate approved
-release before machine-token certification.
-
-## Out-of-band release trust anchor
-
-Before the canonical middleware worker can be enabled, a security owner must
-deliver the approved SSH signing public key and its SHA-256 fingerprint through
-independent protected channels. The public key is deliberately not trusted from
-the release bundle that it authenticates. A host administrator provisions it
-idempotently before installing the signed release:
-
-```text
-sudo python3 tools/provision_release_trust_anchor.py \
-  --public-key /secure-bootstrap/codestra-release.pub \
-  --expected-sha256 <independently-verified-64-hex-fingerprint> \
-  --destination /etc/codestra/release/allowed_signers
-```
-
-The DLQ worker remains fail closed while this protected trust anchor, the signed
-checksum manifest, or its signature is absent or inconsistent.
+The tuple keeps `production_deployment_authorized=false`. Promotion requires the
+global source lock to pass, exact-digest staging certification, paired backup and
+restore evidence, two-way rollback, a read-only canary no greater than one
+percent, and a separate traffic-activation decision. External-effect flags
+remain false.

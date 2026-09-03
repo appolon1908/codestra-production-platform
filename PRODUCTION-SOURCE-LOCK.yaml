@@ -1,41 +1,49 @@
-schema_version: codestra.production-source-lock.v1
-generated_at: "2026-09-03T15:15:00Z"
+schema_version: codestra.production-source-lock.v2
+generated_at: "2026-09-03T17:20:00Z"
 status: FAIL
 target: 65.109.65.169
 protected_platform:
   repository: appolon1908-hue/codestra-production-platform
   branch: release/production-activation
   identity_authority: signed exact-release provenance generated after protected merge
-  manifest_parent_sha: 6861ca89f4d5ce0ac6929d21ddcf235d76e815e4
-  manifest_parent_release_tag: protected-6861ca89f4d5ce0ac6929d21ddcf235d76e815e4
-  note: The resulting commit SHA cannot be embedded in its own source tree; release provenance supplies that exact identity.
+  manifest_parent_sha: e90406cf4802b166461a3f9dc423f0603d1bea49
+  note: The resulting protected merge SHA is bound by post-merge release provenance.
 middleware_authorities:
-  protected_production_tuple:
-    repository: Codestra-SRL/codestra-middleware
-    source_sha: f199b6c40f4e467979e9a8b255a0e686321a182d
-    image: ghcr.io/codestra-srl/codestra-middleware
-    image_digest: sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b
-    migration_head: 0056_klyrow_delivery_events
-    authority_state: CURRENT_PRODUCTION_AUTHORITY_PENDING_CONVERGENCE
-  appolon_n8n_gap_candidate:
+  selected_release_authority:
     repository: appolon1908-hue/Middleware-
     source_sha: 1aa4d505846b7494aff94bec3d7ea68c895e2dd3
+    source_tree: f67ed2eb19afc67dbe51624b5ba6298ec5dc5e32
     image: ghcr.io/appolon1908-hue/codestra-middleware
     image_digest: sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504
     migration_head: 0009_observability_incidents
     release_id: 1aa4d505846b-cec8b5a1b0e7
     release_run: 33767657962
-    production_promotion_gate_run: 33767951234
-    release_artifact_digest: sha256:cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
+    release_run_attempt: 1
+    release_artifact_id: 9898309168
+    release_artifact: signed-middleware-release-1aa4d505846b7494aff94bec3d7ea68c895e2dd3-33767657962-1
+    release_artifact_zip_sha256: sha256:cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
+    release_manifest_sha256: sha256:760bc3197f55bc59a542b736506d686fb3081c95ebc3f3757c16e1ff61fcf049
+    sigstore_bundle_sha256: sha256:7d24a0d5c76f9d44963312157738ddd888bbe680966c67c4f9abe07c566d9958
     sbom_sha256: sha256:87cab4a84d73ddff1acb198560e872b882f3cd6cdcce1a4b046b7a2d3f3a9049
-    contracts_sha256: sha256:2d3033d1819fb1d92c9da69b21e059e5e3c8c5217d5236f2d7536af9cd850ef3
-    migrations_sha256: sha256:6bd0d1ba307e51b5fd1705b8f93ed7d5edc1a9f80e74cbb4fa9a12e413603f58
-    runtime_profiles_sha256: sha256:c46c2bf17e955de663c271b33b95e2256fbecea9607ee5fcb29422605a799b84
+    vulnerability_report_sha256: sha256:a5275e506c7d5048711c6b76b6c879885aea053c3753fdf6599b78bc51dd680d
+    workflow_identity: https://github.com/appolon1908-hue/Middleware-/.github/workflows/release.yml@refs/heads/main
+    oidc_issuer: https://token.actions.githubusercontent.com
     vulnerability_matches: 0
-    runtime_state: SIGNED_IMMUTABLE_CANDIDATE_NOT_DEPLOYED
-    authority_classification: COMPATIBILITY_CANDIDATE_NOT_PRODUCTION_AUTHORITY
-    promotion_decision: DO_NOT_PROMOTE_UNTIL_CANONICAL_CONVERGENCE_OR_EXPLICIT_MIGRATION_CERTIFICATION
     external_effects_default: DISABLED
+    source_authority_selected: true
+    staging_candidate_authorized: false
+    production_deployment_authorized: false
+    runtime_state: SIGNED_IMMUTABLE_CANDIDATE_NOT_DEPLOYED
+    authority_state: SELECTED_FOR_EXPLICIT_STAGING_MIGRATION_CERTIFICATION
+  former_codestra_srl_authority:
+    repository: Codestra-SRL/codestra-middleware
+    source_sha: f199b6c40f4e467979e9a8b255a0e686321a182d
+    image: ghcr.io/codestra-srl/codestra-middleware
+    image_digest: sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b
+    migration_head: 0056_klyrow_delivery_events
+    authority_state: HISTORICAL_ROLLBACK_REFERENCE_NOT_PROMOTABLE
+    production_deployment_authorized: false
+    promotion_decision: DO_NOT_PROMOTE_WITHOUT_NEW_SIGNED_RELEASE_AND_SEPARATE_REVIEW
   canonical_n8n_gap_convergence:
     repository: Codestra-SRL/codestra-middleware
     pull_request: 283
@@ -45,13 +53,18 @@ middleware_authorities:
     actions_conclusion: startup_failure
     actions_blocker: ORGANIZATION_ACTIONS_BUDGET_PREVENTS_JOB_CREATION
     image_digest: null
+    production_selection: NOT_SELECTED_AFTER_EXPLICIT_AUTHORITY_MIGRATION
     deployment_authorized: false
   authority_decision:
-    status: UNRESOLVED
-    preferred_path: RESTORE_CODESTRA_SRL_ACTIONS_BUDGET_CERTIFY_MERGE_PR_283_AND_BUILD_CANONICAL_SIGNED_IMAGE
-    alternate_path: CERTIFY_EXPLICIT_SCHEMA_DATA_CONTRACT_AND_ROLLBACK_MIGRATION_TO_APPOLON_REPOSITORY
-    prohibited_path: SILENTLY_REPLACE_CANONICAL_AUTHORITY_WITH_DIFFERENT_MIGRATION_LINEAGE
-    reason: Codestra-SRL and Appolon candidates have different source lineages and migration heads; an explicit protected authority decision and staging recovery proof are mandatory.
+    status: APPOLON_SELECTED_FOR_STAGING_CERTIFICATION
+    decision_record: docs/APPOLON_MIDDLEWARE_PRODUCTION_AUTHORITY_MIGRATION_20260903.md
+    preferred_path: CERTIFY_EXPLICIT_SCHEMA_DATA_CONTRACT_AND_ROLLBACK_MIGRATION_TO_APPOLON_REPOSITORY
+    prohibited_path: SILENTLY_REPLACE_A_RUNNING_DATABASE_OR_SKIP_STAGING_ROLLBACK
+    reason: >-
+      The selected Appolon release has exact protected source, immutable image,
+      signed release-manifest, SPDX SBOM, vulnerability report, and Sigstore
+      identity evidence. The distinct migration lineage still requires an
+      isolated staging restore and two-way rollback rehearsal before deployment.
 custom_release_candidates:
   codestra_ai:
     repository: appolon1908-hue/Codestra-AI
@@ -72,23 +85,23 @@ custom_release_candidates:
     evidence: evidence/server65/AI-MARKETING-IMMUTABLE-CANDIDATES-20260902.md
     deployment_authorized: false
 blockers:
-  - id: middleware-authority-split
-    reason: >-
-      The protected Appolon runtime now has a signed immutable candidate but
-      remains a compatibility authority because its source and migration
-      lineage differ from the Codestra-SRL production authority. Production
-      requires either a certified canonical convergence or an explicit
-      schema/data/contract migration with staging restore and rollback proof.
-  - id: canonical-middleware-actions-budget
-    reason: >-
-      Codestra-SRL/codestra-middleware PR 283 cannot create exact-head CI jobs
-      because the organization Actions budget prevents further usage. The
-      required checks must run normally; they may not be disabled or bypassed.
   - id: unpinned-custom-runtime
     count: 24
     evidence: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml
+    reason: >-
+      Local Docker image IDs are not registry deployment digests. Each custom
+      workload must receive a source-bound signed registry digest or be retired.
+  - id: runtime-candidate-matrix-not-authorized
+    authority: appolon1908-hue/codestra-production-runtime-authority
+    reason: >-
+      IMMUTABLE-CANDIDATE-MATRIX.yaml remains deployment_authorized=false and
+      contains UNKNOWN or pending identities.
   - id: protected-staging-not-executed
     reason: >-
       The isolated staging host, protected environment variables and secrets,
       exact endpoint manifest, backup/restore evidence, and rollback evidence
-      are not yet materialized. Deployment authorization remains false.
+      are not yet materialized.
+  - id: production-readonly-canary-not-executed
+    reason: >-
+      No exact-digest production canary at or below one percent has completed
+      the required observation window.

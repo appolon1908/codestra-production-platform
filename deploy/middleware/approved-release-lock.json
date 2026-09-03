@@ -1,9 +1,18 @@
 {
-  "source": "https://github.com/Codestra-SRL/codestra-middleware",
-  "revision": "f199b6c40f4e467979e9a8b255a0e686321a182d",
-  "image": "ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b",
-  "required_database_head": "0056_klyrow_delivery_events",
+  "deployment_state": "BLOCKED_PENDING_SOURCE_LOCK_STAGING_BACKUP_RESTORE_AND_CANARY",
+  "external_effects_default": "disabled",
+  "image": "ghcr.io/appolon1908-hue/codestra-middleware@sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504",
+  "release_artifact": "signed-middleware-release-1aa4d505846b7494aff94bec3d7ea68c895e2dd3-33767657962-1",
+  "release_artifact_id": 9898309168,
+  "release_manifest_sha256": "760bc3197f55bc59a542b736506d686fb3081c95ebc3f3757c16e1ff61fcf049",
+  "required_database_head": "0009_observability_incidents",
+  "revision": "1aa4d505846b7494aff94bec3d7ea68c895e2dd3",
+  "sbom_sha256": "87cab4a84d73ddff1acb198560e872b882f3cd6cdcce1a4b046b7a2d3f3a9049",
+  "schema_version": 2,
+  "sigstore_bundle_sha256": "7d24a0d5c76f9d44963312157738ddd888bbe680966c67c4f9abe07c566d9958",
+  "source": "https://github.com/appolon1908-hue/Middleware-",
+  "source_tree": "f67ed2eb19afc67dbe51624b5ba6298ec5dc5e32",
+  "vulnerability_report_sha256": "a5275e506c7d5048711c6b76b6c879885aea053c3753fdf6599b78bc51dd680d",
   "webphone_endpoint_adapter_url": "",
-  "webphone_features_enabled": false,
-  "deployment_state": "BLOCKED_PENDING_PROTECTED_BACKUP_RESTORE_AND_ROLLOUT"
+  "webphone_features_enabled": false
 }

@@ -1,12 +1,17 @@
 # Apply last, after compose.middleware-runtime.yaml and feature overrides.
 x-approved-middleware: &approved-middleware
-  image: ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b
+  image: ghcr.io/appolon1908-hue/codestra-middleware@sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504
   environment: &webphone-disabled
     WEBPHONE_ENDPOINT_ADAPTER_URL: ""
     WEBPHONE_KEYCLOAK_ENABLED: "false"
     WEBPHONE_SESSION_ISSUER_ENABLED: "false"
     WEBPHONE_STAGING_PROVISIONING_ENABLED: "false"
     PRODUCTION_WEBRTC_ENABLED: "false"
+    LIVE_EMAIL_DELIVERY: "false"
+    LIVE_SMS_DELIVERY: "false"
+    LIVE_PSTN_DIALING: "false"
+    ODOO_WRITE: "false"
+    N8N_DELIVERY_ENABLED: "false"
 
 services:
   middleware-event-gateway: *approved-middleware
