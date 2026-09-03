@@ -11,7 +11,11 @@ Status: PARTIAL.
 - Email-reseller deployment authority: Platform PR #219, merge `e05873b7555f228cb98eecc15f090a9eead509b7`.
 - Email-reseller rollback files and runtime snapshot: `/opt/codestra/backups/email-reseller-cutover-20260903T001500Z`; no migration was run.
 - Email-reseller post-deployment: healthy, restart count 0, `/livez`, `/readyz`, and `/health` PASS; synthetic submission mode and live email/SMS/PSTN flags remain false.
-- Email-reseller `/version`, `/capabilities`, and `/metrics` return 401 and therefore remain explicit API-certification gaps.
+- Email-reseller operational API source merged in Platform PR #221 at `9371bc39b11fe2cd52c5414e84a31cc9adb80644`; protected publication run `33699390261` produced digest `sha256:e1dddbb9055528b702dd27d99b42ee59b1929a2de826ca966075bd0b59e5e005` with SBOM, provenance, vulnerability, and OCI gates passing.
+- Digest authority PR #222 auto-merged normally at `f46d07510158f4dcac3ef482a6f871dde2b8acde`. A first replacement attempt was immediately rolled back because the pre-deploy actionable-alert count was 1. The alert was the disk-capacity warning; no application or monitoring degradation occurred.
+- After removing 3.93 GB of abandoned `/tmp` test environments, disk utilization fell to 74.34% and the alert resolved. The replacement was repeated from a green baseline.
+- Final email-reseller runtime: protected SHA `9371bc39b11fe2cd52c5414e84a31cc9adb80644`, exact digest `sha256:e1dddbb9055528b702dd27d99b42ee59b1929a2de826ca966075bd0b59e5e005`, healthy, restart count 0. `/livez`, `/readyz`, `/health`, `/version`, and `/capabilities` return attributable, non-cached responses; all external-delivery capability values are false and simulation is true.
+- Email-reseller `/metrics` remains an explicit API/observability gap and is not counted as certified.
 - No email, SMS, PSTN, social, advertising, model, or n8n provider effect was enabled.
 
 The remaining provider-bound workloads were not changed; Wave 4 is not complete.
