@@ -41,27 +41,33 @@ jobs:
 
           path = Path("tools/validate_openai_provider_runtime_contract.py")
           text = path.read_text(encoding="utf-8")
-          old_service = '''    require_equal(service.get("profiles"), [PROFILE], "service profile", errors)
-              require_equal(service.get("image"), image, "service image", errors)
-              require_equal(service.get("command"), ["python", "-m", "app.entrypoints.openai_worker"], "service command", errors)
-          '''.replace("              ", "    ")
-          new_service = '''    require_equal(service.get("profiles"), [PROFILE], "service profile", errors)
-              service_image = service.get("image")
-              if isinstance(service_image, str) and ":latest" in service_image:
-                  errors.append("mutable latest reference is forbidden")
-              require_equal(service_image, image, "service image", errors)
-              require_equal(service.get("command"), ["python", "-m", "app.entrypoints.openai_worker"], "service command", errors)
-          '''.replace("              ", "    ")
-          old_tail = '''    if ":latest" in compose_text:
-              errors.append("mutable latest reference is forbidden")
-          '''.replace("              ", "    ")
-          new_tail = '''    if ":latest" in compose_text and "mutable latest reference is forbidden" not in errors:
-              errors.append("mutable latest reference is forbidden")
-          '''.replace("              ", "    ")
+          old_service = (
+              '    require_equal(service.get("profiles"), [PROFILE], "service profile", errors)\n'
+              '    require_equal(service.get("image"), image, "service image", errors)\n'
+              '    require_equal(service.get("command"), ["python", "-m", "app.entrypoints.openai_worker"], "service command", errors)\n'
+          )
+          new_service = (
+              '    require_equal(service.get("profiles"), [PROFILE], "service profile", errors)\n'
+              '    service_image = service.get("image")\n'
+              '    if isinstance(service_image, str) and ":latest" in service_image:\n'
+              '        errors.append("mutable latest reference is forbidden")\n'
+              '    require_equal(service_image, image, "service image", errors)\n'
+              '    require_equal(service.get("command"), ["python", "-m", "app.entrypoints.openai_worker"], "service command", errors)\n'
+          )
+          old_tail = (
+              '    if ":latest" in compose_text:\n'
+              '        errors.append("mutable latest reference is forbidden")\n'
+          )
+          new_tail = (
+              '    if ":latest" in compose_text and "mutable latest reference is forbidden" not in errors:\n'
+              '        errors.append("mutable latest reference is forbidden")\n'
+          )
           if text.count(old_service) != 1 or text.count(old_tail) != 1:
               raise SystemExit("validator source differs from reviewed generated tree")
-          text = text.replace(old_service, new_service).replace(old_tail, new_tail)
-          path.write_text(text, encoding="utf-8")
+          path.write_text(
+              text.replace(old_service, new_service).replace(old_tail, new_tail),
+              encoding="utf-8",
+          )
           PY
           git diff --check
 
