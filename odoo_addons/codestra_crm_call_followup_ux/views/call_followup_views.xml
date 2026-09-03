@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_codestra_call_followup_search_ux" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.search.ux</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_search"/>
+        <field name="arch" type="xml">
+            <xpath expr="//filter[@name='scheduled']" position="after">
+                <filter name="snoozed" string="Snoozed" domain="[('snoozed_until', '!=', False)]"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_codestra_call_followup_list_ux" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.list.ux</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_list"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='callback_at']" position="after">
+                <field name="snoozed_until" optional="show"/>
+                <field name="snooze_count" optional="hide"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_codestra_call_followup_form_ux" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.form.ux</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header/button[@name='action_open_post_call_wizard']" position="after">
+                <button name="action_snooze_5"
+                        type="object"
+                        string="Snooze 5m"
+                        class="btn-secondary"
+                        invisible="state != 'pending'"/>
+                <button name="action_snooze_15"
+                        type="object"
+                        string="Snooze 15m"
+                        class="btn-secondary"
+                        invisible="state != 'pending'"/>
+                <button name="action_snooze_30"
+                        type="object"
+                        string="Snooze 30m"
+                        class="btn-secondary"
+                        invisible="state != 'pending'"/>
+            </xpath>
+            <xpath expr="//field[@name='schedule_kind']/ancestor::group[1]" position="before">
+                <group string="Popup Reminder" invisible="not snoozed_until and not snooze_count">
+                    <field name="snoozed_until" readonly="1"/>
+                    <field name="snooze_count" readonly="1"/>
+                    <field name="last_snoozed_at" readonly="1"/>
+                    <field name="last_popup_released_at" readonly="1"/>
+                </group>
+            </xpath>
+        </field>
+    </record>
+</odoo>

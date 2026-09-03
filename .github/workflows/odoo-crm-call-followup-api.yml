@@ -1,0 +1,35 @@
+name: Odoo CRM Call Follow-up API
+
+on:
+  pull_request:
+    paths:
+      - "odoo_addons/codestra_crm_call_followup_api/**"
+      - "api/completed_call_v1.schema.json"
+      - "integrations/odoo_call_followup_client.py"
+      - "scripts/validate_odoo_crm_call_followup_api.py"
+      - ".github/workflows/odoo-crm-call-followup-api.yml"
+  push:
+    branches:
+      - "feature/odoo19-call-followup-api-contract-v1"
+    paths:
+      - "odoo_addons/codestra_crm_call_followup_api/**"
+      - "api/completed_call_v1.schema.json"
+      - "integrations/odoo_call_followup_client.py"
+      - "scripts/validate_odoo_crm_call_followup_api.py"
+      - ".github/workflows/odoo-crm-call-followup-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m compileall -q odoo_addons/codestra_crm_call_followup_api integrations/odoo_call_followup_client.py scripts/validate_odoo_crm_call_followup_api.py
+      - run: python scripts/validate_odoo_crm_call_followup_api.py
