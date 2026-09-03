@@ -27,47 +27,63 @@ def test_staging_only_digest_is_not_production_manifest_authority() -> None:
     assert staging_digest not in manifest
 
 
-def test_protected_release_gate_requires_completed_middleware_tuple() -> None:
+def test_protected_release_gate_requires_current_signed_middleware_tuple() -> None:
     workflow = Path(".github/workflows/protected-release.yml").read_text()
     builder = Path("tools/build_release_bundle.py").read_text()
+
+    # The run and artifact names come from the committed, exact release tuple.
     for name in (
         "CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN",
-        "CODESTRA_MIDDLEWARE_PRODUCTION_RELEASE_RUN_ID",
-        "CODESTRA_MIDDLEWARE_PRODUCTION_RELEASE_ARTIFACT",
+        "config/production-release-tuple.json",
+        "MIDDLEWARE_RELEASE_RUN_ID",
+        "MIDDLEWARE_RELEASE_ARTIFACT",
+        "EXPECTED_ARTIFACT_DIGEST",
     ):
         assert name in workflow
-    assert "cosign\" verify" in workflow
-    assert "verify-attestation --type slsaprovenance1" in workflow
-    assert "alembic heads" in workflow
-    assert 'test "${#migration_heads[@]}" -eq 1' in workflow
-    assert 'migration_revision="${migration_heads[0]}"' in workflow
-    assert "dist/middleware-signature-verification.json" in workflow
-    assert "dist/middleware-provenance-verification.json" in workflow
-    assert "dist/middleware-sbom-verification.json" in workflow
-    assert "dist/middleware-sbom.cdx.json" in workflow
-    for retained_evidence in (
-        "dist/middleware-trivy.json",
-        "dist/middleware-grype-vex.json",
-        "dist/middleware-source-SHA256SUMS",
-    ):
-        assert retained_evidence in workflow
-        assert retained_evidence.replace("dist/", "") in workflow
-    assert workflow.count("tools/verify_attestation_predicate.py") == 1
-    assert "--predicate middleware-release/sbom.cdx.json" in workflow
-    assert "tools/verify_slsa_provenance_attestation.py" in workflow
+
+    # The current signed bundle is verified before any platform release is built.
+    assert "tools/verify_middleware_release_evidence.py" in workflow
     for argument in (
-        "--verification middleware-provenance-verification.json",
-        "--provenance middleware-release/provenance.json",
-        "--release-env middleware-release/RELEASE.env",
-        "--sbom middleware-release/sbom.cdx.json",
-        "--trivy middleware-release/trivy.json",
-        "--grype middleware-release/grype-vex.json",
+        "--tuple config/production-release-tuple.json",
+        '--run-id "${MIDDLEWARE_RELEASE_RUN_ID}"',
+        '--artifact "${MIDDLEWARE_RELEASE_ARTIFACT}"',
+        '--artifact-digest "${artifact_digest}"',
+        '--cosign "${RUNNER_TEMP}/cosign"',
+        "--derived-provenance-output middleware-derived-provenance.json",
+        "--derived-openvex-output middleware-derived-openvex.json",
     ):
         assert argument in workflow
+
+    # Image signature, provenance, SBOM, source label and exact migration head are enforced.
+    assert '"${RUNNER_TEMP}/cosign" verify' in workflow
+    assert "verify-attestation --type slsaprovenance1" in workflow
+    assert "verify-attestation --type spdxjson" in workflow
     assert workflow.count("--certificate-identity") == 3
     assert workflow.count("--certificate-oidc-issuer") == 3
+    assert "tools/verify_attestation_predicate.py" in workflow
+    assert "--predicate middleware-release/middleware.spdx.json" in workflow
     assert "docker image inspect" in workflow
-    assert 'org.opencontainers.image.revision' in workflow
+    assert "org.opencontainers.image.revision" in workflow
+    assert "alembic heads" in workflow
+    assert 'test "${#migration_heads[@]}" -eq 1' in workflow
+    assert 'test "${migration_heads[0]}" = "$MIDDLEWARE_MIGRATION_REVISION"' in workflow
+
+    # The protected release retains the exact files present in the signed v1 bundle,
+    # plus deterministic verification and derived evidence generated from those inputs.
+    for retained_evidence in (
+        "dist/middleware-signature-verification.json",
+        "dist/middleware-provenance-verification.json",
+        "dist/middleware-sbom-verification.json",
+        "dist/middleware-release-manifest.v1.json",
+        "dist/middleware-release-manifest.v1.sigstore.json",
+        "dist/middleware.spdx.json",
+        "dist/middleware.grype.json",
+        "dist/middleware-derived-provenance.json",
+        "dist/middleware-derived-openvex.json",
+    ):
+        assert retained_evidence in workflow
+
+    # Workflow actions are immutable, and production release construction remains fail closed.
     assert "actions/checkout@v4" not in workflow
     assert "actions/setup-python@v5" not in workflow
     assert "actions/upload-artifact@v4" not in workflow
