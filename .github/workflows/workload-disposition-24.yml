@@ -1,0 +1,108 @@
+name: Validate 24-workload production disposition
+
+on:
+  pull_request:
+    branches:
+      - release/production-activation
+    paths:
+      - ".github/workflows/workload-disposition-24.yml"
+      - "evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml"
+      - "evidence/server65/WORKLOAD-DISPOSITION-24-20260903.yaml"
+      - "scripts/validate_workload_disposition_24.py"
+      - "tests/test_workload_disposition_24.py"
+      - "deploy/email-reseller/compose.yaml"
+      - "deploy/mail-platform/compose.api.yaml"
+      - "deploy/reseller-portal/compose.yaml"
+      - "PRODUCTION-SOURCE-LOCK.yaml"
+  push:
+    branches:
+      - release/immutable-platform-workloads-20260903
+      - release/production-activation
+    paths:
+      - ".github/workflows/workload-disposition-24.yml"
+      - "evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml"
+      - "evidence/server65/WORKLOAD-DISPOSITION-24-20260903.yaml"
+      - "scripts/validate_workload_disposition_24.py"
+      - "tests/test_workload_disposition_24.py"
+      - "deploy/email-reseller/compose.yaml"
+      - "deploy/mail-platform/compose.api.yaml"
+      - "deploy/reseller-portal/compose.yaml"
+      - "PRODUCTION-SOURCE-LOCK.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workload-disposition-24-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    name: workload-disposition-24
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact clean checkout
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+          test -z "$(git status --porcelain)"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Validate disposition and regression tests
+        run: |
+          set -Eeuo pipefail
+          python3 -m pip install --disable-pip-version-check --no-input PyYAML
+          python3 -m py_compile scripts/validate_workload_disposition_24.py tests/test_workload_disposition_24.py
+          python3 scripts/validate_workload_disposition_24.py
+          python3 tests/test_workload_disposition_24.py
+
+      - name: Prove production application Compose is digest-only
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          import yaml
+
+          required = {
+              "deploy/email-reseller/compose.yaml": "api",
+              "deploy/mail-platform/compose.api.yaml": "mail-api",
+              "deploy/reseller-portal/compose.yaml": "portal",
+          }
+          digest = re.compile(r"^[^:@\s]+(?:/[^:@\s]+)+@sha256:[0-9a-f]{64}$")
+          for filename, service_name in required.items():
+              document = yaml.safe_load(Path(filename).read_text(encoding="utf-8"))
+              service = document["services"][service_name]
+              if "build" in service:
+                  raise SystemExit(f"{filename}: deploy-time build is forbidden")
+              image = service.get("image", "")
+              if not digest.fullmatch(image):
+                  raise SystemExit(f"{filename}: application image is not digest-pinned: {image}")
+          print("DIGEST_ONLY_PRODUCTION_COMPOSE=PASS")
+          PY
+          for file in \
+            deploy/email-reseller/compose.yaml \
+            deploy/mail-platform/compose.api.yaml \
+            deploy/reseller-portal/compose.yaml; do
+            docker compose -f "$file" config --no-interpolate >/dev/null
+          done
+          git diff --check
+          test -z "$(git status --porcelain)"
