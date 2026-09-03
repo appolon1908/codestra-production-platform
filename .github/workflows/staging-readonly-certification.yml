@@ -1,0 +1,206 @@
+name: Staging read-only certification authority
+
+on:
+  pull_request:
+    branches:
+      - release/production-activation
+    paths:
+      - ".github/workflows/staging-readonly-certification.yml"
+      - "config/staging-readonly-authority.v1.json"
+      - "config/staging-readonly-endpoint-manifest.template.v1.json"
+      - "docs/STAGING-READONLY-EXECUTION-GATE.md"
+      - "evidence/staging-readonly/**"
+      - "tools/validate_staging_readonly_authority.py"
+      - "tests/test_staging_readonly_authority.py"
+      - "PRODUCTION-SOURCE-LOCK.yaml"
+  push:
+    branches:
+      - ops/staging-readonly-authority-20260903
+    paths:
+      - ".github/workflows/staging-readonly-certification.yml"
+      - "config/staging-readonly-authority.v1.json"
+      - "config/staging-readonly-endpoint-manifest.template.v1.json"
+      - "docs/STAGING-READONLY-EXECUTION-GATE.md"
+      - "evidence/staging-readonly/**"
+      - "tools/validate_staging_readonly_authority.py"
+      - "tests/test_staging_readonly_authority.py"
+      - "PRODUCTION-SOURCE-LOCK.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-readonly-authority-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  source-policy:
+    name: staging-readonly / source-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Check out exact source identity
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Compile and test the fail-closed authority
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile tools/validate_staging_readonly_authority.py
+          python3 tests/test_staging_readonly_authority.py
+          python3 tools/validate_staging_readonly_authority.py \
+            --mode policy \
+            --evidence-output "${RUNNER_TEMP}/staging-readonly-policy.json"
+          git diff --check
+
+      - name: Upload bounded source-policy evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: staging-readonly-policy-${{ env.EXPECTED_SHA }}
+          path: ${{ runner.temp }}/staging-readonly-policy.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  environment-preflight:
+    name: staging-readonly / environment-preflight
+    needs:
+      - source-policy
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: staging-readonly
+    env:
+      EXPECTED_SHA: ${{ github.sha }}
+      CODESTRA_STAGING_OPERATOR_HOST: ${{ vars.CODESTRA_STAGING_OPERATOR_HOST }}
+      CODESTRA_STAGING_OPERATOR_USER: ${{ vars.CODESTRA_STAGING_OPERATOR_USER }}
+      CODESTRA_STAGING_OPERATOR_PORT: ${{ vars.CODESTRA_STAGING_OPERATOR_PORT }}
+      CODESTRA_STAGING_CANDIDATE_ID: ${{ vars.CODESTRA_STAGING_CANDIDATE_ID }}
+      CODESTRA_STAGING_CANDIDATE_MANIFEST_SHA256: ${{ vars.CODESTRA_STAGING_CANDIDATE_MANIFEST_SHA256 }}
+      CODESTRA_STAGING_ENDPOINT_MANIFEST_SHA256: ${{ vars.CODESTRA_STAGING_ENDPOINT_MANIFEST_SHA256 }}
+      CODESTRA_STAGING_KEYCLOAK_ISSUER: ${{ vars.CODESTRA_STAGING_KEYCLOAK_ISSUER }}
+      CODESTRA_STAGING_OFF_HOST_BACKUP_URI: ${{ vars.CODESTRA_STAGING_OFF_HOST_BACKUP_URI }}
+      CODESTRA_STAGING_CANARY_MAX_PERCENT: ${{ vars.CODESTRA_STAGING_CANARY_MAX_PERCENT }}
+      CODESTRA_STAGING_KONG_ROUTE_COUNT: ${{ vars.CODESTRA_STAGING_KONG_ROUTE_COUNT }}
+      HAS_CODESTRA_STAGING_READONLY_OPERATOR_SSH_KEY: ${{ secrets.CODESTRA_STAGING_READONLY_OPERATOR_SSH_KEY != '' }}
+      HAS_CODESTRA_STAGING_READONLY_OPERATOR_KNOWN_HOSTS: ${{ secrets.CODESTRA_STAGING_READONLY_OPERATOR_KNOWN_HOSTS != '' }}
+      HAS_CODESTRA_GHCR_DEPLOYMENT_READ_TOKEN: ${{ secrets.CODESTRA_GHCR_DEPLOYMENT_READ_TOKEN != '' }}
+      HAS_CODESTRA_STAGING_READONLY_ENDPOINT_MANIFEST: ${{ secrets.CODESTRA_STAGING_READONLY_ENDPOINT_MANIFEST != '' }}
+      HAS_CODESTRA_STAGING_READONLY_BEARER_TOKEN: ${{ secrets.CODESTRA_STAGING_READONLY_BEARER_TOKEN != '' }}
+      HAS_CODESTRA_STAGING_METRICS_BEARER_TOKEN: ${{ secrets.CODESTRA_STAGING_METRICS_BEARER_TOKEN != '' }}
+      HAS_CODESTRA_STAGING_OFF_HOST_BACKUP_CREDENTIAL: ${{ secrets.CODESTRA_STAGING_OFF_HOST_BACKUP_CREDENTIAL != '' }}
+      HAS_CODESTRA_RELEASE_SIGNING_PUBLIC_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_PUBLIC_KEY != '' }}
+      STAGING_ENDPOINT_MANIFEST_JSON: ${{ secrets.CODESTRA_STAGING_READONLY_ENDPOINT_MANIFEST }}
+    steps:
+      - name: Check out exact source identity
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Materialize protected endpoint manifest
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          printf '%s' "${STAGING_ENDPOINT_MANIFEST_JSON}" \
+            > "${RUNNER_TEMP}/staging-readonly-endpoints.json"
+          unset STAGING_ENDPOINT_MANIFEST_JSON
+          chmod 0600 "${RUNNER_TEMP}/staging-readonly-endpoints.json"
+
+      - name: Validate environment without contacting staging
+        id: preflight
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          python3 tools/validate_staging_readonly_authority.py \
+            --mode environment \
+            --endpoint-manifest "${RUNNER_TEMP}/staging-readonly-endpoints.json" \
+            --evidence-output "${RUNNER_TEMP}/staging-readonly-environment-preflight.json"
+
+      - name: Publish secret-free preflight summary
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          python3 - "${RUNNER_TEMP}/staging-readonly-environment-preflight.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          if not path.is_file():
+              raise SystemExit("preflight evidence file is missing")
+          evidence = json.loads(path.read_text(encoding="utf-8"))
+          with Path("${GITHUB_STEP_SUMMARY}").open("a", encoding="utf-8") as summary:
+              summary.write("## Staging read-only environment preflight\n\n")
+              summary.write(f"- Result: **{evidence.get('status')}**\n")
+              summary.write(f"- Source lock: `{evidence.get('source_lock_status')}`\n")
+              summary.write(f"- Runtime candidate authorized: `{evidence.get('runtime_candidate_authorized')}`\n")
+              summary.write(f"- Staging host: `{evidence.get('staging_host_status')}`\n")
+              summary.write("- Runtime contacted: `false`\n")
+              summary.write("- SSH attempted: `false`\n")
+              summary.write("- Secret values recorded: `false`\n")
+              for key in ("missing_variables", "missing_secrets", "invalid_variables", "blockers"):
+                  values = evidence.get(key) or []
+                  summary.write(f"\n### {key.replace('_', ' ').title()}\n\n")
+                  if values:
+                      for value in values:
+                          summary.write(f"- `{value}`\n")
+                  else:
+                      summary.write("- None\n")
+          PY
+
+      - name: Upload bounded secret-free preflight evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: staging-readonly-environment-preflight-${{ env.EXPECTED_SHA }}
+          path: ${{ runner.temp }}/staging-readonly-environment-preflight.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Stop before SSH unless every entry gate passes
+        if: ${{ steps.preflight.outcome != 'success' }}
+        run: |
+          echo "STAGING_READONLY_EXECUTION=BLOCKED_BEFORE_SSH" >&2
+          exit 1
+
+      - name: Record allowed next stage without executing it
+        if: ${{ steps.preflight.outcome == 'success' }}
+        run: |
+          echo "STAGING_READONLY_ENTRY_GATE=PASS"
+          echo "NEXT_ALLOWED_ACTION=SEPARATELY_REVIEWED_RESTRICTED_OPERATOR_DEPLOYMENT"
+          echo "RUNTIME_CONTACTED=NO"
+          echo "SSH_ATTEMPTED=NO"
+          echo "PRODUCTION_CHANGED=NO"
