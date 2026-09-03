@@ -2653,7 +2653,7 @@ class Gateway:
             supplied_proof_sha256,
             carrier_dlr,
             self.clock(),
-            self.settings.middleware_forwarding_enabled,
+            True,
         )
         LOG.info(
             "system=telnexa adapter_message_id=%s reconciliation=jasmin_dlr state=%s",
@@ -3282,9 +3282,10 @@ class Gateway:
         )
         if missing := required - payload.keys():
             return 422, {"detail": "missing required fields", "fields": sorted(missing)}
-        dispatch_eligible = (
-            self.settings.middleware_forwarding_enabled and path in EVENT_TYPES
-        )
+        # Eligibility describes whether a newly accepted event has a governed
+        # downstream contract.  The forwarding flag only pauses the dispatcher;
+        # it must not permanently quarantine receipts accepted during a pause.
+        dispatch_eligible = path in EVENT_TYPES
         if dispatch_eligible:
             try:
                 forwarding_tenant(payload)

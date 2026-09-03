@@ -55,9 +55,11 @@ expects this file at
 `/etc/kyqra-telnexa-integration/tenant-bindings.json` and mounts it as a
 read-only runtime secret without committing tenant identifiers to Git.
 
-Middleware forwarding is independently fail-closed. New authenticated ingress
-events become dispatch-eligible only when `MIDDLEWARE_FORWARDING_ENABLED=true`
-and an HTTPS `MIDDLEWARE_EVENTS_URL`, `MIDDLEWARE_EVENTS_CA_FILE`,
+Middleware forwarding is independently fail-closed. New authenticated events
+with an exact governed mapping remain durably dispatch-eligible while the
+dispatcher is paused. They are dispatched only when
+`MIDDLEWARE_FORWARDING_ENABLED=true` and an HTTPS `MIDDLEWARE_EVENTS_URL`,
+`MIDDLEWARE_EVENTS_CA_FILE`,
 `MIDDLEWARE_EVENTS_CLIENT_CERT_FILE`, and
 `MIDDLEWARE_EVENTS_CLIENT_KEY_FILE` plus the dedicated per-source API-key and
 HMAC authorities are present. The client constructs one hostname-verifying
@@ -67,7 +69,8 @@ every governed provider source. Shared mode can forward only the Telnexa
 DLR/failure events it produces; it neither exposes the general provider-ingress
 routes nor consumes credentials for other provider identities. Existing
 database rows migrate with `dispatch_eligible=0`; the dispatcher never replays
-that historical quarantine.
+that historical quarantine. Pausing forwarding does not quarantine new mapped
+provider receipts that the gateway has already acknowledged.
 Ingress paths without an exact governed `EVENT_TYPES` mapping also remain
 dispatch-ineligible, even when forwarding is enabled.
 Mapped callbacks must supply a non-empty bounded `tenant_id` before they are

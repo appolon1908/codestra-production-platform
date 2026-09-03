@@ -1467,11 +1467,27 @@ def test_ingress_authentication_replay_and_payload_conflict_fail_closed(
     app = gateway.Gateway(
         settings(tmp_path, mode="middleware"), store(tmp_path), clock=lambda: now
     )
-    body = json.dumps({"message_id": "message-1"}, separators=(",", ":")).encode()
+    body = json.dumps(
+        {
+            "message_id": "message-1",
+            "tenant_id": "tenant-a",
+            "correlation_id": "correlation-auth-replay-1",
+            "event_type": "klyrow.email.delivered",
+        },
+        separators=(",", ":"),
+    ).encode()
     headers = signed_headers("klyrow", body, now, "event-0001")
     assert app.ingress("klyrow", "/api/v1/klyrow/events", body, headers)[0] == 202
     assert app.ingress("klyrow", "/api/v1/klyrow/events", body, headers)[0] == 409
-    changed = json.dumps({"message_id": "message-2"}, separators=(",", ":")).encode()
+    changed = json.dumps(
+        {
+            "message_id": "message-2",
+            "tenant_id": "tenant-a",
+            "correlation_id": "correlation-auth-replay-1",
+            "event_type": "klyrow.email.delivered",
+        },
+        separators=(",", ":"),
+    ).encode()
     changed_headers = signed_headers("klyrow", changed, now, "event-0001")
     assert app.ingress("klyrow", "/api/v1/klyrow/events", changed, changed_headers)[0] == 409
 
@@ -1597,7 +1613,11 @@ def test_authentication_header_names_are_case_insensitive(
     app = gateway.Gateway(
         settings(tmp_path, mode="middleware"), store(tmp_path), clock=lambda: now
     )
-    body = b'{"message_id":"message-case"}'
+    body = (
+        b'{"message_id":"message-case","tenant_id":"tenant-a",'
+        b'"correlation_id":"correlation-case-1",'
+        b'"event_type":"klyrow.email.delivered"}'
+    )
     headers = {
         key.swapcase(): value
         for key, value in signed_headers("klyrow", body, now, "event-case-1").items()
@@ -1620,6 +1640,8 @@ def test_kyqra_entity_duplicate_requires_the_same_payload(
         "source_url": "https://example.invalid/record",
         "business_name": "Synthetic",
         "crawl_timestamp": "2026-09-01T00:00:00Z",
+        "tenant_id": "tenant-a",
+        "correlation_id": "correlation-entity-1",
     }
     body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     first = signed_headers("kyqra", body, now, "event-entity-1")
@@ -1649,7 +1671,14 @@ def test_kyqra_lifecycle_paths_do_not_conflict_on_shared_job_id(
         ),
         start=1,
     ):
-        body = json.dumps({"job_id": "job-shared"}, separators=(",", ":")).encode()
+        body = json.dumps(
+            {
+                "job_id": "job-shared",
+                "tenant_id": "tenant-a",
+                "correlation_id": f"correlation-life-{index}",
+            },
+            separators=(",", ":"),
+        ).encode()
         headers = signed_headers("kyqra", body, now, f"event-life-{index}")
         assert app.ingress("kyqra", path, body, headers)[0] == 202
 
@@ -1955,8 +1984,7 @@ def test_supported_klyrow_status_is_dispatch_eligible(
         settings(
             tmp_path,
             mode="middleware",
-            middleware_forwarding_enabled=True,
-            downstream_url="https://middleware.invalid/v1/events",
+            middleware_forwarding_enabled=False,
         ),
         state,
         clock=lambda: now,
@@ -1982,6 +2010,7 @@ def test_supported_klyrow_status_is_dispatch_eligible(
             "SELECT dispatch_eligible,state FROM events"
         ).fetchone()
     assert dict(row) == {"dispatch_eligible": 1, "state": "queued"}
+    assert app.dispatch_once() == 0
 
 
 def test_unrelated_success_response_cannot_mark_event_delivered(
@@ -3317,8 +3346,7 @@ def test_attempt_bound_rejection_dlr_supersedes_synchronous_success(
             live_submission_enabled=True,
             production_delivery_authorized=True,
             production_change_id="CHG-JASMIN-LATE-REJECTION",
-            middleware_forwarding_enabled=True,
-            downstream_url="https://10.40.0.2/v1/events",
+            middleware_forwarding_enabled=False,
         ),
         state,
         clock=lambda: now,
@@ -3358,6 +3386,7 @@ def test_attempt_bound_rejection_dlr_supersedes_synchronous_success(
     assert event["path"] == gateway.TELNEXA_REJECTED_EVENT_PATH
     assert event["entity_key"] == "message-0001"
     assert event["dispatch_eligible"] == 1
+    assert app.dispatch_once() == 0
     projection = json.loads(event["payload"])
     assert projection == {
         "adapter_message_id": result["adapter_message_id"],
