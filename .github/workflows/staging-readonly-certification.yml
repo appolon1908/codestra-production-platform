@@ -15,7 +15,6 @@ on:
       - "PRODUCTION-SOURCE-LOCK.yaml"
   push:
     branches:
-      - ops/staging-readonly-authority-20260903
       - release/production-activation
     paths:
       - ".github/workflows/staging-readonly-certification.yml"
@@ -47,6 +46,17 @@ jobs:
     env:
       EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
+      - name: Reject unsafe manual dispatch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_ACTOR: ${{ github.actor }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -Eeuo pipefail
+          test "${DISPATCH_REF}" = "refs/heads/release/production-activation"
+          test "${DISPATCH_ACTOR}" = "${REPOSITORY_OWNER}"
+
       - name: Check out exact source identity
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -87,7 +97,7 @@ jobs:
     name: staging-readonly / environment-preflight
     needs:
       - source-policy
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/release/production-activation' && (github.event_name != 'workflow_dispatch' || github.actor == github.repository_owner) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment:
@@ -114,16 +124,17 @@ jobs:
       HAS_CODESTRA_RELEASE_SIGNING_PUBLIC_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_PUBLIC_KEY != '' }}
       STAGING_ENDPOINT_MANIFEST_JSON: ${{ secrets.CODESTRA_STAGING_READONLY_ENDPOINT_MANIFEST }}
     steps:
-      - name: Check out exact source identity
+      - name: Check out exact protected source identity
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ env.EXPECTED_SHA }}
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify exact checkout
+      - name: Verify protected release checkout
         run: |
           set -Eeuo pipefail
+          test "${GITHUB_REF}" = "refs/heads/release/production-activation"
           test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
 
       - name: Set up Python
