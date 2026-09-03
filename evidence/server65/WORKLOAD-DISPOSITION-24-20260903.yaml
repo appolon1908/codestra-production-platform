@@ -1,0 +1,249 @@
+schema_version: codestra.workload-disposition.v1
+captured_from:
+  path: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml
+  captured_at: "2026-09-02T10:30:00Z"
+  record_count: 24
+reconciled_at: "2026-09-03T15:50:00Z"
+target_server: 65.109.65.169
+production_changed: false
+runtime_contacted: false
+status: BLOCKED
+summary:
+  records_total: 24
+  retire_from_production: 12
+  immutable_replacements_ready: 7
+  immutable_replacements_pending: 5
+  blocking_authorities: 2
+  unresolved_unknown_records: 0
+safety_controls:
+  LIVE_WRITE: false
+  ODOO_WRITE: false
+  N8N_DELIVERY_ENABLED: false
+  ENABLE_EXTERNAL_DELIVERY: false
+  LIVE_EMAIL_DELIVERY: false
+  LIVE_SMS_DELIVERY: false
+  LIVE_PSTN_DIALING: false
+  CAMPAIGN_ACTIVATION: false
+  PROVIDER_DELIVERY: false
+  ADVERTISING_ACTIVATION: false
+  PAYMENT_EXECUTION: false
+  FINANCIAL_TRADING: false
+records:
+  - container: codestra-middleware-external-webhook-worker-1
+    current_image: codestra/middleware:webhook-cert-pg-20260816
+    current_image_id: sha256:93cbb4a11765ad92e9bbf1a1bb9601f15a540164b4e7d6647cb0f16d588ab6e0
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: canonical-middleware-pr-283
+    candidate_repository: Codestra-SRL/codestra-middleware
+    candidate_source_sha: PENDING_PROTECTED_MERGE
+    candidate_image: ghcr.io/codestra-srl/codestra-middleware
+    candidate_image_digest: PENDING_REQUIRED_CI_AND_PROTECTED_BUILD
+    candidate_state: BLOCKED
+
+  - container: codestra-middleware-breero-odoo-worker-1
+    current_image: codestra/middleware:breero-51416422
+    current_image_id: sha256:961c0569a5033cdb494d211fd32cfe20d7efd42d3900f02c2d3f0ac7bfdcfa63
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: canonical-middleware-pr-283
+    candidate_repository: Codestra-SRL/codestra-middleware
+    candidate_source_sha: PENDING_PROTECTED_MERGE
+    candidate_image: ghcr.io/codestra-srl/codestra-middleware
+    candidate_image_digest: PENDING_REQUIRED_CI_AND_PROTECTED_BUILD
+    candidate_state: BLOCKED
+
+  - container: codestra-sms-api-event-worker-1
+    current_image: codestra-sms-api-event-worker
+    current_image_id: sha256:65222db1296663c33f1bdac9ef5c8c305d2d4388ddca26e3306776821d2dbee9
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: protected-runtime-authority
+    candidate_repository: appolon1908-hue/codestra-production-runtime-authority
+    candidate_source_sha: 470591454b681092cc8fdde57b2a921802dffd3f
+    candidate_image: ghcr.io/appolon1908-hue/sms-api-event-worker
+    candidate_image_digest: sha256:7a9ab0aa14075892edee8c0cba68bb7979645c0795812892c3e07ab0d16b3e3a
+    candidate_state: READY
+
+  - container: codestra-middleware-staging-odoo-result-worker-staging-1
+    current_image: codestra/middleware:staging-b29db772
+    current_image_id: sha256:b81c125296effc17a33258212d9a71a3c427a972fa9783ec2c060109d167408f
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: staging workload mixed into the production host
+
+  - container: codestra-middleware-staging-middleware-staging-1
+    current_image: codestra/middleware:staging-b29db772
+    current_image_id: sha256:b81c125296effc17a33258212d9a71a3c427a972fa9783ec2c060109d167408f
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: staging workload mixed into the production host
+
+  - container: codestra-middleware-staging-social-reconciliation-worker-staging-1
+    current_image: codestra/middleware:social-staging-12cd5fc
+    current_image_id: sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: social staging worker mixed into the production host
+
+  - container: codestra-middleware-staging-social-delivery-worker-staging-1
+    current_image: codestra/middleware:social-staging-12cd5fc
+    current_image_id: sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: social staging worker mixed into the production host
+
+  - container: codestra-middleware-staging-social-dead-letter-worker-staging-1
+    current_image: codestra/middleware:social-staging-12cd5fc
+    current_image_id: sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: social staging worker mixed into the production host
+
+  - container: codestra-middleware-staging-notification-worker-staging-1
+    current_image: codestra/middleware:staging-preflight-n8n-auth-20260801
+    current_image_id: sha256:ed7accf6d1f9ad7d84f43deba8caa0d58f8c40709c7b54d622d70df56b1f2386
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: staging notification worker mixed into the production host
+
+  - container: codestra-middleware-staging-scheduler-staging-1
+    current_image: codestra/middleware:staging-preflight-n8n-auth-20260801
+    current_image_id: sha256:ed7accf6d1f9ad7d84f43deba8caa0d58f8c40709c7b54d622d70df56b1f2386
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: staging scheduler mixed into the production host
+
+  - container: codestra-middleware-staging-callback-staging-1
+    current_image: codestra/middleware:current-hardened-20260723
+    current_image_id: sha256:57a4a3a22278aa61bc443910927a308d594db287b8e2cd500ee12293e8a93f4d
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: staging callback service mixed into the production host
+
+  - container: codestra-odoo19-module-staging-callback-tls-1
+    current_image: codestra/caddy:2.11.4-hardened-20260723
+    current_image_id: sha256:269c6bd9b2713a27f8dc34a19a904bb0ba9d8f0f1564913576becd24779674d5
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: staging-only callback TLS proxy mixed into production
+
+  - container: codestra-middleware-1
+    current_image: codestra/middleware:health-contract-b3ca9aa
+    current_image_id: sha256:5dd751a9da60e2417c9ee553ddea68f54e76981dcc896eb3676b27617d121f38
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: canonical-middleware-pr-283
+    candidate_repository: Codestra-SRL/codestra-middleware
+    candidate_source_sha: PENDING_PROTECTED_MERGE
+    candidate_image: ghcr.io/codestra-srl/codestra-middleware
+    candidate_image_digest: PENDING_REQUIRED_CI_AND_PROTECTED_BUILD
+    candidate_state: BLOCKED
+
+  - container: codestra-email-reseller-api-1
+    current_image: codestra-email-reseller-api
+    current_image_id: sha256:8d7bb50e8787c110a7930fadb0c69a44ba075c70cb5e035118d9f334b1211e08
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: protected-platform-release-222
+    candidate_repository: appolon1908-hue/codestra-production-platform
+    candidate_source_sha: 9371bc39b11fe2cd52c5414e84a31cc9adb80644
+    candidate_image: ghcr.io/appolon1908-hue/email-reseller
+    candidate_image_digest: sha256:e1dddbb9055528b702dd27d99b42ee59b1929a2de826ca966075bd0b59e5e005
+    candidate_state: READY
+
+  - container: codestra-sms-api-api-1
+    current_image: codestra-sms-api-api
+    current_image_id: sha256:49790449a1871a585456fe41bcb52dd614fb56f432907b9f5e7271e54306d6d7
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: protected-runtime-authority
+    candidate_repository: appolon1908-hue/codestra-production-runtime-authority
+    candidate_source_sha: 470591454b681092cc8fdde57b2a921802dffd3f
+    candidate_image: ghcr.io/appolon1908-hue/sms-api
+    candidate_image_digest: sha256:e620fc2e15989e395e0c69bad682a31dbf10fffecc569053e7d1ff5d3a1ede47
+    candidate_state: READY
+
+  - container: codestra-mail-api-mail-api-1
+    current_image: codestra/mail-api:20260822
+    current_image_id: sha256:7495d5f0d79f027456ed61b7c3c2ea9331c228f3d2e10bceef3178eef5a62594
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: protected-platform-release-214
+    candidate_repository: appolon1908-hue/codestra-production-platform
+    candidate_source_sha: e612e38dae1a1e2ec5e770dcd29aabc3c2ea2b53
+    candidate_image: ghcr.io/appolon1908-hue/mail-api
+    candidate_image_digest: sha256:586ed6aaded359b4cad64905d027079ea910eda5202bae0bac0d44d8baf0df09
+    candidate_state: READY
+
+  - container: codestra-mail-isolated-stalwart-1
+    current_image: stalwartlabs/stalwart:v0.16
+    current_image_id: sha256:9ed1d343243b7aa72969e372a7240b7ddea07730781d4b68a0dc3d8d51c418bb
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: protected-vendor-authority
+    candidate_repository: appolon1908-hue/codestra-production-runtime-authority
+    candidate_source_sha: 470591454b681092cc8fdde57b2a921802dffd3f
+    candidate_image: stalwartlabs/stalwart
+    candidate_image_digest: sha256:9ed1d343243b7aa72969e372a7240b7ddea07730781d4b68a0dc3d8d51c418bb
+    candidate_state: READY
+
+  - container: kong-production-standby-kong-standby-auth-1
+    current_image: codestra/kong-standby-auth:20260820
+    current_image_id: sha256:48b52b06eae0c92b1d4ae45bdee6f3974c684e650933de2391c7a3456602d01f
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: kong-pr-47
+    candidate_repository: appolon1908-hue/Kong
+    candidate_source_sha: PENDING_PROTECTED_MERGE
+    candidate_image: ghcr.io/appolon1908-hue/kong-standby-auth
+    candidate_image_digest: PENDING_RELEASE_EVIDENCE
+    candidate_state: BLOCKED
+
+  - container: codestra-kong-identity-certification-1
+    current_image: codestra/identity-certification:canonical-co-20260820
+    current_image_id: sha256:ffceaad23a8daf61bed7a069499c341ae2495b48dd77ca492ee965b761ff55af
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: certification-only workload must not remain in production
+
+  - container: codestra-beyvra-email-api-1
+    current_image: codestra/beyvra-email:canonical-co-20260820
+    current_image_id: sha256:a226db03c6fce98f81c02e78bab96a2beb452a27dd79308c921e85bfa664aa52
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: canonical-middleware-pr-283
+    candidate_repository: Codestra-SRL/codestra-middleware
+    candidate_source_sha: PENDING_PROTECTED_MERGE
+    candidate_image: ghcr.io/codestra-srl/codestra-middleware
+    candidate_image_digest: PENDING_REQUIRED_CI_AND_PROTECTED_BUILD
+    candidate_state: BLOCKED
+
+  - container: codestra-reseller-portal-portal-1
+    current_image: codestra-reseller-portal:oidc-tenant-authority-20260816
+    current_image_id: sha256:7d7cf6318ac122f7e39ab679dec499dc1f6116129765903d44e42c74541ca12e
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: protected-platform-release-214
+    candidate_repository: appolon1908-hue/codestra-production-platform
+    candidate_source_sha: e612e38dae1a1e2ec5e770dcd29aabc3c2ea2b53
+    candidate_image: ghcr.io/appolon1908-hue/reseller-portal
+    candidate_image_digest: sha256:74ce88fa3ca05a6c3d595080b78c398be1dc49ac72185ba8aa787d9f6f8247d9
+    candidate_state: READY
+
+  - container: codestra-private-vicidial-ingress-1
+    current_image: codestra/caddy:2.11.4-hardened-20260723
+    current_image_id: sha256:269c6bd9b2713a27f8dc34a19a904bb0ba9d8f0f1564913576becd24779674d5
+    disposition: REPLACE_WITH_IMMUTABLE
+    authority: protected-vendor-authority
+    candidate_repository: appolon1908-hue/codestra-production-runtime-authority
+    candidate_source_sha: 470591454b681092cc8fdde57b2a921802dffd3f
+    candidate_image: codestra/caddy
+    candidate_image_digest: sha256:269c6bd9b2713a27f8dc34a19a904bb0ba9d8f0f1564913576becd24779674d5
+    candidate_state: READY
+
+  - container: codestra-middleware-staging-scraper-odoo-delivery-worker-1
+    current_image: codestra/middleware:scraper-protected-main-4780bd72
+    current_image_id: sha256:dc97c48f3a29690635bf28de9f3d2562fac2dadb74b8744ea6e99c1bd4ffcda1
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: staging delivery worker mixed into the production host
+
+  - container: codestra-agent-desktop-preview
+    current_image: codestra/agent-desktop:preview-6101
+    current_image_id: sha256:9d01eff55f0f823d9faae1c51ffe71685663c24bc0bbdbb9da49bfe39f22e791
+    disposition: RETIRE_FROM_PRODUCTION
+    reason: preview-only workload must not remain in production
+blocking_authorities:
+  - id: canonical-middleware-pr-283
+    records: 4
+    reason: Codestra-SRL Actions still fails before job creation; protected merge and immutable digest do not exist
+  - id: kong-pr-47
+    records: 1
+    reason: exact-head source checks pass, but independent approval, protected merge, and release-evidence digest remain required
+pass_rule:
+  required_records: 24
+  required_retirements_completed: 12
+  required_ready_replacements: 12
+  required_blocking_authorities: 0
+  runtime_readback_matches_disposition: true
+  rollback_images_preserved: true
+  source_lock_status: PASS
