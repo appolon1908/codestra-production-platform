@@ -5,6 +5,21 @@ Production target: `65.109.65.169`
 Staging target: `2.29.17.172`
 Decision: **NO-GO**
 
+## 2026-09-03 refresh
+
+- PR #181 remains merged at protected merge `5aec485814149434750f2313370ae0ae39db5bd8`.
+- The resulting `release/production-activation` head
+  `517145689b6a27c9953ffd357458d8fc8e7c100d` passed both `Exact protected
+  release` (run `33700200216`) and `immutable-candidate-build` (run
+  `33700200254`). The protected tag is
+  `protected-517145689b6a27c9953ffd357458d8fc8e7c100d`.
+- The candidate build is release evidence only; no image was deployed to
+  Server 65. Production remains unchanged.
+- The current canonical Middleware PR #283 is still approved and mergeable at
+  exact head `e48ec614a2da680802ee106e271b52f3006e72dc`, but its required exact-
+  SHA workflow run `33698014234` completed with `startup_failure` and no jobs.
+  Therefore the n8n runtime gap gate remains FAIL.
+
 ## Verified progress
 
 - Platform PR [#181](https://github.com/appolon1908-hue/codestra-production-platform/pull/181) merged through protected automation at `5aec485814149434750f2313370ae0ae39db5bd8`.
