@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Materialize the reviewed authority payload after exact release verification."""
+# Re-run only after the current protected production base is present in ancestry.
 from __future__ import annotations
 import argparse, base64, hashlib, importlib.util, io, json, os, tarfile, tempfile
 from pathlib import Path, PurePosixPath
