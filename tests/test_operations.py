@@ -262,9 +262,16 @@ class MonitoringGovernanceTests(unittest.TestCase):
         )
         self.assertIn("operations_dashboard_staging", compose["services"]["prometheus"]["networks"])
         self.assertIn(
-            "/opt/codestra/secrets/identity-staging/monitoring-readonly-client-secret:/run/secrets/staging_metrics_client_secret:ro",
+            "/etc/codestra/secrets/monitoring-runtime/staging_metrics_client_secret:/run/secrets/staging_metrics_client_secret:ro",
             compose["services"]["prometheus"]["volumes"],
         )
+        projection = (MONITORING / "sync-staging-metrics-secret.sh").read_text()
+        self.assertIn("/opt/codestra/secrets/identity-staging/monitoring-readonly-client-secret", projection)
+        self.assertIn("install -o root -g 65534 -m 0640", projection)
+        self.assertIn('cmp -s "$source_file" "$temporary"', projection)
+        installer = (MONITORING / "install-monitoring.sh").read_text()
+        self.assertIn('bash "$ROOT/sync-staging-metrics-secret.sh"', installer)
+        self.assertIn('[[ -s "$staging_metrics_secret" && -r "$staging_metrics_secret" ]]', installer)
         self.assertEqual(
             compose["networks"]["operations_dashboard_staging"],
             {
