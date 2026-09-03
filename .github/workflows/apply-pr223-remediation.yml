@@ -1,0 +1,65 @@
+name: Apply validated PR 223 remediation
+
+on:
+  push:
+    branches:
+      - chatgpt/pr223-validation-20260903
+    paths:
+      - scripts/apply_pr223_redirect_fix.py
+      - .github/workflows/apply-pr223-remediation.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-pr223-remediation
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TARGET_BRANCH: fix/private-gateway-outbound-mtls-20260903
+      EXPECTED_TARGET_HEAD: 10772e0d9799c14ae94222902e0c7fe6f4dcc65e
+    steps:
+      - name: Check out remediation tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: tooling
+          persist-credentials: false
+      - name: Check out exact PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          path: target
+          fetch-depth: 1
+      - name: Verify exact target head
+        working-directory: target
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Install private-gateway test tools
+        run: python -m pip install "pytest==8.4.2" "PyYAML==6.0.3" "bandit==1.9.4" "openapi-spec-validator==0.7.2"
+      - name: Apply redirect remediation
+        run: python tooling/scripts/apply_pr223_redirect_fix.py target
+      - name: Run complete private-gateway gate
+        working-directory: target
+        run: |
+          python -m compileall -q services/private-integration-gateway/gateway.py tests/test_private_integration_gateway.py
+          python -m pytest -q tests/test_private_integration_gateway.py
+          python -m bandit -q -r services/private-integration-gateway/gateway.py
+          git diff --check
+      - name: Commit and push tested correction
+        working-directory: target
+        run: |
+          set -Eeuo pipefail
+          git config user.name "Ralph Appolon"
+          git config user.email "appolon1908@gmail.com"
+          git add services/private-integration-gateway/gateway.py tests/test_private_integration_gateway.py
+          git diff --cached --check
+          git commit -m "fix(gateway): reject redirected mTLS forwarding"
+          git push origin "HEAD:$TARGET_BRANCH"
