@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://api.codestra.co/schemas/contact-center-event-envelope-v1.schema.json",
+  "title": "Codestra Contact Center Event Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "occurred_at",
+    "source",
+    "tenant_id",
+    "campaign_id",
+    "correlation_id",
+    "subject",
+    "data"
+  ],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1, "maxLength": 255},
+    "event_type": {
+      "enum": [
+        "call.created",
+        "call.ringing",
+        "call.answered",
+        "call.held",
+        "call.resumed",
+        "call.transferred",
+        "call.ended",
+        "call.disposition_submitted",
+        "agent.login",
+        "agent.ready",
+        "agent.paused",
+        "agent.wrapup",
+        "agent.logout",
+        "callback.created",
+        "callback.completed",
+        "email.accepted",
+        "email.delivered",
+        "email.bounced",
+        "email.received",
+        "sms.accepted",
+        "sms.delivered",
+        "sms.failed",
+        "sms.received",
+        "provisioning.completed",
+        "provisioning.failed"
+      ]
+    },
+    "schema_version": {"const": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "source": {"type": "string", "minLength": 1, "maxLength": 64},
+    "tenant_id": {"type": "string", "minLength": 1, "maxLength": 255},
+    "campaign_id": {"type": "string", "minLength": 1, "maxLength": 255},
+    "correlation_id": {"type": "string", "format": "uuid"},
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "enum": ["interaction", "call_leg", "agent", "callback", "message", "provisioning_job"]
+        },
+        "id": {"type": "string", "minLength": 1, "maxLength": 255}
+      }
+    },
+    "data": {"type": "object"}
+  }
+}
