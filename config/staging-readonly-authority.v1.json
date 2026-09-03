@@ -26,7 +26,7 @@
   },
   "staging_infrastructure": {
     "repository": "appolon1908-hue/Infustruction-repo",
-    "ref": "f53ecf4a7d739dea8e633431e836510b2471d4d2",
+    "ref": "1954bd726ad0988000a96d437aaaa7aca37f6235",
     "provisioning_workflow": ".github/workflows/stage6-provision-staging-host.yml",
     "required_host_status": "CREATED_AND_VERIFIED",
     "observed_host_status": "NOT_RUN_HOST_NOT_CREATED",
