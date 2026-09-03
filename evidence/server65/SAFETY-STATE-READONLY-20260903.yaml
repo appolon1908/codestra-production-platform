@@ -1,0 +1,23 @@
+server: 65.109.65.169
+date: 2026-09-03
+access: codestra-app alias, codestra-admin, read-only docker inspect
+status: PARTIAL
+notes: Capability variables are intentionally absent from infrastructure containers; values below cover containers that declare each applicable switch.
+switches:
+  LIVE_ADVERTISING_ENABLED: {declared: '1/106', values: [false]}
+  EXTERNAL_DELIVERY_ENABLED: {declared: '34/106', values: [false]}
+  SOCIAL_PUBLISHING_ENABLED: {declared: '1/106', values: [false]}
+  EXTERNAL_MODEL_CALLS_ENABLED: {declared: '1/106', values: [false]}
+  LIVE_SMS_DELIVERY: {declared: '33/106', values: [false]}
+  LIVE_EMAIL_DELIVERY: {declared: '34/106', values: [false]}
+  LIVE_PSTN_DIALING: {declared: '33/106', values: [false]}
+  N8N_EXTERNAL_PROVIDER_WRITES: {declared: '1/106', values: [false]}
+  PRODUCTION_DIALING: {declared: '13/106', values: [false, disabled]}
+  CALLS_PLACED: {declared: '0/106', values: [ABSENT]}
+gates:
+  external_effect_switches: PASS
+  calls_placed_authoritative_counter: FAIL
+  safety_state: FAIL
+ssh_changed: false
+production_changed: false
+calls_placed: 0
