@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 
 PAYLOAD_SHA256 = "9faf571c4bd3cfad5c1ffc0ad35145adb4affbe3d67850186822c1df4cc869bb"
 PAYLOAD_DIR = ".authority-payload"
+EXPECTED_PARTS = tuple(f"part{index:02d}" for index in range(8))
 EXPECTED = {
     ".github/workflows/protected-release.yml", "PRODUCTION-SOURCE-LOCK.yaml",
     "config/jetstream-dlq-worker.env.example", "config/production-release-tuple.json",
@@ -35,6 +36,8 @@ def materialize(root: Path, staging: Path) -> None:
     parts = sorted((root / PAYLOAD_DIR).glob("part*"))
     if not parts:
         raise RuntimeError("authority payload parts are missing")
+    if tuple(path.name for path in parts) != EXPECTED_PARTS:
+        raise RuntimeError("authority payload parts are incomplete or out of sequence")
     encoded = "".join("".join(path.read_text().split()) for path in parts)
     payload = base64.b64decode(encoded, validate=True)
     if hashlib.sha256(payload).hexdigest() != PAYLOAD_SHA256:
