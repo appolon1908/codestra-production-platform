@@ -11,6 +11,7 @@
     "occurred_at",
     "tenant_id",
     "company_id",
+    "correlation_id",
     "idempotency_key",
     "aggregate",
     "payload",
@@ -19,16 +20,17 @@
   "properties": {
     "event_id": {
       "type": "string",
-      "format": "uuid"
+      "format": "uuid",
+      "description": "Per-attempt transport nonce. It is deterministic for the current durable attempt and distinct from the logical outbox event identity."
     },
     "event_type": {
       "enum": [
-        "post_call.completed",
-        "callback.scheduled",
-        "appointment.scheduled",
-        "post_call.email_queued",
-        "calendar.rescheduled",
-        "calendar.cancelled"
+        "call_followup.completed",
+        "call_followup.callback_scheduled",
+        "call_followup.appointment_scheduled",
+        "call_followup.email_queued",
+        "call_followup.calendar_rescheduled",
+        "call_followup.calendar_cancelled"
       ]
     },
     "event_version": {
@@ -48,10 +50,8 @@
       "minimum": 1
     },
     "correlation_id": {
-      "type": [
-        "string",
-        "boolean"
-      ],
+      "type": "string",
+      "minLength": 1,
       "maxLength": 255
     },
     "idempotency_key": {
@@ -84,15 +84,15 @@
       "additionalProperties": false,
       "required": [
         "source",
-        "delivery_attempt"
+        "logical_event_id"
       ],
       "properties": {
         "source": {
           "const": "odoo"
         },
-        "delivery_attempt": {
-          "type": "integer",
-          "minimum": 1
+        "logical_event_id": {
+          "type": "string",
+          "format": "uuid"
         }
       }
     }
