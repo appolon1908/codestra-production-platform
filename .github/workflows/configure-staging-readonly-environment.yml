@@ -58,7 +58,7 @@ jobs:
     name: staging-readonly environment / configure
     needs:
       - source-policy
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/production-activation') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
