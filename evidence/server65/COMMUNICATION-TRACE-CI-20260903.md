@@ -7,7 +7,7 @@ Server scope: 65.109.65.169 (evidence only; no host mutation)
 
 - Repository: `appolon1908-hue/Codestra-Communication-CC`
 - Pull request: https://github.com/appolon1908-hue/Codestra-Communication-CC/pull/6
-- Exact candidate SHA: `481ae2b97a78569588f066e1bd161b5258fea441`
+- Exact candidate SHA: `94e23bc14bda76e0f52b97cbcc2928008716f99f`
 - PR state: draft; not deployed
 
 ## Protected CI read-back
@@ -37,6 +37,9 @@ data-only dumps between source and restored databases.
   restored for worker dispatch.
 - Span attributes are bounded method/status/host/correlation values; secrets
   and provider payloads are not emitted.
+- Optional collector CA/client-mTLS files are validated as regular files; client
+  keys must be runtime-owned and mode `0600`, and incomplete mTLS configuration
+  fails closed.
 
 ## Certification boundary
 
