@@ -14,6 +14,10 @@ services:
       EMAIL_MAX_REQUEST_BYTES: "262144"
       EMAIL_MAX_RECIPIENTS: "50"
       EMAIL_RATE_PER_MINUTE: "60"
+      CODESTRA_IMAGE_DIGEST: ${EMAIL_RESELLER_IMAGE_DIGEST:?exact email reseller digest required}
+      CODESTRA_BUILD_TIMESTAMP: ${EMAIL_RESELLER_BUILD_TIMESTAMP:?email reseller build timestamp required}
+      CODESTRA_MIGRATION_REVISION: email-reseller-schema-v1
+      CODESTRA_ENVIRONMENT: production
       KLYROW_HEALTH_URL: https://klyrow.internal.codestra.agency:18000/v1/health
       KLYROW_CLIENT_CERT_FILE: /run/codestra-mtls/klyrow/client-fullchain.crt
       KLYROW_CLIENT_KEY_FILE: /run/codestra-mtls/klyrow/client.key

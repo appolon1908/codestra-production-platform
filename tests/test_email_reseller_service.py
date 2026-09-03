@@ -139,6 +139,25 @@ class EmailResellerTest(unittest.TestCase):
     def test_unknown_consumer_denied(self):
         self.rejected("customer_account_not_found", lambda: self.create(consumer="missing"))
 
+    def test_version_state_is_safe_and_attributable(self):
+        value = self.s.version_state("correlation-a")
+        self.assertEqual(value["service"], "email-reseller")
+        self.assertEqual(value["api_version"], "v1")
+        self.assertEqual(value["correlation_id"], "correlation-a")
+        self.assertNotIn("database_url", value)
+
+    def test_capabilities_derive_from_fail_closed_runtime_state(self):
+        os.environ["LIVE_EMAIL_DELIVERY"] = "false"
+        os.environ["LIVE_SMS_DELIVERY"] = "false"
+        os.environ["LIVE_PSTN_DIALING"] = "false"
+        value = self.s.capability_state("correlation-a")
+        self.assertFalse(value["business_writes_enabled"])
+        self.assertFalse(value["external_delivery_enabled"])
+        self.assertFalse(value["live_email_enabled"])
+        self.assertFalse(value["live_sms_enabled"])
+        self.assertFalse(value["live_pstn_enabled"])
+        self.assertTrue(value["simulation_enabled"])
+
 
 if __name__ == "__main__":
     unittest.main()
