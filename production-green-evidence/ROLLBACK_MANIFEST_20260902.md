@@ -13,4 +13,7 @@ Reseller portal rollback image: sha256:7d7cf6318ac122f7e39ab679dec499dc1f6116129
 Email reseller candidate source: e612e38dae1a1e2ec5e770dcd29aabc3c2ea2b53 <!-- gitleaks:allow; protected Git SHA -->
 Email reseller candidate image: sha256:1dba872104d8876b6e9882b9d629a5b767358eb55ce93b626331f4d92b5035d4
 Email reseller rollback image: sha256:8d7bb50e8787c110a7930fadb0c69a44ba075c70cb5e035118d9f334b1211e08
+Email reseller operational source: 9371bc39b11fe2cd52c5414e84a31cc9adb80644 <!-- gitleaks:allow; protected Git SHA -->
+Email reseller operational candidate: sha256:e1dddbb9055528b702dd27d99b42ee59b1929a2de826ca966075bd0b59e5e005
+Email reseller current rollback image: sha256:1dba872104d8876b6e9882b9d629a5b767358eb55ce93b626331f4d92b5035d4
 Filesystem reserve rollback: verify sufficient free blocks, then run tune2fs -m 5 /dev/md2.
