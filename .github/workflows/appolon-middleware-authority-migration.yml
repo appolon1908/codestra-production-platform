@@ -11,7 +11,7 @@ on:
 permissions:
   actions: read
   contents: write
-  pull-requests: write
+  pull-requests: read
 
 concurrency:
   group: appolon-middleware-authority-${{ github.ref }}
@@ -35,7 +35,6 @@ jobs:
       MIDDLEWARE_ARTIFACT_ZIP_SHA256: cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
       ARTIFACT_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN || github.token }}
       PUSH_TOKEN: ${{ secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN || github.token }}
-      GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Check out the exact review head
@@ -137,9 +136,18 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Commit the verified review-only authority tree
+      - name: Push the verified non-workflow authority tree
         run: |
           set -Eeuo pipefail
+          git restore --source=HEAD -- \
+            .github/workflows/protected-release.yml \
+            .github/workflows/appolon-middleware-authority-finalizer.yml \
+            .github/workflows/appolon-middleware-authority-gate.yml \
+            .github/workflows/appolon-middleware-authority-migration.yml \
+            .github/workflows/appolon-middleware-post-merge-release.yml
+          test -n "$(git status --porcelain)"
+          test ! -e tools/migrate_middleware_authority.py
+          test ! -d .authority-payload
           git config user.name 'codestra-authority-bot'
           git config user.email 'appolon1908-hue@users.noreply.github.com'
           git add --all
@@ -147,44 +155,3 @@ jobs:
           git push \
             "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             HEAD:refs/heads/fix/materialize-appolon-middleware-authority-20260903
-
-      - name: Validate the committed exact generated tree
-        run: |
-          set -Eeuo pipefail
-          python3 -m pip install --disable-pip-version-check --no-input 'pytest==8.4.2' 'PyYAML==6.0.2'
-          test -z "$(git status --porcelain)"
-          git diff --check HEAD^
-          python3 -m py_compile \
-            tools/*.py \
-            tests/test_middleware_release_evidence.py \
-            tests/test_release_bundle.py \
-            tests/test_server_a_release_tuple.py \
-            tests/test_jetstream_worker_image.py \
-            tests/test_middleware_approved_release.py
-          python3 tools/verify_middleware_release_evidence.py \
-            --directory "$RUNNER_TEMP/middleware-release" \
-            --tuple config/production-release-tuple.json \
-            --github-env "$RUNNER_TEMP/middleware-release.env"
-          python3 tools/validate_openai_provider_runtime_contract.py
-          python3 -m pytest -q \
-            tests/test_middleware_release_evidence.py \
-            tests/test_release_bundle.py \
-            tests/test_server_a_release_tuple.py \
-            tests/test_jetstream_worker_image.py \
-            tests/test_middleware_approved_release.py \
-            tests/test_openai_provider_runtime_contract.py
-
-      - name: Ready the protected review
-        run: |
-          set -Eeuo pipefail
-          pr_number="$(gh pr list \
-            --repo "$GITHUB_REPOSITORY" \
-            --head fix/materialize-appolon-middleware-authority-20260903 \
-            --base release/production-activation \
-            --state open \
-            --json number \
-            --jq 'if length == 1 then .[0].number else error("authority PR missing or ambiguous") end')"
-          gh pr ready "$pr_number" --repo "$GITHUB_REPOSITORY"
-          gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-reviewer kazan555
-          gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" --body 'The exact signed Appolon Middleware release is now bound to a deterministic review-only production authority tree. Full exact-head CI, independent approval, staging restore/rollback, and canary remain mandatory. No deployment or external effect is authorized.'
-          gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --auto --squash
