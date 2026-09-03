@@ -77,7 +77,7 @@ jobs:
           scripts/validate_odoo_crm_call_followup_extensions.py
 
       - name: Validate middleware namespace and replay contract
-        run: python tests/test_call_followup_automation_middleware_contract.py
+        run: PYTHONPATH=. python tests/test_call_followup_automation_middleware_contract.py
 
       - name: Validate consolidated source contracts
         run: python scripts/validate_odoo_crm_call_followup_extensions.py
