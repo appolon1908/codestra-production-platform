@@ -144,6 +144,20 @@ class TestCodestraCrmCallFollowupAutomationHardening(
         ):
             self.outbox._delivery_config()
 
+    def test_sequential_enqueue_reuses_existing_event_without_insert_error(self):
+        first = self.outbox.enqueue_followup_events(self.followup)
+        second = self.outbox.enqueue_followup_events(self.followup)
+
+        self.assertEqual(first.ids, second.ids)
+
+    def test_manager_can_dead_letter_through_internal_write_boundary(self):
+        event = self._event()
+
+        event.with_user(self.manager).action_mark_dead()
+
+        self.assertEqual(event.state, "dead")
+        self.assertEqual(event.last_error, "manually_dead_lettered")
+
     def test_wire_envelope_uses_one_accepted_namespace_and_stable_metadata(self):
         event = self._event()
         config = self._config()

@@ -13,9 +13,13 @@ import uuid
 from datetime import timezone
 
 from odoo import _, api, fields, models
-from odoo.exceptions import ValidationError
+from odoo.exceptions import AccessError, ValidationError
 
-from .outbox import MAX_RESPONSE_BYTES, _NoRedirectHandler
+from .outbox import (
+    MANUAL_RETRY_ATTEMPTS,
+    MAX_RESPONSE_BYTES,
+    _NoRedirectHandler,
+)
 
 
 MAX_SECRET_FILE_BYTES = 4096
@@ -143,6 +147,96 @@ class CodestraCrmCallFollowupAutomationHardening(models.Model):
                 )
             )
         return super()._delivery_config()
+
+    @api.model
+    def _enqueue(
+        self,
+        *,
+        event_type,
+        followup,
+        payload,
+        idempotency_key,
+        calendar_event=False,
+        occurred_at=False,
+    ):
+        payload_sha256 = self._payload_sha256(payload)
+        existing = self.sudo().search(
+            [("idempotency_key", "=", idempotency_key)],
+            limit=1,
+        )
+        if existing:
+            if (
+                existing.event_type != event_type
+                or existing.payload_sha256 != payload_sha256
+            ):
+                raise ValidationError(
+                    _(
+                        "The automation idempotency key already exists with "
+                        "a different immutable event."
+                    )
+                )
+            return existing
+        return super()._enqueue(
+            event_type=event_type,
+            followup=followup,
+            payload=payload,
+            idempotency_key=idempotency_key,
+            calendar_event=calendar_event,
+            occurred_at=occurred_at,
+        )
+
+    def action_retry_now(self):
+        if not self.env.user.has_group(
+            "codestra_crm_call_followup.group_call_followup_manager"
+        ):
+            raise AccessError(
+                _("Only a call-follow-up manager may retry automation.")
+            )
+        for record in self:
+            if record.state not in {"retry", "dead"}:
+                raise ValidationError(
+                    _("Only retry or dead-letter events can be retried.")
+                )
+            record.sudo()._write_delivery(
+                {
+                    "state": "pending",
+                    "max_attempts": max(
+                        record.max_attempts,
+                        record.attempt_count + MANUAL_RETRY_ATTEMPTS,
+                    ),
+                    "manual_retry_count": record.manual_retry_count + 1,
+                    "next_attempt_at": fields.Datetime.now(),
+                    "locked_at": False,
+                    "lease_token": False,
+                    "last_error": False,
+                }
+            )
+        return True
+
+    def action_mark_dead(self):
+        if not self.env.user.has_group(
+            "codestra_crm_call_followup.group_call_followup_manager"
+        ):
+            raise AccessError(
+                _("Only a call-follow-up manager may dead-letter automation.")
+            )
+        for record in self:
+            if record.state not in {"pending", "retry"}:
+                raise ValidationError(
+                    _(
+                        "Only pending or retry events can be manually "
+                        "dead-lettered."
+                    )
+                )
+        self.sudo()._write_delivery(
+            {
+                "state": "dead",
+                "locked_at": False,
+                "lease_token": False,
+                "last_error": "manually_dead_lettered",
+            }
+        )
+        return True
 
     def _stable_correlation_id(self):
         self.ensure_one()

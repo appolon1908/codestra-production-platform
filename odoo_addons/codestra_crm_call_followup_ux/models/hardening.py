@@ -17,6 +17,10 @@ class CodestraCrmCallFollowupUxHardening(models.Model):
         except (TypeError, ValueError):
             batch_size = 500
 
+        # The selection below is raw SQL and must observe pending ORM writes
+        # made earlier in the same transaction, including tests and manual
+        # snooze actions.
+        self.flush_model(["state", "popup_completed_at", "snoozed_until"])
         now = fields.Datetime.now()
         self.env.cr.execute(
             f"""

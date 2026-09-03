@@ -1,4 +1,4 @@
-from odoo import _, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 
 
@@ -13,6 +13,21 @@ class CodestraCrmPostCallWizardUx(models.TransientModel):
         related="followup_id.snooze_count",
         readonly=True,
     )
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        prepared = []
+        for raw_values in vals_list:
+            values = dict(raw_values)
+            if not values.get("disposition"):
+                followup = self.env[
+                    "codestra.crm.call.followup"
+                ].browse(values.get("followup_id")).exists()
+                values["disposition"] = (
+                    followup.disposition if followup else False
+                ) or "contacted"
+            prepared.append(values)
+        return super().create(prepared)
 
     def _snooze_and_close(self, minutes):
         self.ensure_one()

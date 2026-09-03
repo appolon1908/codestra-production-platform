@@ -5,7 +5,7 @@
         <field name="model">codestra.crm.post.call.wizard</field>
         <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_crm_post_call_wizard_form"/>
         <field name="arch" type="xml">
-            <xpath expr="//div[contains(@class, 'o_codestra_identity_card')]" position="after">
+            <xpath expr="//div[hasclass('o_codestra_identity_card')]" position="after">
                 <div class="o_codestra_post_call_actions">
                     <div class="o_codestra_post_call_actions__copy">
                         <strong>Customer context</strong>
