@@ -1,9 +1,9 @@
-name: Stage exact Appolon Middleware authority binding review
+name: Generate exact Appolon Middleware authority binding repair
 
 on:
   push:
     branches:
-      - release/appolon-middleware-authority-20260903
+      - fix/materialize-appolon-middleware-authority-20260903
     paths:
       - tools/migrate_middleware_authority.py
       - .github/workflows/appolon-middleware-authority-migration.yml
@@ -48,7 +48,7 @@ jobs:
       - name: Prove branch and source identity
         run: |
           set -Eeuo pipefail
-          test "$GITHUB_REF" = 'refs/heads/release/appolon-middleware-authority-20260903'
+          test "$GITHUB_REF" = 'refs/heads/fix/materialize-appolon-middleware-authority-20260903'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
           test -n "$ARTIFACT_TOKEN"
@@ -140,14 +140,14 @@ jobs:
           git commit -m 'release: bind exact signed Appolon Middleware authority [authority-generated]'
           git push \
             "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            HEAD:refs/heads/release/appolon-middleware-authority-20260903
+            HEAD:refs/heads/fix/materialize-appolon-middleware-authority-20260903
 
       - name: Ready the protected review
         run: |
           set -Eeuo pipefail
           pr_number="$(gh pr list \
             --repo "$GITHUB_REPOSITORY" \
-            --head release/appolon-middleware-authority-20260903 \
+            --head fix/materialize-appolon-middleware-authority-20260903 \
             --base release/production-activation \
             --state open \
             --json number \
