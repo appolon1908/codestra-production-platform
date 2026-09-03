@@ -55,14 +55,23 @@ expects this file at
 `/etc/kyqra-telnexa-integration/tenant-bindings.json` and mounts it as a
 read-only runtime secret without committing tenant identifiers to Git.
 
-Middleware forwarding is independently fail-closed. New authenticated ingress
-events become dispatch-eligible only when `MIDDLEWARE_FORWARDING_ENABLED=true`
-and an HTTPS `MIDDLEWARE_EVENTS_URL` plus the dedicated per-source API-key and
-HMAC authorities are present. Middleware mode can forward every governed
-provider source. Shared mode can forward only the Telnexa DLR/failure events it
-produces; it neither exposes the general provider-ingress routes nor consumes
-credentials for other provider identities. Existing database rows migrate with
-`dispatch_eligible=0`; the dispatcher never replays that historical quarantine.
+Middleware forwarding is independently fail-closed. New authenticated events
+with an exact governed mapping remain durably dispatch-eligible while the
+dispatcher is paused. They are dispatched only when
+`MIDDLEWARE_FORWARDING_ENABLED=true` and an HTTPS `MIDDLEWARE_EVENTS_URL`,
+`MIDDLEWARE_EVENTS_CA_FILE`,
+`MIDDLEWARE_EVENTS_CLIENT_CERT_FILE`, and
+`MIDDLEWARE_EVENTS_CLIENT_KEY_FILE` plus the dedicated per-source API-key and
+HMAC authorities are present. The client constructs one hostname-verifying
+TLS 1.2-or-newer context at startup, refuses every HTTP redirect before
+presenting credentials or the client identity, and refuses to start forwarding
+when the CA, certificate, or private key is unavailable. Middleware mode can forward
+every governed provider source. Shared mode can forward only the Telnexa
+DLR/failure events it produces; it neither exposes the general provider-ingress
+routes nor consumes credentials for other provider identities. Existing
+database rows migrate with `dispatch_eligible=0`; the dispatcher never replays
+that historical quarantine. Pausing forwarding does not quarantine new mapped
+provider receipts that the gateway has already acknowledged.
 Ingress paths without an exact governed `EVENT_TYPES` mapping also remain
 dispatch-ineligible, even when forwarding is enabled.
 Mapped callbacks must supply a non-empty bounded `tenant_id` before they are
@@ -75,8 +84,10 @@ exact `replayed_event_id` response reconciles a lost receipt only after a prior
 attempt reached an unknown result; it cannot authorize a first attempt. Every
 attempt is durably claimed as outcome-unknown before network I/O, and an
 expired claim is retryable after restart without overlapping a live request. The
-committed shared-mode Compose contract enables only this source-scoped status
-forwarding while keeping both carrier-delivery authorization gates disabled.
+committed shared-mode Compose contract keeps this source-scoped status
+forwarding disabled until a separate reviewed overlay installs the outbound
+mTLS identity and exact downstream URL. Both carrier-delivery authorization
+gates also remain disabled.
 
 Outbound SMS idempotency is reserved before any Jasmin interaction. A short
 preflight lease permits safe recovery after a crash or dependency failure only

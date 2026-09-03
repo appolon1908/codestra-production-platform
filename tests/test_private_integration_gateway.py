@@ -46,6 +46,9 @@ def clean_gateway_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "SERVICE_TENANT_BINDINGS_FILE",
         "MIDDLEWARE_FORWARDING_ENABLED",
         "MIDDLEWARE_EVENTS_URL",
+        "MIDDLEWARE_EVENTS_CA_FILE",
+        "MIDDLEWARE_EVENTS_CLIENT_CERT_FILE",
+        "MIDDLEWARE_EVENTS_CLIENT_KEY_FILE",
         "JASMIN_HTTP_URL",
         "JASMIN_DLR_CALLBACK_URL",
         "JASMIN_RECONCILIATION_SECRET",
@@ -86,6 +89,9 @@ def settings(tmp_path: Path, **changes):
         "production_change_id": "",
         "middleware_forwarding_enabled": False,
         "downstream_url": "",
+        "downstream_ca_file": str(tmp_path / "middleware-ca.crt"),
+        "downstream_client_cert_file": str(tmp_path / "middleware-client.crt"),
+        "downstream_client_key_file": str(tmp_path / "middleware-client.key"),
         "jasmin_url": "http://jasmin:1401",
         "jasmin_dlr_callback_url": "http://gateway:8080/internal/v1/jasmin/dlr",
         "service_tenant_bindings": {"telnexa": frozenset({"tenant-a"})},
@@ -167,6 +173,33 @@ def test_delivery_defaults_fail_closed(tmp_path: Path, monkeypatch: pytest.Monke
     assert value.live_submission_enabled is False
     assert value.production_delivery_authorized is False
     assert value.service_tenant_bindings == {}
+
+
+def test_forwarding_environment_binds_outbound_mtls_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    values = {
+        "INTEGRATION_DB": str(tmp_path / "forwarding.db"),
+        "MIDDLEWARE_FORWARDING_ENABLED": "true",
+        "MIDDLEWARE_EVENTS_URL": "https://middleware.invalid/v1/events",
+        "MIDDLEWARE_EVENTS_CA_FILE": str(tmp_path / "ca.crt"),
+        "MIDDLEWARE_EVENTS_CLIENT_CERT_FILE": str(tmp_path / "client.crt"),
+        "MIDDLEWARE_EVENTS_CLIENT_KEY_FILE": str(tmp_path / "client.key"),
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    settings_value = gateway.Settings.from_environment()
+    assert settings_value.middleware_forwarding_enabled is True
+    assert settings_value.downstream_url == values["MIDDLEWARE_EVENTS_URL"]
+    assert settings_value.downstream_ca_file == values["MIDDLEWARE_EVENTS_CA_FILE"]
+    assert (
+        settings_value.downstream_client_cert_file
+        == values["MIDDLEWARE_EVENTS_CLIENT_CERT_FILE"]
+    )
+    assert (
+        settings_value.downstream_client_key_file
+        == values["MIDDLEWARE_EVENTS_CLIENT_KEY_FILE"]
+    )
 
 
 def test_service_tenant_bindings_are_strict_and_file_backed(
@@ -653,6 +686,20 @@ def test_live_delivery_requires_second_gate_and_change_id(tmp_path: Path):
 def test_middleware_forwarding_is_explicit_https_and_source_bounded(tmp_path: Path):
     with pytest.raises(ValueError, match="MIDDLEWARE_EVENTS_URL"):
         settings(tmp_path, middleware_forwarding_enabled=True)
+    with pytest.raises(ValueError, match="outbound mTLS material"):
+        settings(
+            tmp_path,
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+            downstream_ca_file="",
+        )
+    with pytest.raises(ValueError, match="paths must be absolute"):
+        settings(
+            tmp_path,
+            middleware_forwarding_enabled=True,
+            downstream_url="https://middleware.invalid/v1/events",
+            downstream_ca_file="relative-ca.crt",
+        )
     shared = settings(
         tmp_path,
         middleware_forwarding_enabled=True,
@@ -669,6 +716,122 @@ def test_middleware_forwarding_is_explicit_https_and_source_bounded(tmp_path: Pa
         downstream_url="https://middleware.invalid/v1/events",
     )
     assert value.middleware_forwarding_enabled is True
+
+
+def test_middleware_tls_context_requires_files_and_loads_client_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    value = settings(
+        tmp_path,
+        middleware_forwarding_enabled=True,
+        downstream_url="https://middleware.invalid/v1/events",
+    )
+    with pytest.raises(RuntimeError, match="mTLS material is unavailable"):
+        gateway.build_middleware_tls_context(value)
+
+    for path_value in (
+        value.downstream_ca_file,
+        value.downstream_client_cert_file,
+        value.downstream_client_key_file,
+    ):
+        Path(path_value).write_text("test fixture", encoding="utf-8")
+
+    class Context:
+        minimum_version = None
+        loaded = None
+
+        def load_cert_chain(self, *, certfile, keyfile):
+            self.loaded = (certfile, keyfile)
+
+    context = Context()
+    calls = []
+
+    def create_default_context(*, cafile):
+        calls.append(cafile)
+        return context
+
+    monkeypatch.setattr(gateway.ssl, "create_default_context", create_default_context)
+    assert gateway.build_middleware_tls_context(value) is context
+    assert calls == [value.downstream_ca_file]
+    assert context.minimum_version == gateway.ssl.TLSVersion.TLSv1_2
+    assert context.loaded == (
+        value.downstream_client_cert_file,
+        value.downstream_client_key_file,
+    )
+
+
+def test_gateway_builds_outbound_mtls_context_before_default_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    value = settings(
+        tmp_path,
+        middleware_forwarding_enabled=True,
+        downstream_url="https://middleware.invalid/v1/events",
+    )
+    sentinel = object()
+    monkeypatch.setattr(
+        gateway, "build_middleware_tls_context", lambda supplied: sentinel
+    )
+    app = gateway.production_gateway(value, store(tmp_path))
+    assert app.middleware_tls_context is sentinel
+
+
+def test_middleware_transport_refuses_redirects_before_presenting_identity(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    handlers = []
+    calls = []
+
+    class Response:
+        status = 202
+
+    class Opener:
+        def open(self, request, timeout):
+            calls.append((request, timeout))
+            return Response()
+
+    def build_opener(*supplied_handlers):
+        handlers.extend(supplied_handlers)
+        return Opener()
+
+    monkeypatch.setattr(gateway.urllib.request, "build_opener", build_opener)
+    request = urllib.request.Request(
+        "https://middleware.invalid/v1/events",
+        data=b"{}",
+        headers={"Authorization": "Bearer synthetic"},
+        method="POST",
+    )
+    context = gateway.ssl.SSLContext(gateway.ssl.PROTOCOL_TLS_CLIENT)
+    response = gateway.open_middleware_request(
+        request,
+        timeout=10,
+        context=context,
+        urlopen=gateway.urllib.request.urlopen,
+    )
+
+    assert response.status == 202
+    assert calls == [(request, 10)]
+    assert any(
+        isinstance(handler, gateway._NoRedirectHandler)
+        for handler in handlers
+    )
+    assert any(
+        isinstance(handler, urllib.request.HTTPSHandler)
+        for handler in handlers
+    )
+    redirect_handler = next(
+        handler
+        for handler in handlers
+        if isinstance(handler, gateway._NoRedirectHandler)
+    )
+    assert redirect_handler.redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://other.invalid/capture",
+    ) is None
 
 
 def test_only_private_jasmin_service_is_accepted(tmp_path: Path):
@@ -1362,11 +1525,27 @@ def test_ingress_authentication_replay_and_payload_conflict_fail_closed(
     app = gateway.Gateway(
         settings(tmp_path, mode="middleware"), store(tmp_path), clock=lambda: now
     )
-    body = json.dumps({"message_id": "message-1"}, separators=(",", ":")).encode()
+    body = json.dumps(
+        {
+            "message_id": "message-1",
+            "tenant_id": "tenant-a",
+            "correlation_id": "correlation-auth-replay-1",
+            "event_type": "klyrow.email.delivered",
+        },
+        separators=(",", ":"),
+    ).encode()
     headers = signed_headers("klyrow", body, now, "event-0001")
     assert app.ingress("klyrow", "/api/v1/klyrow/events", body, headers)[0] == 202
     assert app.ingress("klyrow", "/api/v1/klyrow/events", body, headers)[0] == 409
-    changed = json.dumps({"message_id": "message-2"}, separators=(",", ":")).encode()
+    changed = json.dumps(
+        {
+            "message_id": "message-2",
+            "tenant_id": "tenant-a",
+            "correlation_id": "correlation-auth-replay-1",
+            "event_type": "klyrow.email.delivered",
+        },
+        separators=(",", ":"),
+    ).encode()
     changed_headers = signed_headers("klyrow", changed, now, "event-0001")
     assert app.ingress("klyrow", "/api/v1/klyrow/events", changed, changed_headers)[0] == 409
 
@@ -1492,7 +1671,11 @@ def test_authentication_header_names_are_case_insensitive(
     app = gateway.Gateway(
         settings(tmp_path, mode="middleware"), store(tmp_path), clock=lambda: now
     )
-    body = b'{"message_id":"message-case"}'
+    body = (
+        b'{"message_id":"message-case","tenant_id":"tenant-a",'
+        b'"correlation_id":"correlation-case-1",'
+        b'"event_type":"klyrow.email.delivered"}'
+    )
     headers = {
         key.swapcase(): value
         for key, value in signed_headers("klyrow", body, now, "event-case-1").items()
@@ -1515,6 +1698,8 @@ def test_kyqra_entity_duplicate_requires_the_same_payload(
         "source_url": "https://example.invalid/record",
         "business_name": "Synthetic",
         "crawl_timestamp": "2026-09-01T00:00:00Z",
+        "tenant_id": "tenant-a",
+        "correlation_id": "correlation-entity-1",
     }
     body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     first = signed_headers("kyqra", body, now, "event-entity-1")
@@ -1544,7 +1729,14 @@ def test_kyqra_lifecycle_paths_do_not_conflict_on_shared_job_id(
         ),
         start=1,
     ):
-        body = json.dumps({"job_id": "job-shared"}, separators=(",", ":")).encode()
+        body = json.dumps(
+            {
+                "job_id": "job-shared",
+                "tenant_id": "tenant-a",
+                "correlation_id": f"correlation-life-{index}",
+            },
+            separators=(",", ":"),
+        ).encode()
         headers = signed_headers("kyqra", body, now, f"event-life-{index}")
         assert app.ingress("kyqra", path, body, headers)[0] == 202
 
@@ -1729,9 +1921,11 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     monkeypatch.setenv("KLYROW_MIDDLEWARE_API_KEY", "test-klyrow-key")
     monkeypatch.setenv("KLYROW_WEBHOOK_SECRET", "test-klyrow-secret")
     requests = []
+    transports = []
 
-    def urlopen(request, **_kwargs):
+    def urlopen(request, **kwargs):
         requests.append(request)
+        transports.append(kwargs)
         return dispatch_receipt(request)
 
     state = store(tmp_path)
@@ -1759,6 +1953,7 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
     assert app.ingress("klyrow", "/api/v1/klyrow/events", body, headers)[0] == 202
     assert app.dispatch_once() == 1
     assert len(requests) == 1
+    assert transports == [{"timeout": 10, "context": app.middleware_tls_context}]
     request = requests[0]
     assert request.full_url == "https://middleware.invalid/v1/events"
     sent = json.loads(request.data)
@@ -1847,8 +2042,7 @@ def test_supported_klyrow_status_is_dispatch_eligible(
         settings(
             tmp_path,
             mode="middleware",
-            middleware_forwarding_enabled=True,
-            downstream_url="https://middleware.invalid/v1/events",
+            middleware_forwarding_enabled=False,
         ),
         state,
         clock=lambda: now,
@@ -1874,6 +2068,7 @@ def test_supported_klyrow_status_is_dispatch_eligible(
             "SELECT dispatch_eligible,state FROM events"
         ).fetchone()
     assert dict(row) == {"dispatch_eligible": 1, "state": "queued"}
+    assert app.dispatch_once() == 0
 
 
 def test_unrelated_success_response_cannot_mark_event_delivered(
@@ -2626,6 +2821,7 @@ def test_dispatcher_startup_requires_credentials_and_starts_daemon(
             downstream_url="https://middleware.invalid/v1/events",
         ),
         store(tmp_path),
+        middleware_tls_context=object(),
     )
     with pytest.raises(RuntimeError, match="KYQRA_MIDDLEWARE_API_KEY"):
         gateway.start_dispatcher(app)
@@ -2662,6 +2858,7 @@ def test_dispatcher_startup_requires_credentials_and_starts_daemon(
             downstream_url="https://middleware.invalid/v1/events",
         ),
         store(tmp_path),
+        middleware_tls_context=object(),
     )
     gateway.start_dispatcher(shared_app)
     assert len(started) == 2
@@ -3207,8 +3404,7 @@ def test_attempt_bound_rejection_dlr_supersedes_synchronous_success(
             live_submission_enabled=True,
             production_delivery_authorized=True,
             production_change_id="CHG-JASMIN-LATE-REJECTION",
-            middleware_forwarding_enabled=True,
-            downstream_url="https://10.40.0.2/v1/events",
+            middleware_forwarding_enabled=False,
         ),
         state,
         clock=lambda: now,
@@ -3248,6 +3444,7 @@ def test_attempt_bound_rejection_dlr_supersedes_synchronous_success(
     assert event["path"] == gateway.TELNEXA_REJECTED_EVENT_PATH
     assert event["entity_key"] == "message-0001"
     assert event["dispatch_eligible"] == 1
+    assert app.dispatch_once() == 0
     projection = json.loads(event["payload"])
     assert projection == {
         "adapter_message_id": result["adapter_message_id"],
@@ -4180,7 +4377,7 @@ def test_compose_is_digest_only_nonroot_and_fail_closed():
     )
     assert service["environment"]["LIVE_SUBMISSION_ENABLED"] == "false"
     assert service["environment"]["PRODUCTION_DELIVERY_AUTHORIZED"] == "false"
-    assert service["environment"]["MIDDLEWARE_FORWARDING_ENABLED"] == "true"
+    assert service["environment"]["MIDDLEWARE_FORWARDING_ENABLED"] == "false"
     assert compose["networks"]["private_api"]["internal"] is True
     assert "/etc/kyqra-telnexa-integration/shared.env" in service["env_file"][0]
 
