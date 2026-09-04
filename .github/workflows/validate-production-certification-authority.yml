@@ -6,7 +6,6 @@ on:
       - release/production-activation
     paths:
       - "PRODUCTION-SOURCE-LOCK.yaml"
-      - "IMMUTABLE-CANDIDATE-MATRIX.yaml"
       - "config/production-certification-authority.v1.json"
       - "tools/reconcile_production_certification.py"
       - "tests/test_production_certification_authority.py"
@@ -17,7 +16,6 @@ on:
       - release/production-activation
     paths:
       - "PRODUCTION-SOURCE-LOCK.yaml"
-      - "IMMUTABLE-CANDIDATE-MATRIX.yaml"
       - "config/production-certification-authority.v1.json"
       - "tools/reconcile_production_certification.py"
       - "tests/test_production_certification_authority.py"
@@ -37,6 +35,11 @@ permissions:
 defaults:
   run:
     shell: bash
+
+env:
+  CANDIDATE_MATRIX_REPOSITORY: appolon1908-hue/codestra-production-runtime-authority
+  CANDIDATE_MATRIX_COMMIT: 470591454b681092cc8fdde57b2a921802dffd3f
+  CANDIDATE_MATRIX_PATH: IMMUTABLE-CANDIDATE-MATRIX.yaml
 
 jobs:
   validate-authority:
@@ -64,6 +67,41 @@ jobs:
 
       - name: Install pinned validator dependency
         run: python3 -m pip install --disable-pip-version-check --no-cache-dir PyYAML==6.0.3
+
+      - name: Retrieve exact external immutable candidate matrix
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import os
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          repository = os.environ["CANDIDATE_MATRIX_REPOSITORY"]
+          commit = os.environ["CANDIDATE_MATRIX_COMMIT"]
+          source_path = os.environ["CANDIDATE_MATRIX_PATH"]
+          if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+              raise SystemExit("candidate matrix commit must be a full lowercase Git SHA")
+          url = f"https://raw.githubusercontent.com/{repository}/{commit}/{source_path}"
+          request = urllib.request.Request(
+              url,
+              headers={"User-Agent": "codestra-production-certification-authority"},
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  if response.status != 200:
+                      raise SystemExit(f"candidate matrix fetch returned HTTP {response.status}")
+                  payload = response.read(4 * 1024 * 1024 + 1)
+          except (urllib.error.URLError, TimeoutError) as exc:
+              raise SystemExit(f"candidate matrix fetch failed: {exc}") from exc
+          if not payload or len(payload) > 4 * 1024 * 1024:
+              raise SystemExit("candidate matrix is empty or exceeds the 4 MiB bound")
+          destination = Path("IMMUTABLE-CANDIDATE-MATRIX.yaml")
+          destination.write_bytes(payload)
+          print(f"CANDIDATE_MATRIX_AUTHORITY={repository}@{commit}:{source_path}")
+          PY
+          test -s IMMUTABLE-CANDIDATE-MATRIX.yaml
+          test "$(git ls-files --error-unmatch IMMUTABLE-CANDIDATE-MATRIX.yaml 2>/dev/null || true)" = ""
 
       - name: Compile and run regressions
         run: |
