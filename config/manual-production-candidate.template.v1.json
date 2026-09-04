@@ -1,0 +1,133 @@
+{
+  "schema_version": "codestra.manual-production-candidate.v1",
+  "template": true,
+  "release_id": "REPLACE_WITH_REVIEWED_RELEASE_ID",
+  "controller_sha": "0000000000000000000000000000000000000000",
+  "source_lock_sha": "0000000000000000000000000000000000000000",
+  "runtime_candidate_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "created_at": "1970-01-01T00:00:00Z",
+  "traffic": {
+    "canary_percent": 1,
+    "production_percent": 100,
+    "allowed_canary_methods": [
+      "GET",
+      "HEAD"
+    ]
+  },
+  "safety": {
+    "external_effects_enabled": false,
+    "live_email_delivery": false,
+    "live_sms_delivery": false,
+    "live_pstn_dialing": false,
+    "odoo_write": false,
+    "n8n_external_delivery": false,
+    "live_trading": false,
+    "payment_execution": false
+  },
+  "components": [
+    {
+      "repository": "appolon1908-hue/Infustruction-repo",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/Keycloak",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "Codestra-SRL/codestra-middleware",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/Middleware-",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/codestra",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/beyvra-backend",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/backend2",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/beyvra-frontend",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/scrapper",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/Breero.com",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/Moneybee-Backend",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/Telnexa-web",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    },
+    {
+      "repository": "appolon1908-hue/codestra-production-platform",
+      "source_sha": "0000000000000000000000000000000000000000",
+      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "images": [],
+      "previous_images": [],
+      "enabled": true
+    }
+  ]
+}
