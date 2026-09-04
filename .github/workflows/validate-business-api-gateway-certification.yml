@@ -1,0 +1,99 @@
+name: Validate business API and gateway certification evidence
+
+on:
+  pull_request:
+    branches:
+      - release/production-activation
+    paths:
+      - "config/business-api-gateway-certification-policy.v1.json"
+      - "tools/validate_business_api_gateway_certification.py"
+      - "tests/test_business_api_gateway_certification.py"
+      - ".github/workflows/validate-business-api-gateway-certification.yml"
+  push:
+    branches:
+      - release/production-activation
+    paths:
+      - "config/business-api-gateway-certification-policy.v1.json"
+      - "tools/validate_business_api_gateway_certification.py"
+      - "tests/test_business_api_gateway_certification.py"
+      - ".github/workflows/validate-business-api-gateway-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: business-api-gateway-certification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verifier-regressions:
+    name: API and gateway fail-closed regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Compile and test certification validator
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile tools/validate_business_api_gateway_certification.py
+          python3 -m unittest tests/test_business_api_gateway_certification.py
+          python3 -m json.tool config/business-api-gateway-certification-policy.v1.json >/dev/null
+          git diff --check
+
+  protected-runtime-evidence:
+    name: Protected 15-application and 29-route evidence gate
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/production-activation' }}
+    needs:
+      - verifier-regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: staging-readonly
+    steps:
+      - name: Check out exact protected source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Materialize bounded evidence input
+        env:
+          BUSINESS_API_GATEWAY_EVIDENCE: ${{ secrets.CODESTRA_STAGING_BUSINESS_API_GATEWAY_EVIDENCE }}
+        run: |
+          set -Eeuo pipefail
+          test -n "${BUSINESS_API_GATEWAY_EVIDENCE}"
+          printf '%s' "${BUSINESS_API_GATEWAY_EVIDENCE}" > "${RUNNER_TEMP}/business-api-gateway-evidence.json"
+          chmod 0600 "${RUNNER_TEMP}/business-api-gateway-evidence.json"
+
+      - name: Validate runtime and gateway evidence
+        id: validate
+        run: |
+          set -Eeuo pipefail
+          python3 tools/validate_business_api_gateway_certification.py \
+            --evidence "${RUNNER_TEMP}/business-api-gateway-evidence.json" \
+            --result-output "${RUNNER_TEMP}/business-api-gateway-result.json"
+
+      - name: Delete raw evidence input
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/business-api-gateway-evidence.json"
+
+      - name: Upload bounded validation result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: business-api-gateway-result-${{ github.sha }}
+          path: ${{ runner.temp }}/business-api-gateway-result.json
+          if-no-files-found: error
+          retention-days: 30

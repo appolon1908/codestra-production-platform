@@ -1,0 +1,476 @@
+name: ONE CLICK — Go live read-only
+run-name: ONE CLICK Platform go live read-only • ${{ github.run_id }}
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/one-click-go-live.yml"
+      - "tests/test_one_click_go_live_workflow.py"
+      - "docs/ONE-CLICK-GO-LIVE.md"
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Start the signed release, isolated staging, rollback, and maximum 1% GET/HEAD-only live production canary
+        required: true
+        type: choice
+        options:
+          - GO_LIVE_READONLY
+        default: GO_LIVE_READONLY
+      canary_percent:
+        description: Production read-only canary percentage; must be greater than zero and no more than one
+        required: true
+        type: string
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codestra-one-click-platform-go-live
+  cancel-in-progress: false
+
+jobs:
+  policy:
+    name: Validate one-click fail-closed policy
+    if: github.repository == 'appolon1908-hue/codestra-production-platform'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact workflow source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run one-click safety contract
+        run: |
+          set -Eeuo pipefail
+          python3 tests/test_one_click_go_live_workflow.py
+          git diff --check
+
+  verify:
+    name: Verify canonical fail-closed release authority
+    needs: policy
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'appolon1908-hue/codestra-production-platform' && github.ref == 'refs/heads/release/production-activation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      orchestration_id: ${{ steps.authority.outputs.orchestration_id }}
+      platform_sha: ${{ steps.authority.outputs.platform_sha }}
+      middleware_source_sha: ${{ steps.authority.outputs.middleware_source_sha }}
+      middleware_image_digest: ${{ steps.authority.outputs.middleware_image_digest }}
+      change_id: ${{ steps.authority.outputs.change_id }}
+    env:
+      CONFIRMATION: ${{ inputs.confirmation }}
+      CANARY_PERCENT: ${{ inputs.canary_percent }}
+      ORCHESTRATOR_TOKEN: ${{ secrets.CODESTRA_RELEASE_ORCHESTRATOR_TOKEN }}
+    steps:
+      - name: Check out exact protected release authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install pinned source-lock parser
+        run: python3 -m pip install --disable-pip-version-check --no-input 'PyYAML==6.0.2'
+
+      - name: Validate source lock, tuple, and one-click request
+        id: authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test "$CONFIRMATION" = GO_LIVE_READONLY
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/release/production-activation" --jq .object.sha)" = "$GITHUB_SHA"
+          test -n "$ORCHESTRATOR_TOKEN" || {
+            echo "CODESTRA_RELEASE_ORCHESTRATOR_TOKEN must have Actions read/write access to Codestra-SRL/codestra-middleware and appolon1908-hue/Infustruction-repo" >&2
+            exit 1
+          }
+          python3 - "$CANARY_PERCENT" <<'PY'
+          import sys
+          value = float(sys.argv[1])
+          if not (0 < value <= 1):
+              raise SystemExit("canary_percent must be greater than zero and no more than one")
+          PY
+          python3 - "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+          import yaml
+
+          platform_sha, run_id, output_path = sys.argv[1:]
+          lock = yaml.safe_load(Path("PRODUCTION-SOURCE-LOCK.yaml").read_text(encoding="utf-8"))
+          release = json.loads(Path("config/production-release-tuple.json").read_text(encoding="utf-8"))
+
+          if lock.get("status") != "PASS":
+              raise SystemExit("PRODUCTION-SOURCE-LOCK.yaml is not PASS")
+          if lock.get("blockers"):
+              raise SystemExit("production source lock still contains blockers")
+
+          source_sha = release.get("middleware_source_sha")
+          image_digest = release.get("middleware_digest")
+          change_id = release.get("change_id")
+          if not isinstance(source_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", source_sha):
+              raise SystemExit("invalid middleware source SHA in release tuple")
+          if not isinstance(image_digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
+              raise SystemExit("invalid Middleware image digest in release tuple")
+          if not isinstance(change_id, str) or not re.fullmatch(r"CHG-[A-Z0-9][A-Z0-9._-]{7,127}", change_id):
+              raise SystemExit("invalid change ID in release tuple")
+
+          protected = (lock.get("middleware_authorities") or {}).get("protected_production_tuple") or {}
+          if protected.get("repository") != "Codestra-SRL/codestra-middleware":
+              raise SystemExit("canonical Middleware repository is not Codestra-SRL/codestra-middleware")
+          if protected.get("source_sha") != source_sha:
+              raise SystemExit("source-lock and release-tuple Middleware SHAs differ")
+          if protected.get("image_digest") != image_digest:
+              raise SystemExit("source-lock and release-tuple Middleware digests differ")
+          if "PENDING" in str(protected.get("authority_state", "")):
+              raise SystemExit("canonical Middleware authority is still pending")
+
+          for name, candidate in (lock.get("custom_release_candidates") or {}).items():
+              if candidate.get("deployment_authorized") is not True:
+                  raise SystemExit(f"custom release candidate is not deployment-authorized: {name}")
+
+          orchestration_id = f"platform-{platform_sha[:12]}-{run_id}"
+          values = {
+              "orchestration_id": orchestration_id,
+              "platform_sha": platform_sha,
+              "middleware_source_sha": source_sha,
+              "middleware_image_digest": image_digest,
+              "change_id": change_id,
+          }
+          with open(output_path, "a", encoding="utf-8") as handle:
+              for key, value in values.items():
+                  handle.write(f"{key}={value}\n")
+          PY
+
+  middleware:
+    name: Verify or build canonical signed Middleware candidate
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ secrets.CODESTRA_RELEASE_ORCHESTRATOR_TOKEN }}
+      TARGET_REPOSITORY: Codestra-SRL/codestra-middleware
+      RELEASE_WORKFLOW: exact-main-production-release.yml
+      SOURCE_SHA: ${{ needs.verify.outputs.middleware_source_sha }}
+      EXPECTED_IMAGE_DIGEST: ${{ needs.verify.outputs.middleware_image_digest }}
+      RELEASE_REQUEST_B64: ${{ secrets.CODESTRA_MIDDLEWARE_RELEASE_REQUEST_B64 }}
+    steps:
+      - name: Require canonical source and successful required CI
+        id: main
+        run: |
+          set -Eeuo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          main_sha="$(gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
+          comparison="$(gh api "repos/${TARGET_REPOSITORY}/compare/${SOURCE_SHA}...${main_sha}")"
+          jq -e --arg source "$SOURCE_SHA" '
+            .merge_base_commit.sha == $source and
+            (.status == "ahead" or .status == "identical")
+          ' <<<"$comparison" >/dev/null
+          status_payload="$(gh api "repos/${TARGET_REPOSITORY}/commits/${SOURCE_SHA}/status")"
+          jq -e '
+            any(.statuses[]?;
+              .context == "codestra/required-ci" and .state == "success")
+          ' <<<"$status_payload" >/dev/null
+          echo "main_sha=${main_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Reuse a matching certified exact-main release
+        id: existing
+        run: |
+          set -Eeuo pipefail
+          work="$RUNNER_TEMP/existing-middleware-release"
+          mkdir -m 0700 "$work"
+          found=false
+          run_id=""
+          artifact_name=""
+          payload="$(gh api "repos/${TARGET_REPOSITORY}/actions/workflows/${RELEASE_WORKFLOW}/runs?event=workflow_dispatch&status=success&per_page=100")"
+          while IFS=$'\t' read -r candidate_run candidate_attempt; do
+            [[ "$candidate_run" =~ ^[1-9][0-9]*$ ]] || continue
+            expected_name="exact-main-production-${SOURCE_SHA}-${candidate_run}-${candidate_attempt}"
+            artifacts="$(gh api "repos/${TARGET_REPOSITORY}/actions/runs/${candidate_run}/artifacts?per_page=100")"
+            expired="$(
+              jq -r --arg name "$expected_name" '
+                [.artifacts[] | select(.name == $name)] | first | .expired // true
+              ' <<<"$artifacts"
+            )"
+            if [[ "$expired" != false ]]; then
+              continue
+            fi
+            rm -rf "$work/content"
+            mkdir -m 0700 "$work/content"
+            gh run download "$candidate_run" \
+              --repo "$TARGET_REPOSITORY" \
+              --name "$expected_name" \
+              --dir "$work/content"
+            (
+              cd "$work/content"
+              sha256sum --check --strict SHA256SUMS
+            )
+            test "$(sed -n 's/^SOURCE_SHA=//p' "$work/content/RELEASE.env")" = "$SOURCE_SHA"
+            digest="$(sed -n 's/^IMAGE_DIGEST=//p' "$work/content/RELEASE.env")"
+            test "$digest" = "$EXPECTED_IMAGE_DIGEST"
+            found=true
+            run_id="$candidate_run"
+            artifact_name="$expected_name"
+            break
+          done < <(
+            jq -r '
+              [.workflow_runs[] | select(.conclusion == "success")]
+              | sort_by(.created_at)
+              | reverse[]
+              | [.id, .run_attempt] | @tsv
+            ' <<<"$payload"
+          )
+          echo "found=${found}" >> "$GITHUB_OUTPUT"
+          if [[ "$found" == true ]]; then
+            echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=${artifact_name}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate canonical release request when a build is required
+        id: request
+        if: steps.existing.outputs.found != 'true'
+        run: |
+          set -Eeuo pipefail
+          test -n "$RELEASE_REQUEST_B64" || {
+            echo "CODESTRA_MIDDLEWARE_RELEASE_REQUEST_B64 is required because no matching signed release artifact exists" >&2
+            exit 1
+          }
+          umask 077
+          printf '%s' "$RELEASE_REQUEST_B64" | base64 --decode > "$RUNNER_TEMP/middleware-release-request.json"
+          jq -cS . "$RUNNER_TEMP/middleware-release-request.json" > "$RUNNER_TEMP/middleware-release-request.canonical.json"
+          cmp --silent "$RUNNER_TEMP/middleware-release-request.json" "$RUNNER_TEMP/middleware-release-request.canonical.json"
+          jq -e --arg sha "$SOURCE_SHA" '
+            (keys | sort) == ([
+              "authority_artifact",
+              "authority_document_sha256",
+              "authority_run_id",
+              "merged_pr_number",
+              "source_sha",
+              "vex_artifact",
+              "vex_run_id"
+            ] | sort) and
+            .source_sha == $sha and
+            (.merged_pr_number | tostring | test("^[1-9][0-9]*$")) and
+            (.authority_run_id | tostring | test("^[1-9][0-9]*$")) and
+            (.authority_artifact | test("^security-owner-authority-[1-9][0-9]*-[1-9][0-9]*$")) and
+            (.authority_document_sha256 | test("^[0-9a-f]{64}$")) and
+            (.vex_run_id | tostring | test("^[1-9][0-9]*$")) and
+            (.vex_artifact | test("^production-openvex-[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$"))
+          ' "$RUNNER_TEMP/middleware-release-request.json" >/dev/null
+          {
+            echo "merged_pr_number=$(jq -r .merged_pr_number "$RUNNER_TEMP/middleware-release-request.json")"
+            echo "authority_run_id=$(jq -r .authority_run_id "$RUNNER_TEMP/middleware-release-request.json")"
+            echo "authority_artifact=$(jq -r .authority_artifact "$RUNNER_TEMP/middleware-release-request.json")"
+            echo "authority_document_sha256=$(jq -r .authority_document_sha256 "$RUNNER_TEMP/middleware-release-request.json")"
+            echo "vex_run_id=$(jq -r .vex_run_id "$RUNNER_TEMP/middleware-release-request.json")"
+            echo "vex_artifact=$(jq -r .vex_artifact "$RUNNER_TEMP/middleware-release-request.json")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch exact-main signed production release
+        id: dispatch
+        if: steps.existing.outputs.found != 'true'
+        run: |
+          set -Eeuo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh api --method POST \
+            "repos/${TARGET_REPOSITORY}/actions/workflows/${RELEASE_WORKFLOW}/dispatches" \
+            -f ref=main \
+            -f "inputs[source_sha]=${SOURCE_SHA}" \
+            -f "inputs[merged_pr_number]=${{ steps.request.outputs.merged_pr_number }}" \
+            -f "inputs[authority_run_id]=${{ steps.request.outputs.authority_run_id }}" \
+            -f "inputs[authority_artifact]=${{ steps.request.outputs.authority_artifact }}" \
+            -f "inputs[authority_document_sha256]=${{ steps.request.outputs.authority_document_sha256 }}" \
+            -f "inputs[vex_run_id]=${{ steps.request.outputs.vex_run_id }}" \
+            -f "inputs[vex_artifact]=${{ steps.request.outputs.vex_artifact }}"
+          echo "started_at=${started_at}" >> "$GITHUB_OUTPUT"
+
+      - name: Locate exact-main production release
+        id: child
+        if: steps.existing.outputs.found != 'true'
+        env:
+          STARTED_AT: ${{ steps.dispatch.outputs.started_at }}
+          TARGET_MAIN_SHA: ${{ steps.main.outputs.main_sha }}
+        run: |
+          set -Eeuo pipefail
+          run_id=""
+          for _ in $(seq 1 90); do
+            payload="$(gh api "repos/${TARGET_REPOSITORY}/actions/workflows/${RELEASE_WORKFLOW}/runs?event=workflow_dispatch&branch=main&per_page=20")"
+            run_id="$(
+              jq -r --arg started "$STARTED_AT" --arg sha "$TARGET_MAIN_SHA" '
+                [.workflow_runs[]
+                 | select(.event == "workflow_dispatch")
+                 | select(.head_branch == "main")
+                 | select(.head_sha == $sha)
+                 | select(.created_at >= $started)]
+                | sort_by(.created_at)
+                | last
+                | .id // empty
+              ' <<<"$payload"
+            )"
+            if [[ "$run_id" =~ ^[1-9][0-9]*$ ]]; then
+              break
+            fi
+            sleep 5
+          done
+          [[ "$run_id" =~ ^[1-9][0-9]*$ ]] || {
+            echo "Unable to locate exact-main Middleware release run" >&2
+            exit 1
+          }
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for exact signed Middleware candidate
+        if: steps.existing.outputs.found != 'true'
+        env:
+          RUN_ID: ${{ steps.child.outputs.run_id }}
+        run: |
+          set -Eeuo pipefail
+          gh run watch "$RUN_ID" \
+            --repo "$TARGET_REPOSITORY" \
+            --interval 20 \
+            --exit-status
+
+      - name: Verify newly produced release artifact
+        if: steps.existing.outputs.found != 'true'
+        env:
+          RUN_ID: ${{ steps.child.outputs.run_id }}
+        run: |
+          set -Eeuo pipefail
+          run_attempt="$(gh api "repos/${TARGET_REPOSITORY}/actions/runs/${RUN_ID}" --jq .run_attempt)"
+          artifact_name="exact-main-production-${SOURCE_SHA}-${RUN_ID}-${run_attempt}"
+          work="$RUNNER_TEMP/new-middleware-release"
+          mkdir -m 0700 "$work"
+          gh run download "$RUN_ID" \
+            --repo "$TARGET_REPOSITORY" \
+            --name "$artifact_name" \
+            --dir "$work"
+          (
+            cd "$work"
+            sha256sum --check --strict SHA256SUMS
+          )
+          test "$(sed -n 's/^SOURCE_SHA=//p' "$work/RELEASE.env")" = "$SOURCE_SHA"
+          test "$(sed -n 's/^IMAGE_DIGEST=//p' "$work/RELEASE.env")" = "$EXPECTED_IMAGE_DIGEST"
+
+      - name: Record canonical Middleware authority
+        env:
+          EXISTING_RUN_ID: ${{ steps.existing.outputs.run_id }}
+          NEW_RUN_ID: ${{ steps.child.outputs.run_id }}
+        run: |
+          set -Eeuo pipefail
+          run_id="${EXISTING_RUN_ID:-$NEW_RUN_ID}"
+          [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+          {
+            echo "## Canonical signed Middleware candidate verified"
+            echo
+            echo "- Repository: ${TARGET_REPOSITORY}"
+            echo "- Source SHA: \`${SOURCE_SHA}\`"
+            echo "- Image digest: \`${EXPECTED_IMAGE_DIGEST}\`"
+            echo "- Release run: https://github.com/${TARGET_REPOSITORY}/actions/runs/${run_id}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  infrastructure:
+    name: Run isolated staging, rollback, and maximum 1% read-only canary
+    needs: [verify, middleware]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ secrets.CODESTRA_RELEASE_ORCHESTRATOR_TOKEN }}
+      TARGET_REPOSITORY: appolon1908-hue/Infustruction-repo
+      TARGET_WORKFLOW: one-click-go-live.yml
+      ORCHESTRATION_ID: ${{ needs.verify.outputs.orchestration_id }}-infrastructure
+      CANARY_PERCENT: ${{ inputs.canary_percent }}
+    steps:
+      - name: Dispatch protected infrastructure release chain
+        id: dispatch
+        run: |
+          set -Eeuo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh api --method POST \
+            "repos/${TARGET_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+            -f ref=main \
+            -f 'inputs[confirmation]=GO_LIVE_READONLY' \
+            -f "inputs[canary_percent]=${CANARY_PERCENT}" \
+            -f "inputs[orchestration_id]=${ORCHESTRATION_ID}"
+          echo "started_at=${started_at}" >> "$GITHUB_OUTPUT"
+
+      - name: Locate the exact infrastructure wrapper run
+        id: child
+        env:
+          STARTED_AT: ${{ steps.dispatch.outputs.started_at }}
+        run: |
+          set -Eeuo pipefail
+          expected_title="ONE CLICK Infrastructure read-only • ${ORCHESTRATION_ID}"
+          run_id=""
+          for _ in $(seq 1 90); do
+            payload="$(gh api "repos/${TARGET_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?event=workflow_dispatch&branch=main&per_page=20")"
+            run_id="$(
+              jq -r --arg started "$STARTED_AT" --arg title "$expected_title" '
+                [.workflow_runs[]
+                 | select(.event == "workflow_dispatch")
+                 | select(.head_branch == "main")
+                 | select(.display_title == $title)
+                 | select(.created_at >= $started)]
+                | sort_by(.created_at)
+                | last
+                | .id // empty
+              ' <<<"$payload"
+            )"
+            if [[ "$run_id" =~ ^[1-9][0-9]*$ ]]; then
+              break
+            fi
+            sleep 5
+          done
+          [[ "$run_id" =~ ^[1-9][0-9]*$ ]] || {
+            echo "Unable to locate infrastructure release-chain wrapper run" >&2
+            exit 1
+          }
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for staging, rollback, and canary certification
+        env:
+          RUN_ID: ${{ steps.child.outputs.run_id }}
+        run: |
+          set -Eeuo pipefail
+          gh run watch "$RUN_ID" \
+            --repo "$TARGET_REPOSITORY" \
+            --interval 20 \
+            --exit-status
+
+  complete:
+    name: Publish one-click read-only live result
+    needs: [verify, middleware, infrastructure]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Record certified live-canary result
+        env:
+          PLATFORM_SHA: ${{ needs.verify.outputs.platform_sha }}
+          IMAGE_DIGEST: ${{ needs.verify.outputs.middleware_image_digest }}
+          SOURCE_SHA: ${{ needs.verify.outputs.middleware_source_sha }}
+          CHANGE_ID: ${{ needs.verify.outputs.change_id }}
+          CANARY_PERCENT: ${{ inputs.canary_percent }}
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "## Codestra one-click read-only production canary completed"
+            echo
+            echo "- Platform SHA: \`${PLATFORM_SHA}\`"
+            echo "- Middleware source SHA: \`${SOURCE_SHA}\`"
+            echo "- Middleware digest: \`${IMAGE_DIGEST}\`"
+            echo "- Change ID: \`${CHANGE_ID}\`"
+            echo "- Live production canary: ${CANARY_PERCENT}%"
+            echo
+            echo "The exact candidate passed isolated staging certification and rollback rehearsal before the live canary."
+            echo
+            echo "Only the bounded production read-only canary is activated. This workflow does not dispatch unrestricted production-web activation."
+            echo
+            echo "Live writes, trading, money movement, payments, withdrawals, email, SMS, dialing, callbacks, and external provider execution remain disabled."
+          } >> "$GITHUB_STEP_SUMMARY"
