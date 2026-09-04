@@ -66,7 +66,7 @@ BEGIN
     -- Update in place on the canonical identity key. Never delete/reinsert: the
     -- resolver's existing row identity therefore remains stable on reapply.
     -- The repository does not declare the registry's unique constraints, so do
-    -- not make ON CONFLICT depend on an unproven database index.
+    -- not make reconciliation depend on an unproven database index.
     UPDATE oidc_tenant_registry
        SET client_id = canonical_client_id,
            tenant_key = canonical_tenant_key,
