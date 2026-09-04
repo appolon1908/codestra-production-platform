@@ -41,7 +41,7 @@ services:
       ALLOWED_ORIGINS: https://crm.codestra.agency,https://phone.codestra.agency
       NATS_HOST: host.docker.internal
       NATS_PORT: "4222"
-      INTERNAL_EVENT_SOURCE_HEALTH_URL: http://middleware:8095/health
+      INTERNAL_EVENT_SOURCE_HEALTH_URL: http://middleware:8095/healthz
       TICKET_TTL_SECONDS: "45"
       WS_AUTH_TIMEOUT_SECONDS: "5"
       MAX_PENDING_MESSAGES: "100"

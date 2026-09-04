@@ -75,7 +75,7 @@ class Settings:
     write_timeout = min(10, max(1, int(os.getenv("WRITE_TIMEOUT_SECONDS", "3"))))
     nats_host = os.getenv("NATS_HOST", "host.docker.internal")
     nats_port = int(os.getenv("NATS_PORT", "4222"))
-    event_source_health_url = os.getenv("INTERNAL_EVENT_SOURCE_HEALTH_URL", "http://middleware:8095/health")
+    event_source_health_url = os.getenv("INTERNAL_EVENT_SOURCE_HEALTH_URL", "http://middleware:8095/healthz")
 
 
 settings = Settings()
