@@ -24,6 +24,7 @@ DECLARE
         ''
     );
     conflicting_rows integer;
+    updated_rows integer;
     exact_rows integer;
 BEGIN
     IF service_subject IS NULL THEN
@@ -64,27 +65,40 @@ BEGIN
 
     -- Update in place on the canonical identity key. Never delete/reinsert: the
     -- resolver's existing row identity therefore remains stable on reapply.
-    INSERT INTO oidc_tenant_registry (
-        issuer,
-        subject,
-        client_id,
-        tenant_key,
-        status,
-        allowed_scopes
-    )
-    VALUES (
-        canonical_issuer,
-        service_subject,
-        canonical_client_id,
-        canonical_tenant_key,
-        'active',
-        canonical_scopes
-    )
-    ON CONFLICT (issuer, subject) DO UPDATE
-       SET client_id = EXCLUDED.client_id,
-           tenant_key = EXCLUDED.tenant_key,
-           status = EXCLUDED.status,
-           allowed_scopes = EXCLUDED.allowed_scopes;
+    -- The repository does not declare the registry's unique constraints, so do
+    -- not make ON CONFLICT depend on an unproven database index.
+    UPDATE oidc_tenant_registry
+       SET client_id = canonical_client_id,
+           tenant_key = canonical_tenant_key,
+           status = 'active',
+           allowed_scopes = canonical_scopes
+     WHERE issuer = canonical_issuer
+       AND subject = service_subject;
+
+    GET DIAGNOSTICS updated_rows = ROW_COUNT;
+
+    IF updated_rows > 1 THEN
+        RAISE EXCEPTION 'cod_web_out_identity_duplicate';
+    END IF;
+
+    IF updated_rows = 0 THEN
+        INSERT INTO oidc_tenant_registry (
+            issuer,
+            subject,
+            client_id,
+            tenant_key,
+            status,
+            allowed_scopes
+        )
+        VALUES (
+            canonical_issuer,
+            service_subject,
+            canonical_client_id,
+            canonical_tenant_key,
+            'active',
+            canonical_scopes
+        );
+    END IF;
 
     SELECT count(*)
       INTO exact_rows
