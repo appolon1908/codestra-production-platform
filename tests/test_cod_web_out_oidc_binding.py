@@ -43,8 +43,12 @@ class CodWebOutOidcBindingContractTests(unittest.TestCase):
         self.assertFalse(any("admin" in scope for scope in scopes))
 
     def test_reconciliation_is_idempotent_and_preserves_row_identity(self) -> None:
-        self.assertIn("ON CONFLICT (issuer, subject) DO UPDATE", self.sql)
         self.assertIn("LOCK TABLE oidc_tenant_registry", self.sql)
+        self.assertIn("UPDATE oidc_tenant_registry", self.sql)
+        self.assertIn("GET DIAGNOSTICS updated_rows = ROW_COUNT", self.sql)
+        self.assertIn("IF updated_rows = 0 THEN", self.sql)
+        self.assertIn("cod_web_out_identity_duplicate", self.sql)
+        self.assertNotIn("ON CONFLICT", self.sql)
         self.assertNotIn("DELETE FROM OIDC_TENANT_REGISTRY", self.sql.upper())
         self.assertNotIn("TRUNCATE ", self.sql.upper())
 
