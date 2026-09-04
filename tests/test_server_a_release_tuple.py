@@ -40,6 +40,11 @@ def test_protected_release_gate_requires_current_signed_middleware_tuple() -> No
         "EXPECTED_ARTIFACT_DIGEST",
     ):
         assert name in workflow
+    assert (
+        "EXPECTED_ARTIFACT_DIGEST: "
+        "sha256:64bdd090513a6edea513dc0215a1d4d4c8fb5f8935c6eb56b76d3f45ce7a8da9"
+        in workflow
+    )
 
     # The current signed bundle is verified before any platform release is built.
     assert "tools/verify_middleware_release_evidence.py" in workflow
