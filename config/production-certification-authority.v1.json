@@ -10,6 +10,13 @@
   "required_gateway_route_count": 29,
   "source_lock_path": "PRODUCTION-SOURCE-LOCK.yaml",
   "candidate_matrix_path": "IMMUTABLE-CANDIDATE-MATRIX.yaml",
+  "candidate_matrix_authority": {
+    "repository": "appolon1908-hue/codestra-production-runtime-authority",
+    "commit": "470591454b681092cc8fdde57b2a921802dffd3f",
+    "path": "IMMUTABLE-CANDIDATE-MATRIX.yaml",
+    "protected_environment": "repository-administration",
+    "read_token_secret": "CODESTRA_RUNTIME_AUTHORITY_READ_TOKEN"
+  },
   "staging_environment": "staging-readonly",
   "staging_infrastructure_repository": "appolon1908-hue/Infustruction-repo",
   "staging_provisioning_workflow": ".github/workflows/stage6-provision-staging-host.yml",
