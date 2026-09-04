@@ -87,7 +87,7 @@ jobs:
           test -z "$(git status --porcelain)"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/release/production-activation" --jq .object.sha)" = "$GITHUB_SHA"
           test -n "$ORCHESTRATOR_TOKEN" || {
-            echo "CODESTRA_RELEASE_ORCHESTRATOR_TOKEN must have Actions read/write access to Codestra-SRL/codestra-middleware and appolon1908-hue/Infustruction-repo" >&2
+            echo "CODESTRA_RELEASE_ORCHESTRATOR_TOKEN must have Actions read/write access to appolon1908-hue/Middleware- and appolon1908-hue/Infustruction-repo" >&2
             exit 1
           }
           python3 - "$CANARY_PERCENT" <<'PY'
@@ -123,8 +123,8 @@ jobs:
               raise SystemExit("invalid change ID in release tuple")
 
           protected = (lock.get("middleware_authorities") or {}).get("protected_production_tuple") or {}
-          if protected.get("repository") != "Codestra-SRL/codestra-middleware":
-              raise SystemExit("canonical Middleware repository is not Codestra-SRL/codestra-middleware")
+          if protected.get("repository") != "appolon1908-hue/Middleware-":
+              raise SystemExit("canonical Middleware repository is not appolon1908-hue/Middleware-")
           if protected.get("source_sha") != source_sha:
               raise SystemExit("source-lock and release-tuple Middleware SHAs differ")
           if protected.get("image_digest") != image_digest:
@@ -156,8 +156,8 @@ jobs:
     timeout-minutes: 180
     env:
       GH_TOKEN: ${{ secrets.CODESTRA_RELEASE_ORCHESTRATOR_TOKEN }}
-      TARGET_REPOSITORY: Codestra-SRL/codestra-middleware
-      RELEASE_WORKFLOW: exact-main-production-release.yml
+      TARGET_REPOSITORY: appolon1908-hue/Middleware-
+      RELEASE_WORKFLOW: release.yml
       SOURCE_SHA: ${{ needs.verify.outputs.middleware_source_sha }}
       EXPECTED_IMAGE_DIGEST: ${{ needs.verify.outputs.middleware_image_digest }}
       RELEASE_REQUEST_B64: ${{ secrets.CODESTRA_MIDDLEWARE_RELEASE_REQUEST_B64 }}

@@ -9,9 +9,7 @@ def test_release_tuple_has_distinct_authorities_and_fails_closed() -> None:
     assert manifest["orchestration"]["repository"] == (
         "appolon1908-hue/codestra-production-platform"
     )
-    assert manifest["middleware"]["repository"] == (
-        "Codestra-SRL/codestra-middleware"
-    )
+    assert manifest["middleware"]["repository"] == "appolon1908-hue/Middleware-"
     assert manifest["middleware"]["production_signature_verified"] is False
     assert manifest["middleware"]["production_provenance_verified"] is False
     assert all(value is False for value in manifest["required_false_flags"].values())
@@ -64,7 +62,7 @@ def test_protected_release_gate_requires_current_signed_middleware_tuple() -> No
     assert "--predicate middleware-release/middleware.spdx.json" in workflow
     assert "docker image inspect" in workflow
     assert "org.opencontainers.image.revision" in workflow
-    assert "alembic heads" in workflow
+    assert 'Path("/app/migrations").glob' in workflow
     assert 'test "${#migration_heads[@]}" -eq 1' in workflow
     assert 'test "${migration_heads[0]}" = "$MIDDLEWARE_MIGRATION_REVISION"' in workflow
 

@@ -8,9 +8,9 @@
     "configuration_bundle_sha256": "REQUIRED"
   },
   "middleware": {
-    "repository": "Codestra-SRL/codestra-middleware",
+    "repository": "appolon1908-hue/Middleware-",
     "protected_merge_sha": "REQUIRED",
-    "image": "ghcr.io/codestra-srl/codestra-middleware",
+    "image": "ghcr.io/appolon1908-hue/codestra-middleware",
     "image_digest": "sha256:REQUIRED",
     "production_signature_verified": false,
     "production_provenance_verified": false

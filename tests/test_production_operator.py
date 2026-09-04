@@ -448,7 +448,7 @@ def test_restore_test_records_one_stable_backup_stamp(monkeypatch):
             "tested_backup_stamp": stamp,
             "tested_backup_evidence_integrity": "PASS",
             "isolated_middleware_migration": "PASS",
-            "tested_middleware_database_head": "0056_klyrow_delivery_events",
+            "tested_middleware_database_head": "0010_realtime_gateway",
         },
     )
     monkeypatch.setattr(
@@ -521,7 +521,7 @@ def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, 
 
     assert validated["restore_evidence_stamp"] == stamp
     assert validated["isolated_middleware_migration"] == "PASS"
-    assert validated["tested_middleware_database_head"] == "0056_klyrow_delivery_events"
+    assert validated["tested_middleware_database_head"] == "0010_realtime_gateway"
 
 
 def test_restore_result_rejects_unadvertised_backup(monkeypatch, tmp_path):
@@ -641,7 +641,7 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
 
     def run(command, **kwargs):
         calls.append(command)
-        return subprocess.CompletedProcess(command, 0, b"0056_klyrow_delivery_events (head)\n")
+        return subprocess.CompletedProcess(command, 0, b"0010_realtime_gateway (head)\n")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
     result = OPERATOR.rollout_middleware(config)
@@ -657,18 +657,18 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
         (
             Path("/restore-test.json"),
             "tested_middleware_database_head",
-            "0056_klyrow_delivery_events",
+            "0010_realtime_gateway",
         ),
     ]
     assert result["middleware_rollout"] == "PASS"
-    assert result["middleware_database_head"] == "0056_klyrow_delivery_events"
+    assert result["middleware_database_head"] == "0010_realtime_gateway"
     assert calls[0][-6:] == [
         "--rm",
         "--no-deps",
         "middleware-integration-api",
-        "alembic",
-        "upgrade",
-        "head",
+        "--entrypoint",
+        "python",
+        "scripts/migrate_runtime.py",
     ]
     recreate = next(command for command in calls if "--force-recreate" in command)
     assert "--no-deps" in recreate
@@ -754,7 +754,7 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
     monkeypatch.setattr(
         OPERATOR,
         "middleware_database_revision",
-        lambda: "0056_klyrow_delivery_events",
+        lambda: "0010_realtime_gateway",
     )
     monkeypatch.setattr(OPERATOR, "middleware_quiescence_stamp", lambda: None)
     result = OPERATOR.rollout_middleware(config)
