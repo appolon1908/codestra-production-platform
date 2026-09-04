@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "authority": "appolon1908-hue/codestra-production-platform",
+  "production_branch": "release/production-activation",
+  "runtime_matrix": {
+    "repository": "appolon1908-hue/codestra-production-runtime-authority",
+    "branch": "main",
+    "path": "IMMUTABLE-CANDIDATE-MATRIX.yaml",
+    "expected_workloads": 64,
+    "deployment_authorized_required": true
+  },
+  "source_lock": {
+    "path": "PRODUCTION-SOURCE-LOCK.yaml",
+    "required_status": "PASS"
+  },
+  "staging": {
+    "environment": "staging-readonly",
+    "expected_kong_routes": 29,
+    "expected_business_apis": 15,
+    "allowed_canary_methods": ["GET", "HEAD"],
+    "maximum_canary_percent": 1
+  },
+  "required_workload_evidence": [
+    "repository",
+    "source_sha",
+    "image_digest",
+    "signature",
+    "sbom",
+    "provenance",
+    "rollback_digest"
+  ],
+  "forbidden_evidence_values": [
+    "UNKNOWN",
+    "PENDING",
+    "NOT_STARTED",
+    "NOT_RUN",
+    "NONE",
+    "TBD",
+    "TODO",
+    "REPLACE_ME",
+    "UNRESOLVED",
+    "UNVERIFIED"
+  ],
+  "safety": {
+    "admin_bypass_allowed": false,
+    "mutable_images_allowed": false,
+    "runtime_activation_by_evidence_refresh_allowed": false,
+    "business_writes_allowed": false,
+    "communications_delivery_allowed": false,
+    "financial_or_trading_mutation_allowed": false
+  }
+}
