@@ -46,14 +46,25 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
-      - name: Check out complete PR history
-        uses: actions/checkout@v4
+      - name: Check out exact PR head with complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ env.EXPECTED_SHA }}
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+          git cat-file -e "${BASE_SHA}^{commit}"
 
       - name: Set up repository-supported Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
           cache: pip
@@ -151,11 +162,9 @@ jobs:
             --evidence "${RUNNER_TEMP}/integration-architecture.json"
 
       - name: Validate Git whitespace
-        run: git diff --check "${{ github.event.pull_request.base.sha }}..HEAD"
+        run: git diff --check "${BASE_SHA}..HEAD"
 
       - name: Reject forbidden artifacts and customer-data paths
-        env:
-          BASE_SHA: "${{ github.event.pull_request.base.sha }}"
         run: |
           changed="$(git diff --name-only "${BASE_SHA}..HEAD")"
           if grep -E \
@@ -167,8 +176,6 @@ jobs:
           fi
 
       - name: Confirm production feature defaults remain fail closed
-        env:
-          BASE_SHA: "${{ github.event.pull_request.base.sha }}"
         run: |
           if git diff --unified=0 "${BASE_SHA}..HEAD" |
             grep -E '^\+[^+].*(ENABLE_[A-Z0-9_]+[=:][[:space:]]*(true|True|TRUE)|ENABLE_[A-Z0-9_]+["'\'']?[[:space:]]*:[[:space:]]*true)'
@@ -217,7 +224,7 @@ jobs:
       - name: Gitleaks pull-request commit range
         run: |
           "${RUNNER_TEMP}/gitleaks-bin" git --no-banner --redact --exit-code 1 \
-            --log-opts="${{ github.event.pull_request.base.sha }}..HEAD"
+            --log-opts="${BASE_SHA}..HEAD"
 
       - name: Publish protected-branch validate status
         if: always()
