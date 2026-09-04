@@ -14,6 +14,17 @@ The selected Middleware evidence is artifact `signed-middleware-release-1aa4d505
 release manifest, Sigstore bundle, SPDX SBOM, vulnerability report, image
 signature, provenance, source labels, and migration head.
 
+## Out-of-band release trust anchor
+
+The **Out-of-band release trust anchor** is provisioned separately from this
+repository and from the release payload. Its exact public-key fingerprint must
+be approved through the protected release ceremony and installed by
+`tools/provision_release_trust_anchor.py` using the expected SHA-256 guard. A
+candidate may not replace, silently rotate, or derive this trust anchor from its
+own manifest, image, artifact, or workflow token. If a different trust anchor is
+already installed, deployment fails closed and requires a separate reviewed
+rotation change.
+
 The tuple keeps `production_deployment_authorized=false`. Promotion requires the
 global source lock to pass, exact-digest staging certification, paired backup and
 restore evidence, two-way rollback, a read-only canary no greater than one
