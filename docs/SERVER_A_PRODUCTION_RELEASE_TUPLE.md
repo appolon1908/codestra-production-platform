@@ -17,9 +17,10 @@ signature, provenance, source labels, and migration head.
 ## Out-of-band release trust anchor
 
 The **Out-of-band release trust anchor** is provisioned separately from this
-repository and from the release payload. Its exact public-key fingerprint must
-be approved through the protected release ceremony and installed by
-`tools/provision_release_trust_anchor.py` using the expected SHA-256 guard. A
+repository and from the release payload. Its approved SSH signer authority is
+installed at `/etc/codestra/release/allowed_signers`; the exact public-key
+fingerprint must be approved through the protected release ceremony and installed
+by `tools/provision_release_trust_anchor.py` using the expected SHA-256 guard. A
 candidate may not replace, silently rotate, or derive this trust anchor from its
 own manifest, image, artifact, or workflow token. If a different trust anchor is
 already installed, deployment fails closed and requires a separate reviewed
