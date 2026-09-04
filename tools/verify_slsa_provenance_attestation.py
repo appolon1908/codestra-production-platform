@@ -12,11 +12,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-try:
-    from tools.verify_middleware_release_evidence import release_environment
-except ModuleNotFoundError:  # Direct execution: python tools/verify_*.py
-    from verify_middleware_release_evidence import release_environment
-
 
 STATEMENT_TYPE = "https://in-toto.io/Statement/v0.1"
 PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
@@ -28,6 +23,12 @@ EXPECTED_BUILD_TYPE = (
     "https://codestra.example/buildtypes/exact-main-middleware-production/v1"
 )
 SOURCE_REPOSITORY = "https://github.com/Codestra-SRL/codestra-middleware"
+CANONICAL_IMAGE = "ghcr.io/codestra-srl/codestra-middleware"
+STAGING_ONLY_DIGEST = (
+    "sha256:2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff"
+)
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 SLSA_FIELDS = ("buildDefinition", "runDetails")
 EVIDENCE_FILES = {
@@ -35,6 +36,35 @@ EVIDENCE_FILES = {
     "trivySha256": "trivy",
     "grypeSha256": "grype",
 }
+
+
+def release_environment(path: Path) -> dict[str, str]:
+    """Parse the exact legacy Codestra-SRL RELEASE.env evidence contract.
+
+    This compatibility parser intentionally remains local to the SLSA verifier.
+    The Appolon Middleware authority verifier has a different signed-manifest
+    contract and must not replace or reinterpret historical Codestra-SRL evidence.
+    """
+
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or not key or key in values:
+            raise ValueError("middleware RELEASE.env is malformed")
+        values[key] = value
+    required = {"SOURCE_SHA", "IMAGE_REFERENCE", "IMAGE_DIGEST", "SBOM_SHA256"}
+    if values.keys() != required:
+        raise ValueError("middleware RELEASE.env fields are not exact")
+    if not SHA_RE.fullmatch(values["SOURCE_SHA"]):
+        raise ValueError("middleware source SHA is invalid")
+    if not DIGEST_RE.fullmatch(values["IMAGE_DIGEST"]):
+        raise ValueError("middleware image digest is invalid")
+    if values["IMAGE_DIGEST"] == STAGING_ONLY_DIGEST:
+        raise ValueError("staging-only middleware digest is prohibited")
+    expected_reference = CANONICAL_IMAGE + "@" + values["IMAGE_DIGEST"]
+    if values["IMAGE_REFERENCE"] != expected_reference:
+        raise ValueError("middleware image reference and digest differ")
+    return values
 
 
 def _documents(path: Path) -> list[dict[str, Any]]:
@@ -129,9 +159,7 @@ def validate(
     }
     if expected_predicate["buildDefinition"] != expected_build:
         raise ValueError("middleware SLSA build definition is unauthorized")
-    if expected_predicate["runDetails"] != {
-        "builder": {"id": AUTHORIZED_BUILDER}
-    }:
+    if expected_predicate["runDetails"] != {"builder": {"id": AUTHORIZED_BUILDER}}:
         raise ValueError("middleware provenance builder is unauthorized")
     if provenance["subject"] != {"digest": release["IMAGE_DIGEST"]}:
         raise ValueError("copied middleware provenance subject differs from RELEASE.env")
