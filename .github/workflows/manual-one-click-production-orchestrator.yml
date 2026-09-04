@@ -1,0 +1,592 @@
+name: Manual one-click protected production orchestrator
+
+on:
+  pull_request:
+    branches:
+      - release/production-activation
+    paths:
+      - ".github/workflows/manual-one-click-production-orchestrator.yml"
+      - "config/manual-production-orchestrator.catalog.v1.json"
+      - "config/manual-production-candidate.template.v1.json"
+      - "tools/manual_production_orchestrator.py"
+      - "tests/test_manual_production_orchestrator.py"
+      - "docs/MANUAL-ONE-CLICK-PRODUCTION-ORCHESTRATOR.md"
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Highest phase to execute in this protected release train
+        required: true
+        type: choice
+        options:
+          - plan
+          - staging
+          - canary
+          - production
+        default: plan
+      candidate_path:
+        description: Reviewed candidate path under config/releases/
+        required: true
+        type: string
+        default: config/releases/portfolio-candidate.v1.json
+      candidate_sha256:
+        description: Exact SHA-256 of the committed candidate file
+        required: true
+        type: string
+      confirmation:
+        description: Exact phase confirmation phrase documented by this workflow
+        required: true
+        type: string
+      observation_minutes:
+        description: Canary observation window before 100% traffic; 15-180
+        required: true
+        type: number
+        default: 30
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+
+concurrency:
+  group: manual-portfolio-production-${{ inputs.phase || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  source-policy:
+    name: orchestrator / source-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      candidate_sha256: ${{ steps.candidate.outputs.sha256 }}
+      candidate_name: ${{ steps.candidate.outputs.name }}
+    steps:
+      - name: Check out exact controller source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate controller source and policy tests
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile tools/manual_production_orchestrator.py tests/test_manual_production_orchestrator.py
+          python3 tests/test_manual_production_orchestrator.py
+          python3 tools/manual_production_orchestrator.py validate \
+            --candidate config/manual-production-candidate.template.v1.json \
+            --phase plan \
+            --allow-template
+          git diff --check
+          test -z "$(git status --porcelain)"
+
+      - name: Validate exact executable candidate
+        id: candidate
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          CANDIDATE_PATH: ${{ inputs.candidate_path }}
+          EXPECTED_SHA256: ${{ inputs.candidate_sha256 }}
+          PHASE: ${{ inputs.phase }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          OBSERVATION_MINUTES: ${{ inputs.observation_minutes }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/release/production-activation
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path, PurePosixPath
+
+          phrases = {
+              "plan": "PLAN_PORTFOLIO_RELEASE",
+              "staging": "DEPLOY_PORTFOLIO_STAGING",
+              "canary": "START_PORTFOLIO_READONLY_CANARY",
+              "production": "PROMOTE_PORTFOLIO_TO_100_PERCENT",
+          }
+          phase = os.environ["PHASE"]
+          if os.environ["CONFIRMATION"] != phrases[phase]:
+              raise SystemExit("phase confirmation phrase mismatch")
+          expected = os.environ["EXPECTED_SHA256"]
+          if re.fullmatch(r"[0-9a-f]{64}", expected) is None or expected == "0" * 64:
+              raise SystemExit("candidate_sha256 must be non-zero lowercase 64-hex")
+          raw = os.environ["CANDIDATE_PATH"]
+          posix = PurePosixPath(raw)
+          if posix.is_absolute() or ".." in posix.parts:
+              raise SystemExit("candidate path traversal is forbidden")
+          if len(posix.parts) < 3 or posix.parts[:2] != ("config", "releases"):
+              raise SystemExit("candidate must be committed under config/releases/")
+          path = Path(*posix.parts)
+          if not path.is_file() or path.is_symlink():
+              raise SystemExit("candidate file is missing or is a symlink")
+          actual = hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit("candidate file SHA-256 mismatch")
+          value = json.loads(path.read_text())
+          controller_sha = value.get("controller_sha", "")
+          if re.fullmatch(r"[0-9a-f]{40}", controller_sha) is None or controller_sha == "0" * 40:
+              raise SystemExit("candidate controller_sha is invalid")
+          subprocess.check_call(["git", "cat-file", "-e", f"{controller_sha}^{{commit}}"])
+          subprocess.check_call(["git", "merge-base", "--is-ancestor", controller_sha, "HEAD"])
+          minutes = int(os.environ["OBSERVATION_MINUTES"])
+          if not 15 <= minutes <= 180:
+              raise SystemExit("observation_minutes must be between 15 and 180")
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a") as stream:
+              stream.write(f"sha256={actual}\n")
+              stream.write(f"name={path.name}\n")
+          PY
+          python3 tools/manual_production_orchestrator.py validate \
+            --candidate "$CANDIDATE_PATH" \
+            --phase "$PHASE"
+          install -m 0600 "$CANDIDATE_PATH" "$RUNNER_TEMP/portfolio-candidate.json"
+
+      - name: Upload exact executable candidate
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: portfolio-candidate-${{ steps.candidate.outputs.sha256 }}
+          path: ${{ runner.temp }}/portfolio-candidate.json
+          if-no-files-found: error
+          retention-days: 30
+
+  plan:
+    name: orchestrator / portfolio-plan
+    needs:
+      - source-policy
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    environment:
+      name: portfolio-release-plan
+    env:
+      CODESTRA_ORCHESTRATOR_TOKEN: ${{ secrets.CODESTRA_ORCHESTRATOR_TOKEN }}
+      CANDIDATE_SHA256: ${{ needs.source-policy.outputs.candidate_sha256 }}
+      PHASE: ${{ inputs.phase }}
+    outputs:
+      evidence_sha256: ${{ steps.summary.outputs.sha256 }}
+    steps:
+      - name: Check out exact controller source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download exact candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: portfolio-candidate-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/candidate
+
+      - name: Require protected controller token without printing it
+        run: test -n "$CODESTRA_ORCHESTRATOR_TOKEN"
+
+      - name: Verify all repository authorities, exact heads, contracts, and checks
+        run: |
+          set -Eeuo pipefail
+          candidate="$RUNNER_TEMP/candidate/portfolio-candidate.json"
+          test "$(sha256sum "$candidate" | cut -d' ' -f1)" = "$CANDIDATE_SHA256"
+          python3 tools/manual_production_orchestrator.py github-preflight \
+            --candidate "$candidate" \
+            --phase "$PHASE" \
+            --output "$RUNNER_TEMP/github-preflight.json"
+
+      - name: Dispatch normalized plan intents to every repository
+        run: |
+          set -Eeuo pipefail
+          candidate="$RUNNER_TEMP/candidate/portfolio-candidate.json"
+          python3 tools/manual_production_orchestrator.py dispatch-intents \
+            --candidate "$candidate" \
+            --phase plan \
+            --candidate-sha256 "$CANDIDATE_SHA256" \
+            --prior-evidence-sha256 "$(printf '0%.0s' {1..64})" \
+            --output "$RUNNER_TEMP/plan-intents.json"
+
+      - name: Bind portfolio plan evidence
+        id: summary
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg schema_version codestra.manual-portfolio-plan.v1 \
+            --arg controller_sha "$GITHUB_SHA" \
+            --arg candidate_sha256 "$CANDIDATE_SHA256" \
+            --slurpfile preflight "$RUNNER_TEMP/github-preflight.json" \
+            --slurpfile intents "$RUNNER_TEMP/plan-intents.json" \
+            '{
+              schema_version: $schema_version,
+              controller_sha: $controller_sha,
+              candidate_sha256: $candidate_sha256,
+              github_preflight: $preflight[0],
+              release_intents: $intents[0],
+              status: "PASS",
+              runtime_contacted: false,
+              production_changed: false
+            }' >"$RUNNER_TEMP/portfolio-plan.json"
+          sha="$(sha256sum "$RUNNER_TEMP/portfolio-plan.json" | cut -d' ' -f1)"
+          echo "sha256=$sha" >>"$GITHUB_OUTPUT"
+
+      - name: Upload portfolio plan evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: portfolio-plan-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/portfolio-plan.json
+          if-no-files-found: error
+          retention-days: 30
+
+  staging:
+    name: orchestrator / immutable-staging
+    needs:
+      - source-policy
+      - plan
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.phase != 'plan' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    environment:
+      name: portfolio-staging
+    env:
+      CODESTRA_ORCHESTRATOR_TOKEN: ${{ secrets.CODESTRA_ORCHESTRATOR_TOKEN }}
+      CANDIDATE_SHA256: ${{ needs.source-policy.outputs.candidate_sha256 }}
+    outputs:
+      staging_run_id: ${{ steps.summary.outputs.staging_run_id }}
+      evidence_sha256: ${{ steps.summary.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: portfolio-candidate-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: portfolio-plan-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/prior
+
+      - name: Dispatch protected staging release intents
+        run: |
+          set -Eeuo pipefail
+          prior="$RUNNER_TEMP/prior/portfolio-plan.json"
+          prior_sha="$(sha256sum "$prior" | cut -d' ' -f1)"
+          test "$prior_sha" = "${{ needs.plan.outputs.evidence_sha256 }}"
+          python3 tools/manual_production_orchestrator.py dispatch-intents \
+            --candidate "$RUNNER_TEMP/candidate/portfolio-candidate.json" \
+            --phase staging \
+            --candidate-sha256 "$CANDIDATE_SHA256" \
+            --prior-evidence-sha256 "$prior_sha" \
+            --output "$RUNNER_TEMP/staging-intents.json"
+
+      - name: Deploy exact digests and certify isolated staging
+        run: |
+          set -Eeuo pipefail
+          python3 tools/manual_production_orchestrator.py dispatch-infrastructure \
+            --candidate "$RUNNER_TEMP/candidate/portfolio-candidate.json" \
+            --mode staging \
+            --output "$RUNNER_TEMP/infrastructure-staging.json"
+
+      - name: Bind staging evidence
+        id: summary
+        run: |
+          set -Eeuo pipefail
+          staging_run_id="$(jq -r .run_id "$RUNNER_TEMP/infrastructure-staging.json")"
+          jq -n \
+            --arg schema_version codestra.manual-portfolio-staging.v1 \
+            --arg candidate_sha256 "$CANDIDATE_SHA256" \
+            --slurpfile intents "$RUNNER_TEMP/staging-intents.json" \
+            --slurpfile infrastructure "$RUNNER_TEMP/infrastructure-staging.json" \
+            '{
+              schema_version: $schema_version,
+              candidate_sha256: $candidate_sha256,
+              release_intents: $intents[0],
+              infrastructure: $infrastructure[0],
+              status: "PASS",
+              external_effects_enabled: false
+            }' >"$RUNNER_TEMP/portfolio-staging.json"
+          sha="$(sha256sum "$RUNNER_TEMP/portfolio-staging.json" | cut -d' ' -f1)"
+          echo "staging_run_id=$staging_run_id" >>"$GITHUB_OUTPUT"
+          echo "sha256=$sha" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: portfolio-staging-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/portfolio-staging.json
+          if-no-files-found: error
+          retention-days: 30
+
+  rollback:
+    name: orchestrator / rollback-rehearsal
+    needs:
+      - source-policy
+      - staging
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.phase != 'plan' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    environment:
+      name: portfolio-staging
+    env:
+      CODESTRA_ORCHESTRATOR_TOKEN: ${{ secrets.CODESTRA_ORCHESTRATOR_TOKEN }}
+    outputs:
+      rollback_run_id: ${{ steps.summary.outputs.rollback_run_id }}
+      evidence_sha256: ${{ steps.summary.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: portfolio-candidate-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: portfolio-staging-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/prior
+
+      - name: Rehearse rollback and candidate restoration
+        run: |
+          set -Eeuo pipefail
+          prior_sha="$(sha256sum "$RUNNER_TEMP/prior/portfolio-staging.json" | cut -d' ' -f1)"
+          test "$prior_sha" = "${{ needs.staging.outputs.evidence_sha256 }}"
+          python3 tools/manual_production_orchestrator.py dispatch-infrastructure \
+            --candidate "$RUNNER_TEMP/candidate/portfolio-candidate.json" \
+            --mode rollback-rehearsal \
+            --staging-run-id "${{ needs.staging.outputs.staging_run_id }}" \
+            --output "$RUNNER_TEMP/infrastructure-rollback.json"
+
+      - name: Bind rollback evidence
+        id: summary
+        run: |
+          set -Eeuo pipefail
+          rollback_run_id="$(jq -r .run_id "$RUNNER_TEMP/infrastructure-rollback.json")"
+          jq -n \
+            --arg schema_version codestra.manual-portfolio-rollback.v1 \
+            --slurpfile rollback "$RUNNER_TEMP/infrastructure-rollback.json" \
+            '{
+              schema_version: $schema_version,
+              rollback: $rollback[0],
+              status: "PASS",
+              candidate_restored: true,
+              external_effects_enabled: false
+            }' >"$RUNNER_TEMP/portfolio-rollback.json"
+          sha="$(sha256sum "$RUNNER_TEMP/portfolio-rollback.json" | cut -d' ' -f1)"
+          echo "rollback_run_id=$rollback_run_id" >>"$GITHUB_OUTPUT"
+          echo "sha256=$sha" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: portfolio-rollback-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/portfolio-rollback.json
+          if-no-files-found: error
+          retention-days: 30
+
+  canary:
+    name: orchestrator / one-percent-readonly-canary
+    needs:
+      - source-policy
+      - plan
+      - staging
+      - rollback
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.phase == 'canary' || inputs.phase == 'production') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    environment:
+      name: portfolio-production-canary
+    env:
+      CODESTRA_ORCHESTRATOR_TOKEN: ${{ secrets.CODESTRA_ORCHESTRATOR_TOKEN }}
+      CANDIDATE_SHA256: ${{ needs.source-policy.outputs.candidate_sha256 }}
+    outputs:
+      canary_run_id: ${{ steps.summary.outputs.canary_run_id }}
+      observation_sha256: ${{ steps.summary.outputs.observation_sha256 }}
+      evidence_sha256: ${{ steps.summary.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: portfolio-candidate-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: portfolio-rollback-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/prior
+
+      - name: Dispatch protected canary release intents
+        run: |
+          set -Eeuo pipefail
+          prior_sha="$(sha256sum "$RUNNER_TEMP/prior/portfolio-rollback.json" | cut -d' ' -f1)"
+          test "$prior_sha" = "${{ needs.rollback.outputs.evidence_sha256 }}"
+          python3 tools/manual_production_orchestrator.py dispatch-intents \
+            --candidate "$RUNNER_TEMP/candidate/portfolio-candidate.json" \
+            --phase canary \
+            --candidate-sha256 "$CANDIDATE_SHA256" \
+            --prior-evidence-sha256 "$prior_sha" \
+            --output "$RUNNER_TEMP/canary-intents.json"
+
+      - name: Apply exact maximum one-percent GET/HEAD-only canary
+        run: |
+          set -Eeuo pipefail
+          python3 tools/manual_production_orchestrator.py dispatch-infrastructure \
+            --candidate "$RUNNER_TEMP/candidate/portfolio-candidate.json" \
+            --mode production-readonly-canary \
+            --staging-run-id "${{ needs.staging.outputs.staging_run_id }}" \
+            --rollback-run-id "${{ needs.rollback.outputs.rollback_run_id }}" \
+            --output "$RUNNER_TEMP/infrastructure-canary.json"
+
+      - name: Observe the exact canary before any 100% promotion
+        env:
+          OBSERVATION_MINUTES: ${{ inputs.observation_minutes }}
+        run: |
+          set -Eeuo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          sleep "$((OBSERVATION_MINUTES * 60))"
+          ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          canary_run_id="$(jq -r .run_id "$RUNNER_TEMP/infrastructure-canary.json")"
+          state="$(GH_TOKEN="$CODESTRA_ORCHESTRATOR_TOKEN" gh api \
+            "repos/appolon1908-hue/Infustruction-repo/actions/runs/${canary_run_id}" \
+            --jq '.status + ":" + (.conclusion // "")')"
+          test "$state" = completed:success
+          jq -n \
+            --arg schema_version codestra.canary-observation.v1 \
+            --arg started_at "$started_at" \
+            --arg ended_at "$ended_at" \
+            --argjson minutes "$OBSERVATION_MINUTES" \
+            --arg canary_run_id "$canary_run_id" \
+            '{
+              schema_version: $schema_version,
+              started_at: $started_at,
+              ended_at: $ended_at,
+              observation_minutes: $minutes,
+              canary_run_id: $canary_run_id,
+              canary_percent: 1,
+              allowed_methods: ["GET", "HEAD"],
+              status: "PASS",
+              external_effects_enabled: false
+            }' >"$RUNNER_TEMP/canary-observation.json"
+
+      - name: Bind canary and observation evidence
+        id: summary
+        run: |
+          set -Eeuo pipefail
+          canary_run_id="$(jq -r .run_id "$RUNNER_TEMP/infrastructure-canary.json")"
+          observation_sha="$(sha256sum "$RUNNER_TEMP/canary-observation.json" | cut -d' ' -f1)"
+          jq -n \
+            --arg schema_version codestra.manual-portfolio-canary.v1 \
+            --slurpfile intents "$RUNNER_TEMP/canary-intents.json" \
+            --slurpfile canary "$RUNNER_TEMP/infrastructure-canary.json" \
+            --slurpfile observation "$RUNNER_TEMP/canary-observation.json" \
+            '{
+              schema_version: $schema_version,
+              release_intents: $intents[0],
+              canary: $canary[0],
+              observation: $observation[0],
+              status: "PASS",
+              maximum_traffic_percent: 1,
+              external_effects_enabled: false
+            }' >"$RUNNER_TEMP/portfolio-canary.json"
+          sha="$(sha256sum "$RUNNER_TEMP/portfolio-canary.json" | cut -d' ' -f1)"
+          echo "canary_run_id=$canary_run_id" >>"$GITHUB_OUTPUT"
+          echo "observation_sha256=$observation_sha" >>"$GITHUB_OUTPUT"
+          echo "sha256=$sha" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: portfolio-canary-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: |
+            ${{ runner.temp }}/portfolio-canary.json
+            ${{ runner.temp }}/canary-observation.json
+          if-no-files-found: error
+          retention-days: 30
+
+  production:
+    name: orchestrator / promote-same-candidate-to-100-percent
+    needs:
+      - source-policy
+      - plan
+      - staging
+      - rollback
+      - canary
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.phase == 'production' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    environment:
+      name: portfolio-production
+    env:
+      CODESTRA_ORCHESTRATOR_TOKEN: ${{ secrets.CODESTRA_ORCHESTRATOR_TOKEN }}
+      CANDIDATE_SHA256: ${{ needs.source-policy.outputs.candidate_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: portfolio-candidate-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: portfolio-canary-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/prior
+
+      - name: Dispatch final protected production release intents
+        run: |
+          set -Eeuo pipefail
+          prior_sha="$(sha256sum "$RUNNER_TEMP/prior/portfolio-canary.json" | cut -d' ' -f1)"
+          test "$prior_sha" = "${{ needs.canary.outputs.evidence_sha256 }}"
+          python3 tools/manual_production_orchestrator.py dispatch-intents \
+            --candidate "$RUNNER_TEMP/candidate/portfolio-candidate.json" \
+            --phase production \
+            --candidate-sha256 "$CANDIDATE_SHA256" \
+            --prior-evidence-sha256 "$prior_sha" \
+            --output "$RUNNER_TEMP/production-intents.json"
+
+      - name: Promote the exact canary candidate to 100 percent
+        run: |
+          set -Eeuo pipefail
+          observation_sha="$(sha256sum "$RUNNER_TEMP/prior/canary-observation.json" | cut -d' ' -f1)"
+          test "$observation_sha" = "${{ needs.canary.outputs.observation_sha256 }}"
+          python3 tools/manual_production_orchestrator.py dispatch-production \
+            --candidate "$RUNNER_TEMP/candidate/portfolio-candidate.json" \
+            --staging-run-id "${{ needs.staging.outputs.staging_run_id }}" \
+            --rollback-run-id "${{ needs.rollback.outputs.rollback_run_id }}" \
+            --canary-run-id "${{ needs.canary.outputs.canary_run_id }}" \
+            --observation-evidence-sha256 "$observation_sha" \
+            --output "$RUNNER_TEMP/infrastructure-production.json"
+
+      - name: Bind final production evidence
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --arg schema_version codestra.manual-portfolio-production.v1 \
+            --arg controller_sha "$GITHUB_SHA" \
+            --arg candidate_sha256 "$CANDIDATE_SHA256" \
+            --slurpfile intents "$RUNNER_TEMP/production-intents.json" \
+            --slurpfile production "$RUNNER_TEMP/infrastructure-production.json" \
+            '{
+              schema_version: $schema_version,
+              controller_sha: $controller_sha,
+              candidate_sha256: $candidate_sha256,
+              release_intents: $intents[0],
+              production: $production[0],
+              status: "PASS",
+              traffic_percent: 100,
+              external_effects_enabled: false
+            }' >"$RUNNER_TEMP/portfolio-production.json"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: portfolio-production-${{ needs.source-policy.outputs.candidate_sha256 }}
+          path: ${{ runner.temp }}/portfolio-production.json
+          if-no-files-found: error
+          retention-days: 90
