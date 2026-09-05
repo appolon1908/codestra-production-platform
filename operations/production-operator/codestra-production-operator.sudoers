@@ -17,3 +17,5 @@ codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-produ
 codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator activate-control-plane
 codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator enable-production-web-traffic
 codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator disable-production-web-traffic
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator enable-klyrow-email-delivery
+codestra-production-operator ALL=(root) NOPASSWD: /usr/local/sbin/codestra-production-operator disable-klyrow-email-delivery

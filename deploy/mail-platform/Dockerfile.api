@@ -1,13 +1,23 @@
-FROM python@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df
-ARG VCS_REF
+ARG CHAINGUARD_PYTHON_DEV=cgr.dev/chainguard/python@sha256:4bf7e945777010672b8ccd5d2ae2c41c91ad6d3478878347c731ae536d506bef
+ARG CHAINGUARD_PYTHON_RUNTIME=cgr.dev/chainguard/python@sha256:1f6779775c9f466890da563e411cb677045a6c20b6a65160eefad1deffb5012c
+
+FROM ${CHAINGUARD_PYTHON_DEV} AS builder
+USER root
+RUN python -m venv /opt/venv \
+ && /opt/venv/bin/python -m pip install --no-cache-dir --disable-pip-version-check \
+      'fastapi==0.141.1' 'starlette==1.6.0' 'uvicorn==0.52.4' \
+      'PyJWT[crypto]==2.13.0' 'prometheus-client==0.22.1' \
+ && /opt/venv/bin/python -m pip uninstall -y pip setuptools wheel
+
+FROM ${CHAINGUARD_PYTHON_RUNTIME}
+ARG VCS_REF=unknown
 ARG SOURCE_URL=https://github.com/appolon1908-hue/codestra-production-platform
-ARG VERSION
+ARG VERSION=unknown
 LABEL org.opencontainers.image.revision=$VCS_REF org.opencontainers.image.source=$SOURCE_URL org.opencontainers.image.version=$VERSION
-RUN apk upgrade --no-cache \
- && addgroup -S codestra && adduser -S -G codestra codestra \
- && pip install --no-cache-dir fastapi==0.141.1 starlette==1.6.0 uvicorn==0.52.4 PyJWT[crypto]==2.13.0 prometheus-client==0.22.1
+COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
-COPY mail_platform /app/mail_platform
-USER codestra
+COPY --chown=10001:10001 mail_platform /app/mail_platform
+ENV PATH=/opt/venv/bin:$PATH PYTHONPATH=/app PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+USER 10001:10001
 EXPOSE 8098
-CMD ["uvicorn", "mail_platform.api:app", "--host", "0.0.0.0", "--port", "8098", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["/opt/venv/bin/python", "-m", "uvicorn", "mail_platform.api:app", "--host", "0.0.0.0", "--port", "8098", "--proxy-headers", "--forwarded-allow-ips", "*"]

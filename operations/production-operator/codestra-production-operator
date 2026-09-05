@@ -44,6 +44,8 @@ ALLOWED_ACTIONS = {
     "activate-control-plane",
     "enable-production-web-traffic",
     "disable-production-web-traffic",
+    "enable-klyrow-email-delivery",
+    "disable-klyrow-email-delivery",
 }
 READ_ONLY_ACTIONS = {
     "preflight",
@@ -57,6 +59,7 @@ RECOVERY_ACTIONS = {
     "rollback-control-plane",
     "rollback-middleware",
     "disable-production-web-traffic",
+    "disable-klyrow-email-delivery",
 }
 SAFETY_BYPASS_ACTIONS = {
     "status",
@@ -66,6 +69,7 @@ SAFETY_BYPASS_ACTIONS = {
     "rollback-control-plane",
     "rollback-middleware",
     "disable-production-web-traffic",
+    "disable-klyrow-email-delivery",
 }
 CANONICAL_FALSE_FLAGS = {
     "SEND_EVENTS",
@@ -117,6 +121,8 @@ CONTROL_PLANE_WORKER = "codestra-integration-control-plane-worker-1"
 ACTIVE_RELEASE_POINTER = CONFIG_DIR / "active-release.json"
 PREVIOUS_RELEASE_POINTER = CONFIG_DIR / "previous-active-release.json"
 CORE_WEB_TRAFFIC_POINTER = CONFIG_DIR / "core-web-traffic.json"
+KLYROW_EMAIL_AUTHORIZATION = CONFIG_DIR / "klyrow-email-authorization.json"
+KLYROW_EMAIL_POINTER = CONFIG_DIR / "klyrow-email-delivery.json"
 KONG_ADMIN_URL = "http://127.0.0.1:8001"
 KONG_TRAFFIC_GATE_INSTANCE = "codestra-core-web-api-traffic-gate"
 CORE_WEB_PROBE_URL = "https://api.codestra.co/api/v1/callbacks"
@@ -956,6 +962,102 @@ def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
     run_bytes(["/usr/bin/docker", "exec", "-i", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres", "-d", CONTROL_PLANE_DB, "-v", "ON_ERROR_STOP=1"], stdin=database_dump, timeout=1800)
     run_bytes([*compose, "up", "--detach", "--no-build"], timeout=300)
     return {"rollback_stamp": stamp, "database_restored": "PASS", "external_delivery": "DISABLED"}
+
+
+def validate_klyrow_email_authorization(config: dict[str, str]) -> dict[str, object]:
+    """Validate the root-controlled, exact-release authorization and remote evidence summary."""
+    try:
+        payload = json.loads(checked_root_file(KLYROW_EMAIL_AUTHORIZATION))
+    except json.JSONDecodeError as error:
+        raise OperatorError("Klyrow email authorization is malformed") from error
+    required = {
+        "schema", "approved", "change_id", "protected_sha", "maintenance_date",
+        "klyrow_backup", "klyrow_evidence_sha256", "verified_domains",
+        "held_messages", "smtp_no_data", "owner",
+    }
+    if set(payload) != required or payload.get("schema") != "codestra.klyrow-email-authorization.v1":
+        raise OperatorError("Klyrow email authorization schema mismatch")
+    if payload.get("approved") is not True:
+        raise OperatorError("Klyrow email delivery is not approved")
+    for key in ("change_id", "protected_sha", "maintenance_date"):
+        if payload.get(key) != config[key]:
+            raise OperatorError(f"Klyrow email authorization {key} mismatch")
+    if not re.fullmatch(r"/var/backups/codestra-operators/klyrow/[0-9]{8}T[0-9]{6}Z", str(payload.get("klyrow_backup"))):
+        raise OperatorError("Klyrow backup evidence path rejected")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("klyrow_evidence_sha256"))):
+        raise OperatorError("Klyrow evidence digest rejected")
+    if payload.get("verified_domains") != 13 or payload.get("held_messages") != 2:
+        raise OperatorError("Klyrow domain or held-message evidence mismatch")
+    if payload.get("smtp_no_data") != "PASS" or not isinstance(payload.get("owner"), str) or not payload["owner"]:
+        raise OperatorError("Klyrow SMTP or owner approval evidence mismatch")
+    return {
+        "authorization": "PASS", "verified_domains": 13, "held_messages_preserved": 2,
+        "smtp_no_data": "PASS", "klyrow_evidence_sha256": payload["klyrow_evidence_sha256"],
+    }
+
+
+def set_klyrow_email_delivery(config: dict[str, str], enabled: bool) -> dict[str, object]:
+    """Recreate only control-plane API/worker with the fixed email override and read it back."""
+    _, release = control_plane_paths(config)
+    base = release / "deploy/control-plane/compose.yaml"
+    safety = release / "deploy/control-plane/compose.live-delivery-safety.yaml"
+    production = release / "deploy/control-plane/compose.klyrow-production-email.yaml"
+    if enabled:
+        authorization = validate_klyrow_email_authorization(config)
+        require_action_evidence("activate-control-plane", config)
+        validate_control_plane_rollback()
+        layers = [base, safety, production]
+    else:
+        authorization = {"authorization": "NOT_REQUIRED_FOR_DISABLE"}
+        layers = [base, safety]
+    compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT]
+    for layer in layers:
+        compose.extend(["--file", str(layer)])
+    email_delivery_count = lambda: int(run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", CONTROL_PLANE_DB, "-Atc",
+        "set search_path to control_plane; select count(*) from messages where channel='email' and status in ('accepted','sent','delivered');",
+    ], timeout=30).stdout.decode().strip())
+    queued_email_count = lambda: int(run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", CONTROL_PLANE_DB, "-Atc",
+        "set search_path to control_plane; select count(*) from messages where channel='email' and status='queued';",
+    ], timeout=30).stdout.decode().strip())
+    before = email_delivery_count()
+    if enabled and queued_email_count() != 0:
+        raise OperatorError("queued email must be zero before Klyrow activation")
+    try:
+        run_bytes([*compose, "up", "--detach", "--no-build", "api", "worker"], timeout=300)
+        wait_control_plane_health()
+        expected = {
+            "KLYROW_MODE": "production" if enabled else "test",
+            "LIVE_EMAIL_DELIVERY": "true" if enabled else "false",
+            "CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED": "true" if enabled else "false",
+        }
+        for container in (CONTROL_PLANE_API, CONTROL_PLANE_WORKER):
+            inspected = docker_inspect(container)
+            if inspected["State"].get("Health", {}).get("Status") != "healthy":
+                raise OperatorError(f"Klyrow email runtime unhealthy: {container}")
+            env = dict(item.split("=", 1) for item in inspected["Config"].get("Env", []) if "=" in item)
+            if any(env.get(key) != value for key, value in expected.items()):
+                raise OperatorError(f"Klyrow email flag readback mismatch: {container}")
+        after = email_delivery_count()
+        if enabled and after != before:
+            raise OperatorError("email delivery ledger changed during activation")
+        atomic_root_json(KLYROW_EMAIL_POINTER, {
+            "enabled": enabled, "protected_sha": config["protected_sha"],
+            "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }, mode=0o600)
+    except Exception:
+        if enabled:
+            run_bytes(["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
+                       "--file", str(base), "--file", str(safety), "up", "--detach",
+                       "--no-build", "api", "worker"], timeout=300)
+        raise
+    return {**authorization, "klyrow_mode": expected["KLYROW_MODE"],
+            "live_email_delivery": expected["LIVE_EMAIL_DELIVERY"],
+            "email_delivery_ledger_before": before, "email_delivery_ledger_after": after,
+            "messages_sent_during_activation": after - before}
 
 
 def checked_operator_bytes(path: Path, *, expected_mode: int) -> bytes:
@@ -2646,6 +2748,10 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         result.update(set_core_web_traffic(config, True))
     elif action == "disable-production-web-traffic":
         result.update(set_core_web_traffic(config, False))
+    elif action == "enable-klyrow-email-delivery":
+        result.update(set_klyrow_email_delivery(config, True))
+    elif action == "disable-klyrow-email-delivery":
+        result.update(set_klyrow_email_delivery(config, False))
     elif action in {"preflight", "status"}:
         invocation = run_fixed(["/usr/bin/systemctl", "--failed", "--no-legend", "--plain"])
         result.update({"returncode": invocation.returncode, "failed_units_present": bool(invocation.stdout.strip())})
