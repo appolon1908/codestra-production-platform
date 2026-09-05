@@ -50,7 +50,7 @@ sudo python3 tools/provision_release_trust_anchor.py \
   --destination /etc/codestra/release/allowed_signers
 ```
 
-Read back ownership, mode and normalized fingerprint without printing key
+Read back ownership, mode, and normalized fingerprint without printing key
 material. Verify the new release signature before extraction.
 
 ## Exposed runtime-authority rotation
