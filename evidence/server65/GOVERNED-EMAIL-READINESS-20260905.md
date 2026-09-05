@@ -6,6 +6,18 @@
 operator, SSH, resolver, SMTP, or delivery state was changed. No canary was
 sent.
 
+The trust-anchor gate was repeated after the operator requested continuation.
+`/etc/codestra/release/allowed_signers` remained absent, and no independent
+release-signer fingerprint record was found in the authorized host locations
+inspected. The release signature therefore remains unverified.
+
+During the repeated disabled-state check, two sensitive runtime environment
+values were inadvertently rendered in the authorized root-session output by a
+filter-boundary error. The values are not reproduced in this evidence. They
+must be treated as exposed session data and rotated through the governed secret
+rotation procedure before readiness can be claimed. No runtime configuration
+was changed during the check.
+
 The release archive checksum is exact, and GitHub identifies the immutable
 release tag with target commit
 `01f2676772b11919e1d79cc74d36bc5eeaa682cd`. Installation stopped before
@@ -113,7 +125,7 @@ CANARY_DELIVERY=NOT_RUN
 ROLLBACK_TEST=FAIL
 PRODUCTION_CHANGED=NO
 FINAL_STATUS=BLOCKED
-BLOCKERS=Missing independently provisioned SSH release-signing trust anchor; installed operator tuple is older; requested Middleware digest is not running; resolver remains 503; downstream gates were not run
+BLOCKERS=Missing independently provisioned SSH release-signing trust anchor and fingerprint; two runtime secrets require governed rotation after session-output exposure; installed operator tuple is older; requested Middleware digest is not running; resolver remains 503; downstream gates were not run
 PR_URLS=https://github.com/appolon1908-hue/codestra-production-platform/pull/274
 EVIDENCE_PATH=evidence/server65/GOVERNED-EMAIL-READINESS-20260905.md
 ```
