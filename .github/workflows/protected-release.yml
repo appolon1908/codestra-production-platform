@@ -91,7 +91,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN }}
           MIDDLEWARE_REPOSITORY: Codestra-SRL/codestra-middleware
-          EXPECTED_ARTIFACT_DIGEST: sha256:cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
+          # GitHub's immutable digest for the exact artifact named by
+          # config/production-release-tuple.json (run 32919188388).
+          EXPECTED_ARTIFACT_DIGEST: sha256:64bdd090513a6edea513dc0215a1d4d4c8fb5f8935c6eb56b76d3f45ce7a8da9
         run: |
           set -Eeuo pipefail
           test -n "${GH_TOKEN}"
