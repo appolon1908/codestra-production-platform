@@ -1113,6 +1113,60 @@ def test_pinned_probes_are_bundled_and_structurally_no_data() -> None:
     assert "provider_submissions\": 0" in no_effect
 
 
+def test_smtp_no_data_private_route_validates_public_tls_hostname(monkeypatch) -> None:
+    smtp_probe = load_source_script("probe-smtp-no-data", "kpv_smtp_no_data")
+    observations: dict[str, object] = {}
+
+    class FakeSMTP:
+        def __init__(self, *, timeout: int) -> None:
+            assert timeout == 10
+            self._host = ""
+
+        def connect(self, host: str, port: int) -> tuple[int, bytes]:
+            observations["connect"] = (host, port)
+            self._host = host
+            return 220, b"ready"
+
+        def ehlo(self, hostname: str) -> tuple[int, bytes]:
+            assert hostname == "validator.invalid"
+            return 250, b"starttls"
+
+        def has_extn(self, extension: str) -> bool:
+            return extension == "starttls"
+
+        def starttls(self, *, context: object) -> tuple[int, bytes]:
+            observations["tls_hostname"] = self._host
+            observations["tls_context"] = context
+            return 220, b"ready"
+
+        def docmd(self, command: str, argument: str) -> tuple[int, bytes]:
+            return (250, b"ok") if command == "MAIL" else (530, b"auth required")
+
+        def quit(self) -> tuple[int, bytes]:
+            return 221, b"bye"
+
+        def close(self) -> None:
+            raise AssertionError("clean QUIT should close the connection")
+
+    tls_context = object()
+    monkeypatch.setattr(smtp_probe.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(smtp_probe.ssl, "create_default_context", lambda: tls_context)
+
+    result = smtp_probe.probe(
+        "private_submission", "10.40.0.4", 587, "mail.klyrow.com"
+    )
+
+    assert observations == {
+        "connect": ("10.40.0.4", 587),
+        "tls_hostname": "mail.klyrow.com",
+        "tls_context": tls_context,
+    }
+    assert result["certificate_hostname_verified"] is True
+    assert result["relay_denied"] is True
+    assert result["data_issued"] is False
+    assert result["messages_queued"] == 0
+
+
 def test_installer_never_grants_host_groups_or_generic_privilege() -> None:
     installer = (SOURCE / "install-klyrow-production-validator.py").read_text(encoding="utf-8")
     for forbidden in ("groupadd", "groupmod", "usermod", "chmod 666", "docker.sock"):
