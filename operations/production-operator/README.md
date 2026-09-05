@@ -16,9 +16,10 @@ The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
 Klyrow email enablement requires `/etc/codestra/production-operator/klyrow-email-authorization.json`
 as a root-owned `0600` file matching `klyrow-email-authorization.example.json`.
 It binds the protected SHA, change ID, and maintenance date to the Klyrow
-backup/evidence digest, 13 verified domains, two preserved held messages, and a
-passing SMTP no-data probe. Exact-tuple `activate-control-plane` evidence and a
-validated rollback bundle are also mandatory. Failed runtime read-back
+backup/evidence digest, 14 verified domains, two preserved held messages, a
+passing SMTP no-data probe, and passing authorization tests. Exact-tuple
+`activate-control-plane` evidence and a validated rollback bundle are also
+mandatory. Failed runtime read-back
 automatically reapplies the fail-closed override.
 There is no shell, Docker-group membership, host/path input, arbitrary unit, or
 command argument. `preflight`, `status`, `collect-evidence`, and `kong-readback`
@@ -44,7 +45,7 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `f3a75f3045b42cc65c7e54c9cc6a0887d212306f81760aa5b331730506262c51` |
+| `codestra-production-operator` | `ea03de69d32bbcdd79be46fc3ba89ee752f11e10265184b98ebce00823a31af5` |
 | `codestra-production-forced-command` | `80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb` |
 | `codestra-production-operator.sudoers` | `aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
