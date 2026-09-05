@@ -96,8 +96,10 @@ from the release being authenticated.
 
 After that independent gate is satisfied, the mission must restart at
 signature verification. Backups, installer inspection, operator installation,
-resolver repair, database checks, SMTP no-DATA tests, protected preflight,
-activation, and canary work have not run and must not be represented as passed.
+resolver repair, database checks, SMTP no-DATA tests, activation, and canary
+work have not run and must not be represented as passed. The cited protected
+preflight did run: its verification job succeeded, its approved-operation job
+failed, and the overall run failed.
 
 ## Final state
 
@@ -106,14 +108,14 @@ SERVER_A_OPERATOR_INSTALL=FAIL
 PROTECTED_SHA_READBACK=278c115b8f9c0f8a34be285ee26b095c094d8186
 MIDDLEWARE_DIGEST_READBACK=NOT_MATCHED
 CHANGE_ID_READBACK=CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01
-BACKUP_VERIFIED=FAIL
-ROLLBACK_READY=FAIL
-RESOLVER_AUTHORIZATION=FAIL
-RESOLVER_NEGATIVE_TESTS=FAIL
+BACKUP_VERIFIED=NOT_RUN
+ROLLBACK_READY=NOT_RUN
+RESOLVER_AUTHORIZATION=BLOCKED
+RESOLVER_NEGATIVE_TESTS=NOT_RUN
 MIGRATION_HEAD=NOT_VERIFIED
-SMTP_STARTTLS=FAIL
-SMTP_NO_DATA=FAIL
-UNAUTHORIZED_RELAY_DENIED=FAIL
+SMTP_STARTTLS=NOT_RUN
+SMTP_NO_DATA=NOT_RUN
+UNAUTHORIZED_RELAY_DENIED=NOT_RUN
 QUEUE_DELTA=NOT_MEASURED
 PROTECTED_PREFLIGHT=https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/33966259819 failure
 EMAIL_DELIVERY_ENABLED=NO
@@ -122,7 +124,7 @@ PSTN_DELIVERY_ENABLED=NO
 CANARY_SENT=NO
 CANARY_RECIPIENT=NOT_AUTHORIZED
 CANARY_DELIVERY=NOT_RUN
-ROLLBACK_TEST=FAIL
+ROLLBACK_TEST=NOT_RUN
 PRODUCTION_CHANGED=NO
 FINAL_STATUS=BLOCKED
 BLOCKERS=Missing independently provisioned SSH release-signing trust anchor and fingerprint; two runtime secrets require governed rotation after session-output exposure; installed operator tuple is older; requested Middleware digest is not running; resolver remains 503; downstream gates were not run
