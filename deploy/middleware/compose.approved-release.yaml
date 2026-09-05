@@ -1,6 +1,6 @@
 # Apply last, after compose.middleware-runtime.yaml and feature overrides.
 x-approved-middleware: &approved-middleware
-  image: ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b
+  image: ghcr.io/appolon1908-hue/codestra-middleware@sha256:0f5a5b3b1c8166d6509b228541bee01533f5feb1dbef24ed2d241194ba610802
   environment: &webphone-disabled
     WEBPHONE_ENDPOINT_ADAPTER_URL: ""
     WEBPHONE_KEYCLOAK_ENABLED: "false"

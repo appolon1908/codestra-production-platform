@@ -1,8 +1,8 @@
 {
-  "source": "https://github.com/Codestra-SRL/codestra-middleware",
-  "revision": "f199b6c40f4e467979e9a8b255a0e686321a182d",
-  "image": "ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b",
-  "required_database_head": "0056_klyrow_delivery_events",
+  "source": "https://github.com/appolon1908-hue/Middleware-",
+  "revision": "29b25cba8302cd15ef4d87b68f501da6347f2f17",
+  "image": "ghcr.io/appolon1908-hue/codestra-middleware@sha256:0f5a5b3b1c8166d6509b228541bee01533f5feb1dbef24ed2d241194ba610802",
+  "required_database_head": "0010_realtime_gateway",
   "webphone_endpoint_adapter_url": "",
   "webphone_features_enabled": false,
   "deployment_state": "BLOCKED_PENDING_PROTECTED_BACKUP_RESTORE_AND_ROLLOUT"

@@ -36,19 +36,10 @@
     {
       "order": 30,
       "wave": "middleware",
-      "repository": "Codestra-SRL/codestra-middleware",
-      "repository_id": 1313193234,
-      "default_branch": "main",
-      "role": "canonical-middleware",
-      "required": true
-    },
-    {
-      "order": 31,
-      "wave": "middleware",
       "repository": "appolon1908-hue/Middleware-",
       "repository_id": 1347559071,
       "default_branch": "main",
-      "role": "transitional-middleware",
+      "role": "canonical-middleware",
       "required": true
     },
     {
