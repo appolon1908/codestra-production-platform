@@ -756,6 +756,13 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
     monkeypatch.setattr(OPERATOR, "middleware_compose", lambda value: ["docker", "compose"])
     monkeypatch.setattr(OPERATOR, "validate_middleware_compose", lambda value, command: None)
     monkeypatch.setattr(OPERATOR, "middleware_runtime_image_matches", lambda value: [True, True, True])
+    snapshot_calls = []
+    monkeypatch.setattr(
+        OPERATOR,
+        "snapshot_middleware_runtime",
+        lambda value, backup_stamp: snapshot_calls.append((value, backup_stamp))
+        or "20260830T190000Z",
+    )
     monkeypatch.setattr(
         OPERATOR,
         "validate_middleware_rollback",
@@ -764,11 +771,6 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
             "database_clients_running": (),
             "bundle_sha256": "a" * 64,
         },
-    )
-    monkeypatch.setattr(
-        OPERATOR,
-        "snapshot_middleware_runtime",
-        lambda value, backup_stamp: pytest.fail("retry must not overwrite the rollback point"),
     )
     monkeypatch.setattr(
         OPERATOR,
@@ -782,6 +784,7 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
     )
     monkeypatch.setattr(OPERATOR, "middleware_quiescence_stamp", lambda: None)
     result = OPERATOR.rollout_middleware(config)
+    assert snapshot_calls == [(config, "20260830T180000Z")]
     assert result["middleware_backup_stamp"] == "20260830T190000Z"
     assert result["middleware_already_current"] is True
 

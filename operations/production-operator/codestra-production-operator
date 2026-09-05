@@ -2200,7 +2200,10 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
     compose = middleware_compose(config)
     validate_middleware_compose(config, compose)
     image_matches = middleware_runtime_image_matches(config)
-    if any(image_matches):
+    if all(image_matches):
+        stamp = snapshot_middleware_runtime(config, str(backup_state["backup_stamp"]))
+        bundle = validate_middleware_rollback(config)
+    elif any(image_matches):
         bundle = validate_middleware_rollback(config)
         stamp = str(bundle["stamp"])
     else:
