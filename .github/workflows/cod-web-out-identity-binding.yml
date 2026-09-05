@@ -1,0 +1,32 @@
+name: cod-web-out-identity-binding
+
+on:
+  pull_request:
+    paths:
+      - deploy/keycloak/cod-web-out-email-production.json
+      - deploy/kong-production-standby/identity-registry/002_cod_web_out_klyrow_binding.sql
+      - operations/runbooks/cod-web-out-klyrow-resolver-binding.md
+      - tests/test_cod_web_out_oidc_binding.py
+      - .github/workflows/cod-web-out-identity-binding.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whitespace gate compares the exact protected base SHA with this
+          # PR head. A shallow checkout does not necessarily contain that base.
+          fetch-depth: 0
+      - name: Validate exact tenant and resolver scope contract
+        run: python3 -m unittest tests.test_cod_web_out_oidc_binding -v
+      - name: Check changed contract files for whitespace errors
+        run: git diff --check "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" -- \
+          deploy/keycloak/cod-web-out-email-production.json \
+          deploy/kong-production-standby/identity-registry/002_cod_web_out_klyrow_binding.sql \
+          operations/runbooks/cod-web-out-klyrow-resolver-binding.md \
+          tests/test_cod_web_out_oidc_binding.py \
+          .github/workflows/cod-web-out-identity-binding.yml
