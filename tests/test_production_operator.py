@@ -134,11 +134,22 @@ def test_klyrow_authorization_requires_exact_tuple(monkeypatch) -> None:
         "change_id": config["change_id"], "protected_sha": config["protected_sha"],
         "maintenance_date": config["maintenance_date"],
         "klyrow_backup": "/var/backups/codestra-operators/klyrow/20260905T085512Z",
-        "klyrow_evidence_sha256": "c" * 64, "verified_domains": 13,
-        "held_messages": 2, "smtp_no_data": "PASS", "owner": "release-owner",
+        "klyrow_evidence_sha256": "c" * 64, "verified_domains": 14,
+        "held_messages": 2, "smtp_no_data": "PASS", "authorization_tests": "PASS",
+        "owner": "release-owner",
     }
     monkeypatch.setattr(OPERATOR, "checked_root_file", lambda *_args, **_kwargs: json.dumps(authorization))
-    assert OPERATOR.validate_klyrow_email_authorization(config)["authorization"] == "PASS"
+    evidence = OPERATOR.validate_klyrow_email_authorization(config)
+    assert evidence["authorization"] == "PASS"
+    assert evidence["verified_domains"] == 14
+    authorization["authorization_tests"] = "FAIL"
+    with pytest.raises(OPERATOR.OperatorError, match="authorization test evidence mismatch"):
+        OPERATOR.validate_klyrow_email_authorization(config)
+    authorization["authorization_tests"] = "PASS"
+    authorization["verified_domains"] = 13
+    with pytest.raises(OPERATOR.OperatorError, match="domain or held-message evidence mismatch"):
+        OPERATOR.validate_klyrow_email_authorization(config)
+    authorization["verified_domains"] = 14
     authorization["protected_sha"] = "d" * 40
     with pytest.raises(OPERATOR.OperatorError, match="protected_sha mismatch"):
         OPERATOR.validate_klyrow_email_authorization(config)
@@ -690,9 +701,9 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
         "--rm",
         "--no-deps",
         "middleware-integration-api",
-        "--entrypoint",
-        "python",
-        "scripts/migrate_runtime.py",
+        "alembic",
+        "upgrade",
+        "head",
     ]
     recreate = next(command for command in calls if "--force-recreate" in command)
     assert "--no-deps" in recreate
@@ -756,6 +767,13 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
     monkeypatch.setattr(OPERATOR, "middleware_compose", lambda value: ["docker", "compose"])
     monkeypatch.setattr(OPERATOR, "validate_middleware_compose", lambda value, command: None)
     monkeypatch.setattr(OPERATOR, "middleware_runtime_image_matches", lambda value: [True, True, True])
+    snapshot_calls = []
+    monkeypatch.setattr(
+        OPERATOR,
+        "snapshot_middleware_runtime",
+        lambda value, backup_stamp: snapshot_calls.append((value, backup_stamp))
+        or "20260830T190000Z",
+    )
     monkeypatch.setattr(
         OPERATOR,
         "validate_middleware_rollback",
@@ -764,11 +782,6 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
             "database_clients_running": (),
             "bundle_sha256": "a" * 64,
         },
-    )
-    monkeypatch.setattr(
-        OPERATOR,
-        "snapshot_middleware_runtime",
-        lambda value, backup_stamp: pytest.fail("retry must not overwrite the rollback point"),
     )
     monkeypatch.setattr(
         OPERATOR,
@@ -782,8 +795,86 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
     )
     monkeypatch.setattr(OPERATOR, "middleware_quiescence_stamp", lambda: None)
     result = OPERATOR.rollout_middleware(config)
+    assert snapshot_calls == [(config, "20260830T180000Z")]
     assert result["middleware_backup_stamp"] == "20260830T190000Z"
     assert result["middleware_already_current"] is True
+
+
+def test_middleware_rollout_resumes_fresh_snapshot_before_health(monkeypatch):
+    config = OPERATOR.load_release_config()
+    stamp = "20260830T190000Z"
+    marker = {"stamp": stamp}
+    events = []
+    monkeypatch.setattr(
+        OPERATOR,
+        "require_action_evidence",
+        lambda action, value: Path("/evidence"),
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_backup_state",
+        lambda: {"backup_stamp": "20260830T180000Z"},
+    )
+    monkeypatch.setattr(OPERATOR, "require_evidence_value", lambda path, key, value: None)
+    monkeypatch.setattr(OPERATOR, "certify_standby", lambda value: {})
+    monkeypatch.setattr(OPERATOR, "middleware_compose", lambda value: ["docker", "compose"])
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_middleware_compose",
+        lambda value, command: None,
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_runtime_image_matches",
+        lambda value: [True, True, True],
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "snapshot_middleware_runtime",
+        lambda value, backup_stamp: events.append("snapshot") or stamp,
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_middleware_rollback",
+        lambda value: {
+            "stamp": stamp,
+            "database_clients_running": ("codestra-middleware-integration-api-1",),
+            "bundle_sha256": "a" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_quiescence_stamp",
+        lambda: marker["stamp"],
+    )
+
+    def resume(observed_stamp, containers):
+        assert observed_stamp == stamp
+        assert containers == ("codestra-middleware-integration-api-1",)
+        events.append("resume")
+        marker["stamp"] = None
+
+    monkeypatch.setattr(OPERATOR, "resume_middleware_database_clients", resume)
+
+    def wait_for_health():
+        assert events == ["snapshot", "resume"]
+        events.append("healthy")
+
+    monkeypatch.setattr(OPERATOR, "wait_middleware_health", wait_for_health)
+
+    def verify(value):
+        assert events == ["snapshot", "resume", "healthy"]
+        return {"middleware_runtime_digest": "PASS"}
+
+    monkeypatch.setattr(OPERATOR, "verify_middleware_runtime", verify)
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_database_revision",
+        lambda: "0010_realtime_gateway",
+    )
+    result = OPERATOR.rollout_middleware(config)
+    assert result["middleware_already_current"] is True
+    assert marker["stamp"] is None
 
 
 def test_compose_layers_are_copied_before_privileged_use(monkeypatch, tmp_path):
@@ -990,6 +1081,12 @@ def test_middleware_database_clients_quiesce_and_resume_exact_prior_set(
         return subprocess.CompletedProcess(command, 0, b"")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
+    waited = []
+    monkeypatch.setattr(
+        OPERATOR,
+        "wait_middleware_database_clients",
+        lambda containers: waited.append(containers),
+    )
     stamp = "20260830T200000Z"
 
     assert OPERATOR.quiesce_middleware_database_clients(stamp) == originally_running
@@ -1004,6 +1101,51 @@ def test_middleware_database_clients_quiesce_and_resume_exact_prior_set(
     start = next(command for command in calls if command[1] == "start")
     assert stop[4:] == list(originally_running)
     assert start[2:] == list(originally_running)
+    assert waited == [originally_running]
+
+
+def test_middleware_database_client_wait_rejects_resumed_worker_exit(monkeypatch):
+    container = "codestra-middleware-sync-worker-1"
+    observations = iter(
+        (
+            {
+                "RestartCount": 0,
+                "State": {"Running": True, "StartedAt": "2026-09-05T11:00:00Z"},
+            },
+            {
+                "RestartCount": 0,
+                "State": {"Running": False, "StartedAt": "2026-09-05T11:00:00Z"},
+            },
+        )
+    )
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda value: next(observations))
+    monkeypatch.setattr(OPERATOR.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(OPERATOR.OperatorError, match="did not remain running"):
+        OPERATOR.wait_middleware_database_clients((container,))
+
+
+def test_middleware_database_client_wait_restarts_stability_window(monkeypatch):
+    container = "codestra-middleware-reconciliation-worker-1"
+    observations = iter(
+        (
+            {
+                "RestartCount": 0,
+                "State": {"Running": True, "StartedAt": "2026-09-05T11:00:00Z"},
+            },
+            {
+                "RestartCount": 1,
+                "State": {"Running": True, "StartedAt": "2026-09-05T11:00:02Z"},
+            },
+        )
+    )
+    clock = iter((0.0, 0.0, 0.5, 2.0))
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda value: next(observations))
+    monkeypatch.setattr(OPERATOR.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(OPERATOR.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(OPERATOR.OperatorError, match="health check timed out"):
+        OPERATOR.wait_middleware_database_clients((container,), timeout_seconds=1)
 
 
 def test_middleware_database_client_inventory_rejects_an_unclassified_service(
@@ -2133,7 +2275,9 @@ def test_waiver_cannot_bypass_tuple_or_protected_approval() -> None:
     forced = (PACKAGE / "codestra-production-forced-command").read_text()
     workflow = (ROOT / ".github/workflows/production-activation.yml").read_text()
     assert 'parts[1:] != expected' in forced
-    assert 'test "$(git rev-parse HEAD)" = "${PROTECTED_SHA}"' in workflow
+    assert 'test "$(git -C release rev-parse HEAD)" = "${PROTECTED_SHA}"' in workflow
+    assert 'ref: ${{ github.workflow_sha }}' in workflow
+    assert "python authority/tools/validate_activation_request.py" in workflow
     assert 'test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/release%2Fproduction-activation" --jq .commit.sha)" = "${PROTECTED_SHA}"' in workflow
     assert '--digest "${IMAGE_DIGEST}"' in workflow
     assert "environment: production" in workflow
