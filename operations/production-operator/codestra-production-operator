@@ -2214,6 +2214,7 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
                         "Middleware quiescence marker does not match rollback point"
                     )
                 resume_middleware_database_clients(stamp, captured_clients)
+                wait_middleware_health()
         except Exception:
             recover_stale_middleware_quiescence()
             raise

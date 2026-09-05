@@ -851,8 +851,14 @@ def test_middleware_rollout_resumes_fresh_snapshot_before_health(monkeypatch):
 
     monkeypatch.setattr(OPERATOR, "resume_middleware_database_clients", resume)
 
-    def verify(value):
+    def wait_for_health():
         assert events == ["snapshot", "resume"]
+        events.append("healthy")
+
+    monkeypatch.setattr(OPERATOR, "wait_middleware_health", wait_for_health)
+
+    def verify(value):
+        assert events == ["snapshot", "resume", "healthy"]
         return {"middleware_runtime_digest": "PASS"}
 
     monkeypatch.setattr(OPERATOR, "verify_middleware_runtime", verify)
