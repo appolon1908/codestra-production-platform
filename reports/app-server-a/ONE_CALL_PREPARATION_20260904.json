@@ -3,7 +3,7 @@
   "prepared_on": "2026-09-04",
   "basis": "retrieval_and_source_preparation_only",
   "package_state": "DRAFT_BLOCKED",
-  "package_sha256": "019ab6987212d6262d3f6c1e3cfc602ea949833a26aed826e5728b1ad5d9294d",
+  "package_sha256": "491e2d2c1255cc74c0c1a85de0adb61691dcdbb809d765ff369e677373f85b46",
   "source_library_filename": "VICIDIAL_ONE_CALL_PRODUCTION_AUTHORIZATION_PACKAGE.md",
   "source_library_sha256": "3a2aecaab835d474ffe33a63d7a5f3e73f8494447710fb85a2e9c509a64fa6db",
   "observed_platform_branch": "release/production-activation",
