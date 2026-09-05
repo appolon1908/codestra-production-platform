@@ -1103,8 +1103,14 @@ def test_middleware_database_client_wait_rejects_resumed_worker_exit(monkeypatch
     container = "codestra-middleware-sync-worker-1"
     observations = iter(
         (
-            {"State": {"Running": True}},
-            {"State": {"Running": False}},
+            {
+                "RestartCount": 0,
+                "State": {"Running": True, "StartedAt": "2026-09-05T11:00:00Z"},
+            },
+            {
+                "RestartCount": 0,
+                "State": {"Running": False, "StartedAt": "2026-09-05T11:00:00Z"},
+            },
         )
     )
     monkeypatch.setattr(OPERATOR, "docker_inspect", lambda value: next(observations))
@@ -1112,6 +1118,29 @@ def test_middleware_database_client_wait_rejects_resumed_worker_exit(monkeypatch
 
     with pytest.raises(OPERATOR.OperatorError, match="did not remain running"):
         OPERATOR.wait_middleware_database_clients((container,))
+
+
+def test_middleware_database_client_wait_restarts_stability_window(monkeypatch):
+    container = "codestra-middleware-reconciliation-worker-1"
+    observations = iter(
+        (
+            {
+                "RestartCount": 0,
+                "State": {"Running": True, "StartedAt": "2026-09-05T11:00:00Z"},
+            },
+            {
+                "RestartCount": 1,
+                "State": {"Running": True, "StartedAt": "2026-09-05T11:00:02Z"},
+            },
+        )
+    )
+    clock = iter((0.0, 0.0, 0.5, 2.0))
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda value: next(observations))
+    monkeypatch.setattr(OPERATOR.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(OPERATOR.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(OPERATOR.OperatorError, match="health check timed out"):
+        OPERATOR.wait_middleware_database_clients((container,), timeout_seconds=1)
 
 
 def test_middleware_database_client_inventory_rejects_an_unclassified_service(

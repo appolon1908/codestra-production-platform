@@ -1501,14 +1501,17 @@ def validate_middleware_database_client_names(containers: tuple[str, ...]) -> No
 def wait_middleware_database_clients(
     containers: tuple[str, ...], timeout_seconds: int = 180
 ) -> None:
-    """Require every resumed client to remain running across two read-backs."""
+    """Require every resumed client to remain stable across two read-backs."""
     validate_middleware_database_client_names(containers)
     deadline = time.monotonic() + timeout_seconds
     stable_observations = 0
+    stable_fingerprints: dict[str, tuple[int, str]] | None = None
     while time.monotonic() < deadline:
         ready = True
+        fingerprints: dict[str, tuple[int, str]] = {}
         for container in containers:
-            state = docker_inspect(container).get("State")
+            current = docker_inspect(container)
+            state = current.get("State")
             if not isinstance(state, dict) or not isinstance(state.get("Running"), bool):
                 raise OperatorError(
                     f"Middleware database client state unavailable: {container}"
@@ -1517,6 +1520,19 @@ def wait_middleware_database_clients(
                 raise OperatorError(
                     f"Middleware database client did not remain running: {container}"
                 )
+            restart_count = current.get("RestartCount")
+            started_at = state.get("StartedAt")
+            if (
+                isinstance(restart_count, bool)
+                or not isinstance(restart_count, int)
+                or restart_count < 0
+                or not isinstance(started_at, str)
+                or not started_at
+            ):
+                raise OperatorError(
+                    f"Middleware database client restart state unavailable: {container}"
+                )
+            fingerprints[container] = (restart_count, started_at)
             health = state.get("Health")
             if health is not None:
                 if not isinstance(health, dict) or health.get("Status") not in {
@@ -1531,7 +1547,15 @@ def wait_middleware_database_clients(
                     )
                 if health["Status"] != "healthy":
                     ready = False
-        stable_observations = stable_observations + 1 if ready else 0
+        if ready:
+            if fingerprints == stable_fingerprints:
+                stable_observations += 1
+            else:
+                stable_fingerprints = fingerprints
+                stable_observations = 1
+        else:
+            stable_fingerprints = None
+            stable_observations = 0
         if stable_observations >= 2:
             return
         time.sleep(2)
