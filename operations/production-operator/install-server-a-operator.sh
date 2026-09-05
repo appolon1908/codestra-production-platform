@@ -65,9 +65,9 @@ validate_trusted_source() {
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
-f986169593a78ead4133a6b102fbdaddc7f611607a6c26b9f191ad2f9e4e61f9  codestra-production-operator
-6d7432e9765474f86e93a711962ddf6b1f8edb3eab6098ace8d19d575f9ddec4  codestra-production-forced-command
-2969c70ff9e6568a6958f0e6c760a34e538aeb5934049f59dc4f69eab7ab018c  codestra-production-operator.sudoers
+c78bc7cbf21d69611cb303d0439dfb601cc1c939de5ce93426a7c2673965097b  codestra-production-operator
+80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb  codestra-production-forced-command
+aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
 dad62a1dcb35fabb97991ad2f0a1079d13d949528daa7bebe0d35d291ec23f67  ../../PRODUCTION-DATABASE-MANIFEST.yaml
 c6b3041ead24fb674d982a5787ff4f2d0eabbf0fd9bb45be8bcb695d09647235  ../../tools/validate_production_database_manifest.py

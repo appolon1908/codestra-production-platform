@@ -8,6 +8,9 @@ import json
 import re
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+NON_ACTIVATABLE_RELEASES = ROOT / "config" / "non-activatable-releases.json"
+
 CHANGE_ID = "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01"
 SUPERSEDED_DIGESTS = {
     "sha256:336c9a31648a0481737fa4bcc3eafb02a22e4b4fc66ba7b8ec1759c087e05e02",
@@ -18,6 +21,7 @@ ACTIONS = {
     "stage-control-plane", "validate-control-plane", "rollback-control-plane",
     "rollout-middleware", "rollback-middleware",
     "activate-control-plane", "enable-production-web-traffic", "disable-production-web-traffic",
+    "enable-klyrow-email-delivery", "disable-klyrow-email-delivery",
 }
 REQUIRED_FALSE_FLAGS = {
     "CALLBACK_DISPATCH",
@@ -45,6 +49,10 @@ def validate(args: argparse.Namespace) -> None:
         raise ValueError("middleware digest is superseded for new activation")
     if args.change_id != CHANGE_ID:
         raise ValueError("change identifier mismatch")
+    revoked = json.loads(NON_ACTIVATABLE_RELEASES.read_text(encoding="utf-8"))
+    denied = {entry["protected_sha"] for entry in revoked.get("releases", [])}
+    if args.sha in denied:
+        raise ValueError("protected release is explicitly non-activatable")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.maintenance_date):
         raise ValueError("exact maintenance date is required")
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
