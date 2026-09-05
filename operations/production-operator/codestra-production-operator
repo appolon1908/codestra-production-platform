@@ -973,7 +973,7 @@ def validate_klyrow_email_authorization(config: dict[str, str]) -> dict[str, obj
     required = {
         "schema", "approved", "change_id", "protected_sha", "maintenance_date",
         "klyrow_backup", "klyrow_evidence_sha256", "verified_domains",
-        "held_messages", "smtp_no_data", "owner",
+        "held_messages", "smtp_no_data", "authorization_tests", "owner",
     }
     if set(payload) != required or payload.get("schema") != "codestra.klyrow-email-authorization.v1":
         raise OperatorError("Klyrow email authorization schema mismatch")
@@ -988,11 +988,14 @@ def validate_klyrow_email_authorization(config: dict[str, str]) -> dict[str, obj
         raise OperatorError("Klyrow evidence digest rejected")
     if payload.get("verified_domains") != 14 or payload.get("held_messages") != 2:
         raise OperatorError("Klyrow domain or held-message evidence mismatch")
-    if payload.get("smtp_no_data") != "PASS" or not isinstance(payload.get("owner"), str) or not payload["owner"]:
-        raise OperatorError("Klyrow SMTP or owner approval evidence mismatch")
+    if payload.get("smtp_no_data") != "PASS" or payload.get("authorization_tests") != "PASS":
+        raise OperatorError("Klyrow SMTP or authorization test evidence mismatch")
+    if not isinstance(payload.get("owner"), str) or not payload["owner"]:
+        raise OperatorError("Klyrow owner approval evidence mismatch")
     return {
         "authorization": "PASS", "verified_domains": 14, "held_messages_preserved": 2,
-        "smtp_no_data": "PASS", "klyrow_evidence_sha256": payload["klyrow_evidence_sha256"],
+        "smtp_no_data": "PASS", "authorization_tests": "PASS",
+        "klyrow_evidence_sha256": payload["klyrow_evidence_sha256"],
     }
 
 
