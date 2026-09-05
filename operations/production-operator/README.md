@@ -44,9 +44,9 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `1897bb1ec205a2ff1ffddbc190de20dcb34016de9083584c83849abd87d79679` |
-| `codestra-production-forced-command` | `6d7432e9765474f86e93a711962ddf6b1f8edb3eab6098ace8d19d575f9ddec4` |
-| `codestra-production-operator.sudoers` | `2969c70ff9e6568a6958f0e6c760a34e538aeb5934049f59dc4f69eab7ab018c` |
+| `codestra-production-operator` | `f3a75f3045b42cc65c7e54c9cc6a0887d212306f81760aa5b331730506262c51` |
+| `codestra-production-forced-command` | `80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb` |
+| `codestra-production-operator.sudoers` | `aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `codestra-isolated-restore-rehearsal.sh` | `076bc8d33318561fff535f336300d072cd14beb9c756c253a8b1c6a30f3f34f4` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
