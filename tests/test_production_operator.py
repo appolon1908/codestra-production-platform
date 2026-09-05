@@ -134,11 +134,17 @@ def test_klyrow_authorization_requires_exact_tuple(monkeypatch) -> None:
         "change_id": config["change_id"], "protected_sha": config["protected_sha"],
         "maintenance_date": config["maintenance_date"],
         "klyrow_backup": "/var/backups/codestra-operators/klyrow/20260905T085512Z",
-        "klyrow_evidence_sha256": "c" * 64, "verified_domains": 13,
+        "klyrow_evidence_sha256": "c" * 64, "verified_domains": 14,
         "held_messages": 2, "smtp_no_data": "PASS", "owner": "release-owner",
     }
     monkeypatch.setattr(OPERATOR, "checked_root_file", lambda *_args, **_kwargs: json.dumps(authorization))
-    assert OPERATOR.validate_klyrow_email_authorization(config)["authorization"] == "PASS"
+    evidence = OPERATOR.validate_klyrow_email_authorization(config)
+    assert evidence["authorization"] == "PASS"
+    assert evidence["verified_domains"] == 14
+    authorization["verified_domains"] = 13
+    with pytest.raises(OPERATOR.OperatorError, match="domain or held-message evidence mismatch"):
+        OPERATOR.validate_klyrow_email_authorization(config)
+    authorization["verified_domains"] = 14
     authorization["protected_sha"] = "d" * 40
     with pytest.raises(OPERATOR.OperatorError, match="protected_sha mismatch"):
         OPERATOR.validate_klyrow_email_authorization(config)

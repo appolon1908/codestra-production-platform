@@ -986,12 +986,12 @@ def validate_klyrow_email_authorization(config: dict[str, str]) -> dict[str, obj
         raise OperatorError("Klyrow backup evidence path rejected")
     if not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("klyrow_evidence_sha256"))):
         raise OperatorError("Klyrow evidence digest rejected")
-    if payload.get("verified_domains") != 13 or payload.get("held_messages") != 2:
+    if payload.get("verified_domains") != 14 or payload.get("held_messages") != 2:
         raise OperatorError("Klyrow domain or held-message evidence mismatch")
     if payload.get("smtp_no_data") != "PASS" or not isinstance(payload.get("owner"), str) or not payload["owner"]:
         raise OperatorError("Klyrow SMTP or owner approval evidence mismatch")
     return {
-        "authorization": "PASS", "verified_domains": 13, "held_messages_preserved": 2,
+        "authorization": "PASS", "verified_domains": 14, "held_messages_preserved": 2,
         "smtp_no_data": "PASS", "klyrow_evidence_sha256": payload["klyrow_evidence_sha256"],
     }
 

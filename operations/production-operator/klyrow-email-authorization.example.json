@@ -6,7 +6,7 @@
   "maintenance_date": "YYYY-MM-DD",
   "klyrow_backup": "/var/backups/codestra-operators/klyrow/YYYYMMDDTHHMMSSZ",
   "klyrow_evidence_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-  "verified_domains": 13,
+  "verified_domains": 14,
   "held_messages": 2,
   "smtp_no_data": "PASS",
   "owner": "approved-owner"
