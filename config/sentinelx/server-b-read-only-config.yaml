@@ -1,0 +1,38 @@
+# SentinelX policy for Server B (static / 65.21.67.207).
+# Install as /etc/sentinelx/config.yaml, owned root:root, mode 0644.
+# This is intentionally deny-by-default. Do not add telephony paths or services.
+agent:
+  hostname_label: codestra-server-b-vicidial
+  preferred_profile: compact
+
+exec:
+  timeout_default: 15
+  timeout_max: 30
+
+# The core executes allowed commands through `bash -lc` and matches prefixes.
+# An empty list is the only safe way to disable generic shell execution.
+allowed_commands: []
+
+# No service action, including restart/reload/status, is remotely authorized.
+services: {}
+locations: {}
+playbooks: {}
+
+# Keep upload/script staging outside the installer-created, agent-owned tree.
+# The runbook creates this root-owned directory mode 0500, causing upload,
+# edit-upload, arbitrary-script, and binary-transfer writes to fail closed.
+upload_base: /var/empty/sentinelx-disabled
+
+security:
+  trusted_fetch_hosts: []
+  file_url_timeout_seconds: 5
+
+# Expose only one root-generated, sanitized health snapshot. Do not broaden
+# this to /etc, /proc, /var/log, /home, /root, recordings, or backups.
+file_ops:
+  paths:
+    - path: /var/lib/sentinelx/evidence/health.txt
+      access: r
+  max_read_bytes: 16384
+  max_list_entries: 1
+  max_search_results: 10
