@@ -321,7 +321,7 @@ After all fields and approvals are complete:
 ```text
 PACKAGE_VERSION=2-DRAFT-20260904
 PACKAGE_FINALIZED_AT_UTC=
-PACKAGE_CANONICALIZATION_METHOD=UTF8_LF_SORTED_KEYS_OR_APPROVED_EQUIVALENT
+PACKAGE_CANONICALIZATION_METHOD=UTF8_LF_SORTED_KEY_VALUE_LINES_V1
 APPROVAL_MANIFEST_SHA256=
 SERVER_A_MANIFEST_SHA256_VERIFIED=NOT_VERIFIED
 SERVER_B_MANIFEST_SHA256_VERIFIED=NOT_VERIFIED
@@ -329,6 +329,14 @@ ALL_MANDATORY_FIELDS_COMPLETE=NO
 ALL_REQUIRED_APPROVALS_VALID=NOT_VERIFIED
 AUTHORIZATION_DECISION=BLOCKED
 ```
+
+The canonical manifest input is the UTF-8 encoding, with no BOM, of every `KEY=VALUE`
+line from sections 1–14 except `APPROVAL_MANIFEST_SHA256`,
+`SERVER_A_MANIFEST_SHA256_VERIFIED`, and `SERVER_B_MANIFEST_SHA256_VERIFIED`.
+Normalize CRLF to LF; retain values exactly; sort complete lines by ASCII key; join
+with one LF after every line, including the last; then compute lowercase SHA-256.
+Blank fields remain present. Markdown prose, fences, headings, signatures, and
+section 15 onward are excluded. Implementations must reject duplicate keys.
 
 Any change to campaign, list, operator, extension, destination, caller ID,
 trunk, country/class, window, policy, Odoo mapping, n8n workflow, artifact target,
@@ -353,7 +361,11 @@ FINAL_GO_FOR_ONE_CALL_BY=
 FINAL_GO_TIMESTAMP_UTC=
 ```
 
-If any line is not `PASS`, the call remains blocked.
+Every gate-status field from `SERVER_A_READY_FOR_CALL` through
+`ROLLBACK_AUTHORITIES_AVAILABLE` must equal `PASS`. Separately,
+`FINAL_GO_FOR_ONE_CALL_BY` must name the authorized approver and
+`FINAL_GO_TIMESTAMP_UTC` must be a valid UTC timestamp within the approved
+window. Missing or invalid signoff metadata keeps the call blocked.
 
 
 
