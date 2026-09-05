@@ -973,7 +973,7 @@ def validate_klyrow_email_authorization(config: dict[str, str]) -> dict[str, obj
     required = {
         "schema", "approved", "change_id", "protected_sha", "maintenance_date",
         "klyrow_backup", "klyrow_evidence_sha256", "verified_domains",
-        "held_messages", "smtp_no_data", "owner",
+        "held_messages", "smtp_no_data", "authorization_tests", "owner",
     }
     if set(payload) != required or payload.get("schema") != "codestra.klyrow-email-authorization.v1":
         raise OperatorError("Klyrow email authorization schema mismatch")
@@ -986,13 +986,16 @@ def validate_klyrow_email_authorization(config: dict[str, str]) -> dict[str, obj
         raise OperatorError("Klyrow backup evidence path rejected")
     if not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("klyrow_evidence_sha256"))):
         raise OperatorError("Klyrow evidence digest rejected")
-    if payload.get("verified_domains") != 13 or payload.get("held_messages") != 2:
+    if payload.get("verified_domains") != 14 or payload.get("held_messages") != 2:
         raise OperatorError("Klyrow domain or held-message evidence mismatch")
-    if payload.get("smtp_no_data") != "PASS" or not isinstance(payload.get("owner"), str) or not payload["owner"]:
-        raise OperatorError("Klyrow SMTP or owner approval evidence mismatch")
+    if payload.get("smtp_no_data") != "PASS" or payload.get("authorization_tests") != "PASS":
+        raise OperatorError("Klyrow SMTP or authorization test evidence mismatch")
+    if not isinstance(payload.get("owner"), str) or not payload["owner"]:
+        raise OperatorError("Klyrow owner approval evidence mismatch")
     return {
-        "authorization": "PASS", "verified_domains": 13, "held_messages_preserved": 2,
-        "smtp_no_data": "PASS", "klyrow_evidence_sha256": payload["klyrow_evidence_sha256"],
+        "authorization": "PASS", "verified_domains": 14, "held_messages_preserved": 2,
+        "smtp_no_data": "PASS", "authorization_tests": "PASS",
+        "klyrow_evidence_sha256": payload["klyrow_evidence_sha256"],
     }
 
 
@@ -1498,6 +1501,70 @@ def validate_middleware_database_client_names(containers: tuple[str, ...]) -> No
         raise OperatorError("Middleware database client set is malformed")
 
 
+def wait_middleware_database_clients(
+    containers: tuple[str, ...], timeout_seconds: int = 180
+) -> None:
+    """Require every resumed client to remain stable across two read-backs."""
+    validate_middleware_database_client_names(containers)
+    deadline = time.monotonic() + timeout_seconds
+    stable_observations = 0
+    stable_fingerprints: dict[str, tuple[int, str]] | None = None
+    while time.monotonic() < deadline:
+        ready = True
+        fingerprints: dict[str, tuple[int, str]] = {}
+        for container in containers:
+            current = docker_inspect(container)
+            state = current.get("State")
+            if not isinstance(state, dict) or not isinstance(state.get("Running"), bool):
+                raise OperatorError(
+                    f"Middleware database client state unavailable: {container}"
+                )
+            if state["Running"] is not True:
+                raise OperatorError(
+                    f"Middleware database client did not remain running: {container}"
+                )
+            restart_count = current.get("RestartCount")
+            started_at = state.get("StartedAt")
+            if (
+                isinstance(restart_count, bool)
+                or not isinstance(restart_count, int)
+                or restart_count < 0
+                or not isinstance(started_at, str)
+                or not started_at
+            ):
+                raise OperatorError(
+                    f"Middleware database client restart state unavailable: {container}"
+                )
+            fingerprints[container] = (restart_count, started_at)
+            health = state.get("Health")
+            if health is not None:
+                if not isinstance(health, dict) or health.get("Status") not in {
+                    "starting", "healthy", "unhealthy"
+                }:
+                    raise OperatorError(
+                        f"Middleware database client health unavailable: {container}"
+                    )
+                if health["Status"] == "unhealthy":
+                    raise OperatorError(
+                        f"Middleware database client became unhealthy: {container}"
+                    )
+                if health["Status"] != "healthy":
+                    ready = False
+        if ready:
+            if fingerprints == stable_fingerprints:
+                stable_observations += 1
+            else:
+                stable_fingerprints = fingerprints
+                stable_observations = 1
+        else:
+            stable_fingerprints = None
+            stable_observations = 0
+        if stable_observations >= 2:
+            return
+        time.sleep(2)
+    raise OperatorError("Middleware database client health check timed out")
+
+
 def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) -> None:
     validate_middleware_database_client_names(containers)
     state = middleware_database_client_state()
@@ -1509,6 +1576,7 @@ def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) 
     readback = middleware_database_client_state()
     if any(not readback[container] for container in containers):
         raise OperatorError("Middleware database clients did not resume")
+    wait_middleware_database_clients(containers)
     clear_middleware_quiescence(stamp)
 
 
@@ -2200,7 +2268,25 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
     compose = middleware_compose(config)
     validate_middleware_compose(config, compose)
     image_matches = middleware_runtime_image_matches(config)
-    if any(image_matches):
+    if all(image_matches):
+        stamp = snapshot_middleware_runtime(config, str(backup_state["backup_stamp"]))
+        try:
+            bundle = validate_middleware_rollback(config)
+            captured_clients = bundle["database_clients_running"]
+            if not isinstance(captured_clients, tuple):
+                raise OperatorError("Middleware database client state is malformed")
+            quiescence_stamp = middleware_quiescence_stamp()
+            if quiescence_stamp is not None:
+                if quiescence_stamp != stamp:
+                    raise OperatorError(
+                        "Middleware quiescence marker does not match rollback point"
+                    )
+                resume_middleware_database_clients(stamp, captured_clients)
+                wait_middleware_health()
+        except Exception:
+            recover_stale_middleware_quiescence()
+            raise
+    elif any(image_matches):
         bundle = validate_middleware_rollback(config)
         stamp = str(bundle["stamp"])
     else:
@@ -2213,8 +2299,6 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
         runtime = verify_middleware_runtime(config)
         if middleware_database_revision() != MIDDLEWARE_REQUIRED_DATABASE_HEAD:
             raise OperatorError("Middleware database head readback mismatch")
-        if middleware_quiescence_stamp() == stamp:
-            resume_middleware_database_clients(stamp, database_clients_running)
         return {
             **runtime,
             **middleware_rollback_evidence(bundle),
