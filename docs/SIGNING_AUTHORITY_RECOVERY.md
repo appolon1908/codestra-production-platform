@@ -7,7 +7,7 @@ Protected release `01f2676772b11919e1d79cc74d36bc5eeaa682cd` is
 its signing key, and none of the host's candidate public keys verifies the
 release manifest signature. Never install a scanned candidate as a substitute.
 
-Email, SMS, and PSTN delivery remain disabled throughout recovery.
+Email, SMS, and PSTN delivery must remain disabled throughout recovery.
 
 ## Separation of duties
 
