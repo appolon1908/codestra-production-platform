@@ -701,9 +701,9 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
         "--rm",
         "--no-deps",
         "middleware-integration-api",
-        "alembic",
-        "upgrade",
-        "head",
+        "--entrypoint",
+        "python",
+        "scripts/migrate_runtime.py",
     ]
     recreate = next(command for command in calls if "--force-recreate" in command)
     assert "--no-deps" in recreate
