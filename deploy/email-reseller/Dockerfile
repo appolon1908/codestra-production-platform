@@ -5,7 +5,7 @@ FROM ${CHAINGUARD_PYTHON_DEV} AS builder
 USER root
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/python -m pip install --no-cache-dir --disable-pip-version-check \
-      'psycopg[binary]==3.2.9' \
+      'psycopg[binary]==3.3.4' \
  && /opt/venv/bin/python -m pip uninstall -y pip setuptools wheel \
  && mkdir /data
 
