@@ -1,4 +1,4 @@
-FROM python@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df
+FROM python@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52b5f3f88efedaf3a
 ARG VCS_REF
 ARG SOURCE_URL=https://github.com/appolon1908-hue/codestra-production-platform
 ARG VERSION
