@@ -795,6 +795,77 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
     assert result["middleware_already_current"] is True
 
 
+def test_middleware_rollout_resumes_fresh_snapshot_before_health(monkeypatch):
+    config = OPERATOR.load_release_config()
+    stamp = "20260830T190000Z"
+    marker = {"stamp": stamp}
+    events = []
+    monkeypatch.setattr(
+        OPERATOR,
+        "require_action_evidence",
+        lambda action, value: Path("/evidence"),
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_backup_state",
+        lambda: {"backup_stamp": "20260830T180000Z"},
+    )
+    monkeypatch.setattr(OPERATOR, "require_evidence_value", lambda path, key, value: None)
+    monkeypatch.setattr(OPERATOR, "certify_standby", lambda value: {})
+    monkeypatch.setattr(OPERATOR, "middleware_compose", lambda value: ["docker", "compose"])
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_middleware_compose",
+        lambda value, command: None,
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_runtime_image_matches",
+        lambda value: [True, True, True],
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "snapshot_middleware_runtime",
+        lambda value, backup_stamp: events.append("snapshot") or stamp,
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_middleware_rollback",
+        lambda value: {
+            "stamp": stamp,
+            "database_clients_running": ("codestra-middleware-integration-api-1",),
+            "bundle_sha256": "a" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_quiescence_stamp",
+        lambda: marker["stamp"],
+    )
+
+    def resume(observed_stamp, containers):
+        assert observed_stamp == stamp
+        assert containers == ("codestra-middleware-integration-api-1",)
+        events.append("resume")
+        marker["stamp"] = None
+
+    monkeypatch.setattr(OPERATOR, "resume_middleware_database_clients", resume)
+
+    def verify(value):
+        assert events == ["snapshot", "resume"]
+        return {"middleware_runtime_digest": "PASS"}
+
+    monkeypatch.setattr(OPERATOR, "verify_middleware_runtime", verify)
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_database_revision",
+        lambda: "0056_klyrow_delivery_events",
+    )
+    result = OPERATOR.rollout_middleware(config)
+    assert result["middleware_already_current"] is True
+    assert marker["stamp"] is None
+
+
 def test_compose_layers_are_copied_before_privileged_use(monkeypatch, tmp_path):
     _model_root_owned_test_files(monkeypatch)
     monkeypatch.setattr(

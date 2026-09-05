@@ -2202,7 +2202,21 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
     image_matches = middleware_runtime_image_matches(config)
     if all(image_matches):
         stamp = snapshot_middleware_runtime(config, str(backup_state["backup_stamp"]))
-        bundle = validate_middleware_rollback(config)
+        try:
+            bundle = validate_middleware_rollback(config)
+            captured_clients = bundle["database_clients_running"]
+            if not isinstance(captured_clients, tuple):
+                raise OperatorError("Middleware database client state is malformed")
+            quiescence_stamp = middleware_quiescence_stamp()
+            if quiescence_stamp is not None:
+                if quiescence_stamp != stamp:
+                    raise OperatorError(
+                        "Middleware quiescence marker does not match rollback point"
+                    )
+                resume_middleware_database_clients(stamp, captured_clients)
+        except Exception:
+            recover_stale_middleware_quiescence()
+            raise
     elif any(image_matches):
         bundle = validate_middleware_rollback(config)
         stamp = str(bundle["stamp"])
@@ -2216,8 +2230,6 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
         runtime = verify_middleware_runtime(config)
         if middleware_database_revision() != MIDDLEWARE_REQUIRED_DATABASE_HEAD:
             raise OperatorError("Middleware database head readback mismatch")
-        if middleware_quiescence_stamp() == stamp:
-            resume_middleware_database_clients(stamp, database_clients_running)
         return {
             **runtime,
             **middleware_rollback_evidence(bundle),
