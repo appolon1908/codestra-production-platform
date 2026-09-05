@@ -1224,7 +1224,7 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
     writer_fence_index = next(
         index
         for index, command in enumerate(commands)
-        if any("alter database codestra_middleware with connection limit 0" in part for part in command)
+        if any("alter database codestra_middleware_appolon with connection limit 0" in part for part in command)
     )
     destructive_fence_index = next(
         index
