@@ -1,0 +1,11 @@
+x-klyrow-production-email: &klyrow-production-email
+  environment:
+    KLYROW_MODE: "production"
+    LIVE_EMAIL_DELIVERY: "true"
+    CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED: "true"
+
+services:
+  api:
+    <<: *klyrow-production-email
+  worker:
+    <<: *klyrow-production-email

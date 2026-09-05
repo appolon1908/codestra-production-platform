@@ -8,9 +8,18 @@ The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
 `restore-test`, `stage`, `canary`, `status`, `rollback`, `collect-evidence`,
 `kong-readback`,
 `stage-control-plane`, `validate-control-plane`, `activate-control-plane`,
-`rollback-control-plane`, `enable-production-web-traffic`, or
-`disable-production-web-traffic`, plus the bounded `rollout-middleware` and
+`rollback-control-plane`, `enable-production-web-traffic`,
+`disable-production-web-traffic`, `enable-klyrow-email-delivery`, or
+`disable-klyrow-email-delivery`, plus the bounded `rollout-middleware` and
 `rollback-middleware` pair.
+
+Klyrow email enablement requires `/etc/codestra/production-operator/klyrow-email-authorization.json`
+as a root-owned `0600` file matching `klyrow-email-authorization.example.json`.
+It binds the protected SHA, change ID, and maintenance date to the Klyrow
+backup/evidence digest, 13 verified domains, two preserved held messages, and a
+passing SMTP no-data probe. Exact-tuple `activate-control-plane` evidence and a
+validated rollback bundle are also mandatory. Failed runtime read-back
+automatically reapplies the fail-closed override.
 There is no shell, Docker-group membership, host/path input, arbitrary unit, or
 command argument. `preflight`, `status`, `collect-evidence`, and `kong-readback`
 are read-only. `kong-readback` emits only allowlisted route, service, upstream,

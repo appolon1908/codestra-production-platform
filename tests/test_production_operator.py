@@ -109,6 +109,8 @@ EXPECTED_ACTIONS = {
     "activate-control-plane",
     "enable-production-web-traffic",
     "disable-production-web-traffic",
+    "enable-klyrow-email-delivery",
+    "disable-klyrow-email-delivery",
 }
 
 
@@ -118,6 +120,28 @@ def test_action_set_is_exact() -> None:
         "backup": "codestra-readiness-backup.service",
         "restore-test": "codestra-readiness-restore.service",
     }
+
+
+def test_klyrow_authorization_requires_exact_tuple(monkeypatch) -> None:
+    config = {
+        "protected_sha": "a" * 40,
+        "image_digest": "sha256:" + "b" * 64,
+        "change_id": "CHG-20260905-CODESTRA-PRODUCTION-ACTIVATION-01",
+        "maintenance_date": "2026-09-05",
+    }
+    authorization = {
+        "schema": "codestra.klyrow-email-authorization.v1", "approved": True,
+        "change_id": config["change_id"], "protected_sha": config["protected_sha"],
+        "maintenance_date": config["maintenance_date"],
+        "klyrow_backup": "/var/backups/codestra-operators/klyrow/20260905T085512Z",
+        "klyrow_evidence_sha256": "c" * 64, "verified_domains": 13,
+        "held_messages": 2, "smtp_no_data": "PASS", "owner": "release-owner",
+    }
+    monkeypatch.setattr(OPERATOR, "checked_root_file", lambda *_args, **_kwargs: json.dumps(authorization))
+    assert OPERATOR.validate_klyrow_email_authorization(config)["authorization"] == "PASS"
+    authorization["protected_sha"] = "d" * 40
+    with pytest.raises(OPERATOR.OperatorError, match="protected_sha mismatch"):
+        OPERATOR.validate_klyrow_email_authorization(config)
 
 
 def test_database_certification_blocks_activation_without_manifest_pass(
