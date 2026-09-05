@@ -44,6 +44,8 @@ ALLOWED_ACTIONS = {
     "activate-control-plane",
     "enable-production-web-traffic",
     "disable-production-web-traffic",
+    "enable-klyrow-email-delivery",
+    "disable-klyrow-email-delivery",
 }
 READ_ONLY_ACTIONS = {
     "preflight",
@@ -57,6 +59,7 @@ RECOVERY_ACTIONS = {
     "rollback-control-plane",
     "rollback-middleware",
     "disable-production-web-traffic",
+    "disable-klyrow-email-delivery",
 }
 SAFETY_BYPASS_ACTIONS = {
     "status",
@@ -66,6 +69,7 @@ SAFETY_BYPASS_ACTIONS = {
     "rollback-control-plane",
     "rollback-middleware",
     "disable-production-web-traffic",
+    "disable-klyrow-email-delivery",
 }
 CANONICAL_FALSE_FLAGS = {
     "SEND_EVENTS",
@@ -117,6 +121,8 @@ CONTROL_PLANE_WORKER = "codestra-integration-control-plane-worker-1"
 ACTIVE_RELEASE_POINTER = CONFIG_DIR / "active-release.json"
 PREVIOUS_RELEASE_POINTER = CONFIG_DIR / "previous-active-release.json"
 CORE_WEB_TRAFFIC_POINTER = CONFIG_DIR / "core-web-traffic.json"
+KLYROW_EMAIL_AUTHORIZATION = CONFIG_DIR / "klyrow-email-authorization.json"
+KLYROW_EMAIL_POINTER = CONFIG_DIR / "klyrow-email-delivery.json"
 KONG_ADMIN_URL = "http://127.0.0.1:8001"
 KONG_TRAFFIC_GATE_INSTANCE = "codestra-core-web-api-traffic-gate"
 CORE_WEB_PROBE_URL = "https://api.codestra.co/api/v1/callbacks"
@@ -958,6 +964,105 @@ def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
     return {"rollback_stamp": stamp, "database_restored": "PASS", "external_delivery": "DISABLED"}
 
 
+def validate_klyrow_email_authorization(config: dict[str, str]) -> dict[str, object]:
+    """Validate the root-controlled, exact-release authorization and remote evidence summary."""
+    try:
+        payload = json.loads(checked_root_file(KLYROW_EMAIL_AUTHORIZATION))
+    except json.JSONDecodeError as error:
+        raise OperatorError("Klyrow email authorization is malformed") from error
+    required = {
+        "schema", "approved", "change_id", "protected_sha", "maintenance_date",
+        "klyrow_backup", "klyrow_evidence_sha256", "verified_domains",
+        "held_messages", "smtp_no_data", "authorization_tests", "owner",
+    }
+    if set(payload) != required or payload.get("schema") != "codestra.klyrow-email-authorization.v1":
+        raise OperatorError("Klyrow email authorization schema mismatch")
+    if payload.get("approved") is not True:
+        raise OperatorError("Klyrow email delivery is not approved")
+    for key in ("change_id", "protected_sha", "maintenance_date"):
+        if payload.get(key) != config[key]:
+            raise OperatorError(f"Klyrow email authorization {key} mismatch")
+    if not re.fullmatch(r"/var/backups/codestra-operators/klyrow/[0-9]{8}T[0-9]{6}Z", str(payload.get("klyrow_backup"))):
+        raise OperatorError("Klyrow backup evidence path rejected")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("klyrow_evidence_sha256"))):
+        raise OperatorError("Klyrow evidence digest rejected")
+    if payload.get("verified_domains") != 14 or payload.get("held_messages") != 2:
+        raise OperatorError("Klyrow domain or held-message evidence mismatch")
+    if payload.get("smtp_no_data") != "PASS" or payload.get("authorization_tests") != "PASS":
+        raise OperatorError("Klyrow SMTP or authorization test evidence mismatch")
+    if not isinstance(payload.get("owner"), str) or not payload["owner"]:
+        raise OperatorError("Klyrow owner approval evidence mismatch")
+    return {
+        "authorization": "PASS", "verified_domains": 14, "held_messages_preserved": 2,
+        "smtp_no_data": "PASS", "authorization_tests": "PASS",
+        "klyrow_evidence_sha256": payload["klyrow_evidence_sha256"],
+    }
+
+
+def set_klyrow_email_delivery(config: dict[str, str], enabled: bool) -> dict[str, object]:
+    """Recreate only control-plane API/worker with the fixed email override and read it back."""
+    _, release = control_plane_paths(config)
+    base = release / "deploy/control-plane/compose.yaml"
+    safety = release / "deploy/control-plane/compose.live-delivery-safety.yaml"
+    production = release / "deploy/control-plane/compose.klyrow-production-email.yaml"
+    if enabled:
+        authorization = validate_klyrow_email_authorization(config)
+        require_action_evidence("activate-control-plane", config)
+        validate_control_plane_rollback()
+        layers = [base, safety, production]
+    else:
+        authorization = {"authorization": "NOT_REQUIRED_FOR_DISABLE"}
+        layers = [base, safety]
+    compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT]
+    for layer in layers:
+        compose.extend(["--file", str(layer)])
+    email_delivery_count = lambda: int(run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", CONTROL_PLANE_DB, "-Atc",
+        "set search_path to control_plane; select count(*) from messages where channel='email' and status in ('accepted','sent','delivered');",
+    ], timeout=30).stdout.decode().strip())
+    queued_email_count = lambda: int(run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", CONTROL_PLANE_DB, "-Atc",
+        "set search_path to control_plane; select count(*) from messages where channel='email' and status='queued';",
+    ], timeout=30).stdout.decode().strip())
+    before = email_delivery_count()
+    if enabled and queued_email_count() != 0:
+        raise OperatorError("queued email must be zero before Klyrow activation")
+    try:
+        run_bytes([*compose, "up", "--detach", "--no-build", "api", "worker"], timeout=300)
+        wait_control_plane_health()
+        expected = {
+            "KLYROW_MODE": "production" if enabled else "test",
+            "LIVE_EMAIL_DELIVERY": "true" if enabled else "false",
+            "CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED": "true" if enabled else "false",
+        }
+        for container in (CONTROL_PLANE_API, CONTROL_PLANE_WORKER):
+            inspected = docker_inspect(container)
+            if inspected["State"].get("Health", {}).get("Status") != "healthy":
+                raise OperatorError(f"Klyrow email runtime unhealthy: {container}")
+            env = dict(item.split("=", 1) for item in inspected["Config"].get("Env", []) if "=" in item)
+            if any(env.get(key) != value for key, value in expected.items()):
+                raise OperatorError(f"Klyrow email flag readback mismatch: {container}")
+        after = email_delivery_count()
+        if enabled and after != before:
+            raise OperatorError("email delivery ledger changed during activation")
+        atomic_root_json(KLYROW_EMAIL_POINTER, {
+            "enabled": enabled, "protected_sha": config["protected_sha"],
+            "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }, mode=0o600)
+    except Exception:
+        if enabled:
+            run_bytes(["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
+                       "--file", str(base), "--file", str(safety), "up", "--detach",
+                       "--no-build", "api", "worker"], timeout=300)
+        raise
+    return {**authorization, "klyrow_mode": expected["KLYROW_MODE"],
+            "live_email_delivery": expected["LIVE_EMAIL_DELIVERY"],
+            "email_delivery_ledger_before": before, "email_delivery_ledger_after": after,
+            "messages_sent_during_activation": after - before}
+
+
 def checked_operator_bytes(path: Path, *, expected_mode: int) -> bytes:
     """Read a no-follow file owned by the effective operator identity."""
     try:
@@ -1396,6 +1501,70 @@ def validate_middleware_database_client_names(containers: tuple[str, ...]) -> No
         raise OperatorError("Middleware database client set is malformed")
 
 
+def wait_middleware_database_clients(
+    containers: tuple[str, ...], timeout_seconds: int = 180
+) -> None:
+    """Require every resumed client to remain stable across two read-backs."""
+    validate_middleware_database_client_names(containers)
+    deadline = time.monotonic() + timeout_seconds
+    stable_observations = 0
+    stable_fingerprints: dict[str, tuple[int, str]] | None = None
+    while time.monotonic() < deadline:
+        ready = True
+        fingerprints: dict[str, tuple[int, str]] = {}
+        for container in containers:
+            current = docker_inspect(container)
+            state = current.get("State")
+            if not isinstance(state, dict) or not isinstance(state.get("Running"), bool):
+                raise OperatorError(
+                    f"Middleware database client state unavailable: {container}"
+                )
+            if state["Running"] is not True:
+                raise OperatorError(
+                    f"Middleware database client did not remain running: {container}"
+                )
+            restart_count = current.get("RestartCount")
+            started_at = state.get("StartedAt")
+            if (
+                isinstance(restart_count, bool)
+                or not isinstance(restart_count, int)
+                or restart_count < 0
+                or not isinstance(started_at, str)
+                or not started_at
+            ):
+                raise OperatorError(
+                    f"Middleware database client restart state unavailable: {container}"
+                )
+            fingerprints[container] = (restart_count, started_at)
+            health = state.get("Health")
+            if health is not None:
+                if not isinstance(health, dict) or health.get("Status") not in {
+                    "starting", "healthy", "unhealthy"
+                }:
+                    raise OperatorError(
+                        f"Middleware database client health unavailable: {container}"
+                    )
+                if health["Status"] == "unhealthy":
+                    raise OperatorError(
+                        f"Middleware database client became unhealthy: {container}"
+                    )
+                if health["Status"] != "healthy":
+                    ready = False
+        if ready:
+            if fingerprints == stable_fingerprints:
+                stable_observations += 1
+            else:
+                stable_fingerprints = fingerprints
+                stable_observations = 1
+        else:
+            stable_fingerprints = None
+            stable_observations = 0
+        if stable_observations >= 2:
+            return
+        time.sleep(2)
+    raise OperatorError("Middleware database client health check timed out")
+
+
 def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) -> None:
     validate_middleware_database_client_names(containers)
     state = middleware_database_client_state()
@@ -1407,6 +1576,7 @@ def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) 
     readback = middleware_database_client_state()
     if any(not readback[container] for container in containers):
         raise OperatorError("Middleware database clients did not resume")
+    wait_middleware_database_clients(containers)
     clear_middleware_quiescence(stamp)
 
 
@@ -2098,7 +2268,25 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
     compose = middleware_compose(config)
     validate_middleware_compose(config, compose)
     image_matches = middleware_runtime_image_matches(config)
-    if any(image_matches):
+    if all(image_matches):
+        stamp = snapshot_middleware_runtime(config, str(backup_state["backup_stamp"]))
+        try:
+            bundle = validate_middleware_rollback(config)
+            captured_clients = bundle["database_clients_running"]
+            if not isinstance(captured_clients, tuple):
+                raise OperatorError("Middleware database client state is malformed")
+            quiescence_stamp = middleware_quiescence_stamp()
+            if quiescence_stamp is not None:
+                if quiescence_stamp != stamp:
+                    raise OperatorError(
+                        "Middleware quiescence marker does not match rollback point"
+                    )
+                resume_middleware_database_clients(stamp, captured_clients)
+                wait_middleware_health()
+        except Exception:
+            recover_stale_middleware_quiescence()
+            raise
+    elif any(image_matches):
         bundle = validate_middleware_rollback(config)
         stamp = str(bundle["stamp"])
     else:
@@ -2111,8 +2299,6 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
         runtime = verify_middleware_runtime(config)
         if middleware_database_revision() != MIDDLEWARE_REQUIRED_DATABASE_HEAD:
             raise OperatorError("Middleware database head readback mismatch")
-        if middleware_quiescence_stamp() == stamp:
-            resume_middleware_database_clients(stamp, database_clients_running)
         return {
             **runtime,
             **middleware_rollback_evidence(bundle),
@@ -2646,6 +2832,10 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         result.update(set_core_web_traffic(config, True))
     elif action == "disable-production-web-traffic":
         result.update(set_core_web_traffic(config, False))
+    elif action == "enable-klyrow-email-delivery":
+        result.update(set_klyrow_email_delivery(config, True))
+    elif action == "disable-klyrow-email-delivery":
+        result.update(set_klyrow_email_delivery(config, False))
     elif action in {"preflight", "status"}:
         invocation = run_fixed(["/usr/bin/systemctl", "--failed", "--no-legend", "--plain"])
         result.update({"returncode": invocation.returncode, "failed_units_present": bool(invocation.stdout.strip())})

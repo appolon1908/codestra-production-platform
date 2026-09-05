@@ -18,6 +18,7 @@ ACTIONS = {
     "stage-control-plane", "validate-control-plane", "rollback-control-plane",
     "rollout-middleware", "rollback-middleware",
     "activate-control-plane", "enable-production-web-traffic", "disable-production-web-traffic",
+    "enable-klyrow-email-delivery", "disable-klyrow-email-delivery",
 }
 REQUIRED_FALSE_FLAGS = {
     "CALLBACK_DISPATCH",
