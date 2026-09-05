@@ -1013,6 +1013,19 @@ def set_klyrow_email_delivery(config: dict[str, str], enabled: bool) -> dict[str
     compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT]
     for layer in layers:
         compose.extend(["--file", str(layer)])
+    email_delivery_count = lambda: int(run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", CONTROL_PLANE_DB, "-Atc",
+        "set search_path to control_plane; select count(*) from messages where channel='email' and status in ('accepted','sent','delivered');",
+    ], timeout=30).stdout.decode().strip())
+    queued_email_count = lambda: int(run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", CONTROL_PLANE_DB, "-Atc",
+        "set search_path to control_plane; select count(*) from messages where channel='email' and status='queued';",
+    ], timeout=30).stdout.decode().strip())
+    before = email_delivery_count()
+    if enabled and queued_email_count() != 0:
+        raise OperatorError("queued email must be zero before Klyrow activation")
     try:
         run_bytes([*compose, "up", "--detach", "--no-build", "api", "worker"], timeout=300)
         wait_control_plane_health()
@@ -1028,18 +1041,23 @@ def set_klyrow_email_delivery(config: dict[str, str], enabled: bool) -> dict[str
             env = dict(item.split("=", 1) for item in inspected["Config"].get("Env", []) if "=" in item)
             if any(env.get(key) != value for key, value in expected.items()):
                 raise OperatorError(f"Klyrow email flag readback mismatch: {container}")
+        after = email_delivery_count()
+        if enabled and after != before:
+            raise OperatorError("email delivery ledger changed during activation")
+        atomic_root_json(KLYROW_EMAIL_POINTER, {
+            "enabled": enabled, "protected_sha": config["protected_sha"],
+            "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }, mode=0o600)
     except Exception:
         if enabled:
             run_bytes(["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
                        "--file", str(base), "--file", str(safety), "up", "--detach",
                        "--no-build", "api", "worker"], timeout=300)
         raise
-    atomic_root_json(KLYROW_EMAIL_POINTER, {
-        "enabled": enabled, "protected_sha": config["protected_sha"],
-        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-    }, mode=0o600)
     return {**authorization, "klyrow_mode": expected["KLYROW_MODE"],
-            "live_email_delivery": expected["LIVE_EMAIL_DELIVERY"], "messages_sent": 0}
+            "live_email_delivery": expected["LIVE_EMAIL_DELIVERY"],
+            "email_delivery_ledger_before": before, "email_delivery_ledger_after": after,
+            "messages_sent_during_activation": after - before}
 
 
 def checked_operator_bytes(path: Path, *, expected_mode: int) -> bytes:
