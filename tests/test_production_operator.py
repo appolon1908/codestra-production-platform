@@ -1076,6 +1076,12 @@ def test_middleware_database_clients_quiesce_and_resume_exact_prior_set(
         return subprocess.CompletedProcess(command, 0, b"")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
+    waited = []
+    monkeypatch.setattr(
+        OPERATOR,
+        "wait_middleware_database_clients",
+        lambda containers: waited.append(containers),
+    )
     stamp = "20260830T200000Z"
 
     assert OPERATOR.quiesce_middleware_database_clients(stamp) == originally_running
@@ -1090,6 +1096,22 @@ def test_middleware_database_clients_quiesce_and_resume_exact_prior_set(
     start = next(command for command in calls if command[1] == "start")
     assert stop[4:] == list(originally_running)
     assert start[2:] == list(originally_running)
+    assert waited == [originally_running]
+
+
+def test_middleware_database_client_wait_rejects_resumed_worker_exit(monkeypatch):
+    container = "codestra-middleware-sync-worker-1"
+    observations = iter(
+        (
+            {"State": {"Running": True}},
+            {"State": {"Running": False}},
+        )
+    )
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda value: next(observations))
+    monkeypatch.setattr(OPERATOR.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(OPERATOR.OperatorError, match="did not remain running"):
+        OPERATOR.wait_middleware_database_clients((container,))
 
 
 def test_middleware_database_client_inventory_rejects_an_unclassified_service(

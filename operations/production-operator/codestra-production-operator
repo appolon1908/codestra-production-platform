@@ -1498,6 +1498,46 @@ def validate_middleware_database_client_names(containers: tuple[str, ...]) -> No
         raise OperatorError("Middleware database client set is malformed")
 
 
+def wait_middleware_database_clients(
+    containers: tuple[str, ...], timeout_seconds: int = 180
+) -> None:
+    """Require every resumed client to remain running across two read-backs."""
+    validate_middleware_database_client_names(containers)
+    deadline = time.monotonic() + timeout_seconds
+    stable_observations = 0
+    while time.monotonic() < deadline:
+        ready = True
+        for container in containers:
+            state = docker_inspect(container).get("State")
+            if not isinstance(state, dict) or not isinstance(state.get("Running"), bool):
+                raise OperatorError(
+                    f"Middleware database client state unavailable: {container}"
+                )
+            if state["Running"] is not True:
+                raise OperatorError(
+                    f"Middleware database client did not remain running: {container}"
+                )
+            health = state.get("Health")
+            if health is not None:
+                if not isinstance(health, dict) or health.get("Status") not in {
+                    "starting", "healthy", "unhealthy"
+                }:
+                    raise OperatorError(
+                        f"Middleware database client health unavailable: {container}"
+                    )
+                if health["Status"] == "unhealthy":
+                    raise OperatorError(
+                        f"Middleware database client became unhealthy: {container}"
+                    )
+                if health["Status"] != "healthy":
+                    ready = False
+        stable_observations = stable_observations + 1 if ready else 0
+        if stable_observations >= 2:
+            return
+        time.sleep(2)
+    raise OperatorError("Middleware database client health check timed out")
+
+
 def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) -> None:
     validate_middleware_database_client_names(containers)
     state = middleware_database_client_state()
@@ -1509,6 +1549,7 @@ def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) 
     readback = middleware_database_client_state()
     if any(not readback[container] for container in containers):
         raise OperatorError("Middleware database clients did not resume")
+    wait_middleware_database_clients(containers)
     clear_middleware_quiescence(stamp)
 
 
