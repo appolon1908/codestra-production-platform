@@ -65,6 +65,7 @@ def test_rejects_non_boolean_false_flag(tmp_path):
     "rollout-middleware", "rollback-middleware",
     "activate-control-plane", "enable-production-web-traffic",
     "disable-production-web-traffic",
+    "enable-klyrow-email-delivery", "disable-klyrow-email-delivery",
 ])
 def test_state_change_window_authority_is_deferred_to_root_operator(tmp_path, action):
     # The runner cannot read the root-owned waiver evidence. It binds the exact
