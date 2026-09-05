@@ -3,7 +3,7 @@
 ## Decision
 
 `BLOCKED` and fail closed. No production configuration, workload, database,
-operator, SSH, resolver, SMTP, or delivery state was changed. No canary was
+operator, SSH, resolver, SMTP, or delivery state was changed. No email canary was
 sent.
 
 The trust-anchor gate was repeated after the operator requested continuation.
