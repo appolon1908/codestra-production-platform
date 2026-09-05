@@ -2275,7 +2275,9 @@ def test_waiver_cannot_bypass_tuple_or_protected_approval() -> None:
     forced = (PACKAGE / "codestra-production-forced-command").read_text()
     workflow = (ROOT / ".github/workflows/production-activation.yml").read_text()
     assert 'parts[1:] != expected' in forced
-    assert 'test "$(git rev-parse HEAD)" = "${PROTECTED_SHA}"' in workflow
+    assert 'test "$(git -C release rev-parse HEAD)" = "${PROTECTED_SHA}"' in workflow
+    assert 'ref: ${{ github.workflow_sha }}' in workflow
+    assert "python authority/tools/validate_activation_request.py" in workflow
     assert 'test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/release%2Fproduction-activation" --jq .commit.sha)" = "${PROTECTED_SHA}"' in workflow
     assert '--digest "${IMAGE_DIGEST}"' in workflow
     assert "environment: production" in workflow
