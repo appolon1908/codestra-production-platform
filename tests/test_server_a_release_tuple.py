@@ -55,29 +55,41 @@ def test_protected_release_gate_requires_current_signed_middleware_tuple() -> No
     # Image signature, provenance, SBOM, source label and exact migration head are enforced.
     assert '"${RUNNER_TEMP}/cosign" verify' in workflow
     assert "verify-attestation --type slsaprovenance1" in workflow
-    assert "verify-attestation --type spdxjson" in workflow
+    assert "verify-attestation --type cyclonedx" in workflow
     assert workflow.count("--certificate-identity") == 3
     assert workflow.count("--certificate-oidc-issuer") == 3
     assert "tools/verify_attestation_predicate.py" in workflow
-    assert "--predicate middleware-release/middleware.spdx.json" in workflow
+    assert "--predicate middleware-release/sbom.cdx.json" in workflow
+    assert "tools/verify_slsa_provenance_attestation.py" in workflow
+    for argument in (
+        "--provenance middleware-release/provenance.json",
+        "--release-env middleware-release/RELEASE.env",
+        "--sbom middleware-release/sbom.cdx.json",
+        "--trivy middleware-release/trivy.json",
+        "--grype middleware-release/grype-vex.json",
+    ):
+        assert argument in workflow
     assert "docker image inspect" in workflow
     assert "org.opencontainers.image.revision" in workflow
     assert 'Path("/app/migrations").glob' in workflow
     assert 'test "${#migration_heads[@]}" -eq 1' in workflow
-    assert 'test "${migration_heads[0]}" = "$MIDDLEWARE_MIGRATION_REVISION"' in workflow
+    assert "EXPECTED_MIGRATION_REVISION: 0056_klyrow_delivery_events" in workflow
+    assert 'test "${migration_heads[0]}" = "$EXPECTED_MIGRATION_REVISION"' in workflow
+    assert "MIDDLEWARE_MIGRATION_REVISION=%s" in workflow
 
-    # The protected release retains the exact files present in the signed v1 bundle,
-    # plus deterministic verification and derived evidence generated from those inputs.
+    # The protected release retains the exact files present in the canonical legacy
+    # evidence bundle plus deterministic verification of those inputs.
     for retained_evidence in (
         "dist/middleware-signature-verification.json",
         "dist/middleware-provenance-verification.json",
         "dist/middleware-sbom-verification.json",
-        "dist/middleware-release-manifest.v1.json",
-        "dist/middleware-release-manifest.v1.sigstore.json",
-        "dist/middleware.spdx.json",
-        "dist/middleware.grype.json",
-        "dist/middleware-derived-provenance.json",
-        "dist/middleware-derived-openvex.json",
+        "dist/middleware-RELEASE.env",
+        "dist/middleware-sbom.cdx.json",
+        "dist/middleware-provenance.json",
+        "dist/middleware-trivy.json",
+        "dist/middleware-grype-vex.json",
+        "dist/middleware-openvex.json",
+        "dist/middleware-source-SHA256SUMS",
     ):
         assert retained_evidence in workflow
 
