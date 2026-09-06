@@ -12,13 +12,18 @@ repo=$(git -C "$base" rev-parse --show-toplevel 2>/dev/null) || die GIT_SOURCE_R
 [[ $(git -C "$repo" rev-parse HEAD) == "$revision" ]] || die REVISION_MISMATCH
 git -C "$repo" merge-base --is-ancestor "$revision" origin/release/production-activation || die UNPROTECTED_SOURCE_REJECTED
 
-install -d -o root -g root -m 0755 /run/lock
-lock_path=/run/lock/codestra-server-b-telephony-safety-install.lock
-touch "$lock_path"
-[[ -f $lock_path && ! -L $lock_path ]] || die UNSAFE_INSTALLER_LOCK
-chown root:root "$lock_path"
-chmod 0600 "$lock_path"
-exec {installer_lock}>"$lock_path"
+lock_parent=/root/vicidial-sync-remediation
+lock_root=$lock_parent/.locks
+for directory in "$lock_parent" "$lock_root"; do
+  if [[ ! -e $directory ]]; then install -d -o root -g root -m 0700 "$directory"; fi
+  [[ -d $directory && ! -L $directory && $(stat -c '%U:%G %a' "$directory") == 'root:root 700' ]] || die UNSAFE_INSTALLER_LOCK_ROOT
+done
+lock_path=$lock_root/server-b-telephony-safety-install.lock
+if [[ ! -e $lock_path ]]; then
+  (umask 077; set -o noclobber; : >"$lock_path") 2>/dev/null || true
+fi
+[[ -f $lock_path && ! -L $lock_path && $(stat -c '%U:%G %a' "$lock_path") == 'root:root 600' ]] || die UNSAFE_INSTALLER_LOCK
+exec {installer_lock}<>"$lock_path"
 flock -n "$installer_lock" || die INSTALLER_ALREADY_RUNNING
 
 payload=$base/codestra-server-b-telephony-safety

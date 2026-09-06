@@ -211,6 +211,9 @@ def test_installer_and_rollback_contracts_are_fail_closed():
         "sha256sum -c /etc/codestra/server-b-telephony-safety/SHA256SUMS",
         "INSTALLED_REVISION_MISMATCH",
         "flock -n \"$installer_lock\" || die INSTALLER_ALREADY_RUNNING",
+        "lock_root=$lock_parent/.locks",
+        "set -o noclobber",
+        "exec {installer_lock}<>",
         "mktemp -d /root/codestra-server-b-telephony-safety-backup-XXXXXXXXXXXX",
         "BACKUP_FORMAT=server-b-telephony-safety-v2",
         "BACKUP-SHA256SUMS",
@@ -224,6 +227,11 @@ def test_installer_and_rollback_contracts_are_fail_closed():
     assert "[A-Za-z0-9]{12}" in rollback
     assert "INCOMPLETE_BACKUP" in rollback
     assert "BACKUP_CHECKSUM_MISMATCH" in rollback
+    assert "/run/lock" not in installer
+    assert "/run/lock" not in rollback
+    assert "/root/vicidial-sync-remediation" in installer
+    assert "/root/vicidial-sync-remediation" in rollback
+    assert "set -o noclobber" in rollback
 
 
 def test_lock_is_exclusive_and_precedes_all_backup_or_staging_resources(tmp_path):
