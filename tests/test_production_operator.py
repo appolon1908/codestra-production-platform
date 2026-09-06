@@ -723,7 +723,8 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
     assert f"{OPERATOR.MIDDLEWARE_MIGRATION_DATABASE_URL}:/run/secrets/migration_database_url:ro" in calls[0]
     assert "/usr/bin/python3.13" in calls[0]
     assert "middleware-integration-api" in calls[0]
-    assert "runpy.run_path('/app/scripts/migrate_runtime.py',run_name='__main__')" in calls[0][-1]
+    assert "c.set_main_option('script_location','/app/migrations')" in calls[0][-1]
+    assert "command.upgrade(c,'head')" in calls[0][-1]
     recreate = next(command for command in calls if "--force-recreate" in command)
     assert "--no-deps" in recreate
     assert recreate[-3:] == list(OPERATOR.MIDDLEWARE_RUNTIME_SERVICES)

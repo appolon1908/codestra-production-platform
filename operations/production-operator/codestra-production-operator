@@ -2353,11 +2353,13 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
             "--no-deps",
             "--volume",
             f"{MIDDLEWARE_MIGRATION_DATABASE_URL}:/run/secrets/migration_database_url:ro",
+            "--env",
+            "DATABASE_URL_FILE=/run/secrets/migration_database_url",
             "--entrypoint",
             "/usr/bin/python3.13",
             "middleware-integration-api",
             "-c",
-            "import os,pathlib,runpy;os.environ['DATABASE_URL']=pathlib.Path('/run/secrets/migration_database_url').read_text().strip();runpy.run_path('/app/scripts/migrate_runtime.py',run_name='__main__')",
+            "from alembic.config import Config;from alembic import command;c=Config();c.set_main_option('script_location','/app/migrations');command.upgrade(c,'head')",
         ], timeout=1800)
         run_bytes([
             *compose,
