@@ -483,7 +483,7 @@ def test_restore_test_records_one_stable_backup_stamp(monkeypatch):
             "tested_backup_stamp": stamp,
             "tested_backup_evidence_integrity": "PASS",
             "isolated_middleware_migration": "PASS",
-            "tested_middleware_database_head": "0056_klyrow_delivery_events",
+            "tested_middleware_database_head": "0010_realtime_gateway",
         },
     )
     monkeypatch.setattr(
@@ -556,7 +556,7 @@ def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, 
 
     assert validated["restore_evidence_stamp"] == stamp
     assert validated["isolated_middleware_migration"] == "PASS"
-    assert validated["tested_middleware_database_head"] == "0056_klyrow_delivery_events"
+    assert validated["tested_middleware_database_head"] == "0010_realtime_gateway"
 
 
 def test_restore_result_rejects_unadvertised_backup(monkeypatch, tmp_path):
@@ -676,7 +676,7 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
 
     def run(command, **kwargs):
         calls.append(command)
-        return subprocess.CompletedProcess(command, 0, b"0056_klyrow_delivery_events (head)\n")
+        return subprocess.CompletedProcess(command, 0, b"0010_realtime_gateway (head)\n")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
     result = OPERATOR.rollout_middleware(config)
@@ -692,18 +692,18 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
         (
             Path("/restore-test.json"),
             "tested_middleware_database_head",
-            "0056_klyrow_delivery_events",
+            "0010_realtime_gateway",
         ),
     ]
     assert result["middleware_rollout"] == "PASS"
-    assert result["middleware_database_head"] == "0056_klyrow_delivery_events"
+    assert result["middleware_database_head"] == "0010_realtime_gateway"
     assert calls[0][-6:] == [
         "--rm",
         "--no-deps",
         "middleware-integration-api",
-        "alembic",
-        "upgrade",
-        "head",
+        "--entrypoint",
+        "python",
+        "scripts/migrate_runtime.py",
     ]
     recreate = next(command for command in calls if "--force-recreate" in command)
     assert "--no-deps" in recreate
@@ -791,7 +791,7 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
     monkeypatch.setattr(
         OPERATOR,
         "middleware_database_revision",
-        lambda: "0056_klyrow_delivery_events",
+        lambda: "0010_realtime_gateway",
     )
     monkeypatch.setattr(OPERATOR, "middleware_quiescence_stamp", lambda: None)
     result = OPERATOR.rollout_middleware(config)
@@ -870,7 +870,7 @@ def test_middleware_rollout_resumes_fresh_snapshot_before_health(monkeypatch):
     monkeypatch.setattr(
         OPERATOR,
         "middleware_database_revision",
-        lambda: "0056_klyrow_delivery_events",
+        lambda: "0010_realtime_gateway",
     )
     result = OPERATOR.rollout_middleware(config)
     assert result["middleware_already_current"] is True
@@ -1366,7 +1366,7 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
     writer_fence_index = next(
         index
         for index, command in enumerate(commands)
-        if any("alter database codestra_middleware with connection limit 0" in part for part in command)
+        if any("alter database codestra_middleware_appolon with connection limit 0" in part for part in command)
     )
     destructive_fence_index = next(
         index
@@ -2275,7 +2275,9 @@ def test_waiver_cannot_bypass_tuple_or_protected_approval() -> None:
     forced = (PACKAGE / "codestra-production-forced-command").read_text()
     workflow = (ROOT / ".github/workflows/production-activation.yml").read_text()
     assert 'parts[1:] != expected' in forced
-    assert 'test "$(git rev-parse HEAD)" = "${PROTECTED_SHA}"' in workflow
+    assert 'test "$(git -C release rev-parse HEAD)" = "${PROTECTED_SHA}"' in workflow
+    assert 'ref: ${{ github.workflow_sha }}' in workflow
+    assert "python authority/tools/validate_activation_request.py" in workflow
     assert 'test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/release%2Fproduction-activation" --jq .commit.sha)" = "${PROTECTED_SHA}"' in workflow
     assert '--digest "${IMAGE_DIGEST}"' in workflow
     assert "environment: production" in workflow

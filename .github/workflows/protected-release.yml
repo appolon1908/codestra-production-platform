@@ -90,10 +90,8 @@ jobs:
       - name: Download and verify canonical Middleware signed evidence
         env:
           GH_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN }}
-          MIDDLEWARE_REPOSITORY: Codestra-SRL/codestra-middleware
-          # GitHub's immutable digest for the exact artifact named by
-          # config/production-release-tuple.json (run 32919188388).
-          EXPECTED_ARTIFACT_DIGEST: sha256:64bdd090513a6edea513dc0215a1d4d4c8fb5f8935c6eb56b76d3f45ce7a8da9
+          MIDDLEWARE_REPOSITORY: appolon1908-hue/Middleware-
+          EXPECTED_ARTIFACT_DIGEST: sha256:e04928d95ec12a429096af180f3bbd40891af324eff0f4868f5a7d638e74c5b6
         run: |
           set -Eeuo pipefail
           test -n "${GH_TOKEN}"
@@ -126,7 +124,7 @@ jobs:
       - name: Verify image signer, provenance, SBOM, source label, and migration head
         env:
           GH_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN }}
-          SIGNER_IDENTITY: https://github.com/Codestra-SRL/codestra-middleware/.github/workflows/exact-main-production-release.yml@refs/heads/main
+          SIGNER_IDENTITY: https://github.com/appolon1908-hue/Middleware-/.github/workflows/release.yml@refs/heads/main
           OIDC_ISSUER: https://token.actions.githubusercontent.com
           EXPECTED_MIGRATION_REVISION: 0056_klyrow_delivery_events
         run: |
@@ -158,8 +156,8 @@ jobs:
           docker pull "$MIDDLEWARE_IMAGE_REFERENCE"
           test "$(docker image inspect "$MIDDLEWARE_IMAGE_REFERENCE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$MIDDLEWARE_PROTECTED_SHA"
           mapfile -t migration_heads < <(
-            docker run --rm --network none "$MIDDLEWARE_IMAGE_REFERENCE" alembic heads |
-              awk 'NF {print $1}'
+            docker run --rm --network none --entrypoint python "$MIDDLEWARE_IMAGE_REFERENCE" \
+              -c 'from pathlib import Path; print(sorted(p.stem for p in Path("/app/migrations").glob("[0-9][0-9][0-9][0-9]_*.sql"))[-1])'
           )
           test "${#migration_heads[@]}" -eq 1
           test "${migration_heads[0]}" = "$EXPECTED_MIGRATION_REVISION"
