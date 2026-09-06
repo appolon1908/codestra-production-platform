@@ -71,6 +71,11 @@ class BackupOperationsTests(unittest.TestCase):
         marker = source.index('mv "$backup_root/.LAST_SUCCESS-${stamp}" "$backup_root/LAST_SUCCESS"')
         self.assertGreater(marker, evidence)
 
+    def test_restore_checks_runtime_manifest_without_pipefail_broken_pipe(self) -> None:
+        source = (ROOT / "operations" / "readiness" / "codestra-isolated-restore-rehearsal.sh").read_text()
+        self.assertIn('tar -tzf "$work_dir/runtime-images.tar.gz" manifest.json >/dev/null', source)
+        self.assertNotIn("tar -tzf \"$work_dir/runtime-images.tar.gz\" | grep", source)
+
     def test_restore_rehearsal_recreates_rbac_owners_before_exact_restore(self) -> None:
         backup = (ROOT / "operations" / "readiness" / "codestra-local-consistency-backup.sh").read_text()
         source = (ROOT / "operations" / "readiness" / "codestra-isolated-restore-rehearsal.sh").read_text()
