@@ -83,15 +83,18 @@ def _release_manifest() -> dict:
         },
         "services": [
             {
-                "service_id": "middleware",
+                "service_id": service_id,
                 "repository": "appolon1908-hue/Middleware-",
                 "git_sha": "b" * 40,
                 "image": {
-                    "reference": "ghcr.io/appolon1908-hue/middleware",
+                    "reference": f"ghcr.io/appolon1908-hue/{service_id}",
                     "digest": f"sha256:{sha}",
                 },
                 "service_manifest_sha256": sha,
             }
+            for service_id in json.loads(
+                (ROOT / "composition/runtime-composition.v1.json").read_text()
+            )["release_service_ids"]
         ],
         "edge": {
             "caddy": {"path": "operations/caddy/Caddyfile", "sha256": sha},
@@ -125,6 +128,20 @@ def test_release_manifest_accepts_staging_evidence_before_production() -> None:
         )
     )
     Draft202012Validator(schema).validate(_release_manifest())
+
+
+def test_release_manifest_rejects_any_missing_deployed_service() -> None:
+    schema = json.loads(
+        (ROOT / "release/platform-release-manifest.v1.schema.json").read_text()
+    )
+    manifest = _release_manifest()
+    for service in list(manifest["services"]):
+        incomplete = deepcopy(manifest)
+        incomplete["services"] = [
+            item for item in incomplete["services"] if item != service
+        ]
+        with pytest.raises(ValidationError):
+            Draft202012Validator(schema).validate(incomplete)
 
 
 def test_production_acceptance_requires_staging_acceptance() -> None:

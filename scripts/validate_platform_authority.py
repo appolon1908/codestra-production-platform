@@ -57,6 +57,14 @@ def validate_composition() -> None:
     ids = [item.get("id") for item in components]
     assert len(ids) == len(set(ids)), "component IDs must be unique"
     by_id = {item["id"]: item for item in components}
+    release_service_ids = composition.get("release_service_ids")
+    assert isinstance(release_service_ids, list) and release_service_ids
+    assert len(release_service_ids) == len(set(release_service_ids)), (
+        "release service IDs must be unique"
+    )
+    assert set(release_service_ids) == set(by_id), (
+        "every deployed component must be release-bearing"
+    )
     assert by_id["caddy"]["source_path"] == "operations/caddy"
     assert by_id["kyqra-crawler"]["source_repository"] == CANONICAL_KYQRA_REPOSITORY
     host_components = {
@@ -88,6 +96,14 @@ def validate_release_schema() -> None:
     assert schema["$defs"]["image_digest"]["pattern"] == (
         "^sha256:[0-9a-f]{64}$"
     )
+    composition = load("composition/runtime-composition.v1.json")
+    services = schema["properties"]["services"]
+    required_services = {
+        rule["contains"]["properties"]["service_id"]["const"]
+        for rule in services["allOf"]
+    }
+    assert required_services == set(composition["release_service_ids"])
+    assert services["minItems"] == services["maxItems"] == len(required_services)
     gate = schema["$defs"]["environment_gate"]
     evidence = gate["properties"]["evidence"]
     required_evidence = {"integration", "backup", "restore", "monitoring", "rollback"}

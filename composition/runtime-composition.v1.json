@@ -11,6 +11,22 @@
     "promotion_rule": "promote the identical immutable image digests accepted in staging",
     "secrets_in_git": false
   },
+  "release_service_ids": [
+    "caddy",
+    "kong",
+    "middleware",
+    "odoo-19",
+    "n8n",
+    "keycloak",
+    "kyqra-crawler",
+    "observability",
+    "postgresql",
+    "redis",
+    "nats-jetstream",
+    "temporal",
+    "telnexa",
+    "klyrow"
+  ],
   "hosts": [
     {
       "id": "application-server-a",

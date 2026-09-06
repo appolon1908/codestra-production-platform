@@ -10,6 +10,12 @@ evidence, rollback evidence, and production approval.
 SHAs and `sha256:` image digests. Tags, mutable branches, `latest`, incomplete
 templates, and environment-specific rebuilds are not release identities.
 
+The `release_service_ids` inventory in the pinned runtime composition is the
+complete release boundary. A manifest must contain exactly one digest-bound
+service record for every listed deployed component—including Caddy, Kong, Odoo,
+n8n, Keycloak, data/event infrastructure, observability, and provider services.
+The schema rejects partial manifests and extra duplicate service records.
+
 Promotion sequence:
 
 1. Merge service changes through protected source branches.
