@@ -46,6 +46,11 @@ class BackupOperationsTests(unittest.TestCase):
             / "codestra-isolated-restore-rehearsal.sh"
         ).read_text()
         self.assertIn("CREATE ROLE middleware_data_owner;", source)
+        self.assertIn("grep -qx 'mw_integration_api|true|false|false|false'", source)
+        self.assertIn(
+            "CREATE ROLE mw_integration_api LOGIN NOINHERIT PASSWORD :'rehearsal_password';",
+            source,
+        )
         self.assertIn("CREATE ROLE keycloak_data_owner;", source)
         self.assertNotIn("GRANT middleware_data_owner TO middleware_app;", source)
         self.assertNotIn("GRANT keycloak_data_owner TO keycloak;", source)

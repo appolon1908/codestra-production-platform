@@ -50,7 +50,7 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 | `codestra-production-operator.sudoers` | `aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `codestra-readiness-restore.override.conf` | `bbc8e4af977ae21b4faffd8c755ed1a0220aebb2796f10c90c94483be3eed06e` |
-| `codestra-isolated-restore-rehearsal.sh` | `572437fb273d07bfb07f5e1298cf9e29475d62bbb08ad038077f3dddfb818b9f` |
+| `codestra-isolated-restore-rehearsal.sh` | `760f4db38afa312caa97568ab2f84fa38078d8e92115110b36554a91e25f828b` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
 
 The installer contains the pinned digests and verifies them before
