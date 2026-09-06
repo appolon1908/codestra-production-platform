@@ -1,0 +1,17 @@
+#!/bin/bash
+set -euo pipefail
+
+python_alias=/usr/bin/python3
+python_target=$(/usr/bin/readlink -f "$python_alias")
+python_name=${python_target##*/python}
+stdlib=/usr/lib/python${python_name}
+
+test -x "$python_alias"
+test -d "$stdlib"
+for authority in /usr /usr/lib "$stdlib"; do
+  test "$(/usr/bin/stat -c '%u:%g:%a' "$authority")" = "0:0:755"
+done
+test -z "$(/usr/bin/find "$stdlib" -xdev \( ! -user root -o -perm /022 \) -print -quit)"
+
+export CODESTRA_HOST_AUDITD_BOOTSTRAP_VERIFIED=stdlib-root-owned-read-only-v1
+exec "$python_alias" -I "$(/usr/bin/dirname "$0")/install-provider-host-auditd.py" "$@"

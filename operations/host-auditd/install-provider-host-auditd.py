@@ -1278,6 +1278,7 @@ def restore_file(record: dict[str, object], checkpoint: Path) -> None:
             if not target.is_file():
                 raise InstallError(f"rollback target type rejected: {target}")
             target.unlink()
+            fsync_directory(target.parent)
         return
     snapshot = checkpoint / str(record["snapshot"])
     value = checked_root_regular_exact(snapshot, 0o600)
@@ -1357,8 +1358,9 @@ def restore_checkpoint(
     aggregate_record = next(
         item for item in items if item.get("path") == str(AGGREGATE_TARGET)
     )
-    if aggregate_record.get("present") is False:
-        restore_file(aggregate_record, checkpoint)
+    # Loading kernel rules rewrites the aggregate. Restore its authenticated
+    # checkpoint bytes (or absence) after the load in both cases.
+    restore_file(aggregate_record, checkpoint)
     before = record["service_before"]
     if not isinstance(before, dict):
         raise InstallError("rollback service state rejected")
@@ -1575,6 +1577,10 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str]) -> int:
     try:
+        if os.environ.get("CODESTRA_HOST_AUDITD_BOOTSTRAP_VERIFIED") != (
+            "stdlib-root-owned-read-only-v1"
+        ):
+            raise InstallError("verified bootstrap launcher is required")
         args = parser().parse_args(argv)
         result = install(args) if args.action == "install" else rollback(args)
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))

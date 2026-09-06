@@ -43,7 +43,7 @@ single `SHA256:...` fingerprint produced by `ssh-keygen -lf ... -E sha256`, plus
 one newline.
 
 ```text
-python3 -I operations/host-auditd/install-provider-host-auditd.py install \
+operations/host-auditd/install-provider-host-auditd-verified install \
   --source-sha <40-hex-protected-sha> \
   --release-archive <codestra-production-platform-SHA.tar.gz> \
   --release-manifest <deployment-manifest.json> \
@@ -103,7 +103,7 @@ Rollback restores only the managed files captured by the requested checkpoint
 and the prior enable/active state:
 
 ```text
-python3 -I operations/host-auditd/install-provider-host-auditd.py rollback \
+operations/host-auditd/install-provider-host-auditd-verified rollback \
   --backup-stamp <UTC-checkpoint> \
   --expected-source-sha <40-hex-protected-sha>
 ```

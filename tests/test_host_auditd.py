@@ -819,13 +819,29 @@ def test_idempotent_install_authenticates_recorded_checkpoint() -> None:
     assert idempotent < authenticate < returned
 
 
-def test_absent_aggregate_is_removed_after_augenrules_load() -> None:
+def test_exact_aggregate_checkpoint_is_restored_after_augenrules_load() -> None:
     source = (PACKAGE / "install-provider-host-auditd.py").read_text()
     restore = source.index("def restore_checkpoint(")
     load = source.index('run_checked([str(COMMANDS["augenrules"]), "--load"])', restore)
-    absent = source.index('aggregate_record.get("present") is False', load)
-    remove_generated = source.index("restore_file(aggregate_record, checkpoint)", absent)
-    assert restore < load < absent < remove_generated
+    restore_aggregate = source.index("restore_file(aggregate_record, checkpoint)", load)
+    assert restore < load < restore_aggregate
+    assert 'aggregate_record.get("present") is False' not in source[load:restore_aggregate]
+
+
+def test_rollback_fsyncs_parent_after_deleting_absent_target() -> None:
+    source = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    unlink = source.index("target.unlink()", source.index("def restore_file("))
+    sync = source.index("fsync_directory(target.parent)", unlink)
+    assert unlink < sync
+
+
+def test_verified_bootstrap_checks_stdlib_before_python_execution() -> None:
+    launcher = (PACKAGE / "install-provider-host-auditd-verified").read_text()
+    assert "/usr/bin/find" in launcher
+    assert "! -user root -o -perm /022" in launcher
+    assert launcher.index("/usr/bin/find") < launcher.index('exec "$python_alias" -I')
+    source = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    assert "verified bootstrap launcher is required" in source
 
 
 def test_validator_requires_exact_root_owned_release_trust() -> None:
