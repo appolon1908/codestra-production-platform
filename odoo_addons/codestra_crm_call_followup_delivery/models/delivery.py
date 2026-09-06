@@ -311,6 +311,7 @@ class CodestraCrmCallDelivery(models.Model):
     @api.model
     def _cron_retry_failed(self, limit=50):
         now = fields.Datetime.now()
+        self.flush_model(["state", "attempt_count", "max_attempts", "next_attempt_at"])
         self.env.cr.execute(
             """
             SELECT id

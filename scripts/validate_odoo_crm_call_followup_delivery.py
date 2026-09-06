@@ -63,6 +63,7 @@ def main() -> int:
         "recipient_hash",
         "BACKOFF_MINUTES",
         "FOR UPDATE SKIP LOCKED",
+        'flush_model(["state", "attempt_count", "max_attempts", "next_attempt_at"])',
         "_cron_reconcile_mail_states",
         "_cron_retry_failed",
         "action_retry_now",
