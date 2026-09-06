@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Fail-closed, sanitized validation for a signed one-call authorization."""
+"""Validate one-call authorization scope, not signature authenticity.
+
+Exit 0 means only that required fields, scope, and time window are consistent.
+It NEVER authorizes activation, authenticates a signer, or certifies a call.
+"""
 
 from __future__ import annotations
 
@@ -27,6 +31,11 @@ MANDATORY = (
     "TEST_CAMPAIGN",
     "SYNTHETIC_LIST",
     "TEST_AGENT",
+    "TEST_EXTENSION",
+    "CALLING_HOURS_POLICY_REFERENCE",
+    "CONSENT_POLICY_REFERENCE",
+    "DNC_POLICY_REFERENCE",
+    "ROLLBACK_REFERENCE",
     "TEST_USER_GROUP",
     "TEST_TRUNK",
     "TEST_CARRIER_ROUTE",
@@ -68,8 +77,10 @@ def parse(path: Path) -> dict[str, str]:
         if not line or line.startswith("#"):
             continue
         key, separator, value = line.partition("=")
-        if separator:
-            values[key.strip()] = value.strip().strip("'\"")
+        key = key.strip()
+        if not separator or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or key in values:
+            raise ValueError("malformed or duplicate authorization field")
+        values[key] = value.strip().strip("'\"")
     return values
 
 
@@ -88,7 +99,11 @@ def main() -> int:
     if not path.is_file():
         print("authorization_state=INACCESSIBLE reason=record_missing", file=sys.stderr)
         return 2
-    values = parse(path)
+    try:
+        values = parse(path)
+    except (OSError, UnicodeError, ValueError):
+        print("authorization_state=INVALID reason=malformed_record", file=sys.stderr)
+        return 2
     missing = [key for key in MANDATORY if not values.get(key)]
     invalid = [key for key in MANDATORY if values.get(key) and INVALID.search(values[key])]
     if missing or invalid:
@@ -132,7 +147,8 @@ def main() -> int:
         print("authorization_state=EXPIRED reason=window_or_zero_match_expired", file=sys.stderr)
         return 2
     print(
-        "authorization_state=VALIDATED "
+        "authorization_state=SCOPE_VALIDATED signature_authenticity=NOT_VERIFIED "
+        "activation_authorized=false business_flow_certified=false "
         f"change_reference_present=true window_seconds={int((end - start).total_seconds())} "
         f"max_calls=1 max_concurrent_calls=1 max_duration_seconds={maximum_duration} "
         f"max_events={maximum_events} retry_calls_authorized=false"
