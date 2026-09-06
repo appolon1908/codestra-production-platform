@@ -169,7 +169,7 @@
                         groups="codestra_crm_call_followup.group_call_followup_manager"
                         confirm="Return failed automation jobs for this follow-up to the durable queue?"/>
             </xpath>
-            <xpath expr="//page[@string='Integration']/group" position="inside">
+            <xpath expr="//page[@name='integration']/group" position="inside">
                 <separator string="Automation"/>
                 <field name="automation_policy_id" readonly="1"/>
                 <field name="automation_pending_sla_at" readonly="1"/>
