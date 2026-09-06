@@ -387,7 +387,8 @@ class MySQLRepository:
     def campaign(self, actual_id: str) -> dict | None:
         row = self._one(
             "SELECT campaign_id,campaign_name,active,dial_method,local_call_time,"
-            "campaign_recording,scheduled_callbacks,campaign_description "
+            "campaign_recording,scheduled_callbacks,campaign_description,"
+            "hopper_level,auto_dial_level "
             "FROM vicidial_campaigns WHERE campaign_id=%s", (actual_id,))
         if not row:
             return None

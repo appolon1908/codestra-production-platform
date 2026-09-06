@@ -226,6 +226,46 @@ def test_first_agent_adoption_recovers_after_mysql_commit_before_mapping(
     assert service.state.agent_adoption_intent("COD1001") is None
 
 
+def test_stale_pre_mutation_agent_adoption_clears_unused_intent(
+    tmp_path, monkeypatch,
+):
+    service, repository = enabled_service(tmp_path)
+    existing = {
+        "user_id": "COD1001", "full_name": "Legacy Agent",
+        "user_group": "LEGACY", "campaigns": ["LEGACY01"],
+        "inbound_groups": [], "active": False,
+    }
+    repository.agents["COD1001"] = dict(existing)
+    payload = {
+        "context": context(),
+        "agent": {
+            "user_id": "COD1001", "full_name": "Codestra Agent",
+            "user_group": "COD_TEST_SDR", "campaigns": ["CODT0001"],
+            "inbound_groups": ["COD_TEST_CLOSERS"], "active": False,
+            "adopt_existing_sha256": service.state.digest(existing),
+        },
+    }
+    command = AgentCommand.model_validate(payload)
+    original_sync = repository.sync_agent_disabled
+
+    def reject_stale(_spec):
+        repository.agents["COD1001"]["full_name"] = "Concurrent Change"
+        raise CollisionError("existing agent adoption proof became stale")
+
+    monkeypatch.setattr(repository, "sync_agent_disabled", reject_stale)
+    with pytest.raises(CollisionError, match="became stale"):
+        service.sync_agent("stale-adoption", command)
+    assert service.state.agent_adoption_intent("COD1001") is None
+
+    refreshed = dict(repository.agents["COD1001"])
+    payload["agent"]["adopt_existing_sha256"] = service.state.digest(refreshed)
+    monkeypatch.setattr(repository, "sync_agent_disabled", original_sync)
+    result = service.sync_agent(
+        "fresh-adoption", AgentCommand.model_validate(payload)
+    )
+    assert result["status"] == "disabled"
+
+
 def test_completed_agent_adoption_replays_after_result_record_crash(tmp_path, monkeypatch):
     service, repository = enabled_service(tmp_path)
     existing = {"user_id":"COD1001", "full_name":"Legacy Agent", "user_group":"LEGACY",
@@ -268,6 +308,12 @@ def test_mysql_campaign_adoption_revalidates_proof_in_conditional_mutation():
     assert '"hopper_level,auto_dial_level "' in source
     assert "if affected != 1:" in source
     assert "campaign adoption proof became stale" in source
+
+
+def test_mysql_campaign_actual_state_includes_all_adoption_proof_fields():
+    source = inspect.getsource(MySQLRepository.campaign)
+    assert "campaign_description," in source
+    assert '"hopper_level,auto_dial_level "' in source
 
 
 def test_mysql_agent_disable_does_not_parse_legacy_campaign_membership():

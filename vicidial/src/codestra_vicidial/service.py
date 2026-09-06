@@ -365,6 +365,14 @@ class AdapterService:
                     return {"status": "disabled", "actual": existing}
             try:
                 actual = self.repository.sync_agent_disabled(command.agent)
+            except CollisionError:
+                # A collision from the locked compare/update path means no
+                # MyISAM row was changed. Discard the now-stale unused intent
+                # so a caller can retry with a fresh observed-state proof.
+                if mapping is None and command.agent.adopt_existing_sha256:
+                    self.state.clear_agent_adoption_intent(command.agent.user_id)
+                raise
+            try:
                 mismatches = []
                 for field in ("user_id", "full_name", "user_group"):
                     if actual.get(field) != desired[field]:
