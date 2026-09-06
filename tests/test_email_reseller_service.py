@@ -73,6 +73,40 @@ class EmailResellerAdmissionTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(f"admission denied: {flag}", result.stdout)
 
+    def test_deployment_uses_baked_admission_and_matching_private_origin(self):
+        base = (ROOT / "deploy/email-reseller/compose.yaml").read_text()
+        safety = (ROOT / "deploy/email-reseller/compose.live-delivery-safety.yaml").read_text()
+        caddy = (ROOT / "operations/caddy/klyrow-events.caddy").read_text()
+        candidate = json.loads((ROOT / "deploy/email-reseller/immutable-candidate-lock.json").read_text())
+
+        self.assertIn('entrypoint: ["/opt/venv/bin/python", "-m", "email_reseller_service.admission"]', safety)
+        self.assertIn('command: ["/opt/venv/bin/python", "-m", "email_reseller_service.server"]', safety)
+        self.assertNotIn("/opt/codestra/safety/live-delivery-admission.sh", safety)
+        self.assertIn('"127.0.0.1:18181:8080"', base)
+        self.assertIn("reverse_proxy 127.0.0.1:18181", caddy)
+        image = next(line.strip().split("@", 1)[1] for line in base.splitlines() if line.strip().startswith("image:"))
+        runtime_digest = next(
+            line.strip().split(": ", 1)[1]
+            for line in base.splitlines()
+            if line.strip().startswith("CODESTRA_IMAGE_DIGEST:")
+        )
+        runtime_build_timestamp = next(
+            line.strip().split(": ", 1)[1].strip('"')
+            for line in base.splitlines()
+            if line.strip().startswith("CODESTRA_BUILD_TIMESTAMP:")
+        )
+        self.assertEqual(image, runtime_digest)
+        self.assertEqual(candidate["image_digest"], runtime_digest)
+        self.assertEqual(candidate["image"].rsplit("@", 1)[1], runtime_digest)
+        self.assertEqual(candidate["build_timestamp"], runtime_build_timestamp)
+        self.assertEqual(candidate["workflow_run"]["run_id"], 34055841105)
+        self.assertEqual(candidate["workflow_run"]["artifact_id"], 9995939653)
+        self.assertEqual(candidate["workflow_run"]["oidc_issuer"], "https://token.actions.githubusercontent.com")
+        self.assertEqual({item["status"] for item in candidate["evidence"].values()}, {"PASS"})
+        self.assertTrue(all(len(bytes.fromhex(item["sha256"])) == 32 for item in candidate["evidence"].values()))
+        self.assertFalse(candidate["deployment_authorized"])
+        self.assertFalse(candidate["production_certified"])
+
 
 class EmailResellerTest(unittest.TestCase):
     def setUp(self):
