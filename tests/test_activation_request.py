@@ -89,6 +89,17 @@ def test_superseded_digest_is_denied_even_when_manifest_matches(tmp_path):
         validate(args)
 
 
+def test_unrecoverable_signer_release_is_denied(tmp_path):
+    sha = "01f2676772b11919e1d79cc74d36bc5eeaa682cd"
+    args = request(tmp_path, sha=sha)
+    manifest = json.loads(open(args.manifest, encoding="utf-8").read())
+    manifest["commit"] = sha
+    with open(args.manifest, "w", encoding="utf-8") as stream:
+        json.dump(manifest, stream)
+    with pytest.raises(ValueError, match="explicitly non-activatable"):
+        validate(args)
+
+
 def test_workflow_uses_only_restricted_pinned_operator_transport():
     workflow = open(".github/workflows/production-activation.yml", encoding="utf-8").read()
     assert "secrets.CODESTRA_PRODUCTION_OPERATOR_SSH_KEY" in workflow

@@ -14,7 +14,7 @@ def evidence(tmp_path: Path, digest: str = "sha256:" + "c" * 64) -> Path:
     sbom_hash = hashlib.sha256((tmp_path / "sbom.cdx.json").read_bytes()).hexdigest()
     (tmp_path / "RELEASE.env").write_text(
         f"SOURCE_SHA={source}\n"
-        f"IMAGE_REFERENCE=ghcr.io/codestra-srl/codestra-middleware@{digest}\n"
+        f"IMAGE_REFERENCE=ghcr.io/appolon1908-hue/codestra-middleware@{digest}\n"
         f"IMAGE_DIGEST={digest}\n"
         f"SBOM_SHA256={sbom_hash}\n"
     )
@@ -23,8 +23,8 @@ def evidence(tmp_path: Path, digest: str = "sha256:" + "c" * 64) -> Path:
         "subject": {"digest": digest},
         "evidence": {"sbomSha256": sbom_hash},
         "runDetails": {"builder": {"id": (
-            "https://github.com/Codestra-SRL/codestra-middleware/"
-            ".github/workflows/exact-main-production-release.yml@refs/heads/main"
+            "https://github.com/appolon1908-hue/Middleware-/"
+            ".github/workflows/release.yml@refs/heads/main"
         )}},
     }))
     (tmp_path / "signature-verification.txt").write_text("verified\n")
