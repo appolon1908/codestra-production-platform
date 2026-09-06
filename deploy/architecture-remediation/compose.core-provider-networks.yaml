@@ -12,6 +12,8 @@ services:
       - provider_email
       - provider_sms
       - provider_voice
+  private-vicidial-ingress:
+    networks: !override [provider_voice]
 networks:
   provider_email: {name: codestra-provider-email, external: true}
   provider_sms: {name: codestra-provider-sms, external: true}
