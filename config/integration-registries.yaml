@@ -56,6 +56,9 @@ endpoints:
   - {<<: *endpoint_defaults, endpoint_id: realtime-session-v1, system: middleware, method: POST, path: /api/v1/realtime/sessions, required_scope: 'realtime:session:create', idempotency_required: true}
   - {<<: *endpoint_defaults, endpoint_id: agent-websocket-v1, system: websocket, method: GET, path: /ws/agent, required_scope: realtime.connect, request_schema: websocket-upgrade-v1, response_schema: websocket-events-v1, owner: realtime-platform}
   - {<<: *endpoint_defaults, endpoint_id: admin-system-health-v1, system: middleware, method: GET, path: /v1/admin/system, required_scope: admin.system.read, response_schema: system-health-v1}
+  - {<<: *endpoint_defaults, endpoint_id: admin-system-health-detail-v1, system: middleware, method: GET, path: /v1/admin/system/health, required_scope: platform.admin, response_schema: system-health-v1}
+  - {<<: *endpoint_defaults, endpoint_id: admin-system-readiness-v1, system: middleware, method: GET, path: /v1/admin/system/readiness, required_scope: platform.admin, response_schema: system-health-v1}
+  - {<<: *endpoint_defaults, endpoint_id: admin-system-databases-v1, system: middleware, method: GET, path: /v1/admin/system/databases, required_scope: platform.admin, response_schema: system-databases-v1}
 webhooks:
   - {webhook_id: klyrow-events-v1, sender: klyrow, receiver: middleware, path: /v1/webhooks/klyrow, authentication: hmac_timestamp, schema: integration-event-envelope-v1, retry_policy: bounded_exponential_v1, idempotency: event_id_payload_hash, owner: communications-platform, dlq: true, reconciliation: true, enabled: false}
   - {webhook_id: telnexa-events-v1, sender: telnexa, receiver: middleware, path: /v1/webhooks/telnexa, authentication: hmac_timestamp, schema: integration-event-envelope-v1, retry_policy: bounded_exponential_v1, idempotency: event_id_payload_hash, owner: communications-platform, dlq: true, reconciliation: true, enabled: false}
