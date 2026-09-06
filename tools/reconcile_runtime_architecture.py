@@ -34,7 +34,7 @@ class Project:
 
 PROJECTS = (
     Project("codestra", "codestra-middleware-1", ("postgres", "middleware"), "compose.core-provider-networks.yaml"),
-    Project("codestra-beyvra-email", "codestra-beyvra-email-api-1", ("api",), "compose.beyvra-email.yaml", image_environment=(("BEYVRA_EMAIL_IMAGE", "codestra-beyvra-email-api-1"),)),
+    Project("codestra-beyvra-email", "codestra-beyvra-email-api-1", ("api", "worker"), "compose.beyvra-email.yaml", image_environment=(("BEYVRA_EMAIL_IMAGE", "codestra-beyvra-email-api-1"),)),
     Project("codestra-email-reseller", "codestra-email-reseller-api-1", ("api",), "compose.email-reseller.yaml"),
     Project("codestra-integration-control-plane", "codestra-integration-control-plane-api-1", ("api", "worker"), "compose.endpoint-overrides.yaml"),
     Project("private-integration", "private-integration-gateway-1", ("gateway",), "compose.private-integration.yaml"),
@@ -138,13 +138,84 @@ def ensure_network(name: str) -> str:
         labels = network.get("Labels") or {}
         if any(labels.get(key) != value for key, value in NETWORK_LABELS.items()):
             raise ReconcileError(f"existing network is not governed: {name}")
+        if network.get("Internal") is not False:
+            raise ReconcileError(f"provider connector network blocks required egress: {name}")
         return "present"
-    command = ["/usr/bin/docker", "network", "create", "--driver", "bridge", "--internal"]
+    # Provider connectors need outbound reachability to their remote providers.
+    # They remain private (not attached to public proxy services) and are subject
+    # to the host's governed forwarding/firewall policy, but must not use
+    # Docker's --internal isolation, which suppresses all external routing.
+    command = ["/usr/bin/docker", "network", "create", "--driver", "bridge"]
     for key, value in NETWORK_LABELS.items():
         command.extend(["--label", f"{key}={value}"])
     command.append(name)
     run(command)
     return "created"
+
+
+def compose_model(command: list[str], workdir: Path, environment: dict[str, str]) -> dict:
+    model = json.loads(run([*command, "config", "--format", "json"], cwd=workdir,
+                           env=environment).stdout)
+    if not isinstance(model, dict):
+        raise ReconcileError("Compose model is not a JSON object")
+    return model
+
+
+def compose_ps(payload: str) -> list[dict]:
+    stripped = payload.strip()
+    if not stripped:
+        return []
+    try:
+        parsed = json.loads(stripped)
+        return parsed if isinstance(parsed, list) else [parsed]
+    except json.JSONDecodeError:
+        return [json.loads(line) for line in stripped.splitlines()]
+
+
+def verify_project(project: Project, command: list[str], workdir: Path,
+                   environment: dict[str, str]) -> dict:
+    model = compose_model(command, workdir, environment)
+    model_services = model.get("services", {})
+    model_networks = model.get("networks", {})
+    rows = compose_ps(run([*command, "ps", "--format", "json", *project.services],
+                          cwd=workdir, env=environment).stdout)
+    by_service = {row.get("Service"): row for row in rows}
+    if len(rows) != len(project.services) or set(by_service) != set(project.services):
+        raise ReconcileError(f"reconciled service inventory mismatch: {project.name}")
+    evidence: dict[str, object] = {}
+    for service in project.services:
+        row = by_service[service]
+        if row.get("State") != "running":
+            raise ReconcileError(f"reconciled service is not running: {project.name}/{service}")
+        health = row.get("Health") or ""
+        if health not in {"", "healthy"}:
+            raise ReconcileError(f"reconciled service is not healthy: {project.name}/{service}")
+        name = row.get("Name")
+        if not isinstance(name, str) or not name:
+            raise ReconcileError(f"reconciled container name missing: {project.name}/{service}")
+        container = inspect_container(name)
+        configured = model_services.get(service, {}).get("networks", {})
+        desired_networks = set()
+        for key in configured:
+            network_name = model_networks.get(key, {}).get("name")
+            if not isinstance(network_name, str) or not network_name:
+                raise ReconcileError(
+                    f"resolved network name missing: {project.name}/{service}/{key}"
+                )
+            desired_networks.add(network_name)
+        actual_networks = set(container.get("NetworkSettings", {}).get("Networks", {}))
+        if actual_networks != desired_networks:
+            raise ReconcileError(f"reconciled networks differ: {project.name}/{service}")
+        container_id = container.get("Id")
+        if not isinstance(container_id, str) or not container_id:
+            raise ReconcileError(f"container identity missing: {project.name}/{service}")
+        evidence[service] = {
+            "container_id": container_id,
+            "health": health or "not-configured",
+            "networks": sorted(actual_networks),
+            "state": "running",
+        }
+    return evidence
 
 
 def main() -> int:
@@ -158,7 +229,9 @@ def main() -> int:
             result["networks"] = {name: ensure_network(name) for name in NETWORKS}
             for project, command, workdir, environment in prepared:
                 run([*command, "up", "--detach", "--no-deps", *project.services], cwd=workdir, env=environment)
-                result["projects"][project.name] = "RECONCILED"
+                result["projects"][project.name] = verify_project(
+                    project, command, workdir, environment
+                )
             result["apply"] = "PASS"
         print(json.dumps(result, sort_keys=True))
         return 0

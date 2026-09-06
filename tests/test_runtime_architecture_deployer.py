@@ -20,9 +20,11 @@ def test_deployer_preflights_every_compose_model_before_mutation():
     assert SOURCE.index("prepared = preflight()") < SOURCE.index("ensure_network(name)")
 
 
-def test_provider_networks_are_internal_and_governed():
+def test_provider_networks_are_egress_capable_and_governed():
     assert '("codestra-provider-email", "codestra-provider-sms", "codestra-provider-voice")' in SOURCE
-    assert '"network", "create", "--driver", "bridge", "--internal"' in SOURCE
+    assert '"network", "create", "--driver", "bridge"' in SOURCE
+    assert '["/usr/bin/docker", "network", "create", "--driver", "bridge", "--internal"]' not in SOURCE
+    assert 'network.get("Internal") is not False' in SOURCE
     assert '"codestra.governance": "runtime-architecture-remediation.v1"' in SOURCE
 
 
@@ -37,3 +39,15 @@ def test_image_recreation_remains_digest_only():
     assert '"RepoDigests"' in SOURCE
     assert 'has no unique immutable image digest' in SOURCE
     assert 'return image.rsplit("@", 1)[1]' in SOURCE
+
+
+def test_beyvra_worker_is_in_fixed_reconciliation_inventory():
+    assert 'Project("codestra-beyvra-email", "codestra-beyvra-email-api-1", ("api", "worker")' in SOURCE
+
+
+def test_apply_pass_requires_health_and_exact_network_readback():
+    assert 'result["projects"][project.name] = verify_project(' in SOURCE
+    assert 'row.get("State") != "running"' in SOURCE
+    assert 'health not in {"", "healthy"}' in SOURCE
+    assert 'actual_networks != desired_networks' in SOURCE
+    assert SOURCE.index('verify_project(') < SOURCE.rindex('result["apply"] = "PASS"')
