@@ -2212,6 +2212,7 @@ def test_payload_checksums_are_real() -> None:
         "codestra-production-forced-command",
         "codestra-production-operator.sudoers",
         "codestra-production-operator.sshd",
+        "codestra-readiness-restore.override.conf",
     ):
         digest = subprocess.check_output(["sha256sum", str(PACKAGE / name)], text=True).split()[0]
         assert f"{digest}  {name}" in installer
@@ -2227,6 +2228,11 @@ def test_payload_checksums_are_real() -> None:
     restore_digest = subprocess.check_output(["sha256sum", str(restore)], text=True).split()[0]
     assert restore_digest in installer
     assert 'restore_source=$script_dir/../readiness/codestra-isolated-restore-rehearsal.sh' in installer
+    assert "codestra-readiness-restore.override.conf" in installer
+    assert "/etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf" in installer
+    assert "systemctl daemon-reload" in installer
+    assert "effective_restore_exec=$(systemctl show codestra-readiness-restore.service -p ExecStart --value)" in installer
+    assert "wc -l" in installer
 
     assert "-g codestra-production-operator -m 0710" in installer
     assert installer.index("useradd --system") < installer.index(
@@ -2247,6 +2253,8 @@ def test_validator_proves_authorized_key_is_readable_by_operator():
     assert "codestra-production-operator:codestra-production-operator 600" in validator
     assert "sudo -u codestra-production-operator" in validator
     assert "test -r /var/lib/codestra-production-operator/.ssh/authorized_keys" in validator
+    assert "/etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf" in validator
+    assert "effective_restore_exec=$(systemctl show codestra-readiness-restore.service -p ExecStart --value)" in validator
 
 
 def test_forced_command_binds_exact_release_tuple_before_sudo() -> None:

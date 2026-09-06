@@ -5,8 +5,8 @@ umask 077
 backup_root=/opt/codestra/backups/production-readiness-local
 evidence_root=/opt/codestra/evidence/production-readiness-restore
 release_config=/etc/codestra/production-operator/release.json
-middleware_repository=ghcr.io/codestra-srl/codestra-middleware
-middleware_source_sha=f199b6c40f4e467979e9a8b255a0e686321a182d
+middleware_repository=ghcr.io/appolon1908-hue/codestra-middleware
+middleware_source_sha=63b6c0c8bca5168a1178895bd12858d0b1e8086e
 middleware_required_head=0056_klyrow_delivery_events
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 work_dir="${evidence_root}/.work-${stamp}"
@@ -74,6 +74,9 @@ on_error() {
 }
 trap on_error ERR
 
+mkdir -p "$work_dir" "$final_dir"
+chmod 0700 "$work_dir" "$final_dir"
+
 backup_stamp=$(python3 - "$backup_root/LAST_SUCCESS" <<'PY'
 import os
 import re
@@ -135,9 +138,6 @@ docker image inspect "$middleware_image" >/dev/null
 docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$middleware_image" \
     | grep -Fx "$middleware_image" >/dev/null
 test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$middleware_image")" = "$middleware_source_sha"
-
-mkdir -p "$work_dir" "$final_dir"
-chmod 0700 "$work_dir" "$final_dir"
 
 # Read-only production baselines prove the rehearsal cannot alter live roles.
 docker exec codestra-postgres-1 psql -U postgres -d postgres -At -v ON_ERROR_STOP=1 \
