@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "template": true,
+  "environment": "staging-readonly",
+  "candidate": {
+    "release_id": "REPLACE_WITH_EXACT_RELEASE_ID",
+    "platform_source_sha": "0000000000000000000000000000000000000000",
+    "source_lock_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "candidate_manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "components": []
+  },
+  "previous_candidate": {
+    "release_id": "REPLACE_WITH_PREVIOUS_RELEASE_ID",
+    "components": []
+  },
+  "identity": {
+    "issuer": "https://REPLACE_WITH_STAGING_KEYCLOAK_ISSUER",
+    "discovery_path": "/.well-known/openid-configuration",
+    "expected_http_status": 200
+  },
+  "targets": [],
+  "kong": {
+    "base_url": "https://REPLACE_WITH_STAGING_KONG_HOST",
+    "route_count": 29,
+    "routes": []
+  },
+  "database": {
+    "migration_evidence_endpoint": "https://REPLACE_WITH_PRIVATE_READONLY_ENDPOINT",
+    "expected_heads": []
+  },
+  "counters": {
+    "calls": {"baseline": 0, "maximum_delta": 0},
+    "emails": {"baseline": 0, "maximum_delta": 0},
+    "sms": {"baseline": 0, "maximum_delta": 0},
+    "provider_effects": {"baseline": 0, "maximum_delta": 0}
+  },
+  "backups": {
+    "database_required": true,
+    "odoo_filestore_required": true,
+    "configuration_required": true,
+    "off_host_copy_required": true,
+    "off_host_uri": "REPLACE_WITH_ENVIRONMENT_VARIABLE_REFERENCE",
+    "credential_ref": "CODESTRA_STAGING_OFF_HOST_BACKUP_CREDENTIAL"
+  },
+  "rollback": {
+    "previous_candidate_required": true,
+    "rto_seconds_limit": 1800,
+    "rpo_seconds_limit": 86400,
+    "health_readback_required": true,
+    "readiness_readback_required": true,
+    "version_readback_required": true,
+    "data_integrity_required": true
+  },
+  "canary": {
+    "maximum_traffic_percent": 1,
+    "allowed_methods": ["GET", "HEAD"],
+    "denied_methods": ["POST", "PUT", "PATCH", "DELETE", "CONNECT", "TRACE"],
+    "automatic_rollback_required": true
+  },
+  "safety_controls": {
+    "LIVE_WRITE": false,
+    "ODOO_WRITE": false,
+    "ENABLE_EXTERNAL_DELIVERY": false,
+    "N8N_DELIVERY_ENABLED": false,
+    "LIVE_EMAIL_DELIVERY": false,
+    "LIVE_SMS_DELIVERY": false,
+    "LIVE_PSTN_DIALING": false,
+    "PRODUCTION_DIALING": false,
+    "CAMPAIGN_ACTIVATION": false,
+    "PROVIDER_DELIVERY": false,
+    "ADVERTISING_ACTIVATION": false,
+    "PAYMENT_EXECUTION": false,
+    "FINANCIAL_TRADING": false
+  },
+  "credential_policy": {
+    "credentials_embedded": false,
+    "bearer_credential_ref": "CODESTRA_STAGING_READONLY_BEARER_TOKEN",
+    "metrics_credential_ref": "CODESTRA_STAGING_METRICS_BEARER_TOKEN"
+  }
+}

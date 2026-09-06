@@ -1,0 +1,128 @@
+name: Validate production certification evidence gate
+
+on:
+  pull_request:
+    branches:
+      - release/production-activation
+    paths:
+      - "PRODUCTION-SOURCE-LOCK.yaml"
+      - "config/production-certification-evidence-policy.v1.json"
+      - "tools/verify_production_certification_evidence.py"
+      - "tests/test_production_certification_evidence.py"
+      - "docs/PRODUCTION-CERTIFICATION-EVIDENCE-REFRESH.md"
+      - ".github/workflows/production-certification-evidence.yml"
+  push:
+    branches:
+      - release/production-activation
+    paths:
+      - "PRODUCTION-SOURCE-LOCK.yaml"
+      - "config/production-certification-evidence-policy.v1.json"
+      - "tools/verify_production_certification_evidence.py"
+      - "tests/test_production_certification_evidence.py"
+      - ".github/workflows/production-certification-evidence.yml"
+  workflow_dispatch:
+    inputs:
+      runtime_matrix_ref:
+        description: Exact 40-character commit from codestra-production-runtime-authority
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-certification-evidence-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verifier-regressions:
+    name: Fail-closed verifier regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned parser
+        run: python3 -m pip install --disable-pip-version-check --no-cache-dir PyYAML==6.0.3
+
+      - name: Run verifier regression suite
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile tools/verify_production_certification_evidence.py
+          python3 -m unittest tests/test_production_certification_evidence.py
+          git diff --check
+
+  protected-live-gate:
+    name: Protected live source-lock and matrix gate
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/production-activation' }}
+    needs:
+      - verifier-regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Validate exact matrix ref syntax
+        env:
+          MATRIX_REF: ${{ inputs.runtime_matrix_ref }}
+        run: |
+          set -Eeuo pipefail
+          [[ "${MATRIX_REF}" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out protected platform source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Check out exact runtime candidate matrix
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: appolon1908-hue/codestra-production-runtime-authority
+          ref: ${{ inputs.runtime_matrix_ref }}
+          path: runtime-authority
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned parser
+        run: python3 -m pip install --disable-pip-version-check --no-cache-dir PyYAML==6.0.3
+
+      - name: Verify exact protected evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(git -C runtime-authority rev-parse HEAD)" = "${{ inputs.runtime_matrix_ref }}"
+          python3 tools/verify_production_certification_evidence.py \
+            --source-lock PRODUCTION-SOURCE-LOCK.yaml \
+            --matrix runtime-authority/IMMUTABLE-CANDIDATE-MATRIX.yaml \
+            --verify-github \
+            --require-pass \
+            --evidence-output "${RUNNER_TEMP}/production-certification-evidence.json"
+
+      - name: Upload secret-free gate evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-certification-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/production-certification-evidence.json
+          if-no-files-found: error
+          retention-days: 30

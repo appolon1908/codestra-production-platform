@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_codestra_call_followup_search" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.search</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="arch" type="xml">
+            <search string="Call Follow-ups">
+                <field name="name"/>
+                <field name="event_id"/>
+                <field name="call_id"/>
+                <field name="partner_id"/>
+                <field name="lead_id"/>
+                <field name="agent_id"/>
+                <filter name="my_followups" string="My Follow-ups" domain="[('agent_id', '=', uid)]"/>
+                <filter name="pending" string="Needs Follow-up" domain="[('state', '=', 'pending')]"/>
+                <filter name="scheduled" string="Scheduled" domain="[('schedule_kind', '!=', 'none'), ('callback_at', '!=', False)]"/>
+                <filter name="completed" string="Completed" domain="[('state', '=', 'completed')]"/>
+                <separator/>
+                <filter name="today" string="Calls Today" domain="[('ended_at', '&gt;=', 'today'), ('ended_at', '&lt;', 'today +1d')]"/>
+                <group>
+                    <filter name="group_agent" string="Agent" context="{'group_by': 'agent_id'}"/>
+                    <filter name="group_outcome" string="Outcome" context="{'group_by': 'disposition'}"/>
+                    <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>
+                    <filter name="group_call_day" string="Call Date" context="{'group_by': 'ended_at:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_codestra_call_followup_list" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.list</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="arch" type="xml">
+            <list string="Call Follow-ups" create="0" delete="0" default_order="ended_at desc"
+                  decoration-warning="state == 'pending'"
+                  decoration-success="state == 'completed'"
+                  decoration-muted="state == 'cancelled'">
+                <field name="ended_at"/>
+                <field name="partner_id" optional="show"/>
+                <field name="lead_id" optional="show"/>
+                <field name="agent_id" optional="show"/>
+                <field name="duration_seconds" string="Call Seconds" optional="hide"/>
+                <field name="disposition" optional="show"/>
+                <field name="schedule_kind" optional="show"/>
+                <field name="callback_at" optional="show"/>
+                <field name="state" widget="badge"
+                       decoration-warning="state == 'pending'"
+                       decoration-success="state == 'completed'"
+                       decoration-muted="state == 'cancelled'"/>
+                <button name="action_open_post_call_wizard" type="object" string="Complete" class="btn-link" invisible="state != 'pending'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_codestra_call_followup_form" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.form</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="arch" type="xml">
+            <form string="Call Follow-up" create="0" delete="0">
+                <header>
+                    <button name="action_open_post_call_wizard" type="object" string="Complete Post-call" class="btn-primary" invisible="state != 'pending'"/>
+                    <button name="action_open_calendar_event" type="object" string="Open Calendar Event" class="btn-secondary" invisible="not calendar_event_id"/>
+                    <button name="action_cancel_followup" type="object" string="Cancel Follow-up" class="btn-secondary" invisible="state != 'pending'" confirm="Cancel this pending follow-up?"/>
+                    <field name="state" widget="statusbar" statusbar_visible="pending,completed,cancelled"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_open_calendar_event" type="object" class="oe_stat_button" icon="fa-calendar" invisible="not calendar_event_id">
+                            <div class="o_stat_info">
+                                <span class="o_stat_text">Calendar</span>
+                                <span class="o_stat_text">Event</span>
+                            </div>
+                        </button>
+                    </div>
+                    <widget name="web_ribbon" title="Needs Follow-up" bg_color="text-bg-warning" invisible="state != 'pending'"/>
+                    <widget name="web_ribbon" title="Completed" bg_color="text-bg-success" invisible="state != 'completed'"/>
+                    <div class="oe_title">
+                        <label for="name"/>
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="Call">
+                            <field name="ended_at" readonly="1"/>
+                            <field name="started_at" readonly="1"/>
+                            <field name="duration_seconds" readonly="1"/>
+                            <field name="call_id" readonly="1"/>
+                            <field name="event_id" readonly="1" groups="codestra_crm_call_followup.group_call_followup_manager"/>
+                        </group>
+                        <group string="CRM">
+                            <field name="partner_id" readonly="1"/>
+                            <field name="lead_id" readonly="1"/>
+                            <field name="agent_id" readonly="1"/>
+                            <field name="company_id" readonly="1" groups="base.group_multi_company"/>
+                            <field name="disposition" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Scheduled Next Step" invisible="schedule_kind == 'none'">
+                        <field name="schedule_kind" readonly="1"/>
+                        <field name="callback_at" readonly="1"/>
+                        <field name="duration_minutes" readonly="1"/>
+                        <field name="calendar_event_id" readonly="1" options="{'no_create': true, 'no_open': false}"/>
+                        <field name="reminder_email_enabled" readonly="1"/>
+                    </group>
+                    <notebook>
+                        <page string="Notes">
+                            <field name="notes" readonly="1" widget="html"/>
+                        </page>
+                        <page string="Email">
+                            <group>
+                                <field name="send_post_call_email" readonly="1"/>
+                                <field name="email_to" readonly="1"/>
+                                <field name="email_cc" readonly="1"/>
+                                <field name="email_subject" readonly="1"/>
+                            </group>
+                            <field name="email_body" readonly="1" widget="html"/>
+                        </page>
+                        <page string="Integration" groups="codestra_crm_call_followup.group_call_followup_manager">
+                            <group>
+                                <field name="source" readonly="1"/>
+                                <field name="correlation_id" readonly="1"/>
+                                <field name="popup_requested_at" readonly="1"/>
+                                <field name="popup_completed_at" readonly="1"/>
+                                <field name="mail_id" readonly="1"/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_codestra_call_followup_calendar" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.calendar</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="arch" type="xml">
+            <calendar string="Callbacks and Appointments" date_start="callback_at" color="agent_id" mode="month" event_open_popup="true" create="0" delete="0">
+                <field name="name"/>
+                <field name="partner_id"/>
+                <field name="agent_id"/>
+                <field name="schedule_kind"/>
+                <field name="state"/>
+            </calendar>
+        </field>
+    </record>
+
+    <record id="action_codestra_call_followup" model="ir.actions.act_window">
+        <field name="name">Call Follow-ups</field>
+        <field name="res_model">codestra.crm.call.followup</field>
+        <field name="view_mode">list,calendar,form</field>
+        <field name="search_view_id" ref="view_codestra_call_followup_search"/>
+        <field name="context">{'search_default_my_followups': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Completed calls will appear here automatically.</p>
+            <p>The middleware service creates one immutable event per completed call. Agents finish the outcome, notes, email, and callback in the post-call popup.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_codestra_call_followup"
+              name="Call Follow-ups"
+              parent="crm.crm_menu_sales"
+              action="action_codestra_call_followup"
+              sequence="15"
+              groups="codestra_crm_call_followup.group_call_followup_user"/>
+</odoo>

@@ -104,7 +104,7 @@ offload() {
 }
 offload
 find "$work/stage" -maxdepth 1 -type f -name '*.offhost' | grep -q .
-find "$work/spool" -maxdepth 1 -type f -name '*.gpg.sha256' | grep -q .
+! find "$work/spool" -maxdepth 1 -type f -name '*.gpg.sha256' | grep -q .
 RESTIC_PASSWORD_FILE="$work/authority/restic-password" restic -r "$work/restic" snapshots --json --tag shared-postgresql-wal | jq -e 'length > 0' >/dev/null
 
 target='codestra_synthetic_pre_target'
@@ -121,14 +121,20 @@ done
 (( staged_after > staged_before ))
 offload
 
-cp "$work/spool"/*.gpg "$work/spool"/*.gpg.sha256 "$work/recovered-archive/"
+first_wal="$(find "$work/stage" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[0-9A-F]{24}' | head -1)"
+first_name="${first_wal##*/}"
+while IFS= read -r -d '' marker; do
+  snapshot_id="$(awk -F= '$1=="REMOTE_SNAPSHOT_ID"{print $2}' "$marker")"
+  artifact_path="$(awk -F= '$1=="ARTIFACT_PATH"{print substr($0,index($0,"=")+1)}' "$marker")"
+  artifact_name="${artifact_path##*/}"
+  RESTIC_PASSWORD_FILE="$work/authority/restic-password" restic -r "$work/restic" dump "$snapshot_id" "$artifact_path" >"$work/recovered-archive/$artifact_name"
+  RESTIC_PASSWORD_FILE="$work/authority/restic-password" restic -r "$work/restic" dump "$snapshot_id" "$artifact_path.sha256" >"$work/recovered-archive/$artifact_name.sha256"
+done < <(find "$work/stage" -maxdepth 1 -type f -name '*.offhost' -print0)
 chown -R "$postgres_uid:$postgres_gid" "$work/recovered-archive"
 chmod 0700 "$work/recovered-archive"
 cp -a "$work/authority/gpg" "$work/recovery-secrets/gpg"
 chown -R "$postgres_uid:$postgres_gid" "$work/recovery-secrets"
 chmod 0700 "$work/recovery-secrets" "$work/recovery-secrets/gpg"
-first_wal="$(find "$work/stage" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[0-9A-F]{24}' | head -1)"
-first_name="${first_wal##*/}"
 CODESTRA_SHARED_RECOVERY_ARCHIVE="$work/recovered-archive" CODESTRA_SHARED_RECOVERY_SECRETS="$work/authority" \
   "$package/codestra-shared-postgres-restore-wal.sh" "$first_name" "$work/relocated/restored-wal"
 cmp "$first_wal" "$work/relocated/restored-wal"
@@ -175,7 +181,7 @@ test "$pre" = 1 -a "$post" = 0
 
 verified_marker="$(find "$work/stage" -maxdepth 1 -type f -name '*.offhost' | head -1)"
 verified_source="${verified_marker%.offhost}"
-touch -d '9 days ago' "$verified_marker"
+touch -d '7 days 5 minutes ago' "$verified_source"
 CODESTRA_SHARED_WAL_STAGE="$work/stage" CODESTRA_SHARED_POSTGRES_STATE="$work/state" "$package/codestra-shared-postgres-prune-wal.sh" 7
 test ! -e "$verified_marker" -a ! -e "$verified_source" -a -s "$failed_source"
 

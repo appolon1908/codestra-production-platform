@@ -1,0 +1,3 @@
+services:
+  portal:
+    image: ghcr.io/appolon1908-hue/reseller-portal@sha256:74ce88fa3ca05a6c3d595080b78c398be1dc49ac72185ba8aa787d9f6f8247d9

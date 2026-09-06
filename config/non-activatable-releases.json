@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "releases": [
+    {
+      "protected_sha": "01f2676772b11919e1d79cc74d36bc5eeaa682cd",
+      "release_tag": "protected-01f2676772b11919e1d79cc74d36bc5eeaa682cd",
+      "status": "NON_ACTIVATABLE",
+      "reason": "release signer trust anchor cannot be independently recovered",
+      "recorded_at": "2026-09-05T00:00:00Z",
+      "replacement_required": true
+    }
+  ]
+}

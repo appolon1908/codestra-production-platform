@@ -11,12 +11,15 @@ spool="${CODESTRA_SHARED_WAL_ARCHIVE:-/opt/codestra/backups/postgresql-shared/wa
 recipient="$(<"$authority/archive-recipient")"
 retention_days="$(<"$authority/wal-retention-days")"
 [[ "$retention_days" =~ ^[1-9][0-9]*$ ]]
+max_files="${CODESTRA_SHARED_WAL_MAX_FILES_PER_RUN:-16}"
+[[ "$max_files" =~ ^[1-9][0-9]*$ ]]
+(( max_files <= 512 ))
 mkdir -p "$spool"
 chmod 0700 "$spool"
 metrics_state="${CODESTRA_SHARED_POSTGRES_STATE:-/var/lib/codestra-shared-postgresql}"
 mkdir -p "$metrics_state"
 chmod 0700 "$metrics_state"
-disk_used="$(df -P "$stage" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+disk_used="$(df -P "$spool" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
 [[ "$disk_used" =~ ^[0-9]+$ ]]
 if (( disk_used >= 90 )); then
   printf 'critical WAL spool filesystem usage: %s%%\n' "$disk_used" >&2
@@ -33,7 +36,9 @@ if [[ -f "$authority/object-access-key-id" ]]; then AWS_ACCESS_KEY_ID="$(<"$auth
 if [[ -f "$authority/object-secret-access-key" ]]; then AWS_SECRET_ACCESS_KEY="$(<"$authority/object-secret-access-key")"; export AWS_SECRET_ACCESS_KEY; fi
 if [[ -f "$authority/object-region" ]]; then AWS_DEFAULT_REGION="$(<"$authority/object-region")"; export AWS_DEFAULT_REGION; fi
 shopt -s nullglob
+processed=0
 for source_path in "$stage"/[0-9A-F]*; do
+  (( processed < max_files )) || break
   [[ -f "$source_path" && ! -L "$source_path" ]]
   [[ "$source_path" == *.offhost ]] && continue
   wal_name="${source_path##*/}"
@@ -42,18 +47,20 @@ for source_path in "$stage"/[0-9A-F]*; do
   if [[ -f "$marker" && ! -L "$marker" ]] \
     && grep -qx 'EVIDENCE_TYPE=WAL_OFFHOST' "$marker" \
     && grep -qx 'STATUS=PASS' "$marker"; then
-    recorded_artifact="$(awk -F= '$1=="ARTIFACT_PATH"{print substr($0,index($0,"=")+1)}' "$marker")"
     recorded_hash="$(awk -F= '$1=="ARTIFACT_SHA256"{print $2}' "$marker")"
-    if [[ "$recorded_artifact" == "$spool"/* && -f "$recorded_artifact" && ! -L "$recorded_artifact" \
-      && "$recorded_hash" =~ ^[0-9a-f]{64}$ \
-      && "$(sha256sum "$recorded_artifact" | awk '{print $1}')" == "$recorded_hash" ]]; then
+    recorded_snapshot="$(awk -F= '$1=="REMOTE_SNAPSHOT_ID"{print $2}' "$marker")"
+    if [[ "$recorded_hash" =~ ^[0-9a-f]{64}$ && "$recorded_snapshot" =~ ^[0-9a-f]{64}$ ]]; then
       continue
     fi
   fi
   artifact="$spool/$wal_name.gpg"
   if [[ ! -s "$artifact" ]]; then
     temporary="$(mktemp "$spool/.${wal_name}.XXXXXX")"
-    gpg --homedir "$authority/gpg" --batch --yes --trust-model always \
+    # Encryption needs only the protected public keyring. Disable option-file,
+    # trustdb and lock writes so a read-only authority directory remains truly
+    # read-only and cannot emit misleading successful-unit warnings.
+    gpg --homedir "$authority/gpg" --no-options --lock-never \
+      --no-auto-check-trustdb --batch --yes --trust-model always \
       --recipient "$recipient" --encrypt --output "$temporary" "$source_path"
     mv "$temporary" "$artifact"
     (cd "$spool" && sha256sum "$wal_name.gpg" >"$wal_name.gpg.sha256")
@@ -91,6 +98,11 @@ EOF
   mv "$marker_tmp" "$marker"
   sync -d "$stage"
   touch "$spool/LAST_OFFHOST_SUCCESS"
+  # The staged WAL remains available for the configured local retention
+  # window. Remove the transient encrypted copy only after exact remote
+  # readback and the durable evidence marker both succeed.
+  find "$artifact" "$artifact.sha256" -delete
+  processed=$((processed + 1))
 done
 
 prune_helper="${CODESTRA_SHARED_POSTGRES_PRUNE_HELPER:-/usr/local/sbin/codestra-shared-postgres-prune-wal.sh}"

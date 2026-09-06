@@ -1,9 +1,9 @@
 {
-  "source": "https://github.com/Codestra-SRL/codestra-middleware",
-  "revision": "f199b6c40f4e467979e9a8b255a0e686321a182d",
-  "image": "ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b",
+  "source": "https://github.com/appolon1908-hue/Middleware-",
+  "revision": "63b6c0c8bca5168a1178895bd12858d0b1e8086e",
+  "image": "ghcr.io/appolon1908-hue/codestra-middleware@sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a",
   "required_database_head": "0056_klyrow_delivery_events",
   "webphone_endpoint_adapter_url": "",
   "webphone_features_enabled": false,
-  "deployment_state": "BLOCKED_PENDING_SHARED_POSTGRESQL_PITR_AND_0056_MIGRATION"
+  "deployment_state": "BLOCKED_PENDING_PROTECTED_BACKUP_RESTORE_AND_ROLLOUT"
 }

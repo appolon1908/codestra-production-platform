@@ -1,0 +1,1 @@
+from="65.109.65.169,10.40.0.1",restrict,no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty,command="/usr/bin/sudo -n /usr/local/sbin/codestra-server-b-telephony-safety" SSH_PUBLIC_KEY_PLACEHOLDER

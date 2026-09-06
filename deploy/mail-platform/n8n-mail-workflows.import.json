@@ -1,0 +1,74 @@
+[
+  {
+    "id": "MailUserProvV1TS1",
+    "name": "MailUserProvisionedV1",
+    "active": false,
+    "nodes": [
+      {"id":"mup-webhook","name":"MailUserProvisionedV1 Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"parameters":{"httpMethod":"POST","path":"internal/mail-user-provisioned-v1","responseMode":"lastNode"}},
+      {"id":"mup-manual","name":"Manual Test","type":"n8n-nodes-base.manualTrigger","typeVersion":1,"position":[0,160],"parameters":{}},
+      {"id":"mup-validate","name":"Validate Canonical Envelope","type":"n8n-nodes-base.code","typeVersion":2,"position":[260,80],"parameters":{"jsCode":"const required=['event_id','correlation_id','idempotency_key','tenant']; for (const item of $input.all()) { for (const key of required) if (item.json[key] === undefined && Object.keys(item.json).length) throw new Error(`missing_${key}`); item.json.workflow='MailUserProvisionedV1'; item.json.accepted=true; } return $input.all();"}}
+    ],
+    "connections":{"MailUserProvisionedV1 Webhook":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]},"Manual Test":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]}},
+    "settings":{"executionOrder":"v1"}
+  },
+  {
+    "id": "InboundMailV1TS1",
+    "name": "InboundMailReceivedV1",
+    "active": false,
+    "nodes": [
+      {"id":"imr-webhook","name":"InboundMailReceivedV1 Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"parameters":{"httpMethod":"POST","path":"internal/inbound-mail-received-v1","responseMode":"lastNode"}},
+      {"id":"imr-manual","name":"Manual Test","type":"n8n-nodes-base.manualTrigger","typeVersion":1,"position":[0,160],"parameters":{}},
+      {"id":"imr-validate","name":"Validate Canonical Envelope","type":"n8n-nodes-base.code","typeVersion":2,"position":[260,80],"parameters":{"jsCode":"const required=['event_id','message_uuid','correlation_id','idempotency_key','tenant','campaign']; for (const item of $input.all()) { for (const key of required) if (item.json[key] === undefined && Object.keys(item.json).length) throw new Error(`missing_${key}`); item.json.workflow='InboundMailReceivedV1'; item.json.accepted=true; } return $input.all();"}}
+    ],
+    "connections":{"InboundMailReceivedV1 Webhook":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]},"Manual Test":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]}},
+    "settings":{"executionOrder":"v1"}
+  },
+  {
+    "id": "MailDeliveryV1T1",
+    "name": "MailDeliveryStatusV1",
+    "active": false,
+    "nodes": [
+      {"id":"mds-webhook","name":"MailDeliveryStatusV1 Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"parameters":{"httpMethod":"POST","path":"internal/mail-delivery-status-v1","responseMode":"lastNode"}},
+      {"id":"mds-manual","name":"Manual Test","type":"n8n-nodes-base.manualTrigger","typeVersion":1,"position":[0,160],"parameters":{}},
+      {"id":"mds-validate","name":"Validate Canonical Envelope","type":"n8n-nodes-base.code","typeVersion":2,"position":[260,80],"parameters":{"jsCode":"const required=['event_id','message_uuid','correlation_id','idempotency_key','tenant','campaign']; for (const item of $input.all()) { for (const key of required) if (item.json[key] === undefined && Object.keys(item.json).length) throw new Error(`missing_${key}`); item.json.workflow='MailDeliveryStatusV1'; item.json.accepted=true; } return $input.all();"}}
+    ],
+    "connections":{"MailDeliveryStatusV1 Webhook":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]},"Manual Test":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]}},
+    "settings":{"executionOrder":"v1"}
+  },
+  {
+    "id": "MailBounceV1TS01",
+    "name": "MailBounceV1",
+    "active": false,
+    "nodes": [
+      {"id":"mb-webhook","name":"MailBounceV1 Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"parameters":{"httpMethod":"POST","path":"internal/mail-bounce-v1","responseMode":"lastNode"}},
+      {"id":"mb-manual","name":"Manual Test","type":"n8n-nodes-base.manualTrigger","typeVersion":1,"position":[0,160],"parameters":{}},
+      {"id":"mb-validate","name":"Validate Canonical Envelope","type":"n8n-nodes-base.code","typeVersion":2,"position":[260,80],"parameters":{"jsCode":"const required=['event_id','message_uuid','correlation_id','idempotency_key','tenant','campaign']; for (const item of $input.all()) { for (const key of required) if (item.json[key] === undefined && Object.keys(item.json).length) throw new Error(`missing_${key}`); item.json.workflow='MailBounceV1'; item.json.accepted=true; } return $input.all();"}}
+    ],
+    "connections":{"MailBounceV1 Webhook":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]},"Manual Test":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]}},
+    "settings":{"executionOrder":"v1"}
+  },
+  {
+    "id": "MailComplaintV1T",
+    "name": "MailComplaintV1",
+    "active": false,
+    "nodes": [
+      {"id":"mc-webhook","name":"MailComplaintV1 Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"parameters":{"httpMethod":"POST","path":"internal/mail-complaint-v1","responseMode":"lastNode"}},
+      {"id":"mc-manual","name":"Manual Test","type":"n8n-nodes-base.manualTrigger","typeVersion":1,"position":[0,160],"parameters":{}},
+      {"id":"mc-validate","name":"Validate Canonical Envelope","type":"n8n-nodes-base.code","typeVersion":2,"position":[260,80],"parameters":{"jsCode":"const required=['event_id','message_uuid','correlation_id','idempotency_key','tenant','campaign']; for (const item of $input.all()) { for (const key of required) if (item.json[key] === undefined && Object.keys(item.json).length) throw new Error(`missing_${key}`); item.json.workflow='MailComplaintV1'; item.json.accepted=true; } return $input.all();"}}
+    ],
+    "connections":{"MailComplaintV1 Webhook":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]},"Manual Test":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]}},
+    "settings":{"executionOrder":"v1"}
+  },
+  {
+    "id": "MailReconV1TS001",
+    "name": "MailReconciliationV1",
+    "active": false,
+    "nodes": [
+      {"id":"mr-webhook","name":"MailReconciliationV1 Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"parameters":{"httpMethod":"POST","path":"internal/mail-reconciliation-v1","responseMode":"lastNode"}},
+      {"id":"mr-manual","name":"Manual Test","type":"n8n-nodes-base.manualTrigger","typeVersion":1,"position":[0,160],"parameters":{}},
+      {"id":"mr-validate","name":"Validate Canonical Envelope","type":"n8n-nodes-base.code","typeVersion":2,"position":[260,80],"parameters":{"jsCode":"const required=['event_id','correlation_id','idempotency_key','tenant']; for (const item of $input.all()) { for (const key of required) if (item.json[key] === undefined && Object.keys(item.json).length) throw new Error(`missing_${key}`); item.json.workflow='MailReconciliationV1'; item.json.accepted=true; } return $input.all();"}}
+    ],
+    "connections":{"MailReconciliationV1 Webhook":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]},"Manual Test":{"main":[[{"node":"Validate Canonical Envelope","type":"main","index":0}]]}},
+    "settings":{"executionOrder":"v1"}
+  }
+]

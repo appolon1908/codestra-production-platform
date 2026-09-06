@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "expected_business_applications": 15,
+  "expected_kong_routes": 29,
+  "required_endpoint_classes": [
+    "health",
+    "readiness",
+    "version",
+    "capabilities",
+    "openapi"
+  ],
+  "allowed_methods": ["GET", "HEAD"],
+  "allowed_protected_statuses": [200, 204, 302, 400, 401, 403, 405, 415, 422, 429],
+  "maximum_unexpected_404": 0,
+  "maximum_unexpected_5xx": 0,
+  "maximum_cross_business_leaks": 0,
+  "maximum_live_effect_delta": 0,
+  "requirements": {
+    "tls_verified": true,
+    "route_exists": true,
+    "authenticated_positive": "PASS",
+    "unauthenticated_negative": "PASS",
+    "wrong_role_negative": "PASS",
+    "wrong_business_negative": "PASS",
+    "source_sha_readback": "MATCH",
+    "image_digest_readback": "MATCH",
+    "openapi_source_runtime_alignment": "PASS",
+    "gateway_application_alignment": "PASS"
+  },
+  "safety": {
+    "request_bodies_allowed": false,
+    "write_methods_allowed": false,
+    "business_writes_allowed": false,
+    "communications_delivery_allowed": false,
+    "provider_effects_allowed": false,
+    "financial_or_trading_mutation_allowed": false
+  }
+}
