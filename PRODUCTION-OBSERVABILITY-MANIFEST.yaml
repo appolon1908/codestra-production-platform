@@ -1,0 +1,50 @@
+schema_version: "1.0"
+server: 65.109.65.169
+runtime_baseline: 2/20
+candidate_contract: 20/20
+runtime_certification: FAIL
+production_changed: false
+
+sources:
+  middleware:
+    repository: Codestra-SRL/codestra-middleware
+    candidate_pr: 283
+    application_count: 16
+    endpoints: [/healthz, /readyz, /metrics]
+    state: SOURCE_IMPLEMENTED_NOT_DEPLOYED
+  mail-api:
+    repository: appolon1908-hue/codestra-production-platform
+    protected_source_sha: PENDING_PROTECTED_MERGE
+    endpoints: [/healthz, /healthz/ready, /metrics]
+    metrics: [codestra_mail_http_requests_total, codestra_mail_http_request_duration_seconds]
+    state: SOURCE_CANDIDATE_NOT_DEPLOYED
+  reseller-portal:
+    repository: appolon1908-hue/codestra-production-platform
+    protected_source_sha: PENDING_PROTECTED_MERGE
+    endpoints: [/healthz, /readyz, /metrics]
+    metrics: [codestra_reseller_portal_http_requests_total, codestra_reseller_portal_http_request_duration_seconds]
+    state: SOURCE_CANDIDATE_NOT_DEPLOYED
+
+prometheus:
+  configuration: operations/monitoring/prometheus.yml
+  private_networks: [codestra_backend, codestra_edge]
+  application_jobs:
+    - operations-dashboard-middleware
+    - codestra-middleware-runtimes
+    - codestra-mail-api
+    - codestra-reseller-portal
+    - blackbox_application_readiness
+
+alerts:
+  rules: operations/monitoring/rules/application-http.rules.yml
+  required: [availability, readiness, http_5xx, http_latency]
+  delivery_verified: false
+  acknowledgement_verified: false
+
+promotion_gates:
+  exact_digest: FAIL
+  prometheus_target_readback: FAIL
+  alert_delivery: FAIL
+  alert_acknowledgement: FAIL
+  logs: FAIL
+  traces: FAIL

@@ -1,0 +1,60 @@
+.o_codestra_post_call_actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0 0 1rem;
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 0.75rem;
+    background: var(--o-view-background-color, #fff);
+
+    &__copy {
+        display: flex;
+        flex-direction: column;
+        gap: 0.125rem;
+    }
+
+    &__buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+}
+
+.o_codestra_post_call_footer {
+    display: flex;
+    width: 100%;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+
+    &__primary,
+    &__snooze {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .o_codestra_post_call_actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .o_codestra_post_call_footer,
+    .o_codestra_post_call_footer__primary,
+    .o_codestra_post_call_footer__snooze {
+        align-items: stretch;
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .o_codestra_post_call_footer .btn,
+    .o_codestra_post_call_footer button {
+        width: 100%;
+    }
+}

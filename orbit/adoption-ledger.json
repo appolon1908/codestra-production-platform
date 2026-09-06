@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0.0",
+  "contractId": "codestra-orbit-v2.0.0",
+  "authorityRepository": "appolon1908-hue/codestra-production-platform",
+  "status": "PENDING_CONSUMER_ADOPTION",
+  "preparedOn": "2026-09-02",
+  "requiredEntryFields": [
+    "repository",
+    "pullRequest",
+    "protectedCommitSha",
+    "packageArtifacts",
+    "canonicalDomain",
+    "identityClient",
+    "redirectAllowlist",
+    "applicationArtifact",
+    "caddySourceLock",
+    "kongSourceLock",
+    "securityHeaders",
+    "desktopEvidence",
+    "mobileEvidence",
+    "accessibilityEvidence",
+    "authSessionEvidence",
+    "observabilityEvidence",
+    "rollbackEvidence",
+    "productionReadback"
+  ],
+  "entries": []
+}

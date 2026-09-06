@@ -1,0 +1,21 @@
+Defaults!/usr/local/libexec/codestra/klyrow-production-validator-root env_reset
+Defaults!/usr/local/libexec/codestra/klyrow-production-validator-root !setenv
+Defaults!/usr/local/libexec/codestra/klyrow-production-validator-root secure_path=/usr/sbin:/usr/bin:/sbin:/bin
+Defaults!/usr/local/libexec/codestra/klyrow-production-validator-root use_pty
+Defaults!/usr/local/libexec/codestra/klyrow-production-validator-root log_output
+Defaults!/usr/local/libexec/codestra/klyrow-production-validator-root log_input
+
+Cmnd_Alias KLYROW_VALIDATOR = \
+  /usr/local/libexec/codestra/klyrow-production-validator-root authenticate-runbook, \
+  /usr/local/libexec/codestra/klyrow-production-validator-root inventory, \
+  /usr/local/libexec/codestra/klyrow-production-validator-root configuration-readback, \
+  /usr/local/libexec/codestra/klyrow-production-validator-root release-identity, \
+  /usr/local/libexec/codestra/klyrow-production-validator-root health, \
+  /usr/local/libexec/codestra/klyrow-production-validator-root authorization-tests, \
+  /usr/local/libexec/codestra/klyrow-production-validator-root no-effect-tests, \
+  /usr/local/libexec/codestra/klyrow-production-validator-root callback-tests, \
+  /usr/local/libexec/codestra/klyrow-production-validator-root smtp-no-data, \
+  /usr/local/libexec/codestra/klyrow-production-validator-root collect-evidence, \
+  /usr/local/libexec/codestra/klyrow-production-validator-root status
+
+codestra-admin ALL=(root) NOPASSWD: KLYROW_VALIDATOR

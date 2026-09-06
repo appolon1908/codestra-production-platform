@@ -10,17 +10,32 @@ on:
       - "eventing/**"
       - "identity/**"
       - "integrations/**"
+      - "services/private-integration-gateway/**"
       - "operations/**"
+      - "orbit/**"
+      - "evidence/**"
+      - "reports/**"
+      - "production-green-evidence/**"
       - "config/**"
       - "deploy/**"
       - "docs/**"
       - "n8n/**"
       - "odoo_addons/**"
+      - "contracts/telephony/**"
       - "schemas/**"
       - "scripts/**"
       - "tel_events/**"
       - "tools/**"
       - "tests/**"
+      - "AUTOMATED_PRODUCTION_GATES.md"
+      - "PRODUCTION-*.md"
+      - "PRODUCTION-*.yaml"
+      - "REPOSITORY-AUTHORITY-MATRIX.yaml"
+      - "STAGING-CERTIFICATION-REPORT.md"
+      - "BACKUP-RESTORE-CERTIFICATION.md"
+      - "OBSERVABILITY-CERTIFICATION.md"
+      - "SECURITY-CERTIFICATION.md"
+      - "EXTERNAL-CAPABILITY-ACTIVATION-MATRIX.yaml"
       - "pytest.ini"
       - ".gitleaksignore"
       - ".gitignore"
@@ -49,8 +64,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends nats-server
-          python -m pip install pytest pytest-subtests PyYAML requests "nats-py==2.15.0" \
-            "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9"
+          python -m pip install pytest pytest-subtests PyYAML requests "bandit==1.9.4" "nats-py==2.15.0" \
+            "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9" "prometheus-client==0.22.1" \
+            "openapi-spec-validator==0.7.2"
 
       - name: Verify recovered source evidence hashes
         run: |
@@ -60,6 +76,14 @@ jobs:
           echo \
             "f8a329b1808331c53ca6d5e02c9c002de3bd10437b3061a26d030e594a199b9c  scripts/vicidial_sync.py.candidate" |
             sha256sum --check -
+
+      - name: Verify canonical calling contract in required validation
+        shell: bash
+        run: |
+          actual="$(scripts/telephony-contract-digest.sh)"
+          expected="$(jq -r .canonical_digest evidence/calling/CALLING-CONTRACT-DIGESTS.json)"
+          test "$actual" = "$expected"
+          python -m pytest -q tests/test_calling_contract_digest.py tests/test_canonical_caddy_api_contract.py tests/test_calling_contract_remediation.py
 
       - name: Run complete clean-checkout platform suite
         run: |
@@ -177,7 +201,28 @@ jobs:
           install -m 0755 "${RUNNER_TEMP}/gitleaks" "${RUNNER_TEMP}/gitleaks-bin"
 
       - name: Gitleaks candidate tree
-        run: '"${RUNNER_TEMP}/gitleaks-bin" dir --no-banner --redact --exit-code 1 .'
+        run: |
+          report="${RUNNER_TEMP}/gitleaks-candidate.json"
+          set +e
+          "${RUNNER_TEMP}/gitleaks-bin" dir --no-banner --redact --exit-code 1 \
+            --report-format json --report-path "${report}" .
+          status=$?
+          set -e
+          if [[ -s "${report}" ]]; then
+            python - "${report}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          findings = json.loads(Path(sys.argv[1]).read_text())
+          for finding in findings:
+              rule = finding.get("RuleID", "unknown")
+              path = finding.get("File", "unknown")
+              line = finding.get("StartLine", "unknown")
+              print(f"Gitleaks finding: rule={rule} file={path}:{line}")
+          PY
+          fi
+          exit "${status}"
 
       - name: Gitleaks pull-request commit range
         run: |

@@ -1,0 +1,1 @@
+from="__SOURCE_CIDR__",expiry-time="__EXPIRY_UTC__",command="/usr/local/libexec/codestra/klyrow-production-validator ssh-dispatch",restrict,no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty,no-user-rc __SSH_ED25519_PUBLIC_KEY__

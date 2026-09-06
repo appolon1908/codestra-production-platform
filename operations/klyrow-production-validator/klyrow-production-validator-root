@@ -1,0 +1,180 @@
+#!/usr/bin/python3
+"""Root helper reached only through exact sudoers command lines."""
+
+from __future__ import annotations
+
+import json
+import hashlib
+import os
+import secrets
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+from klyrow_validator_core import (
+    APPROVED_ACTIONS,
+    ExclusiveLock,
+    PolicyError,
+    append_audit,
+    CORRELATION_RE,
+    limited_command,
+    parse_direct,
+    redact_object,
+    reject_dangerous_environment,
+    regular_nonsymlink,
+    sanitized_environment,
+    secure_directory,
+    write_all,
+)
+
+
+CONTRACT_PATH = Path("/etc/codestra/klyrow-production-validator/command-contract.json")
+ACTION_RUNNER = Path("/usr/local/libexec/codestra/klyrow-production-validator-actions")
+LOCK_PATH = Path("/run/lock/klyrow-production-validator.lock")
+AUDIT_PATH = Path("/var/lib/codestra/klyrow-production-validator/audit/audit.jsonl")
+EVIDENCE_ROOT = Path("/var/lib/codestra/klyrow-production-validator/evidence")
+
+
+def bounded_readback(value: str) -> dict[str, object]:
+    encoded = value.encode("utf-8", errors="replace")
+    result: dict[str, object] = {
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "bytes": len(encoded),
+        "structured": False,
+    }
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return result
+    result["structured"] = True
+    result["value"] = redact_object(parsed)
+    return result
+
+
+def load_contract() -> dict[str, object]:
+    regular_nonsymlink(CONTRACT_PATH)
+    raw = CONTRACT_PATH.read_bytes()
+    if len(raw) > 131072:
+        raise PolicyError("CONTRACT_TOO_LARGE")
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PolicyError("CONTRACT_INVALID") from exc
+    if not isinstance(value, dict) or value.get("default") != "deny":
+        raise PolicyError("CONTRACT_INVALID")
+    actions = value.get("actions")
+    if not isinstance(actions, dict) or set(actions) != set(APPROVED_ACTIONS):
+        raise PolicyError("CONTRACT_INVALID")
+    return value
+
+
+def validate_invocation(argv: list[str]) -> str:
+    if os.geteuid() != 0:
+        raise PolicyError("ROOT_HELPER_REQUIRES_ROOT")
+    if os.environ.get("SUDO_USER") != "codestra-admin":
+        raise PolicyError("SUDO_ACTOR_REJECTED")
+    reject_dangerous_environment(os.environ)
+    return parse_direct(argv)
+
+
+def read_correlation_id() -> str:
+    raw = sys.stdin.buffer.read(128)
+    try:
+        value = raw.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise PolicyError("CORRELATION_ID_REJECTED") from exc
+    if not value.endswith("\n") or value.count("\n") != 1:
+        raise PolicyError("CORRELATION_ID_REJECTED")
+    correlation_id = value[:-1]
+    if not CORRELATION_RE.fullmatch(correlation_id):
+        raise PolicyError("CORRELATION_ID_REJECTED")
+    return correlation_id
+
+
+def write_evidence(correlation_id: str, record: dict[str, object]) -> None:
+    secure_directory(EVIDENCE_ROOT)
+    path = EVIDENCE_ROOT / f"{correlation_id}.json"
+    payload = json.dumps(redact_object(record), indent=2, sort_keys=True) + "\n"
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    try:
+        write_all(fd, payload.encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def main(argv: list[str]) -> int:
+    os.umask(0o077)
+    correlation_id = "kpv-" + secrets.token_hex(16)
+    action = "rejected"
+    started = datetime.now(timezone.utc)
+    rc = 2
+    result = "FAIL"
+    command_result: dict[str, object] = {}
+    readback: dict[str, object] = {
+        "sha256": hashlib.sha256(b"").hexdigest(),
+        "bytes": 0,
+        "structured": False,
+    }
+    try:
+        action = validate_invocation(argv)
+        correlation_id = read_correlation_id()
+        contract = load_contract()
+        regular_nonsymlink(ACTION_RUNNER)
+        action_contract = contract["actions"][action]  # type: ignore[index]
+        if not isinstance(action_contract, dict):
+            raise PolicyError("ACTION_CONTRACT_INVALID")
+        timeout = action_contract.get("timeout_seconds")
+        maximum = action_contract.get("maximum_output_bytes")
+        if not isinstance(timeout, int) or not isinstance(maximum, int):
+            raise PolicyError("ACTION_CONTRACT_INVALID")
+        with ExclusiveLock(LOCK_PATH):
+            completed = limited_command(
+                [str(ACTION_RUNNER), action],
+                timeout_seconds=timeout,
+                maximum_output_bytes=maximum,
+            )
+        command_result = {
+            "elapsed_ms": completed.elapsed_ms,
+            "truncated": completed.truncated,
+            "timed_out": completed.timed_out,
+            "stdout_sha256": hashlib.sha256(completed.stdout.encode("utf-8")).hexdigest(),
+            "stdout_bytes": len(completed.stdout.encode("utf-8")),
+        }
+        readback = bounded_readback(completed.stdout)
+        if completed.stdout:
+            sys.stdout.write(completed.stdout)
+        if completed.stderr:
+            sys.stderr.write(completed.stderr)
+        if completed.truncated:
+            sys.stderr.write("OUTPUT_TRUNCATED=YES\n")
+        rc = 3 if completed.truncated and completed.returncode == 0 else completed.returncode
+        result = "PASS" if rc == 0 else "FAIL"
+    except PolicyError as exc:
+        sys.stderr.write(f"OPERATOR_RESULT=DENY\nREASON={str(exc).split(':', 1)[0]}\n")
+    finally:
+        finished = datetime.now(timezone.utc)
+        audit_record = {
+            "timestamp": finished.isoformat(),
+            "started_at": started.isoformat(),
+            "finished_at": finished.isoformat(),
+            "actor": "codestra-admin",
+            "action": action,
+            "result": result,
+            "exit_code": rc,
+            "correlation_id": correlation_id,
+            "mutation_classification": "read_only_no_effect",
+            **command_result,
+        }
+        evidence_record = {**audit_record, "authoritative_readback": readback}
+        try:
+            write_evidence(correlation_id, evidence_record)
+            append_audit(AUDIT_PATH, audit_record)
+        except (OSError, PolicyError):
+            rc = 2
+            sys.stderr.write("AUDIT_WRITE=FAIL\n")
+    return rc
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

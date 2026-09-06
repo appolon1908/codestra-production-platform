@@ -3,3 +3,4 @@ services:
   gateway:
     environment:
       PUBLIC_WS_URL: wss://api.codestra.co/ws/agent
+      INTERNAL_EVENT_SOURCE_HEALTH_URL: http://middleware:8095/healthz

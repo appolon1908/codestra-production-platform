@@ -167,9 +167,9 @@ def build(
                     "appolon1908-hue/codestra-production-platform"
                 ),
                 "orchestration_protected_sha": commit,
-                "middleware_repository": "Codestra-SRL/codestra-middleware",
+                "middleware_repository": "appolon1908-hue/Middleware-",
                 "middleware_protected_sha": middleware_sha,
-                "middleware_image": "ghcr.io/codestra-srl/codestra-middleware",
+                "middleware_image": "ghcr.io/appolon1908-hue/codestra-middleware",
                 "middleware_image_digest": middleware_image_digest,
                 "middleware_signature_verification": middleware_signature_status,
                 "middleware_provenance_verification": middleware_provenance_status,

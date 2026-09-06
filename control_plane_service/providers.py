@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import ssl
@@ -98,9 +100,134 @@ def _private_url(name: str) -> str:
     if not url:
         raise ProviderError("provider_url_missing")
     host = urllib.parse.urlparse(url).hostname
-    if host not in {"10.40.0.2", "10.40.0.4", "localhost", "127.0.0.1"}:
+    if host not in {
+        "10.40.0.2",
+        "10.40.0.4",
+        "localhost",
+        "127.0.0.1",
+        "telnexa.internal.codestra.agency",
+    }:
         raise ProviderError("provider_url_not_private")
     return url
+
+
+def _telnexa_submit(message: dict[str, object]) -> ProviderResult:
+    """Submit one SMS through the private gateway's exact authenticated contract."""
+
+    url = _private_url("TELNEXA")
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.path != "/v1/messages"
+        or parsed.query
+        or parsed.fragment
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ProviderError("provider_url_not_approved")
+    try:
+        content = json.loads(str(message.get("content_payload") or "{}"))
+    except json.JSONDecodeError as exc:
+        raise ProviderError("provider_payload_invalid") from exc
+    if not isinstance(content, dict):
+        raise ProviderError("provider_payload_invalid")
+    body_value = content.get("text", content.get("content"))
+    if not isinstance(body_value, str) or not body_value.strip():
+        raise ProviderError("provider_payload_invalid")
+    provider_attempt = int(message.get("provider_attempt") or 0)
+    caller_idempotency_key = str(message["idempotency_key"])
+    provider_idempotency_key = caller_idempotency_key
+    if provider_attempt > 0:
+        attempt_identity = "\n".join(
+            (
+                str(message["tenant_id"]),
+                str(message["message_id"]),
+                caller_idempotency_key,
+                str(provider_attempt),
+            )
+        )
+        provider_idempotency_key = (
+            "retry-" + hashlib.sha256(attempt_identity.encode()).hexdigest()
+        )
+    payload = {
+        "body": body_value,
+        "correlation_id": str(message["correlation_id"]),
+        "customer_id": str(message["customer_id"]),
+        "idempotency_key": provider_idempotency_key,
+        "message_id": str(message["message_id"]),
+        "sender": str(message["sender"]),
+        "tenant_id": str(message["tenant_id"]),
+        "to": str(message["normalized_destination"]),
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    timestamp = str(int(time.time()))
+    nonce = uuid.uuid4().hex
+    signature = hmac.new(
+        _secret("TELNEXA_OUTBOUND_HMAC_SECRET_FILE").encode(),
+        b"POST\n/v1/messages\n"
+        + timestamp.encode()
+        + b"\n"
+        + nonce.encode()
+        + b"\n"
+        + raw,
+        hashlib.sha256,
+    ).hexdigest()
+    request = urllib.request.Request(
+        url,
+        raw,
+        {
+            "Authorization": "Bearer " + _secret("TELNEXA_OUTBOUND_API_KEY_FILE"),
+            "Content-Type": "application/json",
+            "X-Codestra-Nonce": nonce,
+            "X-Codestra-Signature": "sha256=" + signature,
+            "X-Codestra-Timestamp": timestamp,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=float(os.getenv("CONTROL_PLANE_HTTP_TIMEOUT", "5"))
+        ) as response:
+            if response.status != 202:
+                raise ProviderError("provider_response_invalid")
+            response_raw = response.read(2049)
+    except ProviderError:
+        raise
+    except Exception as exc:
+        raise ProviderError("provider_unavailable") from exc
+    if not response_raw or len(response_raw) > 2048:
+        raise ProviderError("provider_response_invalid")
+    try:
+        result = json.loads(response_raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ProviderError("provider_response_invalid") from exc
+    if not isinstance(result, dict):
+        raise ProviderError("provider_response_invalid")
+    adapter_message_id = result.get("adapter_message_id")
+    state = result.get("state")
+    duplicate = result.get("duplicate")
+    carrier_submitted = result.get("carrier_submitted")
+    accepted = result.get("accepted")
+    try:
+        uuid.UUID(str(adapter_message_id))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ProviderError("provider_response_invalid") from exc
+    if accepted is not True or not isinstance(duplicate, bool):
+        raise ProviderError("provider_response_invalid")
+    if state == "submitted" and carrier_submitted is True:
+        return ProviderResult(str(adapter_message_id), "accepted", "submitted")
+    if state == "rejected" and carrier_submitted is False:
+        return ProviderResult(str(adapter_message_id), "rejected", "rejected")
+    if state == "outcome_unknown" and carrier_submitted is False:
+        return ProviderResult(str(adapter_message_id), "deferred", "outcome_unknown")
+    if duplicate is True and state == "submitting" and carrier_submitted is False:
+        return ProviderResult(str(adapter_message_id), "deferred", "submitting")
+    # A safe-mode receipt is not evidence of carrier acceptance. The worker's
+    # production ledger must therefore stay fail-closed until the gateway's
+    # independently reviewed delivery gates are also enabled.
+    if state == "mock_accepted" and carrier_submitted is False:
+        raise ProviderError("provider_delivery_not_authorized")
+    raise ProviderError("provider_response_invalid")
 
 
 def submit(message: dict[str, object]) -> ProviderResult:
@@ -112,6 +239,8 @@ def submit(message: dict[str, object]) -> ProviderResult:
         return ProviderResult("test-" + str(uuid.uuid4()), "accepted", "test_accepted")
     if mode != "production" or os.getenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "false") != "true":
         raise ProviderError("production_delivery_not_authorized")
+    if provider == "telnexa":
+        return _telnexa_submit(message)
     url = _private_url(provider.upper())
     campaign = str(message.get("campaign_id") or "")
     allowed_campaign = os.getenv("KLYROW_ALLOWED_CAMPAIGN", "")

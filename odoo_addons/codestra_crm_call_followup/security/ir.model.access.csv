@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_call_followup_agent,codestra.crm.call.followup agent,model_codestra_crm_call_followup,group_call_followup_user,1,1,0,0
+access_call_followup_manager,codestra.crm.call.followup manager,model_codestra_crm_call_followup,group_call_followup_manager,1,1,0,0
+access_post_call_wizard_agent,codestra.crm.post.call.wizard agent,model_codestra_crm_post_call_wizard,group_call_followup_user,1,1,1,1
+access_post_call_wizard_manager,codestra.crm.post.call.wizard manager,model_codestra_crm_post_call_wizard,group_call_followup_manager,1,1,1,1

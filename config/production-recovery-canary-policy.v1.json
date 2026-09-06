@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "required_recovery_authorities": [
+    "platform-postgresql",
+    "provisioning-sqlite",
+    "odoo-postgresql",
+    "odoo-filestore",
+    "openbao-raft",
+    "grafana-metadata",
+    "superset-metadata",
+    "prometheus-tsdb",
+    "loki-storage",
+    "tempo-storage",
+    "configuration-bundle"
+  ],
+  "required_backup_controls": {
+    "encrypted": true,
+    "off_host_copy": true,
+    "checksum_verified": true,
+    "source_identity_recorded": true,
+    "image_identity_recorded": true
+  },
+  "required_restore_controls": {
+    "isolated": true,
+    "integrity": "PASS",
+    "residual_resources": 0,
+    "health_readback": "PASS",
+    "readiness_readback": "PASS",
+    "version_readback": "PASS"
+  },
+  "required_rollback_controls": {
+    "rehearsed": true,
+    "data_integrity": "PASS",
+    "source_readback": "PASS",
+    "digest_readback": "PASS",
+    "monitoring_continuity": "PASS"
+  },
+  "canary": {
+    "maximum_traffic_percent": 1,
+    "allowed_methods": ["GET", "HEAD"],
+    "maximum_unexpected_404": 0,
+    "maximum_unexpected_5xx": 0,
+    "maximum_live_effect_delta": 0,
+    "source_and_digest_match_required": true,
+    "automatic_rollback_ready_required": true
+  },
+  "soak": {
+    "minimum_duration_seconds": 3600,
+    "maximum_unhealthy_containers": 0,
+    "maximum_restarting_containers": 0,
+    "maximum_down_prometheus_targets": 0,
+    "maximum_actionable_alerts": 0,
+    "maximum_failed_systemd_units": 0,
+    "maximum_source_runtime_drift": 0,
+    "maximum_cross_business_leaks": 0,
+    "maximum_secrets_in_logs": 0
+  },
+  "safety": {
+    "business_writes_allowed": false,
+    "communications_delivery_allowed": false,
+    "provider_effects_allowed": false,
+    "financial_or_trading_mutation_allowed": false,
+    "runtime_activation_by_validator_allowed": false
+  }
+}
