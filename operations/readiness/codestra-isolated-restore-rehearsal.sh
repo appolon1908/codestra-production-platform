@@ -324,13 +324,15 @@ docker run --rm --name "$middleware_migrate_container" \
     -e DATABASE_URL_FILE=/run/secrets/migration_database_url \
     -v "$middleware_migration_database_url_file:/run/secrets/migration_database_url:ro" \
     "$middleware_image" \
-    -m alembic upgrade head > "$work_dir/middleware-alembic-upgrade.txt"
+    -c "from alembic.config import Config;from alembic import command;c=Config();c.set_main_option('script_location','/app/migrations');command.upgrade(c,'head')" \
+    > "$work_dir/middleware-alembic-upgrade.txt"
 docker run --rm --name "$middleware_current_container" \
     "${middleware_container_args[@]}" \
     -e DATABASE_URL_FILE=/run/secrets/migration_database_url \
     -v "$middleware_migration_database_url_file:/run/secrets/migration_database_url:ro" \
     "$middleware_image" \
-    -m alembic current > "$work_dir/middleware-alembic-current.txt"
+    -c "from alembic.config import Config;from alembic import command;c=Config();c.set_main_option('script_location','/app/migrations');command.current(c)" \
+    > "$work_dir/middleware-alembic-current.txt"
 middleware_database_head=$(awk 'NF {value=$1} END {print value}' "$work_dir/middleware-alembic-current.txt")
 test "$middleware_database_head" = "$middleware_required_head"
 middleware_schema_table_count=$(docker exec "$container" psql -U postgres -d codestra_middleware -At -v ON_ERROR_STOP=1 \
