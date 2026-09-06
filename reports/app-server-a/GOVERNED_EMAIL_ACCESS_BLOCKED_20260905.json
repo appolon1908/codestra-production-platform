@@ -1,0 +1,74 @@
+{
+  "observed_at_utc": "2026-09-05T12:37:23Z",
+  "mission": "Server A governed email delivery",
+  "status": "BLOCKED",
+  "observed_session": {
+    "hostname": "static",
+    "effective_user": "codestra-admin",
+    "uid": 1001,
+    "public_address": "65.21.67.207/26",
+    "private_address": "10.40.0.2/24",
+    "os": "openSUSE Leap 15.6",
+    "role": "Server B",
+    "sudo": "Only enumerated codestra-vicidial-operator actions; no general root install path available.",
+    "ssh_config": "No user SSH config found; no existing Server A administrative path established."
+  },
+  "required_session": {
+    "host": "65.109.65.169",
+    "effective_user": "root",
+    "recovery_session": "Independent recovery session required before SSH changes"
+  },
+  "expected_release": {
+    "protected_sha": "01f2676772b11919e1d79cc74d36bc5eeaa682cd",
+    "tag": "protected-01f2676772b11919e1d79cc74d36bc5eeaa682cd",
+    "archive_sha256": "9a8ca7da2c9a7c7b44fa2bd53888b5353326a24965edfdd824a90eaa4068ff1b",
+    "middleware_digest": "sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b",
+    "change_id": "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01",
+    "migration_head": "0056_klyrow_delivery_events"
+  },
+  "release_metadata_observed": {
+    "url": "https://github.com/appolon1908-hue/codestra-production-platform/releases/tag/protected-01f2676772b11919e1d79cc74d36bc5eeaa682cd",
+    "tag_and_target_match": true,
+    "draft": false,
+    "prerelease": false,
+    "asset_metadata_present": [
+      "archive",
+      "deployment-manifest.json",
+      "manifest.sha256",
+      "manifest.sha256.sig",
+      "provenance.json",
+      "sbom.cdx.json"
+    ],
+    "cryptographic_verification": "NOT_RUN; metadata is not signature/checksum verification. Archive not downloaded/extracted; root-owned staging prerequisite unavailable."
+  },
+  "gate_status": {
+    "operator_install": "BLOCKED_NOT_RUN",
+    "installed_tuple_readback": "NOT_RUN",
+    "backup": "NOT_RUN",
+    "rollback_readiness": "NOT_RUN",
+    "resolver_authorization": "NOT_RUN",
+    "resolver_negative_tests": "NOT_RUN",
+    "database_revision": "NOT_RUN",
+    "smtp_starttls": "NOT_RUN",
+    "smtp_authentication": "NOT_RUN",
+    "smtp_no_data_test": "NOT_RUN; no SMTP connection initiated",
+    "relay_denial": "NOT_RUN",
+    "queue_delta": null,
+    "protected_preflight": "NOT_DISPATCHED",
+    "kill_switch": "NOT_RUN"
+  },
+  "server_a_effective_flags": {
+    "email": "UNKNOWN",
+    "sms": "UNKNOWN",
+    "pstn": "UNKNOWN",
+    "direct_odoo_smtp": "UNKNOWN"
+  },
+  "canary": {
+    "sent": false,
+    "recipient": "NOT_AUTHORIZED",
+    "delivery": "NOT_RUN"
+  },
+  "production_changed": false,
+  "exact_blocker": "This session is Server B under restricted codestra-admin, not an authorized root session on Server A. Provide the existing authorized Server A root execution context and independent recovery session; do not bypass the forced-command operator.",
+  "next_action": "Verify Server A identity/effective root and recovery access, then begin read-only inventory and exact signed-release verification before backup or installation. No activation or readiness claim until every mandatory gate has objective evidence."
+}

@@ -67,7 +67,7 @@ validate_trusted_source() {
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
-54d4b4ba37254910077dfa21292083c69a38af799563277b6052af533a4399d2  codestra-production-operator
+02b857534da9faebe51b6921ecc626814a990eafea2f07e2fe061b5915210489  codestra-production-operator
 80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb  codestra-production-forced-command
 aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
@@ -79,7 +79,7 @@ EOF
 verify_payload || fail
 [ ! -L "$restore_source" ] || fail
 [ -f "$restore_source" ] || fail
-[ "$(sha256sum "$restore_source" | awk '{print $1}')" = 38cd3df757aec80f01053f431d5b00b31afbad1a0eb4b3a57c7f75df8d1f50c3 ] || fail
+[ "$(sha256sum "$restore_source" | awk '{print $1}')" = 1ef72012bc5ac4bc148fa4b727bbe8e6ac1c66def75e135c36fabd0418268767 ] || fail
 [ ! -L "$database_manifest_source" ] || fail
 [ -f "$database_manifest_source" ] || fail
 [ ! -L "$database_validator_source" ] || fail
