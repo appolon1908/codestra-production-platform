@@ -51,11 +51,15 @@ def run(values: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 
 class CanaryAuthorizationTests(unittest.TestCase):
-    def test_complete_active_one_call_scope_validates_without_echoing_values(self) -> None:
+    def test_complete_active_scope_does_not_certify_signatures_or_calls(self) -> None:
         values = fields()
         result = run(values)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("authorization_state=VALIDATED", result.stdout)
+        self.assertIn("authorization_state=SCOPE_VALIDATED", result.stdout)
+        self.assertIn("signature_authenticity=NOT_VERIFIED", result.stdout)
+        self.assertIn("activation_authorized=false", result.stdout)
+        self.assertIn("business_flow_certified=false", result.stdout)
+        self.assertNotIn("authorization_state=VALIDATED", result.stdout)
         self.assertNotIn(values["AUTHORIZED_CALLER_ID"], result.stdout)
         self.assertNotIn(values["PROTECTED_DESTINATION_REFERENCE"], result.stdout)
 
@@ -87,3 +91,23 @@ class CanaryAuthorizationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_missing_pilot_extension_and_policy_references_fail_closed():
+    for key in ("TEST_EXTENSION", "CALLING_HOURS_POLICY_REFERENCE", "CONSENT_POLICY_REFERENCE", "DNC_POLICY_REFERENCE", "ROLLBACK_REFERENCE"):
+        values = fields()
+        del values[key]
+        result = run(values)
+        assert result.returncode == 2
+        assert key in result.stderr
+
+
+def test_duplicate_or_malformed_record_is_rejected_without_echoing_values(tmp_path):
+    text = "".join(f"{key}={value}\n" for key, value in fields().items())
+    for suffix in ("MAX_CALLS=2\n", "private-unparseable-value\n", "bad key=private-value\n"):
+        path = tmp_path / "authorization.env"
+        path.write_text(text + suffix)
+        result = subprocess.run(["python3", str(VALIDATOR), str(path)], text=True, capture_output=True, check=False)
+        assert result.returncode == 2
+        assert "malformed_record" in result.stderr
+        assert "private" not in result.stderr + result.stdout

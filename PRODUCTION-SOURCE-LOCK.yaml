@@ -8,6 +8,9 @@ protected_platform:
   identity_authority: signed exact-release provenance generated after protected merge
   manifest_parent_sha: 6861ca89f4d5ce0ac6929d21ddcf235d76e815e4
   manifest_parent_release_tag: protected-6861ca89f4d5ce0ac6929d21ddcf235d76e815e4
+  current_certification_source_sha: 6c94896e3db8f9a2c0f5d0e827e85fb4f3070dbf
+  certification_gate_merge_sha: 7deff8ac3aad25de11be065978492dbacdc20bd2
+  one_click_gate_merge_sha: d867c87e9db3cf072606363b8ee26df77acecc5c
   note: The resulting commit SHA cannot be embedded in its own source tree; release provenance supplies that exact identity.
 middleware_authorities:
   protected_production_tuple:
@@ -71,12 +74,112 @@ custom_release_candidates:
     runtime_state: IMMUTABLE_CANDIDATE_NOT_DEPLOYED
     evidence: evidence/server65/AI-MARKETING-IMMUTABLE-CANDIDATES-20260902.md
     deployment_authorized: false
+evidence_reconciliation_2026_09_04:
+  source_controls:
+    production_certification_validators:
+      status: MERGED
+      pull_request: 242
+      merge_sha: 7deff8ac3aad25de11be065978492dbacdc20bd2
+    fail_closed_one_click_gate:
+      status: MERGED
+      pull_request: 247
+      merge_sha: d867c87e9db3cf072606363b8ee26df77acecc5c
+    infrastructure_source_authority:
+      status: MERGED
+      repository: appolon1908-hue/Infustruction-repo
+      pull_request: 74
+      merge_sha: 66079be45d9813b592d51cf702e5efebeaf37382
+    openbao_source_remediation:
+      status: MERGED_TO_DEVELOPMENT
+      repository: appolon1908-hue/Codestra-OpenBao
+      pull_request: 47
+      merge_sha: 8f13bd3266b308bbde7914a342ee3a48712ee6a1
+      production_image_signed: false
+    runtime_matrix_gate:
+      status: GREEN_REQUIRES_CODEOWNER_APPROVAL
+      repository: appolon1908-hue/codestra-production-runtime-authority
+      pull_request: 6
+      exact_head: ee3ec25b28881cac100b713842e7ec682dbe4da9
+      deployment_authorized: false
+    stage6_current_inventory_repair:
+      status: GREEN_REQUIRES_INDEPENDENT_APPROVAL
+      repository: appolon1908-hue/Infustruction-repo
+      pull_request: 88
+      exact_head: 0ee2fcb2f3b1335ff6ea4e034a1d755a391c1aa7
+      post_merge_get_only_inventory_dispatch: true
+      cloud_mutation_authorized: false
+  staging_host:
+    historical_provisioning_workflow_run: 33455510182
+    historical_provisioning_source_sha: 9a81bcca5a00f2e543a90594c2e7590efd527abf
+    runtime_server_id: 164156679
+    runtime_private_ip: 10.250.6.10
+    egress_server_id: 164156658
+    egress_private_ip: 10.250.6.2
+    network_id: 12602071
+    host_created: true
+    current_host_verified: false
+    evidence_authority: appolon1908-hue/Infustruction-repo#88
+  historical_runtime_replacements:
+    mail_api:
+      source_sha: e612e38dae1a1e2ec5e770dcd29aabc3c2ea2b53
+      image_digest: sha256:586ed6aaded359b4cad64905d027079ea910eda5202bae0bac0d44d8baf0df09
+      rollback_digest: sha256:7495d5f0d79f027456ed61b7c3c2ea9331c228f3d2e10bceef3178eef5a62594
+      evidence: production-green-evidence/WAVE_4_DEPLOYMENT_20260902.md
+      runtime_result: HEALTH_READY_METRICS_AND_WRITE_SAFETY_PASS
+    email_reseller:
+      source_sha: 9371bc39b11fe2cd52c5414e84a31cc9adb80644
+      image_digest: sha256:e1dddbb9055528b702dd27d99b42ee59b1929a2de826ca966075bd0b59e5e005
+      rollback_digest: sha256:1dba872104d8876b6e9882b9d629a5b767358eb55ce93b626331f4d92b5035d4
+      evidence: production-green-evidence/WAVE_4_DEPLOYMENT_20260902.md
+      runtime_result: HEALTH_READY_VERSION_CAPABILITY_AND_WRITE_SAFETY_PASS_METRICS_GAP
+    reseller_portal:
+      source_sha: e612e38dae1a1e2ec5e770dcd29aabc3c2ea2b53
+      image_digest: sha256:74ce88fa3ca05a6c3d595080b78c398be1dc49ac72185ba8aa787d9f6f8247d9
+      rollback_digest: sha256:7d7cf6318ac122f7e39ab679dec499dc1f6116129765903d44e42c74541ca12e
+      evidence: production-green-evidence/WAVE_5_DEPLOYMENT_20260902.md
+      runtime_result: HEALTH_READY_METRICS_AND_WRITE_SAFETY_PASS
+    snapshot_note: These three records prove replacement after the 24-container snapshot but do not establish the current remaining count; a fresh read-only runtime inventory is required.
+  recovery_history:
+    encrypted_backup_and_off_host_checksum: PASS
+    isolated_database_restore: PASS
+    final_candidate_recovery_certified: false
+    evidence: production-green-evidence/BACKUP_RESTORE_RUNTIME_20260902.md
+release_readiness:
+  production_certified: false
+  deployment_authorized: false
+  source_lock_status: FAIL
+  reason: Current staging, complete candidate, API/gateway, recovery, rollback, canary, and soak evidence is incomplete.
 blockers:
   - id: unpinned-custom-runtime
     count: 24
     evidence: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml
   - id: protected-staging-not-executed
     reason: >-
-      The isolated staging host, protected environment variables and secrets,
-      exact endpoint manifest, backup/restore evidence, and rollback evidence
-      are not yet materialized. Deployment authorization remains false.
+      The 64-workload evidence gate is green but still lacks CODEOWNER approval,
+      complete signed artifact records, runtime identities, distinct rollback
+      digests, and isolated staging readback. deployment_authorized remains false.
+  - id: protected-staging-current-verification
+    host_created: true
+    host_verified: false
+    inventory_repair_pull_request: 88
+    inventory_repair_exact_head: 0ee2fcb2f3b1335ff6ea4e034a1d755a391c1aa7
+    reason: >-
+      The isolated Stage 6 host exists, but a fresh protected GET-only inventory,
+      host identity/readiness proof, staging-readonly environment configuration,
+      exact endpoint manifest, and encrypted credentials are still required.
+  - id: openbao-signed-image-and-recovery
+    source_merge_sha: 8f13bd3266b308bbde7914a342ee3a48712ee6a1
+    production_image_signed: false
+    reason: >-
+      OpenBao source remediation is merged to development, but protected branch
+      promotion, exact signed production image evidence, Raft backup and isolated
+      restore, audit, lease/revocation, TLS/mTLS/OIDC, rollback, and soak are absent.
+  - id: final-runtime-certification
+    business_api_status: ZERO_OF_FIFTEEN_PROVEN_IN_CURRENT_FINAL_CANDIDATE
+    gateway_route_status: ZERO_OF_TWENTY_NINE_PROVEN_IN_CURRENT_FINAL_CANDIDATE
+    production_readonly_canary_executed: false
+    soak_complete: false
+    reason: >-
+      The final exact candidate has not passed 15/15 business API, 29/29 Kong
+      route, final backup/restore, two-way rollback, maximum one-percent
+      GET/HEAD-only production canary, and clean soak evidence.
