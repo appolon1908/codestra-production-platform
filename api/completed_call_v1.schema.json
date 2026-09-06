@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codestra.co/schemas/odoo/completed-call-v1.json",
+  "title": "Codestra Odoo Completed Call v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "company_id",
+    "ended_at"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "agent_user_id"
+      ]
+    },
+    {
+      "required": [
+        "agent_login"
+      ]
+    }
+  ],
+  "properties": {
+    "api_version": {
+      "const": "1.0"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "correlation_id": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "call_id": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "producer": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "company_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "agent_user_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "agent_login": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "lead_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "partner_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "customer_name": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "customer_email": {
+      "type": "string",
+      "format": "email",
+      "maxLength": 320
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "duration_seconds": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

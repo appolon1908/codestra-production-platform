@@ -1,0 +1,41 @@
+{
+  "schema_version": "codestra.production-orchestrator-contract.v1",
+  "repository": "appolon1908-hue/codestra-production-platform",
+  "repository_id": 1314230781,
+  "default_branch": "release/production-activation",
+  "role": "controller",
+  "release_intent_workflow": ".github/workflows/manual-release-intent.yml",
+  "deployment_authority": false,
+  "require_verified_commit": true,
+  "required_checks": [
+    "validate"
+  ],
+  "supported_phases": [
+    "plan"
+  ],
+  "artifact_policy": {
+    "minimum_images": 0,
+    "maximum_images": 0,
+    "require_digest": true,
+    "allow_rebuild_after_staging": false,
+    "allow_retag_after_staging": false,
+    "require_sbom": false,
+    "require_provenance": false,
+    "require_signature": false
+  },
+  "environments": {},
+  "native_workflows": {
+    "controller": ".github/workflows/manual-one-click-production-orchestrator.yml"
+  },
+  "safety": {
+    "external_effects_default": false,
+    "live_email_delivery": false,
+    "live_sms_delivery": false,
+    "live_pstn_dialing": false,
+    "odoo_write": false,
+    "n8n_external_delivery": false,
+    "live_trading": false,
+    "payment_execution": false
+  },
+  "blockers": []
+}

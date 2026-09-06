@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_codestra_call_followup_form_api" model="ir.ui.view">
+        <field name="name">codestra.crm.call.followup.form.api</field>
+        <field name="model">codestra.crm.call.followup</field>
+        <field name="inherit_id" ref="codestra_crm_call_followup.view_codestra_call_followup_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='correlation_id']" position="after">
+                <field name="api_version" readonly="1"/>
+                <field name="producer" readonly="1"/>
+                <field name="request_received_at" readonly="1"/>
+                <field name="request_fingerprint" readonly="1"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "1.0.0",
+  "reviewDate": "2026-09-03",
+  "repository": "appolon1908-hue/codestra-production-platform",
+  "protectedBranch": "release/production-activation",
+  "protectedBaseSha": "e7b16cfad97184145041298fdc26f89b6cc9f323",
+  "runtimeMutation": false,
+  "adminBypassUsed": false,
+  "forcePushUsed": false,
+  "merged": [
+    {"pullRequest": 225, "mergeSha": "96c861ea90ef99f504b65b177f41a63b56e88816", "purpose": "staging-readonly source gate"},
+    {"pullRequest": 230, "mergeSha": "e7b16cfad97184145041298fdc26f89b6cc9f323", "purpose": "disabled OpenAI provider runtime contract"}
+  ],
+  "closedContainedOrSuperseded": [
+    5, 6, 7, 8, 9, 16, 17, 100, 115, 119, 120, 121, 122, 123, 124, 125, 126, 128, 131, 135, 149, 151, 155, 157
+  ],
+  "preservedFromHistoricalPullRequests": [
+    {
+      "sourcePullRequests": [93, 94],
+      "paths": [
+        "docs/missions/CODESTRA_ODOO_CORPORATE_CALL_CENTER_FULL_CODEX_MISSION.md",
+        "docs/missions/CODESTRA_ODOO_CORPORATE_CALL_CENTER_BASELINE_AUDIT.md",
+        "docs/missions/CODESTRA_ODOO_CORPORATE_CALL_CENTER_GAP_MATRIX.csv",
+        "schemas/contact-center-event-envelope-v1.schema.json",
+        "tests/test_contact_center_event_contract.py"
+      ],
+      "excludedHistoricalPath": ".github/workflows/platform-source-gate.yml",
+      "exclusionReason": "the protected branch owns a newer source gate"
+    }
+  ],
+  "draftReconstructionRequired": [
+    {"pullRequest": 174, "workstream": "provider auditd", "blocker": "four unresolved transactional and trust-boundary review findings"},
+    {"pullRequest": 150, "workstream": "standalone Kong source authority", "blocker": "old-base conflict; current-base source-lock reconstruction required"},
+    {"pullRequest": 148, "workstream": "WebSocket gateway immutable release", "blocker": "old-base conflict and current authoritative source comparison required"},
+    {"pullRequest": 130, "workstream": "Kong route authority", "blocker": "must follow standalone Kong ownership decision and current 29-route source"},
+    {"pullRequest": 111, "workstream": "VICIdial adapter immutable release", "blocker": "old-base conflict; final source/image rebuild and fresh exact-head evidence required"},
+    {"pullRequest": 110, "workstream": "private Klyrow receiver", "blocker": "old-base conflict; current Caddy and Middleware authority comparison required"},
+    {"pullRequest": 104, "workstream": "Kong PostgreSQL HA", "blocker": "must be reconciled with standalone Kong and current database-certification authority"},
+    {"pullRequest": 97, "workstream": "runtime architecture deployer", "blocker": "must be rebuilt against the current fixed project/service inventory"},
+    {"pullRequest": 96, "workstream": "corporate call-center runtime", "blocker": "broad old-base branch; split current-base component authority required"},
+    {"pullRequest": 10, "workstream": "legacy Middleware database role retirement", "blocker": "requires current database-role inventory and fresh migration rehearsal"}
+  ],
+  "supersessionReviewRequired": [
+    {"pullRequest": 152, "workstream": "central platform and Caddy authority"},
+    {"pullRequest": 129, "workstream": "platform structure and API catalog"},
+    {"pullRequest": 43, "workstream": "mail registry and TEST_SYN controls"}
+  ],
+  "policy": {
+    "mergeRequiresExactCurrentHeadApproval": true,
+    "mergeRequiresSuccessfulCurrentHeadChecks": true,
+    "mergeRequiresZeroUnresolvedThreads": true,
+    "mergeRequiresCurrentBase": true,
+    "sourceMergeAuthorizesDeployment": false,
+    "businessWritesEnabled": false,
+    "communicationsDeliveryEnabled": false,
+    "financialOrTradingMutationEnabled": false
+  }
+}

@@ -11,8 +11,17 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./rules:/etc/prometheus/rules:ro
+      # Root synchronizes this non-root-readable projection from the staging
+      # identity authority; Prometheus never receives write access.
+      - /etc/codestra/secrets/monitoring-runtime/staging_metrics_client_secret:/run/secrets/staging_metrics_client_secret:ro
       - prometheus_data:/prometheus
-    networks: [monitoring]
+    networks:
+      monitoring: {}
+      backend: {}
+      edge: {}
+      operations_dashboard_staging: {}
+      alerting:
+        ipv4_address: 10.253.127.2
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
@@ -37,12 +46,20 @@ services:
       - /etc/codestra/secrets/monitoring/recovery_receiver_url:/run/secrets/alertmanager_recovery_receiver_url:ro
       - /etc/codestra/secrets/monitoring/rejected_route_url:/run/secrets/alertmanager_rejected_route_url:ro
       - alertmanager_data:/alertmanager
-    networks: [monitoring]
+    networks:
+      monitoring: {}
+      alerting:
+        ipv4_address: 10.253.127.3
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/bin/alertmanager", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   node-exporter:
     image: prom/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
@@ -60,6 +77,11 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/bin/node_exporter", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   postgres-exporter:
     image: docker.io/prometheuscommunity/postgres-exporter@sha256:9fca39a4307092387b7de884bed4b62205cb88a6a5fdb423b9a70ea80b34efb3
@@ -92,6 +114,11 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/redis_exporter", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
@@ -114,19 +141,35 @@ services:
     command: [--config.file=/etc/blackbox/blackbox.yml]
     volumes:
       - ./blackbox.yml:/etc/blackbox/blackbox.yml:ro
-    networks: [monitoring]
+    networks: [monitoring, backend, edge]
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/bin/blackbox_exporter", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 networks:
   monitoring:
     internal: false
+  alerting:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.253.127.0/29
   backend:
     external: true
     name: codestra_backend
+  edge:
+    external: true
+    name: codestra_edge
+  operations_dashboard_staging:
+    external: true
+    name: codestra-operations-dashboard-staging_private
 
 volumes:
   prometheus_data: {}

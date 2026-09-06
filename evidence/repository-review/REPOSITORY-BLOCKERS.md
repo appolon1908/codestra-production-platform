@@ -1,0 +1,92 @@
+# Repository Review Blockers
+
+Captured: 2026-09-02T19:37:04.462953+00:00
+
+A missing permission or unavailable API is a blocker, never a PASS.
+
+- `appolon1908-hue/codestra-production-platform` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/codestra-production-platform` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
+- `appolon1908-hue/codestra-production-platform` code_scanning security alerts: gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)
+- `appolon1908-hue/codestra-production-runtime-authority` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/codestra-production-runtime-authority` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
+- `appolon1908-hue/codestra-production-runtime-authority` code_scanning security alerts: gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)
+- `appolon1908-hue/Infustruction-repo` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Infustruction-repo` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Caddy` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Caddy` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Kong` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Kong` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
+- `appolon1908-hue/Kong` code_scanning security alerts: gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)
+- `appolon1908-hue/Keycloak` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Keycloak` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
+- `appolon1908-hue/Keycloak` code_scanning security alerts: gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)
+- `appolon1908-hue/Middleware-` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `Codestra-SRL/codestra-middleware` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
+- `Codestra-SRL/codestra-middleware` code_scanning security alerts: gh: Code Security must be enabled for this repository to use code scanning. (HTTP 403)
+- `Codestra-SRL/codestra-middleware` rulesets: gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)
+- `appolon1908-hue/Odoo` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Odoo` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `Codestra-SRL/codestra-odoo-addons` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `Codestra-SRL/codestra-odoo-addons` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
+- `Codestra-SRL/codestra-odoo-addons` code_scanning security alerts: gh: Code Security must be enabled for this repository to use code scanning. (HTTP 403)
+- `Codestra-SRL/codestra-odoo-addons` rulesets: gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)
+- `appolon1908-hue/N8N` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/N8N` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Marketing-` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Marketing-` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-AI` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-AI` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Communication-CC` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Communication-CC` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codesrea-Social-` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codesrea-Social-` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/social.codestra.co` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/social.codestra.co` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/codestra-provisioning-service` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/codestra-provisioning-service` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
+- `appolon1908-hue/codestra-provisioning-service` code_scanning security alerts: gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)
+- `appolon1908-hue/SDK-repository` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/SDK-repository` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/communication-platform-` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/communication-platform-` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/codestra` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
+- `appolon1908-hue/codestra` code_scanning security alerts: gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)
+- `appolon1908-hue/codestra-backend` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/codestra-backend` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
+- `appolon1908-hue/codestra-backend` code_scanning security alerts: gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)
+- `appolon1908-hue/backend2` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/backend2` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
+- `appolon1908-hue/backend2` code_scanning security alerts: gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)
+- `appolon1908-hue/Codestra-OpenBao` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-OpenBao` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Prometheus` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Prometheus` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Grafana-` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Grafana-` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Alertmanager` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Alertmanager` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Loki` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Loki` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Tempo` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Tempo` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Telemetry` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Telemetry` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Alloy` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Alloy` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Node-Exporter` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Node-Exporter` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-cAdvisor` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-cAdvisor` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Redis-Exporter` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Redis-Exporter` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Blackbox-Exporter` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Blackbox-Exporter` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Postgres-Exporter` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Codestra-Postgres-Exporter` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Superset` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+- `appolon1908-hue/Superset` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+
+## Active operational blockers
+
+- `Codestra-SRL/codestra-middleware`: Canonical Middleware exact-head and protected-main workflows cannot start because the organization Actions budget is zero with prevent_further_usage enabled. Evidence: `evidence/repository-review/CANONICAL-MIDDLEWARE-ACTIONS-BLOCKER-20260902.md`
+- `Server 65 Kong runtime read-back`: The reviewed narrow kong-readback operator action is not installed; Infrastructure/security-owner approval is required without changing SSH or granting an arbitrary shell. Evidence: `evidence/server65/KONG-RUNTIME-READBACK-BLOCKER-20260902.md`
