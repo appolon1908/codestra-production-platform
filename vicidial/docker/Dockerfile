@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-ARG PYTHON_IMAGE=python:3.11.16-alpine@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1
+ARG PYTHON_IMAGE=python:3.11.16-alpine@sha256:0d55920083f1ce1e38ac292e2772f924b4f8bb4188d336c79bf66963039e6146
 
 FROM ${PYTHON_IMAGE} AS builder
 WORKDIR /build
@@ -16,6 +16,7 @@ ARG SOURCE_SHA
 ARG BUILD_DATE
 ARG RELEASE_ENVIRONMENT=production-candidate
 ARG OPENSSL_PACKAGE_VERSION=3.5.8-r0
+ARG LIBUUID_PACKAGE_VERSION=2.42.3-r1
 LABEL org.opencontainers.image.title="Codestra VICIdial Restricted Adapter" \
       org.opencontainers.image.revision="${SOURCE_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
@@ -45,6 +46,7 @@ COPY vicidial/docker/security_regression.py /usr/local/libexec/codestra-security
 RUN apk add --no-cache \
       "libcrypto3=${OPENSSL_PACKAGE_VERSION}" \
       "libssl3=${OPENSSL_PACKAGE_VERSION}" \
+      "libuuid=${LIBUUID_PACKAGE_VERSION}" \
  && test -n "$SOURCE_SHA" \
  && test -n "$BUILD_DATE" \
  && mkdir -p "/opt/codestra/releases/$SOURCE_SHA" /var/lib/codestra-vicidial \

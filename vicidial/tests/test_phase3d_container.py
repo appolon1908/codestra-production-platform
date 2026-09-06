@@ -39,7 +39,9 @@ def test_dockerfile_is_pinned_multistage_nonroot_and_amd64_buildable():
     assert "9443" not in text
     assert '"libcrypto3=${OPENSSL_PACKAGE_VERSION}"' in text
     assert '"libssl3=${OPENSSL_PACKAGE_VERSION}"' in text
+    assert '"libuuid=${LIBUUID_PACKAGE_VERSION}"' in text
     assert "OPENSSL_PACKAGE_VERSION=3.5.8-r0" in text
+    assert "LIBUUID_PACKAGE_VERSION=2.42.3-r1" in text
 
 
 def test_runtime_security_regression_is_bounded_and_version_pinned():
