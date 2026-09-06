@@ -179,7 +179,7 @@ MIDDLEWARE_DB = "codestra_middleware_appolon"
 MIDDLEWARE_REQUIRED_DATABASE_HEAD = "0056_klyrow_delivery_events"
 MIDDLEWARE_REQUIRED_SOURCE_SHA = "63b6c0c8bca5168a1178895bd12858d0b1e8086e"
 MIDDLEWARE_COMPOSE_LAYERS = (
-    (Path("/opt/codestra/compose/compose.yaml"), "4798c36ba65c2274b634b9b0997bfbf86bbccab53574cb3b64fd9897fa472dcb"),
+    (Path("/opt/codestra/compose/compose.yaml"), "d6a7f2d3eeda3fa9e0709caa509f74510d1a552f21148754d8011928a7e3cd2d"),
     (Path("/opt/codestra/compose/compose.middleware-runtime.yaml"), "d6e2ba0372ecc8f7bc6e7a2bc0fb124bb71159664ab6110cc7478aa63a6a2906"),
     (Path("/opt/codestra/compose/compose.phase-n2-activation.yaml"), "b8923298d8cd8216a4129ac7b3ef9e9a9f6b32013bdc743bce531ab12411e390"),
     (Path("/opt/codestra/compose/compose.final-production-trust.yaml"), "30d0ff29813d69d44ea185ca23d5222632058e253283fc1cfc2913f9ebd4e2db"),
@@ -828,8 +828,16 @@ def validate_control_plane(config: dict[str, str]) -> dict[str, object]:
         "postal_inbound.py": hashlib.sha256((release / "control_plane_service/postal_inbound.py").read_bytes()).hexdigest(),
     }
     for name, digest_value in expected.items():
-        result = run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_API, "sha256sum", f"/app/control_plane_service/{name}"], timeout=30)
-        if result.stdout.decode().split()[0] != digest_value:
+        result = run_bytes([
+            "/usr/bin/docker", "exec", CONTROL_PLANE_API, "python", "-c",
+            (
+                "import hashlib,pathlib;"
+                "print(hashlib.sha256(pathlib.Path("
+                f"'/app/control_plane_service/{name}'"
+                ").read_bytes()).hexdigest())"
+            ),
+        ], timeout=30)
+        if result.stdout.decode().strip() != digest_value:
             raise OperatorError(f"control-plane source readback mismatch: {name}")
     health = docker_inspect(CONTROL_PLANE_API)
     if health["State"].get("Health", {}).get("Status") != "healthy":
@@ -2353,11 +2361,13 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
             "--no-deps",
             "--volume",
             f"{MIDDLEWARE_MIGRATION_DATABASE_URL}:/run/secrets/migration_database_url:ro",
+            "--env",
+            "DATABASE_URL_FILE=/run/secrets/migration_database_url",
             "--entrypoint",
             "/usr/bin/python3.13",
             "middleware-integration-api",
             "-c",
-            "import os,pathlib,runpy;os.environ['DATABASE_URL']=pathlib.Path('/run/secrets/migration_database_url').read_text().strip();runpy.run_path('/app/scripts/migrate_runtime.py',run_name='__main__')",
+            "from alembic.config import Config;from alembic import command;c=Config();c.set_main_option('script_location','/app/migrations');command.upgrade(c,'head')",
         ], timeout=1800)
         run_bytes([
             *compose,
