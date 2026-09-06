@@ -244,6 +244,9 @@ def test_mysql_campaign_adoption_revalidates_proof_in_conditional_mutation():
     assert "dial_method<=>%s AND local_call_time<=>%s" in source
     assert "campaign_recording<=>%s AND scheduled_callbacks<=>%s" in source
     assert "campaign_description<=>%s" in source
+    assert "hopper_level<=>%s" in source
+    assert "auto_dial_level<=>%s" in source
+    assert '"hopper_level,auto_dial_level "' in source
     assert "if affected != 1:" in source
     assert "campaign adoption proof became stale" in source
 

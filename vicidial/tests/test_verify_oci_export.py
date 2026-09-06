@@ -91,6 +91,33 @@ def test_verifier_rejects_direct_wrong_platform(monkeypatch, tmp_path):
         runpy.run_path("vicidial/scripts/verify_oci_export.py", run_name="__main__")
 
 
+@pytest.mark.parametrize("schema_version", [None, 1, "2"])
+def test_verifier_rejects_invalid_index_schema_version(
+    monkeypatch, tmp_path, schema_version
+):
+    source_sha = "a" * 40
+    archive_path = tmp_path / "image.oci.tar"
+    image_id, diff_id = _direct_oci_archive(archive_path, source_sha)
+    with tarfile.open(archive_path, "r") as source:
+        members = {item.name: source.extractfile(item).read() for item in source if item.isfile()}
+    index = json.loads(members["index.json"])
+    if schema_version is None:
+        del index["schemaVersion"]
+    else:
+        index["schemaVersion"] = schema_version
+    members["index.json"] = _json_bytes(index)
+    with tarfile.open(archive_path, "w") as target:
+        for name, payload in members.items():
+            _write_member(target, name, payload)
+    metadata = tmp_path / "metadata.json"
+    metadata.write_text(json.dumps([{"Id": image_id, "RootFS": {"Layers": [diff_id]}}]))
+    output = tmp_path / "verification.json"
+    monkeypatch.setattr(sys, "argv", ["verify_oci_export.py", "--archive", str(archive_path),
+        "--metadata", str(metadata), "--source-sha", source_sha, "--output", str(output)])
+    with pytest.raises(ValueError, match="index schema version is not 2"):
+        runpy.run_path("vicidial/scripts/verify_oci_export.py", run_name="__main__")
+
+
 @pytest.mark.parametrize("mutation,match", [
     ("missing", "member missing: oci-layout"),
     ("version", "layout version is not 1.0.0"),

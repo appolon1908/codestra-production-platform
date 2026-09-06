@@ -458,7 +458,8 @@ class MySQLRepository:
         }
         current = self._one(
             "SELECT campaign_id,campaign_name,active,dial_method,local_call_time,"
-            "campaign_recording,scheduled_callbacks,campaign_description "
+            "campaign_recording,scheduled_callbacks,campaign_description,"
+            "hopper_level,auto_dial_level "
             "FROM vicidial_campaigns WHERE campaign_id=%s", (spec.actual_id,))
         if current:
             fields = tuple(desired_campaign)
@@ -538,7 +539,8 @@ class MySQLRepository:
         }
         current = self._one(
             "SELECT campaign_id,campaign_name,active,dial_method,local_call_time,"
-            "campaign_recording,scheduled_callbacks,campaign_description "
+            "campaign_recording,scheduled_callbacks,campaign_description,"
+            "hopper_level,auto_dial_level "
             "FROM vicidial_campaigns WHERE campaign_id=%s", (spec.actual_id,))
         campaign_fields = (
             "campaign_name", "active", "dial_method", "local_call_time",
@@ -624,12 +626,14 @@ class MySQLRepository:
                 "WHERE campaign_id=%s AND campaign_name<=>%s AND active='N' "
                 "AND dial_method<=>%s AND local_call_time<=>%s "
                 "AND campaign_recording<=>%s AND scheduled_callbacks<=>%s "
-                "AND campaign_description<=>%s",
+                "AND campaign_description<=>%s AND hopper_level<=>%s "
+                "AND auto_dial_level<=>%s",
                 (spec.name, spec.dial_method, spec.call_time, spec.recording_policy,
                  desired_campaign["scheduled_callbacks"], description, spec.actual_id,
                  current.get("campaign_name"), current.get("dial_method"),
                  current.get("local_call_time"), current.get("campaign_recording"),
-                 current.get("scheduled_callbacks"), current.get("campaign_description")),
+                 current.get("scheduled_callbacks"), current.get("campaign_description"),
+                 current.get("hopper_level"), current.get("auto_dial_level")),
             )
             if affected != 1:
                 raise CollisionError(

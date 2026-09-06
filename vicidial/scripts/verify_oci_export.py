@@ -79,6 +79,8 @@ def main() -> int:
         if not isinstance(layout, dict) or layout.get("imageLayoutVersion") != "1.0.0":
             raise ValueError("OCI image layout version is not 1.0.0")
         index = member_json(archive, "index.json")
+        if not isinstance(index, dict) or index.get("schemaVersion") != 2:
+            raise ValueError("OCI index schema version is not 2")
         roots = index.get("manifests", [])
         if len(roots) != 1:
             raise ValueError("OCI archive does not contain exactly one root manifest")
