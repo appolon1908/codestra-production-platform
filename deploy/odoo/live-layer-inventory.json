@@ -1,0 +1,16 @@
+{
+  "captured_at": "2026-08-26T03:00:00Z",
+  "layers": [
+    {"order": 1, "path": "/opt/codestra/compose/compose.yaml", "sha256": "d6a7f2d3eeda3fa9e0709caa509f74510d1a552f21148754d8011928a7e3cd2d", "classification": "BASE_PRODUCTION", "purpose": "base Odoo, PostgreSQL, Redis, middleware, networks, volumes and secrets"},
+    {"order": 2, "path": "/opt/codestra/compose/compose.middleware-runtime.yaml", "sha256": "d6e2ba0372ecc8f7bc6e7a2bc0fb124bb71159664ab6110cc7478aa63a6a2906", "classification": "FEATURE_OVERRIDE", "purpose": "middleware image authority; no Odoo semantic change"},
+    {"order": 3, "path": "/opt/codestra/compose/compose.phase-n2-activation.yaml", "sha256": "b8923298d8cd8216a4129ac7b3ef9e9a9f6b32013bdc743bce531ab12411e390", "classification": "FEATURE_OVERRIDE", "purpose": "social and n8n feature gates; no Odoo semantic change"},
+    {"order": 4, "path": "/opt/codestra/compose/compose.final-production-trust.yaml", "sha256": "30d0ff29813d69d44ea185ca23d5222632058e253283fc1cfc2913f9ebd4e2db", "classification": "IDENTITY_OVERRIDE", "purpose": "Odoo Keycloak trust, service allowlist and private networks"},
+    {"order": 5, "path": "/opt/codestra/compose/compose.scraper-ingress-disabled.yaml", "sha256": "1825a3aa2df125e750add89f60c1b660112f9003b8dd803cb0282bac24bf0190", "classification": "SECURITY_OVERRIDE", "purpose": "fail-closed scraper and delivery feature gates; no Odoo semantic change"},
+    {"order": 6, "path": "/opt/codestra/compose/compose.health-contract-remediation.yaml", "sha256": "a254ee5df345dc0d3e15a3e4b229c7eeaeffb4ed08a6d26b164d1983d6658ed6", "classification": "SECURITY_OVERRIDE", "purpose": "middleware database readiness; no Odoo semantic change"},
+    {"order": 7, "path": "/opt/codestra/compose/compose.live-delivery-safety.yaml", "sha256": "447995f20b3443eca8c10d0110031dfe4e05394140a8a7b8f093419fe3c57d9a", "classification": "SECURITY_OVERRIDE", "purpose": "global live-delivery interlocks; no Odoo semantic change"},
+    {"order": 8, "path": "/home/codestra-admin/releases/callback-production-ded863c289c4.override.yaml", "sha256": "b179fab8726c59f554aa4e3200003366d4f2f9e6ae887ec5daad9386ca8f52cb", "classification": "FEATURE_OVERRIDE", "purpose": "Odoo callback synchronization and protected client credential reference"},
+    {"order": 9, "path": "/home/codestra-admin/releases/campaign-crm-middleware-d30babd.override.yaml", "sha256": "7d327f26e94b0eab2824393031bed82c18d0a6d48cb05e70c8480f141633820b", "classification": "FEATURE_OVERRIDE", "purpose": "campaign middleware gates; no Odoo semantic change"},
+    {"order": 10, "path": "/home/codestra-admin/releases/contact-center-91e22ef4.override.yaml", "sha256": "976f53321a7802afb2ab4354aab79c2d5b41d7618d9d99a2185d17491f156d97", "classification": "FEATURE_OVERRIDE", "purpose": "reviewed call-center addon mounts and Odoo command"}
+  ],
+  "unknown_layers": 0
+}

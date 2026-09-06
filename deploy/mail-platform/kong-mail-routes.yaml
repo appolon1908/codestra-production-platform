@@ -1,0 +1,35 @@
+_format_version: "3.0"
+services:
+  - name: codestra-mail-control-plane
+    url: http://codestra-mail-api:8098
+    routes:
+      - name: codestra-mail-user-api
+        hosts: [api.codestra.co]
+        protocols: [https]
+        methods: [GET, POST]
+        paths: [/api/v1/mail/messages, /api/v1/mail/mailboxes]
+        strip_path: false
+      - name: codestra-mail-admin-api
+        hosts: [api.codestra.co]
+        protocols: [https]
+        methods: [GET, POST]
+        paths: [/api/v1/admin/mail]
+        strip_path: false
+plugins:
+  - name: openid-connect
+    service: codestra-mail-control-plane
+    config:
+      issuer: https://auth.codestra.co/realms/codestra/.well-known/openid-configuration
+      auth_methods: [bearer]
+      audience_required: [codestra-mail-api]
+      scopes_required: [openid]
+      verify_claims: true
+  - name: request-size-limiting
+    service: codestra-mail-control-plane
+    config: {allowed_payload_size: 10, size_unit: megabytes, require_content_length: true}
+  - name: rate-limiting
+    service: codestra-mail-control-plane
+    config: {minute: 120, policy: local, limit_by: consumer, fault_tolerant: false}
+  - name: correlation-id
+    service: codestra-mail-control-plane
+    config: {header_name: X-Correlation-ID, generator: uuid, echo_downstream: true}

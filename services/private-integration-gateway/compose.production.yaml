@@ -1,0 +1,58 @@
+name: private-app-integration
+
+services:
+  gateway:
+    image: ${PRIVATE_INTEGRATION_GATEWAY_IMAGE:?set an independently verified immutable image digest}
+    pull_policy: missing
+    restart: unless-stopped
+    user: "10001:10001"
+    env_file:
+      - ${PRIVATE_INTEGRATION_GATEWAY_ENV_FILE:-/etc/kyqra-telnexa-integration/shared.env}
+    environment:
+      SOURCE_COMMIT_SHA: ${PRIVATE_INTEGRATION_GATEWAY_SOURCE_SHA:?set the exact protected source SHA}
+      GATEWAY_MODE: shared
+      JASMIN_DLR_CALLBACK_URL: http://gateway:8080/internal/v1/jasmin/dlr
+      LIVE_SUBMISSION_ENABLED: "false"
+      PRODUCTION_DELIVERY_AUTHORIZED: "false"
+      # Forwarding is activated only with separately issued outbound mTLS
+      # material and an approved MIDDLEWARE_EVENTS_URL deployment overlay.
+      MIDDLEWARE_FORWARDING_ENABLED: "false"
+      # Command persistence is a separately reviewed production activation.
+      INTEGRATION_COMMAND_INTAKE_ENABLED: "false"
+      SERVICE_TENANT_BINDINGS_FILE: /run/secrets/private_gateway_tenant_bindings
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=10001,gid=10001
+    volumes:
+      - gateway_data:/data
+    secrets:
+      - private_gateway_tenant_bindings
+    ports:
+      - "127.0.0.1:18443:8080"
+    networks: [private_api, telnexa_backend]
+    healthcheck:
+      test: [CMD, python, -I, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "5"}
+
+networks:
+  private_api:
+    driver: bridge
+    internal: true
+  telnexa_backend:
+    external: true
+    name: telnexa_backend
+
+volumes:
+  gateway_data:
+
+secrets:
+  private_gateway_tenant_bindings:
+    file: ${PRIVATE_GATEWAY_TENANT_BINDINGS_FILE:-/etc/kyqra-telnexa-integration/tenant-bindings.json}

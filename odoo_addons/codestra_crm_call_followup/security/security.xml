@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <record id="privilege_call_followup" model="res.groups.privilege">
+            <field name="name">Call Follow-up</field>
+        </record>
+
+        <record id="group_call_followup_user" model="res.groups">
+            <field name="name">Agent</field>
+            <field name="privilege_id" ref="privilege_call_followup"/>
+            <field name="implied_ids" eval="[(4, ref('sales_team.group_sale_salesman'))]"/>
+            <field name="comment">Complete assigned post-call records and manage callbacks.</field>
+        </record>
+
+        <record id="group_call_followup_manager" model="res.groups">
+            <field name="name">Manager</field>
+            <field name="privilege_id" ref="privilege_call_followup"/>
+            <field name="implied_ids" eval="[(4, ref('group_call_followup_user')), (4, ref('sales_team.group_sale_manager'))]"/>
+            <field name="comment">Review and manage company-wide call follow-up records.</field>
+        </record>
+
+        <record id="group_call_followup_service" model="res.groups">
+            <field name="name">Integration Service</field>
+            <field name="privilege_id" ref="privilege_call_followup"/>
+            <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+            <field name="comment">Technical API-key identity allowed to register completed calls. Do not assign to human users.</field>
+        </record>
+    </data>
+</odoo>

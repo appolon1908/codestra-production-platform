@@ -1,0 +1,56 @@
+schema_version: codestra.source-authority-runtime-readback.v1
+captured_at: "2026-09-02T17:35:00Z"
+server: 65.109.65.169
+collection: read-only Docker metadata through the existing codestra-admin access path
+record_count: 24
+digest_semantics: current_digest is the local Docker content identity and is not proof of a registry-published immutable artifact
+summary:
+  digest_pinned_compose_references: 0
+  unpinned_deployments: 24
+  distinct_local_image_artifacts: 19
+  unpinned_custom_image_artifacts: 18
+  third_party_image_artifacts: 1
+  repository_and_valid_sha_labels: 4
+  repository_label_invalid_or_unknown_sha: 6
+  no_repository_label: 12
+  third_party_base_labels_without_custom_build_authority: 2
+  compose_authority_under_inaccessible_root_worktree: 4
+  production_changed: false
+deployments:
+  - {service: external-webhook-worker, container: codestra-middleware-external-webhook-worker-1, repository: Codestra-SRL/codestra-middleware, source_sha: UNKNOWN, current_image: "codestra/middleware:webhook-cert-pg-20260816", current_digest: "sha256:93cbb4a11765ad92e9bbf1a1bb9601f15a540164b4e7d6647cb0f16d588ab6e0", provenance_state: INVALID_OCI_REVISION_64_HEX, deployment_authority: /opt/codestra/compose}
+  - {service: breero-odoo-worker, container: codestra-middleware-breero-odoo-worker-1, repository: Codestra-SRL/codestra-middleware, source_sha: 51416422eaaa959c8c7223ad1434287597eb8007, current_image: "codestra/middleware:breero-51416422", current_digest: "sha256:961c0569a5033cdb494d211fd32cfe20d7efd42d3900f02c2d3f0ac7bfdcfa63", provenance_state: LOCAL_DIGEST_MUTABLE_COMPOSE_REFERENCE, deployment_authority: /opt/codestra/compose}
+  - {service: sms-event-worker, container: codestra-sms-api-event-worker-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: codestra-sms-api-event-worker, current_digest: "sha256:65222db1296663c33f1bdac9ef5c8c305d2d4388ddca26e3306776821d2dbee9", provenance_state: MISSING_OCI_SOURCE_AND_REVISION, deployment_authority: /opt/codestra/sms-api}
+  - {service: staging-odoo-result-worker, container: codestra-middleware-staging-odoo-result-worker-staging-1, repository: Codestra-SRL/codestra-middleware, source_sha: UNKNOWN, current_image: "codestra/middleware:staging-b29db772", current_digest: "sha256:b81c125296effc17a33258212d9a71a3c427a972fa9783ec2c060109d167408f", provenance_state: OCI_REVISION_LITERAL_UNKNOWN, deployment_authority: /opt/codestra/middleware-staging}
+  - {service: staging-middleware, container: codestra-middleware-staging-middleware-staging-1, repository: Codestra-SRL/codestra-middleware, source_sha: UNKNOWN, current_image: "codestra/middleware:staging-b29db772", current_digest: "sha256:b81c125296effc17a33258212d9a71a3c427a972fa9783ec2c060109d167408f", provenance_state: OCI_REVISION_LITERAL_UNKNOWN, deployment_authority: /opt/codestra/middleware-staging}
+  - {service: staging-social-reconciliation-worker, container: codestra-middleware-staging-social-reconciliation-worker-staging-1, repository: Codestra-SRL/codestra-middleware, source_sha: UNKNOWN, current_image: "codestra/middleware:social-staging-12cd5fc", current_digest: "sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6", provenance_state: OCI_REVISION_LITERAL_UNKNOWN, deployment_authority: /opt/codestra/middleware-staging}
+  - {service: staging-social-delivery-worker, container: codestra-middleware-staging-social-delivery-worker-staging-1, repository: Codestra-SRL/codestra-middleware, source_sha: UNKNOWN, current_image: "codestra/middleware:social-staging-12cd5fc", current_digest: "sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6", provenance_state: OCI_REVISION_LITERAL_UNKNOWN, deployment_authority: /opt/codestra/middleware-staging}
+  - {service: staging-social-dead-letter-worker, container: codestra-middleware-staging-social-dead-letter-worker-staging-1, repository: Codestra-SRL/codestra-middleware, source_sha: UNKNOWN, current_image: "codestra/middleware:social-staging-12cd5fc", current_digest: "sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6", provenance_state: OCI_REVISION_LITERAL_UNKNOWN, deployment_authority: /opt/codestra/middleware-staging}
+  - {service: staging-notification-worker, container: codestra-middleware-staging-notification-worker-staging-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra/middleware:staging-preflight-n8n-auth-20260801", current_digest: "sha256:ed7accf6d1f9ad7d84f43deba8caa0d58f8c40709c7b54d622d70df56b1f2386", provenance_state: MISSING_OCI_SOURCE_AND_REVISION, deployment_authority: /opt/codestra/middleware-staging}
+  - {service: staging-scheduler, container: codestra-middleware-staging-scheduler-staging-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra/middleware:staging-preflight-n8n-auth-20260801", current_digest: "sha256:ed7accf6d1f9ad7d84f43deba8caa0d58f8c40709c7b54d622d70df56b1f2386", provenance_state: MISSING_OCI_SOURCE_AND_REVISION, deployment_authority: /opt/codestra/middleware-staging}
+  - {service: staging-callback, container: codestra-middleware-staging-callback-staging-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra/middleware:current-hardened-20260723", current_digest: "sha256:57a4a3a22278aa61bc443910927a308d594db287b8e2cd500ee12293e8a93f4d", provenance_state: NON_REPOSITORY_OCI_SOURCE_AND_INVALID_REVISION, deployment_authority: /opt/codestra/middleware-staging}
+  - {service: odoo-staging-callback-tls, container: codestra-odoo19-module-staging-callback-tls-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra/caddy:2.11.4-hardened-20260723", current_digest: "sha256:269c6bd9b2713a27f8dc34a19a904bb0ba9d8f0f1564913576becd24779674d5", provenance_state: THIRD_PARTY_BASE_LABEL_WITHOUT_CUSTOM_BUILD_AUTHORITY, deployment_authority: /opt/codestra/odoo19-module-staging}
+  - {service: middleware, container: codestra-middleware-1, repository: Codestra-SRL/codestra-middleware, source_sha: b3ca9aa458fef843e3065aeff3397c656349f138, current_image: "codestra/middleware:health-contract-b3ca9aa", current_digest: "sha256:5dd751a9da60e2417c9ee553ddea68f54e76981dcc896eb3676b27617d121f38", provenance_state: LOCAL_DIGEST_MUTABLE_COMPOSE_REFERENCE, deployment_authority: /opt/codestra/compose}
+  - {service: email-reseller-api, container: codestra-email-reseller-api-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: codestra-email-reseller-api, current_digest: "sha256:8d7bb50e8787c110a7930fadb0c69a44ba075c70cb5e035118d9f334b1211e08", provenance_state: MISSING_OCI_SOURCE_AND_REVISION_ROOT_WORKTREE_AUTHORITY, deployment_authority: /root/codestra-odoo-middleware-functional/deploy/email-reseller}
+  - {service: sms-api, container: codestra-sms-api-api-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: codestra-sms-api-api, current_digest: "sha256:49790449a1871a585456fe41bcb52dd614fb56f432907b9f5e7271e54306d6d7", provenance_state: MISSING_OCI_SOURCE_AND_REVISION, deployment_authority: /opt/codestra/sms-api}
+  - {service: mail-api, container: codestra-mail-api-mail-api-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra/mail-api:20260822", current_digest: "sha256:7495d5f0d79f027456ed61b7c3c2ea9331c228f3d2e10bceef3178eef5a62594", provenance_state: MISSING_OCI_SOURCE_AND_REVISION_ROOT_WORKTREE_AUTHORITY, deployment_authority: /root/codestra-production-completion/deploy/mail-platform}
+  - {service: stalwart, container: codestra-mail-isolated-stalwart-1, repository: stalwartlabs/stalwart, source_sha: d08305df2e865ccf8b0676fd63ebd37d25aef787, current_image: "stalwartlabs/stalwart:v0.16", current_digest: "sha256:9ed1d343243b7aa72969e372a7240b7ddea07730781d4b68a0dc3d8d51c418bb", provenance_state: THIRD_PARTY_LOCAL_DIGEST_MUTABLE_COMPOSE_REFERENCE_ROOT_WORKTREE_AUTHORITY, deployment_authority: /root/codestra-production-completion/deploy/mail-platform}
+  - {service: kong-standby-auth, container: kong-production-standby-kong-standby-auth-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra/kong-standby-auth:20260820", current_digest: "sha256:48b52b06eae0c92b1d4ae45bdee6f3974c684e650933de2391c7a3456602d01f", provenance_state: MISSING_OCI_SOURCE_AND_REVISION_ROOT_WORKTREE_AUTHORITY, deployment_authority: /root/codestra-kong-production-standby/deploy/kong-production-standby}
+  - {service: kong-identity-certification, container: codestra-kong-identity-certification-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra/identity-certification:canonical-co-20260820", current_digest: "sha256:ffceaad23a8daf61bed7a069499c341ae2495b48dd77ca492ee965b761ff55af", provenance_state: MISSING_OCI_SOURCE_AND_REVISION, deployment_authority: /opt/codestra/kong}
+  - {service: beyvra-email-api, container: codestra-beyvra-email-api-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra/beyvra-email:canonical-co-20260820", current_digest: "sha256:a226db03c6fce98f81c02e78bab96a2beb452a27dd79308c921e85bfa664aa52", provenance_state: MISSING_OCI_SOURCE_AND_REVISION_ROOT_WORKTREE_AUTHORITY, deployment_authority: /root/beyvra-email-middleware/deploy/beyvra-email}
+  - {service: reseller-portal, container: codestra-reseller-portal-portal-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra-reseller-portal:oidc-tenant-authority-20260816", current_digest: "sha256:7d7cf6318ac122f7e39ab679dec499dc1f6116129765903d44e42c74541ca12e", provenance_state: MISSING_OCI_SOURCE_AND_REVISION_ROOT_WORKTREE_AUTHORITY, deployment_authority: /root/codestra-odoo-middleware-functional/deploy/reseller-portal}
+  - {service: private-vicidial-ingress, container: codestra-private-vicidial-ingress-1, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra/caddy:2.11.4-hardened-20260723", current_digest: "sha256:269c6bd9b2713a27f8dc34a19a904bb0ba9d8f0f1564913576becd24779674d5", provenance_state: THIRD_PARTY_BASE_LABEL_WITHOUT_CUSTOM_BUILD_AUTHORITY, deployment_authority: /opt/codestra/compose}
+  - {service: staging-scraper-odoo-delivery-worker, container: codestra-middleware-staging-scraper-odoo-delivery-worker-1, repository: Codestra-SRL/codestra-middleware, source_sha: 4780bd72d1c574af4aed62d374ec50b208e8ea4c, current_image: "codestra/middleware:scraper-protected-main-4780bd72", current_digest: "sha256:dc97c48f3a29690635bf28de9f3d2562fac2dadb74b8744ea6e99c1bd4ffcda1", provenance_state: LOCAL_DIGEST_MUTABLE_COMPOSE_REFERENCE, deployment_authority: /opt/codestra/middleware-staging}
+  - {service: agent-desktop-preview, container: codestra-agent-desktop-preview, repository: UNKNOWN, source_sha: UNKNOWN, current_image: "codestra/agent-desktop:preview-6101", current_digest: "sha256:9d01eff55f0f823d9faae1c51ffe71685663c24bc0bbdbb9da49bfe39f22e791", provenance_state: MISSING_ALL_COMPOSE_AND_OCI_AUTHORITY, deployment_authority: UNKNOWN}
+deployment_authority_readback:
+  opt_directories_are_git_worktrees: false
+  inaccessible_root_worktrees:
+    - /root/codestra-odoo-middleware-functional
+    - /root/codestra-production-completion
+    - /root/codestra-kong-production-standby
+    - /root/beyvra-email-middleware
+certification:
+  source_authority: FAIL
+  source_runtime_drift: 24
+  all_custom_images_digest_pinned: false
+  unpinned_deployments: 24
+  unpinned_custom_image_artifacts: 18

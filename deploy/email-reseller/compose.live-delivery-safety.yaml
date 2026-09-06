@@ -1,0 +1,8 @@
+services:
+  api:
+    environment:
+      LIVE_SMS_DELIVERY: "false"
+      LIVE_EMAIL_DELIVERY: "false"
+      LIVE_PSTN_DIALING: "false"
+    entrypoint: ["/opt/venv/bin/python", "-m", "email_reseller_service.admission"]
+    command: ["/opt/venv/bin/python", "-m", "email_reseller_service.server"]

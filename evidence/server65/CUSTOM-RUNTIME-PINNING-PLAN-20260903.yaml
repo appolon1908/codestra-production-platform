@@ -1,0 +1,187 @@
+schema_version: codestra.custom-runtime-pinning-plan.v1
+captured_from: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml
+captured_at: "2026-09-02T10:30:00Z"
+plan_updated_at: "2026-09-03T15:15:00Z"
+server: 65.109.65.169
+status: FAIL
+deployment_authorized: false
+workload_count: 24
+pinned_count: 0
+remaining_unpinned_count: 24
+required_completion_fields:
+  - authoritative_repository
+  - protected_source_sha
+  - immutable_image_uri
+  - immutable_image_digest
+  - configuration_sha256
+  - migration_version
+  - effective_capabilities
+  - rollback_digest
+  - signature_status
+  - provenance_status
+  - runtime_readback_status
+rules:
+  reject_mutable_tags: true
+  reject_local_only_image_identity: true
+  reject_unknown_source: true
+  reject_unknown_capabilities: true
+  require_registry_preserved_rollback: true
+  require_protected_merge: true
+  require_staging_certification: true
+  require_zero_external_effects: true
+workloads:
+  - container: codestra-middleware-external-webhook-worker-1
+    current_image: codestra/middleware:webhook-cert-pg-20260816
+    current_image_id: sha256:93cbb4a11765ad92e9bbf1a1bb9601f15a540164b4e7d6647cb0f16d588ab6e0
+    classification: RUNTIME_CONFIG
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-middleware-breero-odoo-worker-1
+    current_image: codestra/middleware:breero-51416422
+    current_image_id: sha256:961c0569a5033cdb494d211fd32cfe20d7efd42d3900f02c2d3f0ac7bfdcfa63
+    classification: RUNTIME_CONFIG
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-sms-api-event-worker-1
+    current_image: codestra-sms-api-event-worker
+    current_image_id: sha256:65222db1296663c33f1bdac9ef5c8c305d2d4388ddca26e3306776821d2dbee9
+    classification: UNKNOWN
+    authority_family: SMS
+    status: UNPINNED_REPOSITORY_UNKNOWN
+  - container: codestra-middleware-staging-odoo-result-worker-staging-1
+    current_image: codestra/middleware:staging-b29db772
+    current_image_id: sha256:b81c125296effc17a33258212d9a71a3c427a972fa9783ec2c060109d167408f
+    classification: UNKNOWN
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-middleware-staging-middleware-staging-1
+    current_image: codestra/middleware:staging-b29db772
+    current_image_id: sha256:b81c125296effc17a33258212d9a71a3c427a972fa9783ec2c060109d167408f
+    classification: UNKNOWN
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-middleware-staging-social-reconciliation-worker-staging-1
+    current_image: codestra/middleware:social-staging-12cd5fc
+    current_image_id: sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6
+    classification: UNKNOWN
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-middleware-staging-social-delivery-worker-staging-1
+    current_image: codestra/middleware:social-staging-12cd5fc
+    current_image_id: sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6
+    classification: UNKNOWN
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-middleware-staging-social-dead-letter-worker-staging-1
+    current_image: codestra/middleware:social-staging-12cd5fc
+    current_image_id: sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6
+    classification: UNKNOWN
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-middleware-staging-notification-worker-staging-1
+    current_image: codestra/middleware:staging-preflight-n8n-auth-20260801
+    current_image_id: sha256:ed7accf6d1f9ad7d84f43deba8caa0d58f8c40709c7b54d622d70df56b1f2386
+    classification: UNKNOWN
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-middleware-staging-scheduler-staging-1
+    current_image: codestra/middleware:staging-preflight-n8n-auth-20260801
+    current_image_id: sha256:ed7accf6d1f9ad7d84f43deba8caa0d58f8c40709c7b54d622d70df56b1f2386
+    classification: UNKNOWN
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-middleware-staging-callback-staging-1
+    current_image: codestra/middleware:current-hardened-20260723
+    current_image_id: sha256:57a4a3a22278aa61bc443910927a308d594db287b8e2cd500ee12293e8a93f4d
+    classification: RUNTIME_CONFIG
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-odoo19-module-staging-callback-tls-1
+    current_image: codestra/caddy:2.11.4-hardened-20260723
+    current_image_id: sha256:269c6bd9b2713a27f8dc34a19a904bb0ba9d8f0f1564913576becd24779674d5
+    classification: UNKNOWN
+    authority_family: CADDY
+    candidate_repository: appolon1908-hue/Caddy
+    status: UNPINNED_RUNTIME_MAPPING_REQUIRED
+  - container: codestra-middleware-1
+    current_image: codestra/middleware:health-contract-b3ca9aa
+    current_image_id: sha256:5dd751a9da60e2417c9ee553ddea68f54e76981dcc896eb3676b27617d121f38
+    classification: RUNTIME_CONFIG
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-email-reseller-api-1
+    current_image: codestra-email-reseller-api
+    current_image_id: sha256:8d7bb50e8787c110a7930fadb0c69a44ba075c70cb5e035118d9f334b1211e08
+    classification: UNKNOWN
+    authority_family: EMAIL_RESELLER
+    status: UNPINNED_REPOSITORY_UNKNOWN
+  - container: codestra-sms-api-api-1
+    current_image: codestra-sms-api-api
+    current_image_id: sha256:49790449a1871a585456fe41bcb52dd614fb56f432907b9f5e7271e54306d6d7
+    classification: UNKNOWN
+    authority_family: SMS
+    status: UNPINNED_REPOSITORY_UNKNOWN
+  - container: codestra-mail-api-mail-api-1
+    current_image: codestra/mail-api:20260822
+    current_image_id: sha256:7495d5f0d79f027456ed61b7c3c2ea9331c228f3d2e10bceef3178eef5a62594
+    classification: UNKNOWN
+    authority_family: MAIL_API
+    status: UNPINNED_REPOSITORY_UNKNOWN
+  - container: codestra-mail-isolated-stalwart-1
+    current_image: stalwartlabs/stalwart:v0.16
+    current_image_id: sha256:9ed1d343243b7aa72969e372a7240b7ddea07730781d4b68a0dc3d8d51c418bb
+    classification: RUNTIME_CONFIG
+    authority_family: MAIL_SERVER
+    status: UNPINNED_CONFIGURATION_AUTHORITY_REQUIRED
+  - container: kong-production-standby-kong-standby-auth-1
+    current_image: codestra/kong-standby-auth:20260820
+    current_image_id: sha256:48b52b06eae0c92b1d4ae45bdee6f3974c684e650933de2391c7a3456602d01f
+    classification: UNKNOWN
+    authority_family: KONG
+    candidate_repository: appolon1908-hue/Kong
+    status: UNPINNED_RUNTIME_MAPPING_REQUIRED
+  - container: codestra-kong-identity-certification-1
+    current_image: codestra/identity-certification:canonical-co-20260820
+    current_image_id: sha256:ffceaad23a8daf61bed7a069499c341ae2495b48dd77ca492ee965b761ff55af
+    classification: UNKNOWN
+    authority_family: IDENTITY_CERTIFICATION
+    status: UNPINNED_REPOSITORY_UNKNOWN
+  - container: codestra-beyvra-email-api-1
+    current_image: codestra/beyvra-email:canonical-co-20260820
+    current_image_id: sha256:a226db03c6fce98f81c02e78bab96a2beb452a27dd79308c921e85bfa664aa52
+    classification: UNKNOWN
+    authority_family: BEYVRA_EMAIL
+    status: UNPINNED_REPOSITORY_UNKNOWN
+  - container: codestra-reseller-portal-portal-1
+    current_image: codestra-reseller-portal:oidc-tenant-authority-20260816
+    current_image_id: sha256:7d7cf6318ac122f7e39ab679dec499dc1f6116129765903d44e42c74541ca12e
+    classification: UNKNOWN
+    authority_family: RESELLER_PORTAL
+    status: UNPINNED_REPOSITORY_UNKNOWN
+  - container: codestra-private-vicidial-ingress-1
+    current_image: codestra/caddy:2.11.4-hardened-20260723
+    current_image_id: sha256:269c6bd9b2713a27f8dc34a19a904bb0ba9d8f0f1564913576becd24779674d5
+    classification: UNKNOWN
+    authority_family: CADDY
+    candidate_repository: appolon1908-hue/Caddy
+    status: UNPINNED_RUNTIME_MAPPING_REQUIRED
+  - container: codestra-middleware-staging-scraper-odoo-delivery-worker-1
+    current_image: codestra/middleware:scraper-protected-main-4780bd72
+    current_image_id: sha256:dc97c48f3a29690635bf28de9f3d2562fac2dadb74b8744ea6e99c1bd4ffcda1
+    classification: RUNTIME_CONFIG
+    authority_family: MIDDLEWARE
+    status: UNPINNED_AUTHORITY_DECISION_REQUIRED
+  - container: codestra-agent-desktop-preview
+    current_image: codestra/agent-desktop:preview-6101
+    current_image_id: sha256:9d01eff55f0f823d9faae1c51ffe71685663c24bc0bbdbb9da49bfe39f22e791
+    classification: UNKNOWN
+    authority_family: AGENT_DESKTOP
+    status: UNPINNED_REPOSITORY_UNKNOWN
+exit_gate:
+  pinned_count: 24
+  remaining_unpinned_count: 0
+  source_lock_status: PASS
+  full_core_bom_status: PASS
+  protected_staging_status: PASS
+  deployment_authorized: false
+  note: Deployment authorization remains false until protected staging, backup, restore, and rollback certification all pass.

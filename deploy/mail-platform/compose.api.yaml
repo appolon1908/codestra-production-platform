@@ -1,0 +1,30 @@
+services:
+  mail-api:
+    build:
+      context: ../..
+      dockerfile: deploy/mail-platform/Dockerfile.api
+    image: ghcr.io/appolon1908-hue/mail-api@sha256:586ed6aaded359b4cad64905d027079ea910eda5202bae0bac0d44d8baf0df09
+    restart: unless-stopped
+    user: "65534:65534"
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    environment:
+      MAIL_OIDC_ISSUER: https://auth.codestra.co/realms/codestra
+      MAIL_OIDC_AUDIENCE: codestra-mail-api
+      MAIL_REGISTRY_DATABASE: /var/lib/codestra-mail/registry.db
+    volumes:
+      - /opt/codestra/mail-platform-isolated:/var/lib/codestra-mail
+    networks:
+      codestra-edge:
+        aliases: [codestra-mail-api]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8098/healthz/ready]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+networks:
+  codestra-edge:
+    external: true
+    name: codestra_edge

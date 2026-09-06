@@ -11,7 +11,7 @@ rule_files:
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: [alertmanager:9093]
+        - targets: [10.253.127.3:9093]
 
 scrape_configs:
   - job_name: prometheus
@@ -22,9 +22,126 @@ scrape_configs:
     static_configs:
       - targets: [node-exporter:9100]
 
+  - job_name: postgres-exporter
+    static_configs:
+      - targets: [postgres-exporter:9187]
+
+  - job_name: redis
+    static_configs:
+      - targets: [redis-exporter:9121]
+
   - job_name: containers
     static_configs:
       - targets: [cadvisor:8080]
+
+  - job_name: operations-dashboard-middleware-staging
+    metrics_path: /metrics
+    oauth2:
+      client_id: monitoring-readonly
+      client_secret_file: /run/secrets/staging_metrics_client_secret
+      token_url: https://auth-staging.codestra.co/realms/codestra/protocol/openid-connect/token
+      scopes: [metrics.read]
+    sample_limit: 250000
+    label_limit: 40
+    label_name_length_limit: 128
+    label_value_length_limit: 2048
+    static_configs:
+      - targets: [middleware-intake-staging:8080]
+        labels:
+          codestra_business: platform
+          environment: staging
+          region: hetzner-eu
+          deployment: operations-dashboard-api-v1
+          server: codestra-core-01
+          application: middleware
+          service: middleware-api
+          activation: active
+          job_class: backend
+          tenant_scope: aggregate
+    metric_relabel_configs:
+      - action: labeldrop
+        regex: '(?i)^(tenant_id|tenant_name|organization_id|organization_name|customer_id|customer_name|account_id|user_id|user_name|email|phone|consumer|workspace|token|secret|password|session_id|request_id|correlation_id|trace_id|span_id|lead_id|order_id|message_id|workflow_id|execution_id|webhook_id|idempotency_key|raw_path|path|uri|url|query|query_string|client_address|network_peer_address|db_statement|http_target|http_url|url_full|service_instance_id|host_id|container_id|image_id|process_pid|pod_uid|exception_message|id)$'
+
+  - job_name: operations-dashboard-middleware
+    metrics_path: /metrics
+    sample_limit: 250000
+    label_limit: 40
+    label_name_length_limit: 128
+    label_value_length_limit: 2048
+    static_configs:
+      - targets: [codestra-middleware-1:8095]
+        labels:
+          codestra_business: platform
+          environment: production
+          region: hetzner-eu
+          deployment: production-current
+          server: codestra-core-01
+          application: middleware
+          service: middleware-api
+          activation: active
+          job_class: backend
+          tenant_scope: aggregate
+    metric_relabel_configs:
+      - action: labeldrop
+        regex: '(?i)^(tenant_id|tenant_name|organization_id|organization_name|customer_id|customer_name|account_id|user_id|user_name|email|phone|consumer|workspace|token|secret|password|session_id|request_id|correlation_id|trace_id|span_id|lead_id|order_id|message_id|workflow_id|execution_id|webhook_id|idempotency_key|raw_path|path|uri|url|query|query_string|client_address|network_peer_address|db_statement|http_target|http_url|url_full|service_instance_id|host_id|container_id|image_id|process_pid|pod_uid|exception_message|id)$'
+
+  - job_name: codestra-middleware-runtimes
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - middleware-breero-odoo-worker:8095
+          - middleware-event-gateway:8095
+          - middleware-evidence-runner:8095
+          - middleware-extension-allocator:8095
+          - middleware-integration-api:8095
+          - middleware-notification-worker:8095
+          - middleware-odoo-result-worker:8095
+          - middleware-pjsip-adapter:8095
+          - middleware-policy-engine:8095
+          - middleware-reconciliation-worker:8095
+          - middleware-scheduler:8095
+          - middleware-sync-worker:8095
+          - middleware-telephony-provisioning:8095
+          - middleware-vicidial-adapter:8095
+          - middleware-webphone-session-issuer:8095
+        labels:
+          environment: production
+          application: middleware
+
+  - job_name: codestra-mail-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: [codestra-mail-api:8098]
+        labels:
+          environment: production
+          application: mail-api
+          service: mail-api
+
+  - job_name: codestra-reseller-portal
+    metrics_path: /metrics
+    static_configs:
+      - targets: [portal:8080]
+        labels:
+          environment: production
+          application: reseller-portal
+          service: reseller-portal
+
+  - job_name: blackbox_application_readiness
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: [http://codestra-mail-api:8098/healthz/ready]
+        labels: {application: mail-api, environment: production}
+      - targets: [http://portal:8080/readyz]
+        labels: {application: reseller-portal, environment: production}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
 
   - job_name: blackbox_https
     metrics_path: /probe

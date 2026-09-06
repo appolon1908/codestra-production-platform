@@ -1,0 +1,18 @@
+services:
+  odoo:
+    environment:
+      HOST: codestra-postgres-1
+      USER: odoo_app
+      DB_NAME: codestra_odoo
+      PASSWORD_FILE: /run/secrets/odoo_db_password
+      CODESTRA_CALLBACK_ALLOWED_CAMPAIGN: TEST_SYN
+      CODESTRA_CALLBACK_ALLOWED_TENANT: COD
+      CODESTRA_CALLBACK_API_BASE_URL: https://api.codestra.co/api/v1
+      CODESTRA_CALLBACK_CA_FILE: /etc/ssl/certs/ca-certificates.crt
+      CODESTRA_CALLBACK_CLIENT_ID: codestra-odoo-callback-service
+      CODESTRA_CALLBACK_CLIENT_SECRET_FILE: /run/secrets/odoo_callback_client_secret
+      CODESTRA_CALLBACK_TOKEN_URL: http://keycloak:8080/realms/codestra/protocol/openid-connect/token
+      CODESTRA_ODOO_INTEGRATION_AUDIENCE: codestra-odoo
+      CODESTRA_ODOO_INTEGRATION_SERVICE_ALLOWLIST: codestra-middleware-odoo-results
+      CODESTRA_ODOO_KEYCLOAK_ISSUER: https://auth.codestra.co/realms/codestra
+      CODESTRA_ODOO_KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/codestra/protocol/openid-connect/certs

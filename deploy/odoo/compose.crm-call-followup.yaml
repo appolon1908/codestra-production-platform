@@ -1,0 +1,10 @@
+services:
+  odoo:
+    command:
+      - odoo
+      - --addons-path=/usr/lib/python3/dist-packages/odoo/addons,/mnt/integration-addons,/mnt/call-center-addons,/mnt/breero-addons,/mnt/crm-call-followup-addons
+      - --workers=4
+      - --max-cron-threads=1
+      - --gevent-port=8072
+    volumes:
+      - ${ODOO_CRM_CALL_FOLLOWUP_ADDON_RELEASE:?exact reviewed addon release directory required}/codestra_crm_call_followup:/mnt/crm-call-followup-addons/codestra_crm_call_followup:ro

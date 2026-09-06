@@ -1,0 +1,2 @@
+Defaults:%codestra-runtime-audit env_reset,use_pty,!setenv,secure_path=/usr/sbin:/usr/bin:/sbin:/bin
+%codestra-runtime-audit ALL=(root) NOPASSWD: /usr/local/sbin/codestra-runtime-inventory ""

@@ -1,0 +1,135 @@
+{
+  "schema_version": "codestra.manual-production-orchestrator.catalog.v1",
+  "controller": {
+    "repository": "appolon1908-hue/codestra-production-platform",
+    "repository_id": 1314230781,
+    "branch": "release/production-activation",
+    "workflow": ".github/workflows/manual-one-click-production-orchestrator.yml"
+  },
+  "contract_path": ".codestra/production-orchestrator-contract.v1.json",
+  "release_intent_workflow": ".github/workflows/manual-release-intent.yml",
+  "environment_sequence": [
+    "portfolio-release-plan",
+    "portfolio-staging",
+    "portfolio-production-canary",
+    "portfolio-production"
+  ],
+  "repositories": [
+    {
+      "order": 10,
+      "wave": "infrastructure",
+      "repository": "appolon1908-hue/Infustruction-repo",
+      "repository_id": 1350724865,
+      "default_branch": "main",
+      "role": "infrastructure",
+      "required": true
+    },
+    {
+      "order": 20,
+      "wave": "identity",
+      "repository": "appolon1908-hue/Keycloak",
+      "repository_id": 1347523366,
+      "default_branch": "main",
+      "role": "identity",
+      "required": true
+    },
+    {
+      "order": 30,
+      "wave": "middleware",
+      "repository": "appolon1908-hue/Middleware-",
+      "repository_id": 1347559071,
+      "default_branch": "main",
+      "role": "canonical-middleware",
+      "required": true
+    },
+    {
+      "order": 40,
+      "wave": "applications",
+      "repository": "appolon1908-hue/codestra",
+      "repository_id": 1319808791,
+      "default_branch": "main",
+      "role": "application",
+      "required": true
+    },
+    {
+      "order": 41,
+      "wave": "applications",
+      "repository": "appolon1908-hue/beyvra-backend",
+      "repository_id": 1319831182,
+      "default_branch": "main",
+      "role": "application",
+      "required": true
+    },
+    {
+      "order": 42,
+      "wave": "applications",
+      "repository": "appolon1908-hue/backend2",
+      "repository_id": 1319903950,
+      "default_branch": "main",
+      "role": "application",
+      "required": true
+    },
+    {
+      "order": 43,
+      "wave": "applications",
+      "repository": "appolon1908-hue/beyvra-frontend",
+      "repository_id": 1320246591,
+      "default_branch": "main",
+      "role": "application",
+      "required": true
+    },
+    {
+      "order": 44,
+      "wave": "applications",
+      "repository": "appolon1908-hue/scrapper",
+      "repository_id": 1329513537,
+      "default_branch": "main",
+      "role": "migration-evidence",
+      "required": true
+    },
+    {
+      "order": 45,
+      "wave": "applications",
+      "repository": "appolon1908-hue/Breero.com",
+      "repository_id": 1331354808,
+      "default_branch": "main",
+      "role": "application",
+      "required": true
+    },
+    {
+      "order": 46,
+      "wave": "applications",
+      "repository": "appolon1908-hue/Moneybee-Backend",
+      "repository_id": 1343760409,
+      "default_branch": "main",
+      "role": "application",
+      "required": true
+    },
+    {
+      "order": 47,
+      "wave": "applications",
+      "repository": "appolon1908-hue/Telnexa-web",
+      "repository_id": 1346958528,
+      "default_branch": "main",
+      "role": "application",
+      "required": true
+    },
+    {
+      "order": 90,
+      "wave": "controller",
+      "repository": "appolon1908-hue/codestra-production-platform",
+      "repository_id": 1314230781,
+      "default_branch": "release/production-activation",
+      "role": "controller",
+      "required": true
+    }
+  ],
+  "safety": {
+    "mutable_tags_authoritative": false,
+    "rebuild_between_staging_and_production": false,
+    "retag_between_staging_and_production": false,
+    "maximum_canary_percent": 1,
+    "full_production_requires_canary_evidence": true,
+    "external_effects_default": false
+  }
+}

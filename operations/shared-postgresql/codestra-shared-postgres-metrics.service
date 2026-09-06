@@ -1,0 +1,13 @@
+[Unit]
+Description=Export shared PostgreSQL recovery metrics
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/shared-postgres-metrics.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/node_exporter/textfile_collector

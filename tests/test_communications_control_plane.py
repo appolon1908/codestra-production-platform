@@ -4,6 +4,7 @@ import unittest
 
 from control_plane_service.core import ControlPlaneError, Store, normalize_destination, sms_segments, validate_envelope
 from control_plane_service.providers import ProviderError, submit, submit_crawler
+from control_plane_service.server import projection_for_exact_replay
 from control_plane_service.worker import dispatch_messages
 from control_plane_service.routing import select_channel
 
@@ -59,9 +60,154 @@ class CommunicationsTests(unittest.TestCase):
         self.assertEqual(self.store.get_message(message["message_id"],"tenant-a")["status"],"delivered")
         self.assertEqual(len(self.store.message_events(message["message_id"],"tenant-a")),3)
 
+    def test_late_telnexa_rejection_projects_to_originating_message(self):
+        message,_=self.store.create_message(request())
+        self.store.transition_message(
+            message["message_id"], "tenant-a", "accepted", "submitted",
+            provider_message_id="adapter-message-1",
+        )
+        event_id="telnexa-dlr-" + "a" * 64
+        env=validate_envelope({
+            "event_type":"telnexa.sms.failed",
+            "event_version":"1.0",
+            "occurred_at":"2026-09-01T18:00:00Z",
+            "tenant_id":"tenant-a",
+            "customer_id":"customer-1",
+            "correlation_id":"correlation-1",
+            "idempotency_key":event_id,
+            "payload":{
+                "message_id":message["message_id"],
+                "provider_message_id":"carrier-message-1",
+                "status":"delivery_failed",
+                "error_code":"ESME_RSUBMITFAIL",
+            },
+        },"telnexa",event_id)
+        self.assertTrue(self.store.apply_provider_event("telnexa",env))
+        projected=self.store.get_message(message["message_id"],"tenant-a")
+        self.assertEqual(projected["status"],"failed")
+        self.assertEqual(projected["raw_provider_status"],"delivery_failed")
+        self.assertEqual(projected["provider_message_id"],"carrier-message-1")
+        self.assertEqual(projected["provider_error_code"],"ESME_RSUBMITFAIL")
+
+    def test_sms_c_acknowledgement_is_accepted_not_delivered(self):
+        message,_=self.store.create_message(request())
+        event_id="telnexa-dlr-" + "b" * 64
+        env=validate_envelope({
+            "event_type":"telnexa.sms.submitted",
+            "event_version":"1.0",
+            "occurred_at":"2026-09-01T18:00:00Z",
+            "tenant_id":"tenant-a",
+            "customer_id":"customer-1",
+            "correlation_id":"correlation-1",
+            "idempotency_key":event_id,
+            "payload":{
+                "message_id":message["message_id"],
+                "provider_message_id":"carrier-message-1",
+                "status":"submitted",
+            },
+        },"telnexa",event_id)
+        self.assertTrue(self.store.apply_provider_event("telnexa",env))
+        projected=self.store.get_message(message["message_id"],"tenant-a")
+        self.assertEqual(projected["status"],"accepted")
+        self.assertEqual(projected["raw_provider_status"],"submitted")
+        self.assertIsNone(projected["delivered_at"])
+
+    def test_authenticated_submission_resolves_ambiguous_outcome_without_retry(self):
+        message,_=self.store.create_message(request())
+        self.store.transition_message(
+            message["message_id"], "tenant-a", "deferred", "outcome_unknown",
+            provider_message_id="adapter-message-1",
+        )
+        event_id="telnexa-dlr-" + "c" * 64
+        env=validate_envelope({
+            "event_type":"telnexa.sms.submitted",
+            "event_version":"1.0",
+            "occurred_at":"2026-09-01T18:00:00Z",
+            "tenant_id":"tenant-a",
+            "customer_id":"customer-1",
+            "correlation_id":"correlation-1",
+            "idempotency_key":event_id,
+            "payload":{
+                "message_id":message["message_id"],
+                "provider_message_id":"carrier-message-1",
+                "status":"submitted",
+            },
+        },"telnexa",event_id)
+        self.assertTrue(self.store.apply_provider_event("telnexa",env))
+        projected=self.store.get_message(message["message_id"],"tenant-a")
+        self.assertEqual(projected["status"],"accepted")
+        self.assertEqual(projected["raw_provider_status"],"submitted")
+        self.assertEqual(projected["provider_message_id"],"carrier-message-1")
+        with self.assertRaisesRegex(ControlPlaneError,"not_retryable"):
+            self.store.retry_message(message["message_id"],"tenant-a")
+
+    def test_generic_accepted_projection_cannot_resolve_ambiguous_outcome(self):
+        message,_=self.store.create_message(request())
+        self.store.transition_message(
+            message["message_id"], "tenant-a", "deferred", "outcome_unknown",
+            provider_message_id="adapter-message-1",
+        )
+        self.store.transition_message(
+            message["message_id"], "tenant-a", "accepted", "submitted",
+            provider_message_id="untrusted-message-1",
+        )
+        projected=self.store.get_message(message["message_id"],"tenant-a")
+        self.assertEqual(projected["status"],"deferred")
+        self.assertEqual(projected["provider_message_id"],"adapter-message-1")
+
+    def test_exact_replay_repairs_projection_after_ingest_only_crash(self):
+        message,_=self.store.create_message(request())
+        self.store.transition_message(
+            message["message_id"], "tenant-a", "deferred", "outcome_unknown",
+            provider_message_id="adapter-message-1",
+        )
+        event_id="telnexa-dlr-" + "d" * 64
+        env=validate_envelope({
+            "event_type":"telnexa.sms.submitted",
+            "event_version":"1.0",
+            "occurred_at":"2026-09-01T18:00:00Z",
+            "tenant_id":"tenant-a",
+            "customer_id":"customer-1",
+            "correlation_id":"correlation-1",
+            "idempotency_key":event_id,
+            "payload":{
+                "message_id":message["message_id"],
+                "provider_message_id":"carrier-message-1",
+                "status":"submitted",
+            },
+        },"telnexa",event_id)
+        self.store.ingest(env,reject_event_replay=True)
+        self.assertIsNone(self.store.provider_projection_receipt(event_id))
+        with self.assertRaisesRegex(ControlPlaneError,"replayed_event_id"):
+            self.store.ingest(env,reject_event_replay=True)
+        replay=self.store.exact_event_replay(env)
+        self.assertIsNotNone(replay)
+        self.assertTrue(replay.duplicate)
+        receipt=projection_for_exact_replay(self.store,"telnexa",env)
+        self.assertEqual(receipt,{
+            "event_id":event_id,
+            "message_id":message["message_id"],
+            "provider_message_id":"carrier-message-1",
+            "raw_status":"submitted",
+            "status":"accepted",
+        })
+        self.assertEqual(
+            projection_for_exact_replay(self.store,"telnexa",env),receipt
+        )
+
     def test_sms_stop_optout(self):
         message,_=self.store.create_message(request()); env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"stop-1","payload":{"message_id":message["message_id"],"status":"received","text":"STOP"}},"telnexa","stop-1")
         self.store.apply_provider_event("telnexa",env); self.assertFalse(self.store.preference_allows("tenant-a","customer-1","sms"))
+
+    def test_exact_provider_replay_repairs_missing_optout_side_effects(self):
+        message,_=self.store.create_message(request())
+        env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"stop-crash-replay","payload":{"message_id":message["message_id"],"status":"received","text":"STOP"}},"telnexa","stop-crash-replay")
+        self.store.transition_message(message["message_id"],"tenant-a","inbound_received","received",event_id=env["event_id"],payload=env["payload"])
+        self.assertTrue(self.store.preference_allows("tenant-a","customer-1","sms"))
+        self.assertFalse(self.store.is_suppressed("tenant-a","sms",message["normalized_destination"]))
+        self.assertFalse(self.store.apply_provider_event("telnexa",env))
+        self.assertFalse(self.store.preference_allows("tenant-a","customer-1","sms"))
+        self.assertTrue(self.store.is_suppressed("tenant-a","sms",message["normalized_destination"]))
 
     def test_new_inbound_sms_creates_one_ledger_record(self):
         env=validate_envelope({"event_type":"telnexa.sms.received","event_version":"1.0","occurred_at":"2026-08-15T00:00:00Z","tenant_id":"tenant-a","customer_id":"customer-1","idempotency_key":"inbound-new","payload":{"from":"+18095550123","to":"+18095550100","text":"HELP"}},"telnexa","inbound-new")
@@ -72,7 +218,9 @@ class CommunicationsTests(unittest.TestCase):
         message,_=self.store.create_message(request()); self.store.cancel_message(message["message_id"],"tenant-a")
         with self.assertRaisesRegex(ControlPlaneError,"not_retryable"): self.store.retry_message(message["message_id"],"tenant-a")
         failed,_=self.store.create_message(request(key="failed")); self.store.transition_message(failed["message_id"],"tenant-a","failed","simulated")
-        self.assertEqual(self.store.retry_message(failed["message_id"],"tenant-a")["status"],"queued")
+        retried=self.store.retry_message(failed["message_id"],"tenant-a")
+        self.assertEqual(retried["status"],"queued")
+        self.assertEqual(retried["provider_attempt"],1)
 
     def test_normalization_segments_and_usage_integer_money(self):
         self.assertEqual(normalize_destination("email","USER@Example.Test"),"user@example.test")
