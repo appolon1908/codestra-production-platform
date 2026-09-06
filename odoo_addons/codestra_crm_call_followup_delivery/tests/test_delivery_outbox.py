@@ -219,6 +219,43 @@ class TestCodestraCrmCallDeliveryOutbox(TransactionCase):
         delivery.invalidate_recordset()
         self.assertEqual(delivery.state, "queued")
 
+    def test_manager_can_recover_dead_letter_with_one_new_attempt(self):
+        _, delivery = self._complete_with_email("delivery-manager-dead-retry")
+        delivery._write_from_worker({"state": "dead", "attempt_count": 5})
+
+        self.env(user=self.manager)["codestra.crm.call.delivery"].browse(
+            delivery.id
+        ).action_retry_now()
+
+        delivery.invalidate_recordset()
+        self.assertEqual(delivery.state, "queued")
+        self.assertEqual(delivery.max_attempts, 6)
+
+    def test_retry_reconciles_already_sent_linked_mail(self):
+        _, delivery = self._complete_with_email("delivery-retry-already-sent")
+        mail = delivery.mail_id
+        delivery._write_from_worker({"state": "failed", "attempt_count": 1})
+        mail.sudo().write({"state": "sent"})
+
+        self.env(user=self.manager)["codestra.crm.call.delivery"].browse(
+            delivery.id
+        ).action_retry_now()
+
+        delivery.invalidate_recordset()
+        self.assertEqual(delivery.state, "sent")
+        self.assertEqual(delivery.mail_id, mail)
+
+    def test_reconcile_fails_queued_delivery_when_linked_mail_is_removed(self):
+        _, delivery = self._complete_with_email("delivery-missing-mail")
+        delivery.mail_id.sudo().unlink()
+
+        self.env["codestra.crm.call.delivery"]._cron_reconcile_mail_states()
+
+        delivery.invalidate_recordset()
+        self.assertEqual(delivery.state, "failed")
+        self.assertEqual(delivery.attempt_count, 1)
+        self.assertIn("missing", delivery.last_error.lower())
+
     def test_other_agent_cannot_read_delivery(self):
         _, delivery = self._complete_with_email("delivery-isolation")
         other_env = self.env(user=self.other_agent)

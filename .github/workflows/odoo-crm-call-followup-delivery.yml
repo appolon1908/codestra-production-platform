@@ -5,6 +5,7 @@ on:
     paths:
       - "odoo_addons/codestra_crm_call_followup_delivery/**"
       - "scripts/validate_odoo_crm_call_followup_delivery.py"
+      - "scripts/test_odoo_crm_call_followup_extensions_disposable.sh"
       - ".github/workflows/odoo-crm-call-followup-delivery.yml"
   push:
     branches:
@@ -12,6 +13,7 @@ on:
     paths:
       - "odoo_addons/codestra_crm_call_followup_delivery/**"
       - "scripts/validate_odoo_crm_call_followup_delivery.py"
+      - "scripts/test_odoo_crm_call_followup_extensions_disposable.sh"
       - ".github/workflows/odoo-crm-call-followup-delivery.yml"
   workflow_dispatch:
 
@@ -40,3 +42,5 @@ jobs:
         run: python -m compileall -q odoo_addons/codestra_crm_call_followup_delivery scripts/validate_odoo_crm_call_followup_delivery.py
       - name: Validate delivery invariants
         run: python scripts/validate_odoo_crm_call_followup_delivery.py
+      - name: Install, test, and upgrade in disposable Odoo 19
+        run: bash scripts/test_odoo_crm_call_followup_extensions_disposable.sh

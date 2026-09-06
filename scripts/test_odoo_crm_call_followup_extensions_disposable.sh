@@ -11,8 +11,8 @@ database_user=odoo_test
 database_password=disposable-ci-only
 odoo_image='odoo@sha256:94a4f480b8039dc9ca2bca9e77e59f97d3311f66e2aad663cf2670be9c66d4ea'
 postgres_image='postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94'
-modules='codestra_crm_call_followup_api,codestra_crm_call_followup_ux,codestra_crm_call_followup_automation'
-test_tags='/codestra_crm_call_followup,/codestra_crm_call_followup_api,/codestra_crm_call_followup_ux,/codestra_crm_call_followup_automation'
+modules='codestra_crm_call_followup_api,codestra_crm_call_followup_ux,codestra_crm_call_followup_automation,codestra_crm_call_followup_delivery'
+test_tags='/codestra_crm_call_followup,/codestra_crm_call_followup_api,/codestra_crm_call_followup_ux,/codestra_crm_call_followup_automation,/codestra_crm_call_followup_delivery'
 
 cleanup() {
     docker rm -f "$postgres_container" >/dev/null 2>&1 || true
@@ -64,6 +64,7 @@ odoo() {
         --log-handler=odoo.addons.codestra_crm_call_followup_api:TEST \
         --log-handler=odoo.addons.codestra_crm_call_followup_ux:TEST \
         --log-handler=odoo.addons.codestra_crm_call_followup_automation:TEST \
+        --log-handler=odoo.addons.codestra_crm_call_followup_delivery:TEST \
         "$@"
 }
 
@@ -79,8 +80,9 @@ installed_count=$(docker exec "$postgres_container" psql \
         'codestra_crm_call_followup_api',
         'codestra_crm_call_followup_ux',
         'codestra_crm_call_followup_automation'
+        ,'codestra_crm_call_followup_delivery'
     ) AND state='installed' AND latest_version LIKE '19.0.%'")
-[[ "$installed_count" == '4' ]]
+[[ "$installed_count" == '5' ]]
 
 outbox_table_count=$(docker exec "$postgres_container" psql \
     -U "$database_user" -d "$database" -Atqc \

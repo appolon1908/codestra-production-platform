@@ -248,34 +248,51 @@ class CodestraCrmCallDelivery(models.Model):
             }
         )
 
-    def _queue_retry(self):
+    def _mark_sent(self):
+        self.ensure_one()
+        self._write_from_worker(
+            {
+                "state": "sent",
+                "sent_at": fields.Datetime.now(),
+                "next_attempt_at": False,
+                "last_error": False,
+            }
+        )
+
+    def _queue_retry(self, *, manual=False):
         self.ensure_one()
         if self.state == "sent":
             raise ValidationError(_("A sent delivery cannot be retried."))
         if self.state == "cancelled":
             raise ValidationError(_("A cancelled delivery must be reopened by an administrator."))
-        if self.attempt_count >= self.max_attempts:
+        if self.attempt_count >= self.max_attempts and not manual:
             raise ValidationError(_("The delivery has exhausted its retry budget."))
 
         mail = self.mail_id.sudo()
-        if not mail or mail.state == "sent":
+        if mail and mail.state == "sent":
+            self._mark_sent()
+            return
+        if not mail:
             mail = self._create_replacement_mail()
         else:
             mail.write({"state": "outgoing", "failure_reason": False})
+        values = {
+            "state": "queued",
+            "mail_id": mail.id,
+            "next_attempt_at": False,
+            "last_error": False,
+            "last_attempt_at": fields.Datetime.now(),
+        }
+        if manual and self.attempt_count >= self.max_attempts:
+            values["max_attempts"] = self.attempt_count + 1
         self._write_from_worker(
-            {
-                "state": "queued",
-                "mail_id": mail.id,
-                "next_attempt_at": False,
-                "last_error": False,
-                "last_attempt_at": fields.Datetime.now(),
-            }
+            values
         )
 
     @api.model
     def _cron_reconcile_mail_states(self, limit=200):
         records = self.sudo().search(
-            [("state", "=", "queued"), ("mail_id", "!=", False)],
+            [("state", "=", "queued")],
             order="id",
             limit=limit,
         )
@@ -284,14 +301,7 @@ class CodestraCrmCallDelivery(models.Model):
             if not mail:
                 delivery._record_failure(_("Queued mail record is missing."))
             elif mail.state == "sent":
-                delivery._write_from_worker(
-                    {
-                        "state": "sent",
-                        "sent_at": fields.Datetime.now(),
-                        "next_attempt_at": False,
-                        "last_error": False,
-                    }
-                )
+                delivery._mark_sent()
             elif mail.state in {"exception", "cancel"}:
                 delivery._record_failure(
                     mail.failure_reason or _("Odoo mail queue reported %s") % mail.state
@@ -332,7 +342,7 @@ class CodestraCrmCallDelivery(models.Model):
     def action_retry_now(self):
         self._require_manager()
         for delivery in self:
-            delivery.sudo()._queue_retry()
+            delivery.sudo()._queue_retry(manual=True)
         return True
 
     def action_cancel(self):
