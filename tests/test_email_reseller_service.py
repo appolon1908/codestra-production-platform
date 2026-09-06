@@ -77,6 +77,7 @@ class EmailResellerAdmissionTest(unittest.TestCase):
         base = (ROOT / "deploy/email-reseller/compose.yaml").read_text()
         safety = (ROOT / "deploy/email-reseller/compose.live-delivery-safety.yaml").read_text()
         caddy = (ROOT / "operations/caddy/klyrow-events.caddy").read_text()
+        candidate = json.loads((ROOT / "deploy/email-reseller/immutable-candidate-lock.json").read_text())
 
         self.assertIn('entrypoint: ["/opt/venv/bin/python", "-m", "email_reseller_service.admission"]', safety)
         self.assertIn('command: ["/opt/venv/bin/python", "-m", "email_reseller_service.server"]', safety)
@@ -89,7 +90,22 @@ class EmailResellerAdmissionTest(unittest.TestCase):
             for line in base.splitlines()
             if line.strip().startswith("CODESTRA_IMAGE_DIGEST:")
         )
+        runtime_build_timestamp = next(
+            line.strip().split(": ", 1)[1].strip('"')
+            for line in base.splitlines()
+            if line.strip().startswith("CODESTRA_BUILD_TIMESTAMP:")
+        )
         self.assertEqual(image, runtime_digest)
+        self.assertEqual(candidate["image_digest"], runtime_digest)
+        self.assertEqual(candidate["image"].rsplit("@", 1)[1], runtime_digest)
+        self.assertEqual(candidate["build_timestamp"], runtime_build_timestamp)
+        self.assertEqual(candidate["workflow_run"]["run_id"], 34055841105)
+        self.assertEqual(candidate["workflow_run"]["artifact_id"], 9995939653)
+        self.assertEqual(candidate["workflow_run"]["oidc_issuer"], "https://token.actions.githubusercontent.com")
+        self.assertEqual({item["status"] for item in candidate["evidence"].values()}, {"PASS"})
+        self.assertTrue(all(len(bytes.fromhex(item["sha256"])) == 32 for item in candidate["evidence"].values()))
+        self.assertFalse(candidate["deployment_authorized"])
+        self.assertFalse(candidate["production_certified"])
 
 
 class EmailResellerTest(unittest.TestCase):
