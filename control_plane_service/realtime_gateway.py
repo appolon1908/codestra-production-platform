@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -19,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from websockets.asyncio.server import ServerConnection, serve
+import nats
 
 from .core import Store
 from .database import is_postgres
@@ -29,6 +31,7 @@ STORE = Store(DB)
 ISSUER = "codestra-realtime-session-issuer"
 AUDIENCE = "codestra-agent-realtime"
 TOKEN_TTL = min(60, max(15, int(os.getenv("REALTIME_SESSION_TTL_SECONDS", "60"))))
+SUBJECT_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 
 def _read_secret(name: str) -> str:
@@ -61,9 +64,16 @@ def _ensure_nonce_table() -> None:
               expires_at DOUBLE PRECISION NOT NULL, consumed_at DOUBLE PRECISION,
               source_client TEXT NOT NULL)
         """)
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS realtime_session_request(
+              tenant_id TEXT NOT NULL,source_client TEXT NOT NULL,
+              idempotency_key TEXT NOT NULL,request_hash TEXT NOT NULL,
+              response_json TEXT NOT NULL,created_at DOUBLE PRECISION NOT NULL,
+              PRIMARY KEY(tenant_id,source_client,idempotency_key))
+        """)
 
 
-def issue_token(tenant_id: str, agent_id: str, campaign_id: str, source_client: str) -> tuple[str, float]:
+def _token_material(tenant_id: str, agent_id: str, campaign_id: str) -> tuple[str, float, str, int]:
     now = int(time.time())
     expires = now + TOKEN_TTL
     nonce = uuid.uuid4().hex
@@ -74,14 +84,19 @@ def issue_token(tenant_id: str, agent_id: str, campaign_id: str, source_client: 
     }
     encoded = _b64(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
     signature = _b64(hmac.new(_read_secret("REALTIME_TOKEN_SECRET").encode(), encoded.encode(), hashlib.sha256).digest())
-    digest = hashlib.sha256(nonce.encode()).hexdigest()
+    return (encoded + "." + signature, float(expires),
+            hashlib.sha256(nonce.encode()).hexdigest(), now)
+
+
+def issue_token(tenant_id: str, agent_id: str, campaign_id: str, source_client: str) -> tuple[str, float]:
+    token, expires, digest, issued_at = _token_material(tenant_id, agent_id, campaign_id)
     _ensure_nonce_table()
     with STORE.connect() as db:
         db.execute(
             "INSERT INTO realtime_session_nonce VALUES(?,?,?,?,?,?,NULL,?)",
-            (digest, tenant_id, agent_id, campaign_id, now, expires, source_client),
+            (digest, tenant_id, agent_id, campaign_id, issued_at, expires, source_client),
         )
-    return encoded + "." + signature, float(expires)
+    return token, expires
 
 
 def authorized_agent_membership(
@@ -113,6 +128,80 @@ def authorized_agent_membership(
         return bool(row)
     except Exception:
         return False
+
+
+def resolve_agent_membership(
+    tenant_id: str, campaign_id: str, authenticated_subject: str
+) -> str | None:
+    """Derive the active agent from the authenticated Keycloak subject."""
+    try:
+        with STORE.connect() as db:
+            row = db.execute(
+                """SELECT a.id AS agent_id
+                   FROM cp_agent a
+                   JOIN cp_agent_identity ai ON ai.agent_id=a.id
+                   JOIN cp_membership m ON m.agent_id=a.id
+                   JOIN cp_campaign c ON c.id=m.campaign_id
+                   WHERE c.id=? AND a.tenant_id=? AND c.tenant_id=?
+                     AND m.tenant_id=? AND ai.system='KEYCLOAK'
+                     AND ai.external_id=? AND ai.active=?
+                     AND a.desired_state='ACTIVE'
+                     AND COALESCE(a.actual_state,a.desired_state)='ACTIVE'
+                     AND c.desired_state='ACTIVE'
+                     AND COALESCE(c.effective_state,c.desired_state)='ACTIVE'
+                     AND m.desired_state='ACTIVE'
+                     AND COALESCE(m.actual_state,m.desired_state)='ACTIVE'
+                     AND m.sync_status='SYNCED' AND m.effective_until IS NULL
+                   LIMIT 2""",
+                (campaign_id, tenant_id, tenant_id, tenant_id,
+                 authenticated_subject, True),
+            ).fetchall()
+        return str(row[0]["agent_id"]) if len(row) == 1 else None
+    except Exception:
+        return None
+
+
+def issue_idempotent_session(
+    tenant_id: str, agent_id: str, campaign_id: str, source_client: str,
+    idempotency_key: str, resume_cursor: int | None,
+) -> dict[str, object]:
+    request_hash = hashlib.sha256(json.dumps(
+        {"campaign_id": campaign_id, "resume_cursor": resume_cursor},
+        sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    token, expires, nonce_hash, issued_at = _token_material(
+        tenant_id, agent_id, campaign_id
+    )
+    response: dict[str, object] = {
+        "token": token, "expires_at": expires,
+        "websocket_url": "wss://api.codestra.co/ws/agent",
+        "subprotocols": ["codestra-agent-v1", "session.<token>"],
+    }
+    _ensure_nonce_table()
+    with STORE.connect() as db:
+        changed = db.execute(
+            """INSERT INTO realtime_session_request(
+                 tenant_id,source_client,idempotency_key,request_hash,response_json,created_at)
+               VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
+            (tenant_id, source_client, idempotency_key, request_hash,
+             json.dumps(response, sort_keys=True, separators=(",", ":")), time.time()),
+        ).rowcount
+        if changed == 1:
+            db.execute(
+                "INSERT INTO realtime_session_nonce VALUES(?,?,?,?,?,?,NULL,?)",
+                (nonce_hash, tenant_id, agent_id, campaign_id,
+                 issued_at, expires, source_client),
+            )
+        else:
+            row = db.execute(
+                """SELECT request_hash,response_json FROM realtime_session_request
+                   WHERE tenant_id=? AND source_client=? AND idempotency_key=?""",
+                (tenant_id, source_client, idempotency_key),
+            ).fetchone()
+            if not row or row["request_hash"] != request_hash:
+                raise ValueError("idempotency_conflict")
+            response = json.loads(row["response_json"])
+    return response
 
 
 def consume_token(token: str) -> dict[str, object]:
@@ -187,28 +276,54 @@ class SessionHandler(BaseHTTPRequestHandler):
         tenant = self.headers.get("X-Authenticated-Tenant", "")
         client = self.headers.get("X-Authenticated-Client", "")
         subject = self.headers.get("X-Authenticated-Subject", "")
-        if not tenant or not client or not subject:
+        idempotency_key = self.headers.get("Idempotency-Key", "").strip()
+        if not tenant or not client or not subject or not idempotency_key:
             return self._json(403, {"error": "authenticated_identity_required"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length < 2 or length > 8192:
                 raise ValueError("invalid_body")
             value = json.loads(self.rfile.read(length))
-            agent_id = str(value["agent_id"]).strip()
             campaign_id = str(value["campaign_id"]).strip()
-            if not agent_id or not campaign_id:
+            resume_cursor = value.get("resume_cursor")
+            if not campaign_id or (resume_cursor is not None and
+                                   (not isinstance(resume_cursor, int) or resume_cursor < 0)):
                 raise ValueError("invalid_identity")
-            if not authorized_agent_membership(tenant, agent_id, campaign_id, subject):
+            agent_id = resolve_agent_membership(tenant, campaign_id, subject)
+            if not agent_id:
                 return self._json(403, {"error": "active_agent_membership_required"})
-            token, expires = issue_token(tenant, agent_id, campaign_id, client)
+            response = issue_idempotent_session(
+                tenant, agent_id, campaign_id, client, idempotency_key, resume_cursor
+            )
         except (KeyError, ValueError, json.JSONDecodeError) as exc:
             return self._json(422, {"error": str(exc)})
-        return self._json(201, {
-            "token": token,
-            "expires_at": expires,
-            "websocket_url": "wss://api.codestra.co/ws/agent",
-            "subprotocols": ["codestra-agent-v1", "session.<token>"],
-        })
+        return self._json(201, response)
+
+
+async def forward_agent_events(connection: ServerConnection, claims: dict[str, object]) -> None:
+    tokens = [str(claims[key]) for key in ("tenant_id", "campaign_id", "agent_id")]
+    if not all(SUBJECT_TOKEN.fullmatch(value) for value in tokens):
+        raise RuntimeError("invalid_realtime_subject")
+    subject = "telephony.agent.{tenant}.{campaign}.{agent}".format(
+        tenant=claims["tenant_id"], campaign=claims["campaign_id"], agent=claims["agent_id"]
+    )
+    credentials = os.getenv("REALTIME_NATS_CREDENTIALS_FILE", "")
+    if not credentials:
+        raise RuntimeError("realtime_nats_credentials_missing")
+    nc = await nats.connect(
+        servers=[os.getenv("REALTIME_NATS_URL", "tls://codestra-nats:4222")],
+        user_credentials=credentials, connect_timeout=3, max_reconnect_attempts=3,
+    )
+    try:
+        subscription = await nc.jetstream().subscribe(subject, ordered_consumer=True)
+        async for message in subscription.messages:
+            if len(message.data) > 262144:
+                await message.term()
+                continue
+            await asyncio.wait_for(connection.send(message.data.decode("utf-8")), timeout=5)
+            await message.ack()
+    finally:
+        await nc.close()
 
 
 async def agent_socket(connection: ServerConnection) -> None:
@@ -227,16 +342,31 @@ async def agent_socket(connection: ServerConnection) -> None:
         "agent_id": claims["agent_id"],
         "campaign_id": claims["campaign_id"],
     }, separators=(",", ":")))
-    async for raw in connection:
-        try:
-            value = json.loads(raw)
-        except (TypeError, json.JSONDecodeError):
-            await connection.close(code=4400, reason="invalid_json")
-            return
-        if value.get("type") != "ping":
-            await connection.close(code=4403, reason="client_message_not_allowed")
-            return
-        await connection.send(json.dumps({"type": "pong", "at": int(time.time())}))
+    async def receive_client() -> None:
+        async for raw in connection:
+            try:
+                value = json.loads(raw)
+            except (TypeError, json.JSONDecodeError):
+                await connection.close(code=4400, reason="invalid_json")
+                return
+            if value.get("type") != "ping":
+                await connection.close(code=4403, reason="client_message_not_allowed")
+                return
+            await connection.send(json.dumps({"type": "pong", "at": int(time.time())}))
+
+    receiver = asyncio.create_task(receive_client())
+    events = asyncio.create_task(forward_agent_events(connection, claims))
+    done, pending = await asyncio.wait(
+        {receiver, events}, return_when=asyncio.FIRST_COMPLETED
+    )
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
+    try:
+        for task in done:
+            task.result()
+    except Exception:
+        await connection.close(code=1011, reason="realtime_transport_unavailable")
 
 
 def main() -> None:

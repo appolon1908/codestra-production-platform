@@ -42,7 +42,7 @@ def middleware_request(node_id: str, name: str, path: str, body: str, position: 
     return {
         "id": node_id, "name": name, "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
         "position": position, "parameters": {
-            "method": "POST", "url": "=http://codestra-middleware-integration-api-1:8095" + path,
+            "method": "POST", "url": "=http://codestra-integration-control-plane-api-1:8096" + path,
             "authentication": "predefinedCredentialType", "nodeCredentialType": "oAuth2Api",
             "sendHeaders": True, "headerParameters": {"parameters": [
                 {"name": "X-Tenant-ID", "value": "={{$json.tenant_id}}"},

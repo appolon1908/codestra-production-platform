@@ -169,18 +169,21 @@ def authorize_automation(store: Store, value: dict[str, Any], tenant: str) -> di
 
 def execute_automation(store: Store, value: dict[str, Any], tenant: str) -> dict[str, Any]:
     """Durably start an allowlisted business process; exact retries are safe."""
-    if not isinstance(value, dict) or value.get("authorized") is not True:
+    if not isinstance(value, dict):
         raise ControlPlaneError("automation_authorization_required")
     if value.get("tenant_id") != tenant:
         raise ControlPlaneError("cross_tenant_denied")
-    expected = AUTOMATION_PLANS.get(str(value.get("event_type")))
-    if not expected or value.get("approved_actions") != expected:
+    # The execute boundary must not trust client-controlled authorization
+    # markers. Re-run the complete policy decision from the immutable envelope.
+    material = {key: value.get(key) for key in ENVELOPE_FIELDS}
+    checked = authorize_automation(store, material, tenant)
+    expected = checked["approved_actions"]
+    if value.get("approved_actions") not in (None, expected):
         raise ControlPlaneError("automation_action_plan_mismatch")
     event_id = str(value.get("event_id") or "")
     workflow_key = str(value.get("automation_key") or "")
     if not event_id or not workflow_key:
         raise ControlPlaneError("automation_identity_required")
-    material = {key: value[key] for key in ENVELOPE_FIELDS}
     material["approved_actions"] = expected
     request_hash = hashlib.sha256(_canonical(material).encode()).hexdigest()
     stamp = now_iso()

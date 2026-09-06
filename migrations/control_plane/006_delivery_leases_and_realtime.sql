@@ -26,6 +26,16 @@ CREATE TABLE IF NOT EXISTS public.realtime_session_nonce(
 CREATE INDEX IF NOT EXISTS realtime_session_nonce_expiry
   ON public.realtime_session_nonce(expires_at,consumed_at);
 
+CREATE TABLE IF NOT EXISTS public.realtime_session_request(
+  tenant_id text NOT NULL,
+  source_client text NOT NULL,
+  idempotency_key text NOT NULL,
+  request_hash text NOT NULL,
+  response_json text NOT NULL,
+  created_at double precision NOT NULL,
+  PRIMARY KEY(tenant_id,source_client,idempotency_key)
+);
+
 CREATE TABLE IF NOT EXISTS public.automation_executions(
   tenant_id text NOT NULL,
   event_id text NOT NULL,

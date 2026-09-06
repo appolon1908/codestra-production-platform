@@ -10,13 +10,17 @@ services:
       CONTROL_PLANE_DATABASE_URL_FILE: /run/secrets/control_plane_database_url
       REALTIME_TOKEN_SECRET_FILE: /run/secrets/realtime_token_secret
       KONG_CONTROL_PLANE_GATEWAY_SECRET_FILE: /run/secrets/kong_gateway_secret
+      REALTIME_NATS_CREDENTIALS_FILE: /run/secrets/realtime_nats_credentials
+      REALTIME_NATS_URL: tls://codestra-nats:4222
       REALTIME_SESSION_TTL_SECONDS: "60"
     ports:
       - "127.0.0.1:18102:18102"
+      - "127.0.0.1:18103:18103"
     secrets:
       - control_plane_database_url
       - realtime_token_secret
       - kong_gateway_secret
+      - realtime_nats_credentials
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -35,6 +39,8 @@ secrets:
     file: /etc/codestra/runtime-secrets/control-plane/realtime-token-secret
   kong_gateway_secret:
     file: /etc/codestra/runtime-secrets/kong/control-plane-gateway-secret
+  realtime_nats_credentials:
+    file: /etc/codestra/runtime-secrets/control-plane/realtime-nats.creds
 
 networks:
   edge:

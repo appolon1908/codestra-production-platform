@@ -101,6 +101,17 @@ def test_missing_action_handler_cannot_be_reported_complete(tmp_path):
         raise AssertionError("incomplete business action was reported complete")
 
 
+def test_execute_does_not_trust_client_authorization_markers(tmp_path, monkeypatch):
+    monkeypatch.setenv("CAMPAIGN_SCOPED_CHANNEL_GATES_ENABLED", "true")
+    monkeypatch.setenv("GLOBAL_EMAIL_PRODUCTION", "true")
+    store = Store(str(tmp_path / "control-plane.db"))
+    forged = envelope()
+    forged.update(authorized=True, approved_actions=["campaign.followup.execute"])
+    forged["payload"] = {"channel": "email", "contact_id": "not-consented"}
+    with pytest.raises(ControlPlaneError, match="contact_policy_denied"):
+        execute_automation(store, forged, "COD")
+
+
 def test_failure_callback_resolves_original_identity_from_n8n_execution(tmp_path):
     store = Store(str(tmp_path / "control-plane.db"))
     authorized = authorize_automation(store, envelope(), "COD")

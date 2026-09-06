@@ -25,6 +25,24 @@ def test_one_time_realtime_session_token_is_bound_and_replay_safe(monkeypatch, t
         realtime_gateway.consume_token(token)
 
 
+def test_realtime_session_creation_replays_one_original_nonce(monkeypatch, tmp_path):
+    monkeypatch.setenv("REALTIME_TOKEN_SECRET", "test-only-realtime-secret-that-is-long-enough")
+    realtime_gateway.STORE = Store(str(tmp_path / "control-plane.db"))
+    first = realtime_gateway.issue_idempotent_session(
+        "tenant-a", "agent-7", "campaign-4", "crm-ui", "session-request-1", 12
+    )
+    replay = realtime_gateway.issue_idempotent_session(
+        "tenant-a", "agent-7", "campaign-4", "crm-ui", "session-request-1", 12
+    )
+    assert replay == first
+    with realtime_gateway.STORE.connect() as db:
+        assert db.execute("SELECT count(*) AS n FROM realtime_session_nonce").fetchone()["n"] == 1
+    with pytest.raises(ValueError, match="idempotency_conflict"):
+        realtime_gateway.issue_idempotent_session(
+            "tenant-a", "agent-7", "other-campaign", "crm-ui", "session-request-1", 12
+        )
+
+
 def test_realtime_gateway_has_bounded_transport_defaults():
     source = open("control_plane_service/realtime_gateway.py", encoding="utf-8").read()
     for value in ("max_size=65536", "max_queue=16", "ping_interval=20", "ping_timeout=10"):
@@ -34,6 +52,8 @@ def test_realtime_gateway_has_bounded_transport_defaults():
     assert 'parse_qs(parsed.query)' not in source
     assert "active_agent_membership_required" in source
     assert "ai.system='KEYCLOAK'" in source
+    assert "resolve_agent_membership" in source
+    assert "forward_agent_events" in source
 
 
 def test_realtime_compose_declares_every_secret_and_network():
@@ -41,5 +61,7 @@ def test_realtime_compose_declares_every_secret_and_network():
     assert "control_plane_database_url:" in compose
     assert "realtime_token_secret:" in compose
     assert "kong_gateway_secret:" in compose
+    assert "realtime_nats_credentials:" in compose
+    assert '"127.0.0.1:18103:18103"' in compose
     assert "name: codestra_edge" in compose
     assert "name: codestra_backend" in compose

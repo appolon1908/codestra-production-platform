@@ -112,15 +112,23 @@ def once() -> int:
         if not target:
             attempts = row["delivery_attempts"] + 1
             state = "dead_letter" if attempts >= MAX_ATTEMPTS else "retrying"
+            delay = retry_delay(attempts)
             with current.connect() as db:
-                db.execute(
+                changed = db.execute(
                     """UPDATE event_deliveries SET state=?,attempts=?,next_attempt=?,last_error=?,
                     lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL
                     WHERE event_id=? AND target=? AND lease_owner=? AND lease_token=?""",
-                    (state, attempts, time.time() + retry_delay(attempts),
+                    (state, attempts, time.time() + delay,
                      "TargetNotConfigured", row["event_id"], target_name,
                      WORKER_ID, row["lease_token"]),
-                )
+                ).rowcount
+                if changed == 1:
+                    db.execute(
+                        """UPDATE events SET state=?,attempts=CASE WHEN attempts>? THEN attempts ELSE ? END,
+                           next_attempt=?,last_error=? WHERE event_id=?""",
+                        (state, attempts, attempts, time.time() + delay,
+                         "TargetNotConfigured", row["event_id"]),
+                    )
             processed += 1
             continue
         if not current.circuit_allows(target_name, int(os.getenv("CONTROL_PLANE_CIRCUIT_COOLDOWN", "30"))):
