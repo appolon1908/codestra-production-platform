@@ -101,7 +101,7 @@ def _release_manifest() -> dict:
             for service_id in composition["release_service_ids"]
         ],
         "edge": {
-            "caddy": {"path": "operations/caddy/Caddyfile", "sha256": sha},
+            "caddy": {"path": "release/caddy-edge-bundle.v1.json", "sha256": sha},
             "kong": {"path": "deploy/kong/control-plane.yml", "sha256": sha},
         },
         "promotion": {
@@ -169,9 +169,31 @@ def test_release_manifest_requires_canonical_authority_paths(field, path) -> Non
         Draft202012Validator(schema).validate(manifest)
 
 
-def test_canonical_caddy_root_imports_private_klyrow_listener() -> None:
+@pytest.mark.parametrize("edge", ["caddy", "kong"])
+def test_release_manifest_requires_complete_canonical_edge_paths(edge) -> None:
+    schema = json.loads((ROOT / "release/platform-release-manifest.v1.schema.json").read_text())
+    manifest = _release_manifest()
+    manifest["edge"][edge]["path"] = "README.md"
+    with pytest.raises(ValidationError):
+        Draft202012Validator(schema).validate(manifest)
+
+
+def test_caddy_bundle_hashes_every_deployable_configuration() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/validate_platform_authority.py"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Platform authority validation passed" in result.stdout
+
+
+def test_container_caddy_root_excludes_host_only_klyrow_listener() -> None:
     root = (ROOT / "operations/caddy/Caddyfile").read_text()
-    assert "import klyrow-events.caddy" in root
+    assert "import klyrow-events.caddy" not in root
+    fragment = (ROOT / "operations/caddy/klyrow-events.caddy").read_text()
+    assert "Host-Caddy-only" in fragment
 
 
 def test_production_acceptance_requires_staging_acceptance() -> None:

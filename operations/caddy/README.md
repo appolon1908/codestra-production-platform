@@ -10,6 +10,9 @@ Layout:
 - `Caddyfile` is the reviewed import root.
 - `snippets/` contains reusable, non-secret policy snippets.
 - `*.caddy` contains complete hostname blocks.
+- `klyrow-events.caddy` is a host-network fragment and is deliberately not
+  imported by the container root; it may only be installed by the protected
+  host-Caddy procedure after listener and upstream reachability are proven.
 
 The tracked files contain no ACME account keys, certificates, DNS tokens, or
 other secrets. Runtime material under `/etc/caddy` on `65.109.65.169` is a

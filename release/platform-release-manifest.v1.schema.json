@@ -32,8 +32,8 @@
     },
     "services": {
       "type": "array",
-      "minItems": 14,
-      "maxItems": 14,
+      "minItems": 26,
+      "maxItems": 26,
       "allOf": [
         {"contains": {"properties": {"service_id": {"const": "caddy"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "kong"}}, "required": ["service_id"]}},
@@ -48,7 +48,19 @@
         {"contains": {"properties": {"service_id": {"const": "nats-jetstream"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "temporal"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "telnexa"}}, "required": ["service_id"]}},
-        {"contains": {"properties": {"service_id": {"const": "klyrow"}}, "required": ["service_id"]}}
+        {"contains": {"properties": {"service_id": {"const": "klyrow"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "middleware-external-webhook-worker"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "middleware-breero-odoo-worker"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "sms-event-worker"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "email-reseller-api"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "sms-api"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "mail-api"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "stalwart"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "kong-standby-auth"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "kong-identity-certification"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "beyvra-email-api"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "reseller-portal"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "private-vicidial-ingress"}}, "required": ["service_id"]}}
       ],
       "items": {
         "type": "object",
@@ -56,12 +68,12 @@
         "required": ["service_id", "repository", "git_sha", "image", "service_manifest_sha256"],
         "allOf": [
           {
-            "if": {"properties": {"service_id": {"enum": ["caddy", "kong", "observability", "postgresql", "redis"]}}},
+            "if": {"properties": {"service_id": {"enum": ["caddy", "kong", "observability", "postgresql", "redis", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress"]}}},
             "then": {"properties": {"repository": {"const": "appolon1908-hue/codestra-production-platform"}}}
           },
           {
-            "if": {"properties": {"service_id": {"enum": ["middleware", "nats-jetstream", "temporal"]}}},
-            "then": {"properties": {"repository": {"const": "appolon1908-hue/Middleware-"}}}
+            "if": {"properties": {"service_id": {"enum": ["middleware", "nats-jetstream", "temporal", "middleware-external-webhook-worker", "middleware-breero-odoo-worker"]}}},
+            "then": {"properties": {"repository": {"const": "Codestra-SRL/codestra-middleware"}}}
           },
           {"if": {"properties": {"service_id": {"const": "odoo-19"}}}, "then": {"properties": {"repository": {"const": "appolon1908-hue/Odoo"}}}},
           {"if": {"properties": {"service_id": {"const": "n8n"}}}, "then": {"properties": {"repository": {"const": "appolon1908-hue/N8N"}}}},
@@ -72,7 +84,7 @@
         ],
         "properties": {
           "service_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"},
-          "repository": {"type": "string", "pattern": "^appolon1908-hue/[A-Za-z0-9._-]+$"},
+          "repository": {"type": "string", "pattern": "^(appolon1908-hue|Codestra-SRL)/[A-Za-z0-9._-]+$"},
           "git_sha": {"$ref": "#/$defs/git_sha"},
           "image": {
             "type": "object",
@@ -92,8 +104,18 @@
       "additionalProperties": false,
       "required": ["caddy", "kong"],
       "properties": {
-        "caddy": {"$ref": "#/$defs/pinned_file"},
-        "kong": {"$ref": "#/$defs/pinned_file"}
+        "caddy": {
+          "allOf": [
+            {"$ref": "#/$defs/pinned_file"},
+            {"properties": {"path": {"const": "release/caddy-edge-bundle.v1.json"}}}
+          ]
+        },
+        "kong": {
+          "allOf": [
+            {"$ref": "#/$defs/pinned_file"},
+            {"properties": {"path": {"const": "deploy/kong/control-plane.yml"}}}
+          ]
+        }
       }
     },
     "promotion": {

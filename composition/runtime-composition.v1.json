@@ -25,12 +25,24 @@
     "nats-jetstream",
     "temporal",
     "telnexa",
-    "klyrow"
+    "klyrow",
+    "middleware-external-webhook-worker",
+    "middleware-breero-odoo-worker",
+    "sms-event-worker",
+    "email-reseller-api",
+    "sms-api",
+    "mail-api",
+    "stalwart",
+    "kong-standby-auth",
+    "kong-identity-certification",
+    "beyvra-email-api",
+    "reseller-portal",
+    "private-vicidial-ingress"
   ],
   "hosts": [
     {
       "id": "application-server-a",
-      "components": ["caddy", "kong", "middleware", "odoo-19", "n8n", "keycloak", "postgresql", "redis", "nats-jetstream", "temporal", "observability"]
+      "components": ["caddy", "kong", "middleware", "odoo-19", "n8n", "keycloak", "postgresql", "redis", "nats-jetstream", "temporal", "observability", "middleware-external-webhook-worker", "middleware-breero-odoo-worker", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress"]
     },
     {
       "id": "provider-host",
@@ -54,8 +66,10 @@
     },
     {
       "id": "middleware",
-      "source_repository": "appolon1908-hue/Middleware-",
-      "source_path": "Dockerfile",
+      "source_repository": "Codestra-SRL/codestra-middleware",
+      "source_path": ".",
+      "candidate_source_repository": "appolon1908-hue/Middleware-",
+      "authority_state": "unresolved-pending-governed-convergence",
       "composition_input": "deploy/middleware/compose.approved-release.yaml",
       "role": "cross-system write boundary",
       "deployment_state": "digest-required"
@@ -116,15 +130,19 @@
     },
     {
       "id": "nats-jetstream",
-      "source_repository": "appolon1908-hue/Middleware-",
+      "source_repository": "Codestra-SRL/codestra-middleware",
       "source_path": "app/nats_transport.py",
+      "candidate_source_repository": "appolon1908-hue/Middleware-",
+      "authority_state": "unresolved-pending-governed-convergence",
       "role": "durable cross-service event transport",
       "deployment_state": "private-credentials-and-runtime-verification-required"
     },
     {
       "id": "temporal",
-      "source_repository": "appolon1908-hue/Middleware-",
+      "source_repository": "Codestra-SRL/codestra-middleware",
       "source_path": "app/temporal_workflows.py",
+      "candidate_source_repository": "appolon1908-hue/Middleware-",
+      "authority_state": "unresolved-pending-governed-convergence",
       "role": "recoverable long-running business workflows",
       "deployment_state": "private-identity-and-runtime-verification-required"
     },
@@ -141,6 +159,90 @@
       "source_path": ".",
       "role": "email provider control plane and Mautic/Postal boundary",
       "deployment_state": "provider-host-release-evidence-required"
+    },
+    {
+      "id": "middleware-external-webhook-worker",
+      "source_repository": "Codestra-SRL/codestra-middleware",
+      "source_path": ".",
+      "role": "external webhook durable worker",
+      "deployment_state": "unresolved-current-runtime-authority"
+    },
+    {
+      "id": "middleware-breero-odoo-worker",
+      "source_repository": "Codestra-SRL/codestra-middleware",
+      "source_path": ".",
+      "role": "Breero to Odoo durable worker",
+      "deployment_state": "unresolved-current-runtime-authority"
+    },
+    {
+      "id": "sms-event-worker",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/architecture-remediation/compose.sms-api.yaml",
+      "role": "SMS event delivery worker",
+      "deployment_state": "source-and-digest-reconciliation-required"
+    },
+    {
+      "id": "email-reseller-api",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/email-reseller",
+      "role": "email reseller API",
+      "deployment_state": "source-and-digest-reconciliation-required"
+    },
+    {
+      "id": "sms-api",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/architecture-remediation/compose.sms-api.yaml",
+      "role": "SMS business API",
+      "deployment_state": "source-and-digest-reconciliation-required"
+    },
+    {
+      "id": "mail-api",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/mail-platform",
+      "role": "mail platform API",
+      "deployment_state": "source-and-digest-reconciliation-required"
+    },
+    {
+      "id": "stalwart",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/mail-platform/compose.isolated.yaml",
+      "role": "isolated mail transport",
+      "deployment_state": "upstream-digest-and-config-reconciliation-required"
+    },
+    {
+      "id": "kong-standby-auth",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/kong-production-standby",
+      "role": "Kong standby authentication adapter",
+      "deployment_state": "source-and-digest-reconciliation-required"
+    },
+    {
+      "id": "kong-identity-certification",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/kong/control-plane.yml",
+      "role": "Kong identity certification workload",
+      "deployment_state": "source-and-digest-reconciliation-required"
+    },
+    {
+      "id": "beyvra-email-api",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/architecture-remediation/compose.beyvra-email.yaml",
+      "role": "Beyvra email API",
+      "deployment_state": "source-and-digest-reconciliation-required"
+    },
+    {
+      "id": "reseller-portal",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/reseller-portal",
+      "role": "reseller operations portal",
+      "deployment_state": "source-and-digest-reconciliation-required"
+    },
+    {
+      "id": "private-vicidial-ingress",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/architecture-remediation/compose.private-integration.yaml",
+      "role": "private VICIdial ingress proxy",
+      "deployment_state": "source-and-digest-reconciliation-required"
     }
   ]
 }

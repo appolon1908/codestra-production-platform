@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from pathlib import Path
 
@@ -13,6 +14,15 @@ AUTHORITY_REPOSITORY = "appolon1908-hue/codestra-production-platform"
 AUTHORITY_BRANCH = "release/production-activation"
 CANONICAL_KYQRA_REPOSITORY = "appolon1908-hue/kyqra-crawler"
 RETIRED_KYQRA_REPOSITORY = "appolon1908-hue/kyqra"
+RELEASE_BEARING_WORKLOADS = {
+    "caddy", "kong", "middleware", "odoo-19", "n8n", "keycloak",
+    "kyqra-crawler", "observability", "postgresql", "redis",
+    "nats-jetstream", "temporal", "telnexa", "klyrow",
+    "middleware-external-webhook-worker", "middleware-breero-odoo-worker",
+    "sms-event-worker", "email-reseller-api", "sms-api", "mail-api",
+    "stalwart", "kong-standby-auth", "kong-identity-certification",
+    "beyvra-email-api", "reseller-portal", "private-vicidial-ingress",
+}
 
 
 def load(path: str) -> dict:
@@ -62,11 +72,24 @@ def validate_composition() -> None:
     assert len(release_service_ids) == len(set(release_service_ids)), (
         "release service IDs must be unique"
     )
+    assert set(release_service_ids) == RELEASE_BEARING_WORKLOADS, (
+        "release boundary must include every independently deployed workload"
+    )
     assert set(release_service_ids) == set(by_id), (
         "every deployed component must be release-bearing"
     )
     assert by_id["caddy"]["source_path"] == "operations/caddy"
     assert by_id["kyqra-crawler"]["source_repository"] == CANONICAL_KYQRA_REPOSITORY
+    for service_id in ("middleware", "nats-jetstream", "temporal"):
+        assert by_id[service_id]["source_repository"] == (
+            "Codestra-SRL/codestra-middleware"
+        )
+        assert by_id[service_id]["candidate_source_repository"] == (
+            "appolon1908-hue/Middleware-"
+        )
+        assert by_id[service_id]["authority_state"] == (
+            "unresolved-pending-governed-convergence"
+        )
     host_components = {
         component_id
         for host in composition.get("hosts", [])
@@ -120,6 +143,36 @@ def validate_release_schema() -> None:
     assert promotion["allOf"][0]["then"]["properties"]["staging"][
         "properties"
     ]["status"]["const"] == "accepted"
+    edge = schema["properties"]["edge"]["properties"]
+    assert edge["caddy"]["allOf"][1]["properties"]["path"]["const"] == (
+        "release/caddy-edge-bundle.v1.json"
+    )
+    assert edge["kong"]["allOf"][1]["properties"]["path"]["const"] == (
+        "deploy/kong/control-plane.yml"
+    )
+
+
+def validate_caddy_bundle() -> None:
+    bundle = load("release/caddy-edge-bundle.v1.json")
+    assert bundle.get("schema_version") == "caddy-edge-bundle.v1"
+    assert bundle.get("authority_repository") == AUTHORITY_REPOSITORY
+    entries = bundle.get("files")
+    assert isinstance(entries, list) and entries
+    paths = [entry.get("path") for entry in entries]
+    expected = sorted(
+        str(path.relative_to(ROOT))
+        for path in (ROOT / "operations" / "caddy").rglob("*")
+        if path.is_file() and path.suffix != ".md"
+    )
+    assert sorted(paths) == expected, "Caddy bundle must cover every deployable file"
+    for entry in entries:
+        path = ROOT / entry["path"]
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        assert entry.get("sha256") == actual, f"stale Caddy bundle hash: {entry['path']}"
+        assert entry.get("deployment_target") in {
+            "container-caddy",
+            "host-caddy-pending",
+        }
 
 
 def validate_caddy_home() -> None:
@@ -150,6 +203,7 @@ def main() -> int:
     validate_catalog()
     validate_composition()
     validate_release_schema()
+    validate_caddy_bundle()
     validate_caddy_home()
     print(
         "Platform authority validation passed: contract catalog, runtime "
