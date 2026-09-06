@@ -63,6 +63,12 @@ def require_config_subset(actual: dict, expected: dict, label: str) -> None:
         require_equal(actual.get(key), value, f"{label}.{key}")
 
 
+def is_http_route(route: dict) -> bool:
+    return bool(
+        set(route.get("protocols") or ["http", "https"]).intersection({"http", "https"})
+    )
+
+
 def form_value(value):
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -194,11 +200,13 @@ def verify_contract_route(
         )
     require_equal(route.get("strip_path"), expected["stripPath"], f"{expected['name']}.strip_path")
     require_equal(route.get("preserve_host"), expected["preserveHost"], f"{expected['name']}.preserve_host")
+    require_equal(route.get("https_redirect_status_code"), 426, f"{expected['name']}.https_redirect")
+    require_equal(route.get("headers") or {}, {}, f"{expected['name']}.headers")
+    for field in ("snis", "sources", "destinations"):
+        require_equal(route.get(field) or [], [], f"{expected['name']}.{field}")
     service = services[route["service"]["id"]]
-    require_equal(service.get("host"), expected["serviceHost"], f"{expected['name']}.service.host")
-    require_equal(service.get("port"), expected["servicePort"], f"{expected['name']}.service.port")
-    require_equal(service.get("protocol"), authority_manifest["service"].get("protocol"), f"{expected['name']}.service.protocol")
-    require_equal(service.get("path"), authority_manifest["service"].get("path"), f"{expected['name']}.service.path")
+    for field, value in authority_manifest["service"].items():
+        require_equal(service.get(field), value, f"{expected['name']}.service.{field}")
     plugins = enabled_plugins(admin, route["id"])
     missing = sorted(set(expected["requiredPlugins"]) - set(plugins))
     if missing:
@@ -351,7 +359,8 @@ def main() -> int:
     public_routes = [
         route
         for route in routes
-        if not route.get("hosts") or public_hosts.intersection(route.get("hosts") or [])
+        if is_http_route(route)
+        and (not route.get("hosts") or public_hosts.intersection(route.get("hosts") or []))
     ]
     unverified_public = sorted(
         route.get("name") or route["id"]
@@ -389,7 +398,8 @@ def main() -> int:
     legacy_routes = sorted(
         route.get("name") or route["id"]
         for route in routes_after
-        if not route.get("hosts") or manifest["legacyHost"] in (route.get("hosts") or [])
+        if is_http_route(route)
+        and (not route.get("hosts") or manifest["legacyHost"] in (route.get("hosts") or []))
     )
     if not manifest["legacyHostEnabled"] and legacy_routes:
         print("LEGACY_PUBLIC_ROUTE_NAMES=" + ";".join(legacy_routes))

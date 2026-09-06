@@ -203,9 +203,53 @@ def test_reconciler_is_exact_and_never_unions_legacy_hosts():
     assert "verify_security_plugins" in source
     assert "correlation-id" in source
     assert 'return "true" if value else "false"' in source
-    assert 'if not route.get("hosts") or public_hosts.intersection' in source
-    assert 'service.get("protocol")' in source
-    assert 'service.get("path")' in source
+    assert "is_http_route(route)" in source
+    assert 'for field, value in authority_manifest["service"].items()' in source
+
+
+def test_contract_route_rejects_additional_match_predicates(monkeypatch):
+    module = _module()
+    canonical = json.loads(MANIFEST_PATH.read_text())
+    expected = next(row for row in canonical["contractRoutes"] if row["name"] == "codestra-callback-control")
+    _, authority, _ = module.security_authority(ROOT, expected)
+    service = {**authority["service"], "id": "service-1"}
+    route = {
+        "id": "route-1", "name": expected["name"], "service": {"id": "service-1"},
+        "hosts": expected["hosts"], "paths": expected["paths"],
+        "methods": expected["methods"], "protocols": expected["protocols"],
+        "strip_path": expected["stripPath"], "preserve_host": expected["preserveHost"],
+        "https_redirect_status_code": 426, "headers": {"x-hidden": ["required"]},
+        "snis": [], "sources": [], "destinations": [],
+    }
+    monkeypatch.setattr(module, "enabled_plugins", lambda *_args: {})
+    with pytest.raises(RuntimeError, match="headers drift"):
+        module.verify_contract_route("http://kong", ROOT, expected, [route], {"service-1": service})
+
+
+def test_contract_route_rejects_callback_timeout_drift(monkeypatch):
+    module = _module()
+    canonical = json.loads(MANIFEST_PATH.read_text())
+    expected = next(row for row in canonical["contractRoutes"] if row["name"] == "codestra-callback-control")
+    _, authority, _ = module.security_authority(ROOT, expected)
+    service = {**authority["service"], "id": "service-1", "read_timeout": 1}
+    route = {
+        "id": "route-1", "name": expected["name"], "service": {"id": "service-1"},
+        "hosts": expected["hosts"], "paths": expected["paths"],
+        "methods": expected["methods"], "protocols": expected["protocols"],
+        "strip_path": expected["stripPath"], "preserve_host": expected["preserveHost"],
+        "https_redirect_status_code": 426, "headers": {}, "snis": [],
+        "sources": [], "destinations": [],
+    }
+    monkeypatch.setattr(module, "enabled_plugins", lambda *_args: {})
+    with pytest.raises(RuntimeError, match="service.read_timeout drift"):
+        module.verify_contract_route("http://kong", ROOT, expected, [route], {"service-1": service})
+
+
+def test_stream_routes_are_not_part_of_the_http_public_surface():
+    module = _module()
+    assert module.is_http_route({"protocols": ["http", "https"]})
+    assert not module.is_http_route({"protocols": ["tcp"]})
+    assert not module.is_http_route({"protocols": ["tls_passthrough"]})
 
 
 def test_read_only_route_exporter_redacts_secret_values_without_exporting_credentials():
