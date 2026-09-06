@@ -1784,6 +1784,13 @@ def test_control_plane_source_readback_uses_runtime_python():
     assert '"exec", CONTROL_PLANE_API, "sha256sum"' not in source
 
 
+def test_middleware_compose_binds_required_odoo_addon_paths():
+    source = (ROOT / "operations/production-operator/codestra-production-operator").read_text()
+    assert '"/usr/bin/env"' in source
+    assert "ODOO_CALLBACK_ADDON_RELEASE=/home/codestra-admin/releases/odoo-callback-1e450061b3db/codestra_appointments" in source
+    assert "ODOO_CALLBACK_CAMPAIGN_ADDON_RELEASE=/home/codestra-admin/releases/odoo-callback-1e450061b3db/call_center_campaign" in source
+
+
 def test_control_plane_build_uses_a_valid_local_image_tag():
     compose = (ROOT / "deploy/control-plane/compose.yaml").read_text(encoding="utf-8")
     assert compose.count("build:") == 1
