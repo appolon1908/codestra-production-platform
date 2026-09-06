@@ -11,11 +11,15 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./rules:/etc/prometheus/rules:ro
+      # Root synchronizes this non-root-readable projection from the staging
+      # identity authority; Prometheus never receives write access.
       - /etc/codestra/secrets/monitoring-runtime/staging_metrics_client_secret:/run/secrets/staging_metrics_client_secret:ro
       - prometheus_data:/prometheus
     networks:
       monitoring: {}
       backend: {}
+      edge: {}
+      operations_dashboard_staging: {}
       alerting:
         ipv4_address: 10.253.127.2
     read_only: true
@@ -137,7 +141,7 @@ services:
     command: [--config.file=/etc/blackbox/blackbox.yml]
     volumes:
       - ./blackbox.yml:/etc/blackbox/blackbox.yml:ro
-    networks: [monitoring]
+    networks: [monitoring, backend, edge]
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
@@ -160,6 +164,12 @@ networks:
   backend:
     external: true
     name: codestra_backend
+  edge:
+    external: true
+    name: codestra_edge
+  operations_dashboard_staging:
+    external: true
+    name: codestra-operations-dashboard-staging_private
 
 volumes:
   prometheus_data: {}

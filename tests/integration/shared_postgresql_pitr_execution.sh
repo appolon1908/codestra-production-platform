@@ -181,7 +181,7 @@ test "$pre" = 1 -a "$post" = 0
 
 verified_marker="$(find "$work/stage" -maxdepth 1 -type f -name '*.offhost' | head -1)"
 verified_source="${verified_marker%.offhost}"
-touch -d '9 days ago' "$verified_marker"
+touch -d '7 days 5 minutes ago' "$verified_source"
 CODESTRA_SHARED_WAL_STAGE="$work/stage" CODESTRA_SHARED_POSTGRES_STATE="$work/state" "$package/codestra-shared-postgres-prune-wal.sh" 7
 test ! -e "$verified_marker" -a ! -e "$verified_source" -a -s "$failed_source"
 

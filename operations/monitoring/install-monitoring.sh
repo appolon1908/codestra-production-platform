@@ -58,4 +58,10 @@ if [[ "$VALIDATE_ONLY" == "true" ]]; then
     echo "monitoring_validation=pass deployment=not_started"
     exit 0
 fi
+bash "$ROOT/sync-staging-metrics-secret.sh"
+staging_metrics_secret=/etc/codestra/secrets/monitoring-runtime/staging_metrics_client_secret
+[[ -s "$staging_metrics_secret" && -r "$staging_metrics_secret" ]] || {
+    echo "staging metrics secret projection is unavailable" >&2
+    exit 2
+}
 docker compose -f "$ROOT/compose.monitoring.yaml" up -d

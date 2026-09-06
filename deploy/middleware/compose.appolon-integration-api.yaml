@@ -2,7 +2,7 @@ name: codestra
 
 services:
   appolon-middleware-integration-api:
-    image: ghcr.io/appolon1908-hue/codestra-middleware@sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820
+    image: ghcr.io/appolon1908-hue/codestra-middleware@sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -15,10 +15,10 @@ services:
     environment:
       APP_ENV: production
       RUNTIME_PROFILE_ID: codestra-middleware-production-compose-v1
-      APP_SOURCE_SHA: f6748a58f8d2590520a4f28776770957061cdea1
-      IMAGE_DIGEST: sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820
-      BUILD_TIME: "2026-08-30T13:24:37Z"
-      SCHEMA_HEAD: 0003_immutable_event_ledger
+      APP_SOURCE_SHA: f3437709c06747249586598590145234ea2c7327
+      IMAGE_DIGEST: sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484
+      BUILD_TIME: "2026-09-02T10:04:02Z"
+      SCHEMA_HEAD: 0006_outbox_attempt_events
       OUTBOX_DISPATCH_ENABLED: "false"
       ODOO_WRITE: "false"
       LIVE_WRITE: "false"

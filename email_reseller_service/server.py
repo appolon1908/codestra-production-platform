@@ -25,6 +25,14 @@ MAX_TEXT = int(os.getenv("EMAIL_MAX_TEXT_BYTES", "100000"))
 MAX_HTML = int(os.getenv("EMAIL_MAX_HTML_BYTES", "150000"))
 RATE_PER_MINUTE = int(os.getenv("EMAIL_RATE_PER_MINUTE", "60"))
 MODE = os.getenv("EMAIL_SUBMISSION_MODE", "synthetic")
+SERVICE = "email-reseller"
+APPLICATION_VERSION = os.getenv("CODESTRA_APPLICATION_VERSION", "unknown")
+API_VERSION = "v1"
+GIT_SHA = os.getenv("CODESTRA_GIT_SHA", "unknown")
+IMAGE_DIGEST = os.getenv("CODESTRA_IMAGE_DIGEST", "unknown")
+BUILD_TIMESTAMP = os.getenv("CODESTRA_BUILD_TIMESTAMP", "unknown")
+MIGRATION_REVISION = os.getenv("CODESTRA_MIGRATION_REVISION", "email-reseller-schema-v1")
+ENVIRONMENT = os.getenv("CODESTRA_ENVIRONMENT", "unknown")
 EMAIL_RE = re.compile(r"^[^\s<>@,;\r\n]+@[^\s<>@,;\r\n]+\.[^\s<>@,;\r\n]+$")
 ALLOWED_FIELDS = {"from", "to", "cc", "bcc", "subject", "text", "html", "reply_to", "client_reference"}
 STATUSES = {"accepted", "queued", "sent", "delivered", "soft_bounce", "hard_bounce", "complained", "rejected", "failed"}
@@ -42,6 +50,13 @@ EVENT_TYPES = {
     "hard_bounce": "email.bounced", "complained": "email.complained",
     "rejected": "email.bounced", "failed": "email.bounced",
 }
+KLYROW_EVENT_STATUSES = {
+    "email.sent": "sent", "klyrow.email.sent": "sent",
+    "email.delivered": "delivered", "klyrow.email.delivered": "delivered",
+    "email.bounced": "hard_bounce", "klyrow.email.bounced": "hard_bounce",
+    "email.complained": "complained", "klyrow.email.complained": "complained",
+    "email.deferred": "soft_bounce", "klyrow.email.deferred": "soft_bounce",
+}
 _rate_lock = threading.Lock()
 _rate: dict[str, list[float]] = {}
 
@@ -54,6 +69,51 @@ class ApiError(ValueError):
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def enabled(name: str) -> bool:
+    return os.getenv(name, "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def version_state(correlation_id: str) -> dict[str, Any]:
+    return {
+        "service": SERVICE,
+        "application_version": APPLICATION_VERSION,
+        "api_version": API_VERSION,
+        "git_sha": GIT_SHA,
+        "image_digest": IMAGE_DIGEST,
+        "build_timestamp": BUILD_TIMESTAMP,
+        "migration_revision": MIGRATION_REVISION,
+        "environment": ENVIRONMENT,
+        "correlation_id": correlation_id,
+    }
+
+
+def capability_state(correlation_id: str) -> dict[str, Any]:
+    live_email = enabled("LIVE_EMAIL_DELIVERY") and MODE == "live"
+    live_sms = enabled("LIVE_SMS_DELIVERY")
+    live_pstn = enabled("LIVE_PSTN_DIALING")
+    return {
+        "service": SERVICE,
+        "timestamp": now(),
+        "correlation_id": correlation_id,
+        "read_only_mode": not live_email,
+        "maintenance_mode": enabled("MAINTENANCE_MODE"),
+        "degraded_mode": MODE != "live",
+        "business_writes_enabled": live_email,
+        "external_delivery_enabled": live_email,
+        "live_email_enabled": live_email,
+        "live_sms_enabled": live_sms,
+        "live_pstn_enabled": live_pstn,
+        "live_social_publish_enabled": False,
+        "live_advertising_enabled": False,
+        "simulation_enabled": MODE == "synthetic",
+        "reconciliation_available": False,
+        "supported_api_versions": [API_VERSION],
+        "supported_operations": ["submit_email", "message_status"],
+        "provider_available": False if MODE == "synthetic" else None,
+        "backup_authority_status": "external",
+    }
 
 
 def connect() -> Connection:
@@ -325,13 +385,14 @@ def receive_klyrow_event(raw: bytes, headers: Any) -> tuple[dict[str, Any], bool
         raise ApiError(400, "invalid_json") from exc
     if not isinstance(value, dict) or value.get("source_system") != "klyrow" or value.get("event_id") != event_id:
         raise ApiError(422, "invalid_klyrow_event")
-    provider_event = str(value.get("provider_event") or value.get("event_type") or "unknown")
-    canonical = {
-        "email.sent": "sent", "email.delivered": "delivered", "email.bounced": "hard_bounce",
-        "email.complained": "complained", "email.deferred": "soft_bounce",
-    }.get(str(value.get("event")))
+    event_type = str(value.get("event_type") or "")
+    legacy_event = str(value.get("event") or "")
+    canonical = KLYROW_EVENT_STATUSES.get(event_type) if event_type else KLYROW_EVENT_STATUSES.get(legacy_event)
     if not canonical:
         raise ApiError(422, "unsupported_klyrow_event")
+    if event_type and legacy_event and KLYROW_EVENT_STATUSES.get(legacy_event) != canonical:
+        raise ApiError(422, "conflicting_klyrow_event")
+    provider_event = str(value.get("provider_event") or event_type or legacy_event)
     message_id = str(value.get("message_id") or "")
     with connect() as db:
         message = db.execute("SELECT account_id FROM email_messages WHERE id=?", (message_id,)).fetchone()
@@ -355,6 +416,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(raw)
 
@@ -392,17 +454,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         try:
             path = urlparse(self.path).path
+            correlation_id = self.headers.get("X-Correlation-ID") or str(uuid.uuid4())
             if path == "/livez":
-                return self.send_json(200, {"status": "alive"})
+                return self.send_json(200, {"status": "alive", "service": SERVICE, "timestamp": now(), "correlation_id": correlation_id})
             if path in {"/ready", "/readyz"}:
                 try:
                     with connect() as db:
                         db.execute("SELECT 1").fetchone()
                 except Exception:
-                    return self.send_json(503, {"status": "not_ready", "postgresql": "unavailable"})
-                return self.send_json(200, {"status": "ready", "postgresql": "ok", "klyrow": "disabled" if MODE == "synthetic" else "required"})
+                    return self.send_json(503, {"status": "not_ready", "service": SERVICE, "timestamp": now(), "correlation_id": correlation_id, "postgresql": "unavailable"})
+                return self.send_json(200, {"status": "ready", "service": SERVICE, "timestamp": now(), "correlation_id": correlation_id, "postgresql": "ok", "klyrow": "disabled" if MODE == "synthetic" else "required"})
             if path in {"/health", "/v1/health"}:
-                return self.send_json(200, {"status": "ok", "submission_mode": MODE, "klyrow": postal_connectivity()})
+                return self.send_json(200, {"status": "ok", "service": SERVICE, "timestamp": now(), "correlation_id": correlation_id, "submission_mode": MODE, "klyrow": postal_connectivity()})
+            if path in {"/version", "/v1/version"}:
+                return self.send_json(200, version_state(correlation_id))
+            if path in {"/capabilities", "/v1/capabilities"}:
+                return self.send_json(200, capability_state(correlation_id))
             consumer = self.consumer()
             match = re.fullmatch(r"/(?:v1/email/)?messages/([0-9a-f-]+)(?:/status)?", path)
             if not match:

@@ -1,0 +1,107 @@
+name: Dispatch exact platform signing after Middleware authority merge
+
+on:
+  push:
+    branches:
+      - release/production-activation
+    paths:
+      - PRODUCTION-SOURCE-LOCK.yaml
+      - config/production-release-tuple.json
+      - tools/signed_middleware_release.py
+      - tools/verify_middleware_release_evidence.py
+      - tools/verify_slsa_provenance_attestation.py
+      - tools/build_release_bundle.py
+      - .github/workflows/protected-release.yml
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: appolon-middleware-platform-signing-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch-exact-release:
+    name: Dispatch protected release for exact authority merge
+    if: github.repository == 'appolon1908-hue/codestra-production-platform'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_MIDDLEWARE_SOURCE_SHA: 1aa4d505846b7494aff94bec3d7ea68c895e2dd3
+      EXPECTED_MIDDLEWARE_IMAGE_DIGEST: sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504
+      EXPECTED_MIDDLEWARE_ARTIFACT_DIGEST: sha256:cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
+
+    steps:
+      - name: Check out exact protected platform source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require exact protected authority tuple
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = 'refs/heads/release/production-activation'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          value = json.loads(Path('config/production-release-tuple.json').read_text())
+          assert value['middleware_source_sha'] == '1aa4d505846b7494aff94bec3d7ea68c895e2dd3'
+          assert value['middleware_digest'] == 'sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504'
+          assert value['middleware_run_id'] == '33767657962'
+          assert value['middleware_artifact'].startswith(
+              'signed-middleware-release-1aa4d505846b7494aff94bec3d7ea68c895e2dd3-33767657962-'
+          )
+          for key in (
+              'middleware_sbom_sha256',
+              'middleware_provenance_sha256',
+              'middleware_openvex_sha256',
+          ):
+              assert len(value[key]) == 64
+              int(value[key], 16)
+          source_lock = Path('PRODUCTION-SOURCE-LOCK.yaml').read_text()
+          assert 'status: FAIL' in source_lock
+          assert 'CANONICAL_SOURCE_AUTHORITY_PENDING_STAGING_CERTIFICATION' in source_lock
+          assert 'deployment_authorized: false' in source_lock
+          PY
+
+      - name: Refuse duplicate signing dispatch for this exact SHA
+        id: duplicate
+        run: |
+          set -Eeuo pipefail
+          count="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/protected-release.yml/runs?head_sha=${GITHUB_SHA}&per_page=100" \
+            --jq '.workflow_runs | length')"
+          if test "$count" -gt 0; then
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dispatch existing protected signing workflow
+        if: steps.duplicate.outputs.skip == 'false'
+        run: |
+          set -Eeuo pipefail
+          gh workflow run protected-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref release/production-activation
+
+      - name: Record repository-only boundary
+        run: |
+          set -Eeuo pipefail
+          {
+            echo 'PLATFORM_SIGNING_DISPATCH=PASS'
+            echo "PLATFORM_PROTECTED_SHA=${GITHUB_SHA}"
+            echo "MIDDLEWARE_SOURCE_SHA=${EXPECTED_MIDDLEWARE_SOURCE_SHA}"
+            echo "MIDDLEWARE_IMAGE_DIGEST=${EXPECTED_MIDDLEWARE_IMAGE_DIGEST}"
+            echo "MIDDLEWARE_ARTIFACT_DIGEST=${EXPECTED_MIDDLEWARE_ARTIFACT_DIGEST}"
+            echo 'PRODUCTION_RUNTIME_CHANGED=NO'
+            echo 'PRODUCTION_TRAFFIC_CHANGED=NO'
+            echo 'PRODUCTION_EXTERNAL_EFFECTS_ENABLED=NONE'
+          } >> "$GITHUB_STEP_SUMMARY"

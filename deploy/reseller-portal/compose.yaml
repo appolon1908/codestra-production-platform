@@ -18,7 +18,7 @@ services:
     security_opt: [no-new-privileges:true]
   portal:
     build: {context: ../.., dockerfile: deploy/reseller-portal/Dockerfile}
-    image: ghcr.io/appolon1908-hue/reseller-portal@sha256:5c40c5f172c0b8b9eeaeee0e7261c2ead43eab5b7531a1759b3bd1098e97be10
+    image: ghcr.io/appolon1908-hue/reseller-portal@sha256:74ce88fa3ca05a6c3d595080b78c398be1dc49ac72185ba8aa787d9f6f8247d9
     restart: unless-stopped
     env_file: ${PORTAL_ENV_FILE:-/etc/codestra/secrets/reseller-portal.env}
     depends_on:

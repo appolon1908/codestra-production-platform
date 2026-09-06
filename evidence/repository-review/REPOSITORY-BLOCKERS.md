@@ -1,6 +1,6 @@
 # Repository Review Blockers
 
-Captured: 2026-09-01T21:05:47.526426+00:00
+Captured: 2026-09-02T19:37:04.462953+00:00
 
 A missing permission or unavailable API is a blocker, never a PASS.
 
@@ -20,15 +20,16 @@ A missing permission or unavailable API is a blocker, never a PASS.
 - `appolon1908-hue/Keycloak` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Keycloak` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
 - `appolon1908-hue/Keycloak` code_scanning security alerts: gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)
-- `appolon1908-hue/Middleware-` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Middleware-` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `Codestra-SRL/codestra-middleware` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
 - `Codestra-SRL/codestra-middleware` code_scanning security alerts: gh: Code Security must be enabled for this repository to use code scanning. (HTTP 403)
+- `Codestra-SRL/codestra-middleware` rulesets: gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)
 - `appolon1908-hue/Odoo` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Odoo` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `Codestra-SRL/codestra-odoo-addons` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `Codestra-SRL/codestra-odoo-addons` secret_scanning security alerts: gh: Secret scanning is disabled on this repository. (HTTP 404)
 - `Codestra-SRL/codestra-odoo-addons` code_scanning security alerts: gh: Code Security must be enabled for this repository to use code scanning. (HTTP 403)
+- `Codestra-SRL/codestra-odoo-addons` rulesets: gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)
 - `appolon1908-hue/N8N` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/N8N` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Codestra-Marketing-` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
@@ -84,3 +85,8 @@ A missing permission or unavailable API is a blocker, never a PASS.
 - `appolon1908-hue/Codestra-Postgres-Exporter` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Superset` dependabot security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
 - `appolon1908-hue/Superset` code_scanning security alerts: gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  gh auth refresh -h github.com -s admin:repo_hook
+
+## Active operational blockers
+
+- `Codestra-SRL/codestra-middleware`: Canonical Middleware exact-head and protected-main workflows cannot start because the organization Actions budget is zero with prevent_further_usage enabled. Evidence: `evidence/repository-review/CANONICAL-MIDDLEWARE-ACTIONS-BLOCKER-20260902.md`
+- `Server 65 Kong runtime read-back`: The reviewed narrow kong-readback operator action is not installed; Infrastructure/security-owner approval is required without changing SSH or granting an arbitrary shell. Evidence: `evidence/server65/KONG-RUNTIME-READBACK-BLOCKER-20260902.md`
