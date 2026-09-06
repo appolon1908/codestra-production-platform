@@ -153,11 +153,12 @@ class CodestraCrmCallFollowupJob(models.Model):
                     limit=limit_per_policy,
                 )
                 for followup in missed:
+                    occurrence = fields.Datetime.to_string(followup.callback_at)
                     _, created = self._enqueue(
                         policy,
                         followup,
                         "missed_callback",
-                        f"missed-callback:{policy.id}:{followup.id}",
+                        f"missed-callback:{policy.id}:{followup.id}:{occurrence}",
                     )
                     created_count += int(created)
 
@@ -313,7 +314,13 @@ class CodestraCrmCallFollowupJob(models.Model):
 
     def _process_pending_sla(self):
         followup = self.followup_id
-        if followup.state != "pending" or followup.popup_completed_at:
+        if (
+            followup.state != "pending"
+            or followup.popup_completed_at
+            or followup.ended_at
+            > fields.Datetime.now()
+            - timedelta(minutes=self.policy_id.pending_sla_minutes)
+        ):
             return
         self._create_activity_once(
             _("Post-call follow-up is overdue"),

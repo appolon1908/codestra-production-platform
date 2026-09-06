@@ -155,6 +155,33 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
         followup.invalidate_recordset()
         self.assertFalse(followup.automation_missed_callback_at)
 
+        followup._write_from_workflow(
+            {"callback_at": fields.Datetime.now() - timedelta(minutes=30)}
+        )
+        self.assertEqual(Job._cron_enqueue_due_jobs(company_ids=[self.company.id]), 1)
+        self.assertEqual(
+            Job.search_count(
+                [("followup_id", "=", followup.id), ("job_type", "=", "missed_callback")]
+            ),
+            2,
+        )
+
+    def test_pending_sla_job_rechecks_current_policy_deadline(self):
+        followup = self._register(
+            "automation-pending-policy-change",
+            fields.Datetime.now() - timedelta(minutes=20),
+        )
+        Job = self.env["codestra.crm.call.followup.job"]
+        self.assertEqual(Job._cron_enqueue_due_jobs(company_ids=[self.company.id]), 1)
+        self.policy.pending_sla_minutes = 60
+
+        self.assertEqual(Job._cron_process_jobs(), 1)
+        job = Job.search([("followup_id", "=", followup.id)], limit=1)
+        self.assertEqual(job.state, "done")
+        self.assertFalse(job.activity_id)
+        followup.invalidate_recordset()
+        self.assertFalse(followup.automation_pending_sla_at)
+
     def test_reminder_health_repairs_missing_alarms(self):
         followup = self._register("automation-reminder-health")
         callback_at = fields.Datetime.now() + timedelta(hours=3)

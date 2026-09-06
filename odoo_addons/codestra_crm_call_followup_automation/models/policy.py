@@ -85,10 +85,14 @@ class CodestraCrmCallFollowupPolicy(models.Model):
             "codestra_crm_call_followup.group_call_followup_manager"
         ):
             raise AccessError(_("Call follow-up manager access is required."))
+        self.check_access("read")
+        company_ids = self.mapped("company_id").ids
         created = self.env["codestra.crm.call.followup.job"]._cron_enqueue_due_jobs(
-            company_ids=self.mapped("company_id").ids
+            company_ids=company_ids
         )
-        processed = self.env["codestra.crm.call.followup.job"]._cron_process_jobs()
+        processed = self.env["codestra.crm.call.followup.job"]._cron_process_jobs(
+            company_ids=company_ids
+        )
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",

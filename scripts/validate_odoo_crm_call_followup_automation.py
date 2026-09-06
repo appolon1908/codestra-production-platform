@@ -201,6 +201,8 @@ def main() -> int:
         "callback_completed_at",
         "company_id = ANY(%s)",
         "callback_grace_minutes",
+        "pending_sla_minutes",
+        'fields.Datetime.to_string(followup.callback_at)',
     ):
         if token not in sla_source:
             errors.append(f"SLA automation is missing invariant: {token}")
