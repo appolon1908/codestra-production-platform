@@ -213,7 +213,7 @@ docker exec -i "$container" psql -U postgres -v ON_ERROR_STOP=1 <<'SQL' >/dev/nu
 CREATE ROLE keycloak LOGIN;
 CREATE ROLE keycloak_data_owner;
 CREATE ROLE codestra_monitoring;
-CREATE ROLE middleware_app LOGIN;
+CREATE ROLE middleware_app LOGIN PASSWORD :'rehearsal_password';
 CREATE ROLE middleware_data_owner;
 CREATE ROLE mw_event_gateway;
 CREATE ROLE mw_evidence_runner;
@@ -237,7 +237,7 @@ test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select pg_ha
 test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select pg_has_role('keycloak','keycloak_data_owner','MEMBER')")" = f
 test "$(docker exec "$container" psql -U postgres -d postgres -Atc "select rolcanlogin||'|'||rolsuper||'|'||rolbypassrls from pg_roles where rolname='mw_integration_api'")" = 'true|false|false'
 docker exec "$container" createdb -U postgres -O odoo_app codestra_odoo_restore
-docker exec "$container" createdb -U postgres -O middleware_data_owner codestra_middleware
+docker exec "$container" createdb -U postgres -O middleware_app codestra_middleware
 docker exec "$container" createdb -U postgres -O n8n_app codestra_n8n
 docker exec "$container" createdb -U postgres -O keycloak_data_owner keycloak
 
@@ -303,9 +303,12 @@ cmp "$work_dir/production-middleware-role-baseline.txt" "$work_dir/restored-midd
 # database to the release head before production is touched.  The credential is
 # disposable and mounted as a file, never placed in image metadata or evidence.
 middleware_database_url_file="$work_dir/middleware-database-url"
+middleware_migration_database_url_file="$work_dir/middleware-migration-database-url"
 printf 'postgresql+asyncpg://mw_integration_api:%s@postgres:5432/codestra_middleware\n' \
     "$(<"$rehearsal_password_file")" > "$middleware_database_url_file"
-chmod 0444 "$middleware_database_url_file"
+printf 'postgresql+asyncpg://middleware_app:%s@postgres:5432/codestra_middleware\n' \
+    "$(<"$rehearsal_password_file")" > "$middleware_migration_database_url_file"
+chmod 0444 "$middleware_database_url_file" "$middleware_migration_database_url_file"
 middleware_container_args=(
     --network "$network"
     --read-only
@@ -317,10 +320,16 @@ middleware_container_args=(
     -v "$middleware_database_url_file:/run/secrets/database_url:ro"
 )
 docker run --rm --name "$middleware_migrate_container" \
-    "${middleware_container_args[@]}" "$middleware_image" \
+    "${middleware_container_args[@]}" \
+    -e DATABASE_URL_FILE=/run/secrets/migration_database_url \
+    -v "$middleware_migration_database_url_file:/run/secrets/migration_database_url:ro" \
+    "$middleware_image" \
     -m alembic upgrade head > "$work_dir/middleware-alembic-upgrade.txt"
 docker run --rm --name "$middleware_current_container" \
-    "${middleware_container_args[@]}" "$middleware_image" \
+    "${middleware_container_args[@]}" \
+    -e DATABASE_URL_FILE=/run/secrets/migration_database_url \
+    -v "$middleware_migration_database_url_file:/run/secrets/migration_database_url:ro" \
+    "$middleware_image" \
     -m alembic current > "$work_dir/middleware-alembic-current.txt"
 middleware_database_head=$(awk 'NF {value=$1} END {print value}' "$work_dir/middleware-alembic-current.txt")
 test "$middleware_database_head" = "$middleware_required_head"
@@ -540,7 +549,7 @@ MIDDLEWARE_CANDIDATE_SOURCE_SHA=${middleware_source_sha}
 MIDDLEWARE_MIGRATION_HEAD=${middleware_database_head}
 MIDDLEWARE_SCHEMA_TABLE_COUNT=${middleware_schema_table_count}
 MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS
-MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api
+MIDDLEWARE_MIGRATION_IDENTITY=middleware_app
 MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS
 MIDDLEWARE_CANDIDATE_HEALTH_GATE=PASS
 MIDDLEWARE_CANDIDATE_READINESS_GATE=PASS

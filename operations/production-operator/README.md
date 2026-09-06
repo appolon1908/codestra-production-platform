@@ -45,12 +45,12 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `415919ec5c2cf9a77345db261fe4838ec6270fe1ad7f71ff93377705910b61e1` |
+| `codestra-production-operator` | `54d4b4ba37254910077dfa21292083c69a38af799563277b6052af533a4399d2` |
 | `codestra-production-forced-command` | `80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb` |
 | `codestra-production-operator.sudoers` | `aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `codestra-readiness-restore.override.conf` | `bbc8e4af977ae21b4faffd8c755ed1a0220aebb2796f10c90c94483be3eed06e` |
-| `codestra-isolated-restore-rehearsal.sh` | `68606e184cc12167ab7a9652d9453542e247db2d0ac0c08b32e98d0c3aaed645` |
+| `codestra-isolated-restore-rehearsal.sh` | `38cd3df757aec80f01053f431d5b00b31afbad1a0eb4b3a57c7f75df8d1f50c3` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
 
 The installer contains the pinned digests and verifies them before
@@ -159,7 +159,7 @@ atomic `LAST_SUCCESS` marker after checksum validation. The operator validates
 that restore result and requires it to bind the same backup stamp, immutable
 image digest, Middleware source SHA, schema tables, and Alembic head
 `0056_klyrow_delivery_events`. The migration runs as the production migration
-identity `mw_integration_api`, with the restored grant graph compared byte for
+identity `middleware_app`, while the runtime remains `mw_integration_api` and its restored grant graph is compared byte for
 byte to production, on an internal-only disposable network. The exact candidate
 then starts without a host port and must return healthy `/healthz` and
 database-online `/readyz` responses before production is touched.
