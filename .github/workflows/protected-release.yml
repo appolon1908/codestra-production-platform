@@ -155,8 +155,10 @@ jobs:
           docker pull "$MIDDLEWARE_IMAGE_REFERENCE"
           test "$(docker image inspect "$MIDDLEWARE_IMAGE_REFERENCE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$MIDDLEWARE_PROTECTED_SHA"
           mapfile -t migration_heads < <(
-            docker run --rm --network none --entrypoint python "$MIDDLEWARE_IMAGE_REFERENCE" \
-              -m alembic heads | awk '{print $1}'
+            docker run --rm --network none \
+              --volume "$PWD/tools/detect_alembic_head.py:/tmp/detect-alembic-head.py:ro" \
+              --entrypoint python "$MIDDLEWARE_IMAGE_REFERENCE" \
+              /tmp/detect-alembic-head.py /app/migrations/versions
           )
           test "${#migration_heads[@]}" -eq 1
           test "${migration_heads[0]}" = "$EXPECTED_MIGRATION_REVISION"
