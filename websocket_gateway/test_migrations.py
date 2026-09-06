@@ -24,6 +24,36 @@ def test_open_socket_rechecks_persisted_session_expiry() -> None:
     assert "session_expired_or_revoked" in source
 
 
+def test_open_socket_revalidates_middleware_authorization_fail_closed() -> None:
+    source = Path(__file__).with_name("app.py").read_text()
+    assert "/internal/v1/realtime/authorizations/revalidate" in source
+    assert "connection.delivery_allowed.clear()" in source
+    assert 'code = 1008 if authorization == "denied" else 1011' in source
+    assert 'next_revalidation = time.monotonic() + 30.0' in source
+
+
+def test_replay_is_watermarked_paginated_and_serialized_with_publication() -> None:
+    source = Path(__file__).with_name("app.py").read_text()
+    assert "delivery_lock = asyncio.Lock()" in source
+    assert source.count("async with delivery_lock:") == 2
+    assert "ordinal<=$2" in source
+    assert "ORDER BY ordinal LIMIT 1000" in source
+    assert "while after < watermark:" in source
+    assert source.index("connections[sid] = connection") < source.index("while after < watermark:")
+
+
+def test_duplicate_ticket_cleanup_requires_established_connection() -> None:
+    source = Path(__file__).with_name("app.py").read_text()
+    assert "established = False" in source
+    assert "if established and scope:" in source
+
+
+def test_session_schema_persists_revalidation_authority() -> None:
+    migration = (Path(__file__).with_name("migrations") / "0001_realtime_gateway.up.sql").read_text()
+    assert "realtime_role text NOT NULL" in migration
+    assert "authorization_epoch bigint NOT NULL" in migration
+
+
 def test_release_publication_serializes_by_version() -> None:
     workflow = (Path(__file__).parents[1] / ".github/workflows/websocket-6101-release.yml").read_text()
     assert "inputs.release_version || github.ref" in workflow

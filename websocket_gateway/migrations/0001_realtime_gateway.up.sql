@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS realtime_sessions (
   session_id uuid PRIMARY KEY, user_id text NOT NULL, tenant_id text NOT NULL,
   business_unit_id text NOT NULL, agent_id text NOT NULL, vicidial_user text NOT NULL,
   extension text NOT NULL, campaigns jsonb NOT NULL, created_at timestamptz NOT NULL,
+  realtime_role text NOT NULL CHECK (realtime_role IN ('telephony_agent','telephony_supervisor')),
+  authorization_epoch bigint NOT NULL CHECK (authorization_epoch >= 1),
   expires_at timestamptz NOT NULL, revoked_at timestamptz,
   active_connection boolean NOT NULL DEFAULT false
 );

@@ -63,7 +63,7 @@ def log_event(message: str, **fields: Any) -> None:
 class Settings:
     database_url = ""
     internal_token = ""
-    issuer = os.getenv("KEYCLOAK_ISSUER", "https://auth.codestra.agency/realms/codestra")
+    issuer = os.getenv("KEYCLOAK_ISSUER", "https://auth.codestra.co/realms/codestra")
     audience = os.getenv("KEYCLOAK_AUDIENCE", "codestra-agent-desktop")
     jwks_url = os.getenv("KEYCLOAK_JWKS_URL", "http://keycloak:8080/realms/codestra/protocol/openid-connect/certs")
     ws_url = os.getenv("PUBLIC_WS_URL", "wss://api.codestra.agency/ws/agent")
@@ -76,6 +76,11 @@ class Settings:
     nats_host = os.getenv("NATS_HOST", "host.docker.internal")
     nats_port = int(os.getenv("NATS_PORT", "4222"))
     event_source_health_url = os.getenv("INTERNAL_EVENT_SOURCE_HEALTH_URL", "http://middleware:8095/health")
+    authorization_url = os.getenv(
+        "INTERNAL_AUTHORIZATION_URL",
+        "http://middleware:8095/internal/v1/realtime/authorizations/revalidate",
+    )
+    authorization_timeout = min(5, max(1, int(os.getenv("AUTHORIZATION_TIMEOUT_SECONDS", "3"))))
 
 
 settings = Settings()
@@ -103,6 +108,8 @@ class Connection:
         self.scope = scope
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(settings.max_pending)
         self.sender: asyncio.Task[None] | None = None
+        self.delivery_allowed = asyncio.Event()
+        self.delivery_allowed.set()
 
     def allows(self, event: dict[str, Any]) -> bool:
         return (
@@ -117,6 +124,7 @@ class Connection:
         while True:
             item = await self.queue.get()
             try:
+                await self.delivery_allowed.wait()
                 async with asyncio.timeout(settings.write_timeout):
                     await self.websocket.send_json(item)
                 SENT.inc()
@@ -132,6 +140,7 @@ class Connection:
 
 
 connections: dict[str, Connection] = {}
+delivery_lock = asyncio.Lock()
 
 
 DATABASE_MIGRATION_HEAD = "0001_realtime_gateway"
@@ -189,6 +198,13 @@ def decode_access_token(request: Request) -> dict[str, Any]:
     required = ("tenant_id", "business_unit_id", "agent_id", "vicidial_user", "extension", "campaigns")
     if any(not claims.get(field) for field in required) or not isinstance(claims["campaigns"], list):
         raise HTTPException(403, "agent mapping claims incomplete")
+    if not isinstance(claims.get("authorization_epoch"), int) or claims["authorization_epoch"] < 1:
+        raise HTTPException(403, "authorization epoch missing")
+    claims["realtime_role"] = (
+        "telephony_supervisor"
+        if "realtime.supervisor.connect" in roles_of(claims)
+        else "telephony_agent"
+    )
     return claims
 
 
@@ -230,10 +246,12 @@ async def create_session(request: Request, claims: dict[str, Any] = Depends(deco
     session_expires = min(datetime.fromtimestamp(claims["exp"], timezone.utc), now() + timedelta(hours=8))
     async with request.app.state.pool.acquire() as connection, connection.transaction():
         await connection.execute("""INSERT INTO realtime_sessions
-          (session_id,user_id,tenant_id,business_unit_id,agent_id,vicidial_user,extension,campaigns,created_at,expires_at)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)""",
+          (session_id,user_id,tenant_id,business_unit_id,agent_id,vicidial_user,extension,campaigns,
+           realtime_role,authorization_epoch,created_at,expires_at)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12)""",
           session_id, claims["sub"], claims["tenant_id"], claims["business_unit_id"], claims["agent_id"],
-          claims["vicidial_user"], str(claims["extension"]), json.dumps(claims["campaigns"]), now(), session_expires)
+          claims["vicidial_user"], str(claims["extension"]), json.dumps(claims["campaigns"]),
+          claims["realtime_role"], claims["authorization_epoch"], now(), session_expires)
         await connection.execute("INSERT INTO realtime_tickets(ticket_hash,session_id,expires_at) VALUES($1,$2,$3)", ticket_hash, session_id, expires_at)
     log_event("realtime_session_issued", session_id=session_id, user_id=claims["sub"], agent_id=claims["agent_id"], tenant_id=claims["tenant_id"], result="issued")
     return {"session_id": str(session_id), "expires_at": expires_at.isoformat(), "ws_url": settings.ws_url, "ticket": raw_ticket}
@@ -263,23 +281,45 @@ async def consume_ticket(pool: asyncpg.Pool, ticket: str) -> dict[str, Any] | No
         return result
 
 
-async def replay(pool: asyncpg.Pool, scope: dict[str, Any], last_event_id: str | None) -> list[dict[str, Any]]:
+async def replay_bounds(
+    pool: asyncpg.Pool, scope: dict[str, Any], last_event_id: str | None
+) -> tuple[int, int, int]:
     after = 0
     if last_event_id:
-        value = await pool.fetchval("SELECT ordinal FROM realtime_events WHERE event_id=$1", last_event_id)
+        value = await pool.fetchval("""SELECT ordinal FROM realtime_events
+          WHERE event_id=$1 AND tenant_id=$2 AND business_unit_id=$3 AND user_id=$4
+            AND agent_id=$5 AND campaign_id=ANY($6::text[])""",
+          last_event_id, scope["tenant_id"], scope["business_unit_id"], scope["user_id"],
+          scope["agent_id"], scope["campaigns"])
+        if value is None:
+            raise ValueError("replay cursor is outside the authorized scope")
         after = int(value or 0)
-    rows = await pool.fetch("""SELECT event_id,schema_version,event_type AS type,correlation_id,occurred_at AS timestamp,
+    watermark = int(await pool.fetchval("SELECT COALESCE(MAX(ordinal), 0) FROM realtime_events") or 0)
+    count = int(await pool.fetchval("""SELECT count(*) FROM realtime_events
+      WHERE ordinal>$1 AND ordinal<=$2 AND tenant_id=$3 AND business_unit_id=$4
+        AND user_id=$5 AND agent_id=$6 AND campaign_id=ANY($7::text[])""",
+      after, watermark, scope["tenant_id"], scope["business_unit_id"], scope["user_id"],
+      scope["agent_id"], scope["campaigns"]) or 0)
+    return after, watermark, count
+
+
+async def replay_page(
+    pool: asyncpg.Pool, scope: dict[str, Any], after: int, watermark: int
+) -> list[tuple[int, dict[str, Any]]]:
+    rows = await pool.fetch("""SELECT ordinal,event_id,schema_version,event_type AS type,correlation_id,occurred_at AS timestamp,
       tenant_id,business_unit_id,campaign_id,user_id,agent_id,call_id,sequence,payload FROM realtime_events
-      WHERE ordinal>$1 AND tenant_id=$2 AND business_unit_id=$3 AND user_id=$4 AND agent_id=$5
-        AND campaign_id=ANY($6::text[]) ORDER BY ordinal LIMIT 1000""",
-      after, scope["tenant_id"], scope["business_unit_id"], scope["user_id"], scope["agent_id"], scope["campaigns"])
-    result = []
+      WHERE ordinal>$1 AND ordinal<=$2 AND tenant_id=$3 AND business_unit_id=$4 AND user_id=$5
+        AND agent_id=$6 AND campaign_id=ANY($7::text[]) ORDER BY ordinal LIMIT 1000""",
+      after, watermark, scope["tenant_id"], scope["business_unit_id"], scope["user_id"],
+      scope["agent_id"], scope["campaigns"])
+    result: list[tuple[int, dict[str, Any]]] = []
     for row in rows:
         document = dict(row)
+        ordinal = int(document.pop("ordinal"))
         if isinstance(document["payload"], str):
             document["payload"] = json.loads(document["payload"])
         document["timestamp"] = row["timestamp"].isoformat()
-        result.append(document)
+        result.append((ordinal, document))
     return result
 
 
@@ -291,6 +331,40 @@ async def session_is_active(pool: asyncpg.Pool, scope: dict[str, Any]) -> bool:
     ))
 
 
+async def revalidate_authorization(scope: dict[str, Any]) -> str:
+    """Return active, denied, or indeterminate from the middleware authority."""
+    headers = {
+        "Authorization": f"Bearer {settings.internal_token}",
+        "X-Correlation-ID": str(uuid.uuid4()),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=settings.authorization_timeout) as client:
+            for campaign_id in scope["campaigns"]:
+                response = await client.post(settings.authorization_url, headers=headers, json={
+                    "tenant_id": scope["tenant_id"],
+                    "campaign_id": campaign_id,
+                    "agent_id": scope["agent_id"],
+                    "role": scope["realtime_role"],
+                    "authorization_epoch": scope["authorization_epoch"],
+                })
+                if response.status_code in {401, 403, 410}:
+                    return "denied"
+                if response.status_code != 200:
+                    return "indeterminate"
+                status = response.json()
+                expires_at = datetime.fromisoformat(str(status.get("expires_at", "")).replace("Z", "+00:00"))
+                if (
+                    status.get("active") is not True
+                    or status.get("authorization_epoch") != scope["authorization_epoch"]
+                    or expires_at <= now()
+                    or not 1 <= int(status.get("revalidate_after_seconds", 0)) <= 30
+                ):
+                    return "denied"
+    except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+        return "indeterminate"
+    return "active"
+
+
 @app.websocket("/ws/agent")
 async def ws_agent(websocket: WebSocket) -> None:
     origin = websocket.headers.get("origin")
@@ -299,6 +373,7 @@ async def ws_agent(websocket: WebSocket) -> None:
     await websocket.accept()
     scope: dict[str, Any] | None = None
     connection: Connection | None = None
+    established = False
     try:
         try:
             frame = await asyncio.wait_for(websocket.receive_json(), settings.auth_timeout)
@@ -313,28 +388,59 @@ async def ws_agent(websocket: WebSocket) -> None:
             await websocket.close(code=4409); return
         sid = str(scope["session_id"])
         connection = Connection(websocket, scope)
-        connections[sid] = connection
-        connection.sender = asyncio.create_task(connection.send_loop())
-        ACTIVE.inc(); TOTAL.inc()
         last_event_id = frame.get("last_event_id")
-        missing = await replay(websocket.app.state.pool, scope, last_event_id) if last_event_id else []
+        try:
+            async with delivery_lock:
+                after, watermark, replay_count = await replay_bounds(
+                    websocket.app.state.pool, scope, last_event_id
+                ) if last_event_id else (0, 0, 0)
+                connections[sid] = connection
+                established = True
+                ACTIVE.inc(); TOTAL.inc()
+                await websocket.send_json({"type": "authenticated", "session_id": sid, "replayed": replay_count})
+                connection.sender = asyncio.create_task(connection.send_loop())
+                while after < watermark:
+                    page = await replay_page(websocket.app.state.pool, scope, after, watermark)
+                    if not page:
+                        break
+                    for ordinal, event in page:
+                        await asyncio.wait_for(
+                            connection.queue.put(event), timeout=settings.write_timeout * 2
+                        )
+                        REPLAYED.inc()
+                        after = ordinal
+        except ValueError:
+            await websocket.close(code=4403, reason="invalid_replay_cursor")
+            return
+        except asyncio.TimeoutError:
+            BACKPRESSURE.inc()
+            await websocket.close(code=4429, reason="replay_backpressure")
+            return
         if last_event_id:
             RECONNECTS.inc()
-        await websocket.send_json({"type": "authenticated", "session_id": sid, "replayed": len(missing)})
-        for event in missing:
-            await connection.queue.put(event); REPLAYED.inc()
+        next_revalidation = time.monotonic() + 30.0
         while True:
             remaining = (scope["expires_at"] - now()).total_seconds()
             if remaining <= 0:
                 await websocket.close(code=4401, reason="session_expired"); return
             try:
-                message = await asyncio.wait_for(
-                    websocket.receive_json(), timeout=min(30.0, remaining)
-                )
+                timeout = min(max(0.0, next_revalidation - time.monotonic()), remaining)
+                message = await asyncio.wait_for(websocket.receive_json(), timeout=timeout)
             except asyncio.TimeoutError:
                 if not await session_is_active(websocket.app.state.pool, scope):
                     await websocket.close(code=4401, reason="session_expired_or_revoked")
                     return
+                message = None
+            if time.monotonic() >= next_revalidation:
+                connection.delivery_allowed.clear()
+                authorization = await revalidate_authorization(scope)
+                if authorization != "active":
+                    code = 1008 if authorization == "denied" else 1011
+                    await websocket.close(code=code, reason=f"authorization_{authorization}")
+                    return
+                connection.delivery_allowed.set()
+                next_revalidation = time.monotonic() + 30.0
+            if message is None:
                 continue
             if message.get("type") == "pong":
                 continue
@@ -344,7 +450,7 @@ async def ws_agent(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        if scope:
+        if established and scope:
             await websocket.app.state.pool.execute("UPDATE realtime_sessions SET active_connection=false WHERE session_id=$1", scope["session_id"])
             connections.pop(str(scope["session_id"]), None)
             ACTIVE.dec()
@@ -364,23 +470,24 @@ async def publish_event(event: Event, request: Request) -> dict[str, Any]:
     encoded = json.dumps(event.payload, separators=(",", ":"))
     if len(encoded.encode()) > settings.max_message_size:
         raise HTTPException(413, "event payload too large")
-    row = await request.app.state.pool.fetchrow("""INSERT INTO realtime_events
+    async with delivery_lock:
+        row = await request.app.state.pool.fetchrow("""INSERT INTO realtime_events
       (event_id,schema_version,event_type,correlation_id,occurred_at,tenant_id,business_unit_id,campaign_id,user_id,agent_id,call_id,sequence,payload)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
       ON CONFLICT(event_id) DO NOTHING RETURNING ordinal""", event.event_id, event.schema_version, event.type,
       event.correlation_id, event.timestamp, event.tenant_id, event.business_unit_id, event.campaign_id,
-      event.user_id, event.agent_id, event.call_id, event.sequence, encoded)
-    if not row:
-        return {"accepted": True, "duplicate": True, "delivered": 0}
-    document = event.model_dump(mode="json")
-    delivered = 0
-    for active in tuple(connections.values()):
-        if not active.allows(document):
-            CROSS_SCOPE.inc(); continue
-        try:
-            active.queue.put_nowait(document); delivered += 1
-        except asyncio.QueueFull:
-            BACKPRESSURE.inc(); await active.websocket.close(code=4429)
+          event.user_id, event.agent_id, event.call_id, event.sequence, encoded)
+        if not row:
+            return {"accepted": True, "duplicate": True, "delivered": 0}
+        document = event.model_dump(mode="json")
+        delivered = 0
+        for active in tuple(connections.values()):
+            if not active.allows(document):
+                CROSS_SCOPE.inc(); continue
+            try:
+                active.queue.put_nowait(document); delivered += 1
+            except asyncio.QueueFull:
+                BACKPRESSURE.inc(); await active.websocket.close(code=4429)
     log_event("realtime_event_accepted", event_id=event.event_id, event_type=event.type, tenant_id=event.tenant_id, campaign_id=event.campaign_id, result="accepted", delivered=delivered)
     return {"accepted": True, "duplicate": False, "delivered": delivered}
 

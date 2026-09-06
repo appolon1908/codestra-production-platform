@@ -34,7 +34,7 @@ services:
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
       INTERNAL_TOKEN_FILE: /run/secrets/internal_token
-      KEYCLOAK_ISSUER: https://auth.codestra.agency/realms/codestra
+      KEYCLOAK_ISSUER: https://auth.codestra.co/realms/codestra
       KEYCLOAK_AUDIENCE: codestra-agent-desktop
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/codestra/protocol/openid-connect/certs
       PUBLIC_WS_URL: wss://api.codestra.agency/ws/agent
@@ -42,6 +42,8 @@ services:
       NATS_HOST: host.docker.internal
       NATS_PORT: "4222"
       INTERNAL_EVENT_SOURCE_HEALTH_URL: http://middleware:8095/health
+      INTERNAL_AUTHORIZATION_URL: http://middleware:8095/internal/v1/realtime/authorizations/revalidate
+      AUTHORIZATION_TIMEOUT_SECONDS: "3"
       TICKET_TTL_SECONDS: "45"
       WS_AUTH_TIMEOUT_SECONDS: "5"
       MAX_PENDING_MESSAGES: "100"
