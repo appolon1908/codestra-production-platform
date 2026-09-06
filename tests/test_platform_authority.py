@@ -68,6 +68,12 @@ def _release_manifest() -> dict:
             "rollback",
         )
     }
+    composition = json.loads(
+        (ROOT / "composition/runtime-composition.v1.json").read_text()
+    )
+    repositories = {
+        item["id"]: item["source_repository"] for item in composition["components"]
+    }
     return {
         "schema_version": "platform-release-manifest.v1",
         "release_id": "release-20260828",
@@ -84,7 +90,7 @@ def _release_manifest() -> dict:
         "services": [
             {
                 "service_id": service_id,
-                "repository": "appolon1908-hue/Middleware-",
+                "repository": repositories[service_id],
                 "git_sha": "b" * 40,
                 "image": {
                     "reference": f"ghcr.io/appolon1908-hue/{service_id}",
@@ -92,9 +98,7 @@ def _release_manifest() -> dict:
                 },
                 "service_manifest_sha256": sha,
             }
-            for service_id in json.loads(
-                (ROOT / "composition/runtime-composition.v1.json").read_text()
-            )["release_service_ids"]
+            for service_id in composition["release_service_ids"]
         ],
         "edge": {
             "caddy": {"path": "operations/caddy/Caddyfile", "sha256": sha},
@@ -142,6 +146,32 @@ def test_release_manifest_rejects_any_missing_deployed_service() -> None:
         ]
         with pytest.raises(ValidationError):
             Draft202012Validator(schema).validate(incomplete)
+
+
+def test_release_manifest_binds_each_service_to_its_authoritative_repository() -> None:
+    schema = json.loads((ROOT / "release/platform-release-manifest.v1.schema.json").read_text())
+    manifest = _release_manifest()
+    for index in range(len(manifest["services"])):
+        wrong = deepcopy(manifest)
+        wrong["services"][index]["repository"] = "appolon1908-hue/unrelated"
+        with pytest.raises(ValidationError):
+            Draft202012Validator(schema).validate(wrong)
+
+
+@pytest.mark.parametrize("field,path", [
+    ("contracts", "README.md"), ("runtime", "README.md"),
+])
+def test_release_manifest_requires_canonical_authority_paths(field, path) -> None:
+    schema = json.loads((ROOT / "release/platform-release-manifest.v1.schema.json").read_text())
+    manifest = _release_manifest()
+    manifest[field]["path"] = path
+    with pytest.raises(ValidationError):
+        Draft202012Validator(schema).validate(manifest)
+
+
+def test_canonical_caddy_root_imports_private_klyrow_listener() -> None:
+    root = (ROOT / "operations/caddy/Caddyfile").read_text()
+    assert "import klyrow-events.caddy" in root
 
 
 def test_production_acceptance_requires_staging_acceptance() -> None:
