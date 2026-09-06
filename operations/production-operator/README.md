@@ -49,10 +49,11 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 | `codestra-production-forced-command` | `80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb` |
 | `codestra-production-operator.sudoers` | `aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
-| `codestra-isolated-restore-rehearsal.sh` | `076bc8d33318561fff535f336300d072cd14beb9c756c253a8b1c6a30f3f34f4` |
+| `codestra-readiness-restore.override.conf` | `bbc8e4af977ae21b4faffd8c755ed1a0220aebb2796f10c90c94483be3eed06e` |
+| `codestra-isolated-restore-rehearsal.sh` | `572437fb273d07bfb07f5e1298cf9e29475d62bbb08ad038077f3dddfb818b9f` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
 
-The installer contains the five pinned digests and verifies them before
+The installer contains the pinned digests and verifies them before
 writing host files. The installer digest is published only after protected
 merge so it describes the immutable reviewed artifact rather than a draft.
 
@@ -70,6 +71,7 @@ merge so it describes the immutable reviewed artifact rather than a draft.
 | `/etc/codestra/production-operator/control-plane-archive.sha256` | `root:root` | `0644` | Exact protected control-plane archive digest |
 | `/etc/codestra/production-operator/installed.sha256` | `root:root` | `0600` | Installed-file checksum manifest |
 | `/opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh` | `root:root` | `0755` | Exact-backup, exact-image isolated restore and migration gate |
+| `/etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf` | `root:root` | `0644` | Binds the restore unit to the protected rehearsal script |
 | `/var/lib/codestra-production-operator` | `root:codestra-production-operator` | `0710` | Traversable operator home; contents remain non-listable and individually restricted |
 | `/var/lib/codestra-production-operator/.ssh` | operator user/group | `0700` | SSH key directory |
 | `/var/lib/codestra-production-operator/.ssh/authorized_keys` | operator user/group | `0600` | One caller-supplied ED25519 key with forced command |
