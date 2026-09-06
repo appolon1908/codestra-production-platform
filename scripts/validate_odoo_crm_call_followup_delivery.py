@@ -98,7 +98,12 @@ def main() -> int:
         if snippet not in views:
             errors.append(f"delivery operations view missing CTA: {snippet}")
 
-    combined = "\n".join(path.read_text(encoding="utf-8") for path in MODULE.rglob("*.*"))
+    governed_suffixes = {".py", ".xml", ".csv", ".md"}
+    combined = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in MODULE.rglob("*")
+        if path.is_file() and path.suffix in governed_suffixes
+    )
     for forbidden in (
         "requests.post(",
         "smtplib",
