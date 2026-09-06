@@ -3,10 +3,75 @@ import hashlib
 import hmac
 import json
 import os
+from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
 import uuid
+
+
+ROOT = Path(__file__).parents[1]
+
+
+class EmailResellerAdmissionTest(unittest.TestCase):
+    def run_admission(self, **overrides):
+        environment = {
+            "PATH": os.environ["PATH"],
+            "PYTHONPATH": str(ROOT),
+            "LIVE_SMS_DELIVERY": "false",
+            "LIVE_EMAIL_DELIVERY": "false",
+            "LIVE_PSTN_DIALING": "false",
+            **overrides,
+        }
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "email_reseller_service.admission",
+                sys.executable,
+                "-c",
+                "print('ADMISSION_EXEC=PASS')",
+            ],
+            env=environment,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+
+    def test_admission_executes_only_when_all_delivery_flags_are_disabled(self):
+        result = self.run_admission()
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "ADMISSION_EXEC=PASS")
+
+    def test_admission_rejects_enabled_or_missing_delivery_flags(self):
+        for flag in ("LIVE_SMS_DELIVERY", "LIVE_EMAIL_DELIVERY", "LIVE_PSTN_DIALING"):
+            with self.subTest(flag=flag, state="enabled"):
+                result = self.run_admission(**{flag: "true"})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"admission denied: {flag}", result.stdout)
+
+            with self.subTest(flag=flag, state="missing"):
+                environment = {
+                    "PATH": os.environ["PATH"],
+                    "PYTHONPATH": str(ROOT),
+                    "LIVE_SMS_DELIVERY": "false",
+                    "LIVE_EMAIL_DELIVERY": "false",
+                    "LIVE_PSTN_DIALING": "false",
+                }
+                environment.pop(flag)
+                result = subprocess.run(
+                    [sys.executable, "-m", "email_reseller_service.admission", sys.executable, "-c", "print('unexpected')"],
+                    env=environment,
+                    check=False,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"admission denied: {flag}", result.stdout)
 
 
 class EmailResellerTest(unittest.TestCase):
