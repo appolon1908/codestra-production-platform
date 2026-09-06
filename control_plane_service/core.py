@@ -544,6 +544,50 @@ class Store:
             sql+=" WHERE message_id=? AND tenant_id=?"; args.extend((message_id,tenant)); db.execute(sql,args)
         return True
 
+    def transition_leased_message(
+        self, message_id: str, tenant: str, lease_owner: str, lease_token: str,
+        status: str, raw_status: str, *, provider_message_id: str | None = None,
+        error_code: str | None = None,
+    ) -> bool:
+        """Commit a worker result and its event only while its lease is current."""
+        if status not in MESSAGE_STATES:
+            raise ControlPlaneError("invalid_message_status")
+        stamp = now_iso()
+        timestamp_col = {
+            "accepted": "accepted_at", "sent": "sent_at", "delivered": "delivered_at",
+            "failed": "failed_at", "rejected": "failed_at", "bounced": "failed_at",
+        }.get(status)
+        with self.connect() as db:
+            if not is_postgres():
+                db.raw.execute("BEGIN IMMEDIATE")
+            locking = " FOR UPDATE" if is_postgres() else ""
+            message = db.execute(
+                "SELECT * FROM messages WHERE message_id=? AND tenant_id=? "
+                "AND status='leased' AND lease_owner=? AND lease_token=?" + locking,
+                (message_id, tenant, lease_owner, lease_token),
+            ).fetchone()
+            if not message:
+                return False
+            sql = (
+                "UPDATE messages SET status=?,raw_provider_status=?,"
+                "provider_message_id=COALESCE(?,provider_message_id),provider_error_code=?,"
+                "lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,next_attempt=0"
+            )
+            args: list[Any] = [status, raw_status, provider_message_id, error_code]
+            if timestamp_col:
+                sql += f",{timestamp_col}=?"
+                args.append(stamp)
+            sql += " WHERE message_id=? AND tenant_id=? AND status='leased' AND lease_owner=? AND lease_token=?"
+            args.extend((message_id, tenant, lease_owner, lease_token))
+            if db.execute(sql, args).rowcount != 1:
+                return False
+            if not self._append_message_event(
+                db, message_id, tenant, f'{message["channel"]}.{status}', status,
+                raw_status, message["correlation_id"], None, None,
+            ):
+                raise ControlPlaneError("message_event_collision")
+        return True
+
     def cancel_message(self, message_id: str, tenant: str) -> dict[str, Any]:
         message=self.get_message(message_id,tenant)
         if message["status"] not in {"created","validated","queued"}: raise ControlPlaneError("message_not_cancellable")

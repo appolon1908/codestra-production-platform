@@ -98,7 +98,7 @@ def authorized_agent_membership(
                    JOIN cp_campaign c ON c.id=m.campaign_id
                    WHERE a.id=? AND c.id=? AND a.tenant_id=? AND c.tenant_id=?
                      AND m.tenant_id=? AND ai.system='KEYCLOAK'
-                     AND ai.external_id=? AND ai.active=1
+                     AND ai.external_id=? AND ai.active=?
                      AND a.desired_state='ACTIVE'
                      AND COALESCE(a.actual_state,a.desired_state)='ACTIVE'
                      AND c.desired_state='ACTIVE'
@@ -107,7 +107,8 @@ def authorized_agent_membership(
                      AND COALESCE(m.actual_state,m.desired_state)='ACTIVE'
                      AND m.sync_status='SYNCED' AND m.effective_until IS NULL
                    LIMIT 1""",
-                (agent_id, campaign_id, tenant_id, tenant_id, tenant_id, authenticated_subject),
+                (agent_id, campaign_id, tenant_id, tenant_id, tenant_id,
+                 authenticated_subject, True),
             ).fetchone()
         return bool(row)
     except Exception:

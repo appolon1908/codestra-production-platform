@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS automation_action_executions(
  action TEXT NOT NULL,request_hash TEXT NOT NULL,status TEXT NOT NULL,
  receipt TEXT NOT NULL,completed_at TEXT NOT NULL,
  PRIMARY KEY(tenant_id,event_id,workflow_key,action));
+CREATE UNIQUE INDEX IF NOT EXISTS automation_executions_orchestrator
+ ON automation_executions(execution_id) WHERE execution_id IS NOT NULL AND execution_id <> '';
 """
 
 
@@ -187,18 +189,21 @@ def execute_automation(store: Store, value: dict[str, Any], tenant: str) -> dict
         db.execute(
             """INSERT INTO automation_executions(
                  tenant_id,event_id,workflow_key,request_hash,status,approved_actions,
-                 correlation_id,started_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
+                 correlation_id,execution_id,started_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
             (tenant, event_id, workflow_key, request_hash, "RUNNING", _canonical(expected),
-             str(value.get("correlation_id")), stamp, stamp),
+             str(value.get("correlation_id")),
+             str(value.get("orchestration_execution_id") or ""), stamp, stamp),
         )
         row = db.execute(
-            """SELECT request_hash,status,approved_actions,started_at
+            """SELECT request_hash,status,approved_actions,execution_id,started_at
                FROM automation_executions
                WHERE tenant_id=? AND event_id=? AND workflow_key=?""",
             (tenant, event_id, workflow_key),
         ).fetchone()
     if not row or row["request_hash"] != request_hash:
+        raise ControlPlaneError("idempotency_conflict")
+    if row["execution_id"] != str(value.get("orchestration_execution_id") or ""):
         raise ControlPlaneError("idempotency_conflict")
     completed_actions = []
     for action in expected:
@@ -249,6 +254,23 @@ def record_execution_result(store: Store, value: dict[str, Any], tenant: str):
         raise ControlPlaneError("invalid_execution_result")
     if value["status"] not in {"COMPLETED", "FAILED", "RETRY_PENDING", "DEAD_LETTER"}:
         raise ControlPlaneError("invalid_execution_status")
+    value = dict(value)
+    if value["status"] != "COMPLETED":
+        with store.connect() as db:
+            execution = db.execute(
+                """SELECT tenant_id,event_id,workflow_key,correlation_id
+                   FROM automation_executions WHERE execution_id=?""",
+                (str(value["execution_id"]),),
+            ).fetchone()
+        if not execution:
+            raise ControlPlaneError("automation_execution_not_found")
+        if tenant not in {"", "unknown", execution["tenant_id"]}:
+            raise ControlPlaneError("cross_tenant_denied")
+        tenant = execution["tenant_id"]
+        value.update(
+            event_id=execution["event_id"], workflow_key=execution["workflow_key"],
+            correlation_id=execution["correlation_id"],
+        )
     with store.connect() as db:
         _ensure_embedded_schema(db)
         if value["status"] == "COMPLETED":
@@ -263,32 +285,13 @@ def record_execution_result(store: Store, value: dict[str, Any], tenant: str):
             reported_actions = [item.get("type") for item in value["actions"] if isinstance(item, dict)]
             if reported_actions != expected_actions:
                 raise ControlPlaneError("automation_action_result_mismatch")
-        if value["status"] != "COMPLETED":
-            stamp = now_iso()
-            failure_hash = "failure:" + hashlib.sha256(_canonical(value).encode()).hexdigest()
-            db.execute(
-                """INSERT INTO automation_executions(
-                     tenant_id,event_id,workflow_key,request_hash,status,approved_actions,
-                     correlation_id,execution_id,started_at,completed_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
-                (tenant, str(value["event_id"]), str(value["workflow_key"]),
-                 failure_hash,
-                 value["status"], "[]", str(value["correlation_id"]),
-                 str(value["execution_id"]), stamp, value["completed_at"], stamp),
-            )
-            prior = db.execute(
-                """SELECT request_hash FROM automation_executions
-                   WHERE tenant_id=? AND event_id=? AND workflow_key=?""",
-                (tenant, str(value["event_id"]), str(value["workflow_key"])),
-            ).fetchone()
-            if prior and str(prior["request_hash"]).startswith("failure:") and prior["request_hash"] != failure_hash:
-                raise ControlPlaneError("idempotency_conflict")
         changed = db.execute(
             """UPDATE automation_executions
                SET status=?,execution_id=?,completed_at=?,updated_at=?
-               WHERE tenant_id=? AND event_id=? AND workflow_key=?""",
+               WHERE tenant_id=? AND event_id=? AND workflow_key=? AND execution_id=?""",
             (value["status"], str(value["execution_id"]), value["completed_at"], now_iso(),
-             tenant, str(value["event_id"]), str(value["workflow_key"])),
+             tenant, str(value["event_id"]), str(value["workflow_key"]),
+             str(value["execution_id"])),
         ).rowcount
     if changed != 1:
         raise ControlPlaneError("automation_execution_not_found")

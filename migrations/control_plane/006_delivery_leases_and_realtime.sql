@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS public.automation_executions(
 );
 CREATE INDEX IF NOT EXISTS automation_executions_status
   ON public.automation_executions(tenant_id,status,updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS automation_executions_orchestrator
+  ON public.automation_executions(execution_id)
+  WHERE execution_id IS NOT NULL AND execution_id <> '';
 
 CREATE TABLE IF NOT EXISTS public.automation_action_executions(
   tenant_id text NOT NULL,

@@ -13,7 +13,8 @@ def envelope():
             "correlation_id":"corr-1", "idempotency_key":"idem-1", "tenant_id":"COD",
             "business_unit_id":"COD", "campaign_id":"TEST_SYN", "entity_type":"crm.lead",
             "entity_id":"lead-1", "actor_type":"SYSTEM", "actor_id":"middleware",
-            "occurred_at":"2026-08-22T00:00:00Z", "automation_key":"test_syn_followup", "payload":{}}
+            "occurred_at":"2026-08-22T00:00:00Z", "automation_key":"test_syn_followup",
+            "orchestration_execution_id":"exec-1", "payload":{}}
 
 
 def test_policy_is_tenant_bound_and_fail_closed_for_communications(tmp_path, monkeypatch):
@@ -96,6 +97,32 @@ def test_missing_action_handler_cannot_be_reported_complete(tmp_path):
         assert str(exc) == "automation_actions_incomplete"
     else:
         raise AssertionError("incomplete business action was reported complete")
+
+
+def test_failure_callback_resolves_original_identity_from_n8n_execution(tmp_path):
+    store = Store(str(tmp_path / "control-plane.db"))
+    authorized = authorize_automation(store, envelope(), "COD")
+    try:
+        execute_automation(store, authorized, "COD")
+    except ControlPlaneError as exc:
+        assert "automation_action_handler_missing" in str(exc)
+    failure = {
+        "event_id":"resolve-from-execution", "correlation_id":"resolve-from-execution",
+        "idempotency_key":"n8n-failure:exec-1", "workflow_key":"resolve-from-execution",
+        "execution_id":"exec-1", "status":"FAILED", "actions":[],
+        "completed_at":"2026-08-22T00:00:01Z",
+    }
+    result = record_execution_result(store, failure, "unknown")
+    assert result.event_id == "n8n-result-evt-1"
+    with store.connect() as db:
+        row = db.execute(
+            "SELECT status,event_id,workflow_key,correlation_id FROM automation_executions "
+            "WHERE execution_id='exec-1'"
+        ).fetchone()
+    assert dict(row) == {
+        "status":"FAILED", "event_id":"evt-1", "workflow_key":"test_syn_followup",
+        "correlation_id":"corr-1",
+    }
 
 
 def test_cod_web_out_email_requires_exact_contact_policy(tmp_path, monkeypatch):

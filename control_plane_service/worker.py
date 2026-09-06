@@ -181,24 +181,31 @@ def dispatch_messages() -> int:
                     and not current.preference_allows(
                         message["tenant_id"], message["customer_id"], message["channel"]
                     )):
-                current.transition_message(
-                    message["message_id"], message["tenant_id"], "blocked", "consent_revoked"
-                )
-                release_message_lease(current, message, "blocked", error="consent_revoked")
+                if not current.transition_leased_message(
+                    message["message_id"], message["tenant_id"], WORKER_ID,
+                    message["lease_token"], "blocked", "consent_revoked",
+                    error_code="consent_revoked",
+                ):
+                    raise RuntimeError("message_lease_lost")
                 processed += 1
                 continue
             if current.is_suppressed(
                 message["tenant_id"], message["channel"], message["normalized_destination"]
             ):
-                current.transition_message(
-                    message["message_id"], message["tenant_id"], "blocked", "destination_suppressed"
-                )
-                release_message_lease(current, message, "blocked", error="destination_suppressed")
+                if not current.transition_leased_message(
+                    message["message_id"], message["tenant_id"], WORKER_ID,
+                    message["lease_token"], "blocked", "destination_suppressed",
+                    error_code="destination_suppressed",
+                ):
+                    raise RuntimeError("message_lease_lost")
                 processed += 1
                 continue
             result = submit(message)
-            current.transition_message(message["message_id"], message["tenant_id"], result.status, result.raw_status, provider_message_id=result.provider_message_id)
-            if not release_message_lease(current, message, result.status):
+            if not current.transition_leased_message(
+                message["message_id"], message["tenant_id"], WORKER_ID,
+                message["lease_token"], result.status, result.raw_status,
+                provider_message_id=result.provider_message_id,
+            ):
                 raise RuntimeError("message_lease_lost")
             current.circuit_result(message["provider"], True)
         except Exception as exc:

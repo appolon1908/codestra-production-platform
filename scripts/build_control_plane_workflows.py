@@ -28,7 +28,7 @@ for(const key of ['event_id','correlation_id','tenant_id','idempotency_key']) {
   if(!b[key] && !(key==='event_id' && h['x-event-id'])) throw new Error(key+'_required');
 }
 const eventId=String(b.event_id||h['x-event-id']);
-return [{json:{...b,event_id:eventId,customer_id:String(b.customer_id||b.entity_id||eventId),workflow_key:WORKFLOW,actor_type:'SYSTEM',actor_id:'n8n',schema_version:'1',business_unit_id:String(b.business_unit_id||'default'),campaign_id:String(b.campaign_id||'none'),entity_type:String(b.entity_type||'event'),entity_id:String(b.entity_id||eventId),automation_key:String(b.automation_key||WORKFLOW),payload:b.payload||{}}}];
+return [{json:{...b,event_id:eventId,customer_id:String(b.customer_id||b.entity_id||eventId),workflow_key:WORKFLOW,orchestration_execution_id:String($execution.id),actor_type:'SYSTEM',actor_id:'n8n',schema_version:'1',business_unit_id:String(b.business_unit_id||'default'),campaign_id:String(b.campaign_id||'none'),entity_type:String(b.entity_type||'event'),entity_id:String(b.entity_id||eventId),automation_key:String(b.automation_key||WORKFLOW),payload:b.payload||{}}}];
 """.replace("EVENT_TYPE", json.dumps(event_type)).replace("WORKFLOW", json.dumps(name))
 
 
@@ -85,7 +85,7 @@ def error_workflow() -> dict:
         "nodes": [
             {"id": "cp-90-trigger", "name": "Workflow Error", "type": "n8n-nodes-base.errorTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {}},
             {"id": "cp-90-structure", "name": "Structure failure", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [280, 0],
-             "parameters": {"jsCode": "const e=$json.execution||{}; const w=$json.workflow||{}; return [{json:{ok:false,status:'FAILED',workflow_key:w.name||'unknown',execution_id:String(e.id||$execution.id),event_id:String($json.event_id||e.id||'unknown'),correlation_id:String($json.correlation_id||e.id||'unknown'),idempotency_key:'n8n-failure:'+String(e.id||$execution.id),tenant_id:String($json.tenant_id||'unknown'),actions:[],completed_at:new Date().toISOString(),error:{name:e.error?.name||'WorkflowError',message:e.error?.message||'workflow_failed'}}}];"}},
+             "parameters": {"jsCode": "const e=$json.execution||{}; const executionId=String(e.id||$execution.id); return [{json:{ok:false,status:'FAILED',workflow_key:'resolve-from-execution',execution_id:executionId,event_id:'resolve-from-execution',correlation_id:'resolve-from-execution',idempotency_key:'n8n-failure:'+executionId,tenant_id:String($json.tenant_id||'unknown'),actions:[],completed_at:new Date().toISOString(),error:{name:e.error?.name||'WorkflowError',message:e.error?.message||'workflow_failed'}}}];"}},
             middleware_request("cp-90-callback", "Record governed failure", "/api/v1/automation/results", "={{JSON.stringify($json)}}", [560, 0]),
         ],
         "connections": {
