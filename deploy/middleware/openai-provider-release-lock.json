@@ -25,7 +25,7 @@
   "compose_file": "deploy/middleware/compose.openai-provider.yaml",
   "compose_profile": "openai-provider",
   "container_user": "10001:10001",
-  "image": "ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b",
+  "image": "ghcr.io/appolon1908-hue/codestra-middleware@sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a",
   "protected_secret_mounts": {
     "api_key_container_path": "/run/secrets/openai/api-key",
     "api_key_host_path": "/etc/codestra/secrets/openai-provider/api-key",
@@ -36,7 +36,7 @@
     "safety_salt_container_path": "/run/secrets/openai/safety-salt",
     "safety_salt_host_path": "/etc/codestra/secrets/openai-provider/safety-salt"
   },
-  "repository": "https://github.com/Codestra-SRL/codestra-middleware",
+  "repository": "https://github.com/appolon1908-hue/Middleware-",
   "required_database_head": "0056_klyrow_delivery_events",
   "rollback": {
     "active_lease_must_be_zero": true,
@@ -46,7 +46,7 @@
   },
   "schema_version": 1,
   "service": "middleware-openai-provider-worker",
-  "source_revision": "f199b6c40f4e467979e9a8b255a0e686321a182d",
+  "source_revision": "63b6c0c8bca5168a1178895bd12858d0b1e8086e",
   "worker_identity": {
     "max_concurrency": 1,
     "project_allowlist": [

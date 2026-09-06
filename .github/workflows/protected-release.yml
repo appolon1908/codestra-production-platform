@@ -19,6 +19,8 @@ jobs:
     if: github.ref == 'refs/heads/release/production-activation'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      EXPECTED_MIGRATION_REVISION: 0056_klyrow_delivery_events
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -90,10 +92,8 @@ jobs:
       - name: Download and verify canonical Middleware signed evidence
         env:
           GH_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN }}
-          MIDDLEWARE_REPOSITORY: Codestra-SRL/codestra-middleware
-          # GitHub's immutable digest for the exact artifact named by
-          # config/production-release-tuple.json (run 32919188388).
-          EXPECTED_ARTIFACT_DIGEST: sha256:64bdd090513a6edea513dc0215a1d4d4c8fb5f8935c6eb56b76d3f45ce7a8da9
+          MIDDLEWARE_REPOSITORY: appolon1908-hue/Middleware-
+          EXPECTED_ARTIFACT_DIGEST: sha256:e3af11436039c9812d0e0af4e82a5b3efdfd1736c300f6a6c6f1cfb7ff103e9f
         run: |
           set -Eeuo pipefail
           test -n "${GH_TOKEN}"
@@ -122,13 +122,13 @@ jobs:
           source middleware-release-verified.env
           test "$MIDDLEWARE_PROTECTED_SHA" = "$MIDDLEWARE_EXPECTED_SOURCE_SHA"
           test "$MIDDLEWARE_IMAGE_DIGEST" = "$MIDDLEWARE_EXPECTED_IMAGE_DIGEST"
+          test "$MIDDLEWARE_MIGRATION_REVISION" = "$EXPECTED_MIGRATION_REVISION"
 
       - name: Verify image signer, provenance, SBOM, source label, and migration head
         env:
           GH_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN }}
-          SIGNER_IDENTITY: https://github.com/Codestra-SRL/codestra-middleware/.github/workflows/exact-main-production-release.yml@refs/heads/main
+          SIGNER_IDENTITY: https://github.com/appolon1908-hue/Middleware-/.github/workflows/release.yml@refs/heads/main
           OIDC_ISSUER: https://token.actions.githubusercontent.com
-          EXPECTED_MIGRATION_REVISION: 0056_klyrow_delivery_events
         run: |
           set -Eeuo pipefail
           test -n "$GH_TOKEN"
@@ -141,28 +141,28 @@ jobs:
             --certificate-identity "$SIGNER_IDENTITY" \
             --certificate-oidc-issuer "$OIDC_ISSUER" \
             "$MIDDLEWARE_IMAGE_REFERENCE" > middleware-provenance-verification.json
-          "${RUNNER_TEMP}/cosign" verify-attestation --type cyclonedx \
+          "${RUNNER_TEMP}/cosign" verify-attestation --type spdxjson \
             --certificate-identity "$SIGNER_IDENTITY" \
             --certificate-oidc-issuer "$OIDC_ISSUER" \
             "$MIDDLEWARE_IMAGE_REFERENCE" > middleware-sbom-verification.json
-          python tools/verify_attestation_predicate.py \
-            --verification middleware-sbom-verification.json \
-            --predicate middleware-release/sbom.cdx.json
-          python tools/verify_slsa_provenance_attestation.py \
-            --verification middleware-provenance-verification.json \
-            --provenance middleware-release/provenance.json \
-            --release-env middleware-release/RELEASE.env \
-            --sbom middleware-release/sbom.cdx.json \
-            --trivy middleware-release/trivy.json \
-            --grype middleware-release/grype-vex.json
+          python tools/verify_signed_release_attestations.py \
+            --manifest middleware-release/release-manifest.v1.json \
+            --sbom middleware-release/middleware.spdx.json \
+            --provenance-verification middleware-provenance-verification.json \
+            --sbom-verification middleware-sbom-verification.json \
+            --expected-source "$MIDDLEWARE_PROTECTED_SHA" \
+            --expected-digest "$MIDDLEWARE_IMAGE_DIGEST"
           docker pull "$MIDDLEWARE_IMAGE_REFERENCE"
           test "$(docker image inspect "$MIDDLEWARE_IMAGE_REFERENCE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$MIDDLEWARE_PROTECTED_SHA"
           mapfile -t migration_heads < <(
-            docker run --rm --network none "$MIDDLEWARE_IMAGE_REFERENCE" alembic heads |
-              awk 'NF {print $1}'
+            docker run --rm --network none \
+              --volume "$PWD/tools/detect_alembic_head.py:/tmp/detect-alembic-head.py:ro" \
+              --entrypoint python "$MIDDLEWARE_IMAGE_REFERENCE" \
+              /tmp/detect-alembic-head.py /app/migrations/versions
           )
           test "${#migration_heads[@]}" -eq 1
           test "${migration_heads[0]}" = "$EXPECTED_MIGRATION_REVISION"
+          test "${migration_heads[0]}" = "$MIDDLEWARE_MIGRATION_REVISION"
           printf 'MIDDLEWARE_MIGRATION_REVISION=%s\n' "${migration_heads[0]}" >> "$GITHUB_ENV"
 
       - name: Build deterministic release, SBOM and provenance
@@ -185,20 +185,19 @@ jobs:
           install -m 0644 middleware-signature-verification.json dist/middleware-signature-verification.json
           install -m 0644 middleware-provenance-verification.json dist/middleware-provenance-verification.json
           install -m 0644 middleware-sbom-verification.json dist/middleware-sbom-verification.json
-          install -m 0644 middleware-release/RELEASE.env dist/middleware-RELEASE.env
-          install -m 0644 middleware-release/sbom.cdx.json dist/middleware-sbom.cdx.json
-          install -m 0644 middleware-release/provenance.json dist/middleware-provenance.json
-          install -m 0644 middleware-release/trivy.json dist/middleware-trivy.json
-          install -m 0644 middleware-release/grype-vex.json dist/middleware-grype-vex.json
-          install -m 0644 middleware-release/vex/openvex.json dist/middleware-openvex.json
-          install -m 0644 middleware-release/SHA256SUMS dist/middleware-source-SHA256SUMS
+          install -m 0644 middleware-release/release-manifest.v1.json dist/middleware-release-manifest.v1.json
+          install -m 0644 middleware-release/release-manifest.v1.sigstore.json dist/middleware-release-manifest.v1.sigstore.json
+          install -m 0644 middleware-release/middleware.spdx.json dist/middleware.spdx.json
+          install -m 0644 middleware-release/middleware.grype.json dist/middleware.grype.json
+          install -m 0644 middleware-derived-provenance.json dist/middleware-derived-provenance.json
+          install -m 0644 middleware-derived-openvex.json dist/middleware-derived-openvex.json
           (cd dist && sha256sum \
             middleware-signature-verification.json \
             middleware-provenance-verification.json \
             middleware-sbom-verification.json \
-            middleware-RELEASE.env middleware-sbom.cdx.json \
-            middleware-provenance.json middleware-openvex.json middleware-trivy.json \
-            middleware-grype-vex.json middleware-source-SHA256SUMS \
+            middleware-release-manifest.v1.json middleware-release-manifest.v1.sigstore.json \
+            middleware.spdx.json middleware.grype.json \
+            middleware-derived-provenance.json middleware-derived-openvex.json \
             >> manifest.sha256)
           (cd dist && sha256sum --check manifest.sha256)
           python - <<'PY'
@@ -223,6 +222,8 @@ jobs:
           install -m 0700 -d "${RUNNER_TEMP}/release-signing"
           printf '%s\n' "${SIGNING_KEY}" > "${RUNNER_TEMP}/release-signing/key"
           chmod 0600 "${RUNNER_TEMP}/release-signing/key"
+          trap 'rm -f "${RUNNER_TEMP}/release-signing/key"' EXIT
+          test "$(printf '%s\n' "${SIGNING_PUBLIC_KEY}" | awk '{print $1}')" = ssh-ed25519
           printf 'codestra-release %s\n' "${SIGNING_PUBLIC_KEY}" > "${RUNNER_TEMP}/release-signing/allowed_signers"
           ssh-keygen -Y sign -q -f "${RUNNER_TEMP}/release-signing/key" -n codestra-release dist/manifest.sha256
           ssh-keygen -Y verify -q \

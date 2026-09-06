@@ -42,14 +42,6 @@
       "enabled": true
     },
     {
-      "repository": "Codestra-SRL/codestra-middleware",
-      "source_sha": "0000000000000000000000000000000000000000",
-      "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "images": [],
-      "previous_images": [],
-      "enabled": true
-    },
-    {
       "repository": "appolon1908-hue/Middleware-",
       "source_sha": "0000000000000000000000000000000000000000",
       "contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",

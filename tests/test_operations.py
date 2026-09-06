@@ -46,6 +46,11 @@ class BackupOperationsTests(unittest.TestCase):
             / "codestra-isolated-restore-rehearsal.sh"
         ).read_text()
         self.assertIn("CREATE ROLE middleware_data_owner;", source)
+        self.assertIn("grep -qx 'mw_integration_api|true|false|false|false'", source)
+        self.assertIn(
+            "CREATE ROLE mw_integration_api LOGIN NOINHERIT PASSWORD :'rehearsal_password';",
+            source,
+        )
         self.assertIn("CREATE ROLE keycloak_data_owner;", source)
         self.assertNotIn("GRANT middleware_data_owner TO middleware_app;", source)
         self.assertNotIn("GRANT keycloak_data_owner TO keycloak;", source)
@@ -110,14 +115,20 @@ class BackupOperationsTests(unittest.TestCase):
             / "codestra-isolated-restore-rehearsal.sh"
         ).read_text()
         self.assertIn(
-            "middleware_source_sha=f199b6c40f4e467979e9a8b255a0e686321a182d",
+            "middleware_source_sha=63b6c0c8bca5168a1178895bd12858d0b1e8086e",
+            source,
+        )
+        self.assertIn(
+            "middleware_repository=ghcr.io/appolon1908-hue/codestra-middleware",
             source,
         )
         self.assertIn("middleware_required_head=0056_klyrow_delivery_events", source)
         self.assertIn('middleware_image="${middleware_repository}@${release_values[0]}"', source)
         self.assertIn('"${middleware_container_args[@]}" "$middleware_image"', source)
-        self.assertIn("alembic upgrade head", source)
-        self.assertIn("alembic current", source)
+        self.assertIn("-m alembic upgrade head", source)
+        self.assertIn("-m alembic current", source)
+        self.assertIn('"$middleware_image" -m app.entrypoints.integration_api', source)
+        self.assertIn('"$middleware_image" -c', source)
         self.assertIn("MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS", source)
         self.assertIn("MIDDLEWARE_SCHEMA_TABLE_COUNT=${middleware_schema_table_count}", source)
         self.assertIn(
@@ -126,7 +137,7 @@ class BackupOperationsTests(unittest.TestCase):
         )
         self.assertIn("MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api", source)
         self.assertIn("MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS", source)
-        self.assertIn("python -m app.entrypoints.integration_api", source)
+        self.assertIn('"$middleware_image" -m app.entrypoints.integration_api', source)
         self.assertIn('urlopen("http://middleware-candidate:8095/healthz"', source)
         self.assertIn('urlopen("http://middleware-candidate:8095/readyz"', source)
         self.assertIn("MIDDLEWARE_CANDIDATE_DATABASE_READINESS=PASS", source)

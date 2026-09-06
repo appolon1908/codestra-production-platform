@@ -6,7 +6,7 @@ def test_dlq_worker_is_deployable_and_fail_closed() -> None:
     environment = Path("config/jetstream-dlq-worker.env.example").read_text()
     assert "${MIDDLEWARE_IMAGE} python -m app.entrypoints.jetstream_dlq_worker" in unit
     assert "tools/run_jetstream_dlq_worker.py" not in unit
-    assert "ghcr.io/codestra-srl/codestra-middleware@sha256:REQUIRED" in environment
+    assert "ghcr.io/appolon1908-hue/codestra-middleware@sha256:REQUIRED" in environment
     assert "--read-only" in unit
     assert "--cap-drop ALL" in unit
     assert "--mount type=bind,src=/run/codestra/nats" in unit
