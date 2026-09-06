@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${GHCR_TOKEN}"
-          subject="ghcr.io/codestra-srl/codestra-middleware@${IMAGE_DIGEST}"
+          subject="ghcr.io/appolon1908-hue/codestra-middleware@${IMAGE_DIGEST}"
           printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io --username appolon1908-hue --password-stdin >/dev/null
           trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
           docker pull --quiet "${subject}" >/dev/null

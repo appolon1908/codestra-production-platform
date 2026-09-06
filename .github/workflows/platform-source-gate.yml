@@ -14,12 +14,14 @@ on:
       - "operations/**"
       - "orbit/**"
       - "evidence/**"
+      - "reports/**"
       - "production-green-evidence/**"
       - "config/**"
       - "deploy/**"
       - "docs/**"
       - "n8n/**"
       - "odoo_addons/**"
+      - "contracts/telephony/**"
       - "schemas/**"
       - "scripts/**"
       - "tel_events/**"
@@ -74,6 +76,14 @@ jobs:
           echo \
             "f8a329b1808331c53ca6d5e02c9c002de3bd10437b3061a26d030e594a199b9c  scripts/vicidial_sync.py.candidate" |
             sha256sum --check -
+
+      - name: Verify canonical calling contract in required validation
+        shell: bash
+        run: |
+          actual="$(scripts/telephony-contract-digest.sh)"
+          expected="$(jq -r .canonical_digest evidence/calling/CALLING-CONTRACT-DIGESTS.json)"
+          test "$actual" = "$expected"
+          python -m pytest -q tests/test_calling_contract_digest.py tests/test_canonical_caddy_api_contract.py tests/test_calling_contract_remediation.py
 
       - name: Run complete clean-checkout platform suite
         run: |

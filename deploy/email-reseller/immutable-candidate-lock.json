@@ -1,0 +1,41 @@
+{
+  "schema_version": "codestra.email-reseller-immutable-candidate-lock.v1",
+  "image": "ghcr.io/appolon1908-hue/email-reseller@sha256:fe7a85a9bf71ff6c343743db465681c111c23e44dc8997e67c03ba849ce19b8c",
+  "image_digest": "sha256:fe7a85a9bf71ff6c343743db465681c111c23e44dc8997e67c03ba849ce19b8c",
+  "source_sha": "e3bdb3dc202a6e9a26f49bb2b52495079996ec91",
+  "build_timestamp": "2026-09-06T19:45:17.763859543Z",
+  "workflow_run": {
+    "repository": "appolon1908-hue/codestra-production-platform",
+    "workflow_identity": "https://github.com/appolon1908-hue/codestra-production-platform/.github/workflows/immutable-candidate-build.yml@refs/heads/release/production-activation",
+    "oidc_issuer": "https://token.actions.githubusercontent.com",
+    "run_id": 34055841105,
+    "run_attempt": 1,
+    "artifact_id": 9995939653,
+    "artifact_name": "candidate-email-reseller-e3bdb3dc202a6e9a26f49bb2b52495079996ec91-34055841105-1",
+    "artifact_url": "https://github.com/appolon1908-hue/codestra-production-platform/actions/runs/34055841105/artifacts/9995939653"
+  },
+  "evidence": {
+    "candidate": {
+      "status": "PASS",
+      "sha256": "076f079817b8dd1dd5b2bff24cb17e19c198ae8d98dc5c774ab5b8756284490a"
+    },
+    "signature": {
+      "status": "PASS",
+      "sha256": "7b36de7da60a0a8e83adb66dac98f1140e874f74fa83e70bef7e49d594ef3988"
+    },
+    "provenance": {
+      "status": "PASS",
+      "sha256": "35193c520ed6493b2c38673a44aadff6368ba6e706e6d2a2ba609377bcb77a05"
+    },
+    "sbom": {
+      "status": "PASS",
+      "sha256": "8f5444fc8c6177d960f9b6e51d343de47ae08375519d8fb6b99980c56128e80c"
+    },
+    "labels": {
+      "status": "PASS",
+      "sha256": "ad7cae3e0de71e9050314ae2dec4bee25f20ed1f5bb68fffc7811aa1caff59c9"
+    }
+  },
+  "deployment_authorized": false,
+  "production_certified": false
+}

@@ -1,7 +1,7 @@
 {
   "captured_at": "2026-08-26T03:00:00Z",
   "layers": [
-    {"order": 1, "path": "/opt/codestra/compose/compose.yaml", "sha256": "4798c36ba65c2274b634b9b0997bfbf86bbccab53574cb3b64fd9897fa472dcb", "classification": "BASE_PRODUCTION", "purpose": "base Odoo, PostgreSQL, Redis, middleware, networks, volumes and secrets"},
+    {"order": 1, "path": "/opt/codestra/compose/compose.yaml", "sha256": "d6a7f2d3eeda3fa9e0709caa509f74510d1a552f21148754d8011928a7e3cd2d", "classification": "BASE_PRODUCTION", "purpose": "base Odoo, PostgreSQL, Redis, middleware, networks, volumes and secrets"},
     {"order": 2, "path": "/opt/codestra/compose/compose.middleware-runtime.yaml", "sha256": "d6e2ba0372ecc8f7bc6e7a2bc0fb124bb71159664ab6110cc7478aa63a6a2906", "classification": "FEATURE_OVERRIDE", "purpose": "middleware image authority; no Odoo semantic change"},
     {"order": 3, "path": "/opt/codestra/compose/compose.phase-n2-activation.yaml", "sha256": "b8923298d8cd8216a4129ac7b3ef9e9a9f6b32013bdc743bce531ab12411e390", "classification": "FEATURE_OVERRIDE", "purpose": "social and n8n feature gates; no Odoo semantic change"},
     {"order": 4, "path": "/opt/codestra/compose/compose.final-production-trust.yaml", "sha256": "30d0ff29813d69d44ea185ca23d5222632058e253283fc1cfc2913f9ebd4e2db", "classification": "IDENTITY_OVERRIDE", "purpose": "Odoo Keycloak trust, service allowlist and private networks"},

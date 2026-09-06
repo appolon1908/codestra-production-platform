@@ -44,6 +44,8 @@ ALLOWED_ACTIONS = {
     "activate-control-plane",
     "enable-production-web-traffic",
     "disable-production-web-traffic",
+    "enable-klyrow-email-delivery",
+    "disable-klyrow-email-delivery",
 }
 READ_ONLY_ACTIONS = {
     "preflight",
@@ -57,6 +59,7 @@ RECOVERY_ACTIONS = {
     "rollback-control-plane",
     "rollback-middleware",
     "disable-production-web-traffic",
+    "disable-klyrow-email-delivery",
 }
 SAFETY_BYPASS_ACTIONS = {
     "status",
@@ -66,6 +69,7 @@ SAFETY_BYPASS_ACTIONS = {
     "rollback-control-plane",
     "rollback-middleware",
     "disable-production-web-traffic",
+    "disable-klyrow-email-delivery",
 }
 CANONICAL_FALSE_FLAGS = {
     "SEND_EVENTS",
@@ -102,9 +106,10 @@ EVIDENCE_DIR = Path("/var/lib/codestra-production-operator/evidence")
 LOCK_FILE = Path("/run/lock/codestra-production-operator.lock")
 DATE_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])")
 STANDBY_CONTAINER = "codestra-production-standby-approved"
-STANDBY_ENTRYPOINT = ["/opt/venv/bin/python"]
+STANDBY_ENTRYPOINT = ["/usr/bin/python3.13"]
 STANDBY_COMMAND = ["-c", "import threading; threading.Event().wait()"]
-MIDDLEWARE_IMAGE = "ghcr.io/codestra-srl/codestra-middleware"
+MIDDLEWARE_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware"
+MIDDLEWARE_MIGRATION_DATABASE_URL = Path("/etc/codestra/secrets/codestra-compose/database_url")
 CONTROL_PLANE_PROJECT = "codestra-integration-control-plane"
 CONTROL_PLANE_RELEASE_ROOT = Path("/opt/codestra/releases/control-plane")
 CONTROL_PLANE_ARCHIVE_ROOT = Path("/home/codestra-admin")
@@ -117,8 +122,11 @@ CONTROL_PLANE_WORKER = "codestra-integration-control-plane-worker-1"
 ACTIVE_RELEASE_POINTER = CONFIG_DIR / "active-release.json"
 PREVIOUS_RELEASE_POINTER = CONFIG_DIR / "previous-active-release.json"
 CORE_WEB_TRAFFIC_POINTER = CONFIG_DIR / "core-web-traffic.json"
+KLYROW_EMAIL_AUTHORIZATION = CONFIG_DIR / "klyrow-email-authorization.json"
+KLYROW_EMAIL_POINTER = CONFIG_DIR / "klyrow-email-delivery.json"
 KONG_ADMIN_URL = "http://127.0.0.1:8001"
 KONG_TRAFFIC_GATE_INSTANCE = "codestra-core-web-api-traffic-gate"
+KONG_TRAFFIC_GATE_ROUTE = "codestra-callback-read"
 CORE_WEB_PROBE_URL = "https://api.codestra.co/api/v1/callbacks"
 AUTH_GATEWAY_CONTAINER = "codestra-identity-auth-gateway-1"
 AUTH_GATEWAY_NETWORK = "codestra_backend"
@@ -167,11 +175,11 @@ MIDDLEWARE_ROLLBACK_MARKER = MIDDLEWARE_BACKUP_ROOT / "LAST_SUCCESS"
 MIDDLEWARE_QUIESCE_MARKER = MIDDLEWARE_BACKUP_ROOT / "QUIESCED"
 MIDDLEWARE_ROLLBACK_PROGRESS = "rollback-progress.json"
 MIDDLEWARE_DB_CONTAINER = "codestra-postgres-1"
-MIDDLEWARE_DB = "codestra_middleware"
+MIDDLEWARE_DB = "codestra_middleware_appolon"
 MIDDLEWARE_REQUIRED_DATABASE_HEAD = "0056_klyrow_delivery_events"
-MIDDLEWARE_REQUIRED_SOURCE_SHA = "f199b6c40f4e467979e9a8b255a0e686321a182d"
+MIDDLEWARE_REQUIRED_SOURCE_SHA = "63b6c0c8bca5168a1178895bd12858d0b1e8086e"
 MIDDLEWARE_COMPOSE_LAYERS = (
-    (Path("/opt/codestra/compose/compose.yaml"), "4798c36ba65c2274b634b9b0997bfbf86bbccab53574cb3b64fd9897fa472dcb"),
+    (Path("/opt/codestra/compose/compose.yaml"), "d6a7f2d3eeda3fa9e0709caa509f74510d1a552f21148754d8011928a7e3cd2d"),
     (Path("/opt/codestra/compose/compose.middleware-runtime.yaml"), "d6e2ba0372ecc8f7bc6e7a2bc0fb124bb71159664ab6110cc7478aa63a6a2906"),
     (Path("/opt/codestra/compose/compose.phase-n2-activation.yaml"), "b8923298d8cd8216a4129ac7b3ef9e9a9f6b32013bdc743bce531ab12411e390"),
     (Path("/opt/codestra/compose/compose.final-production-trust.yaml"), "30d0ff29813d69d44ea185ca23d5222632058e253283fc1cfc2913f9ebd4e2db"),
@@ -237,6 +245,34 @@ def checked_root_file(path: Path, *, expected_mode: int = 0o600) -> str:
         return checked_root_bytes(path, expected_mode=expected_mode).decode("ascii").strip()
     except UnicodeError as error:
         raise OperatorError(f"required root file unreadable: {path}") from error
+
+
+def middleware_migration_database_url() -> str:
+    """Read the fixed migration DSN using its deployed least-privilege contract."""
+    try:
+        descriptor = os.open(
+            MIDDLEWARE_MIGRATION_DATABASE_URL,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise OperatorError("unsafe Middleware migration credential type") from error
+        raise OperatorError("Middleware migration credential unavailable") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OperatorError("unsafe Middleware migration credential type")
+        if info.st_uid != 10001 or info.st_gid != 999:
+            raise OperatorError("unsafe Middleware migration credential ownership")
+        if stat.S_IMODE(info.st_mode) != 0o400:
+            raise OperatorError("unsafe Middleware migration credential mode")
+        try:
+            value = stream.read().decode("ascii").strip()
+        except UnicodeError as error:
+            raise OperatorError("Middleware migration credential is unreadable") from error
+    if re.match(r"^postgresql(?:\+asyncpg)?://middleware_app:", value) is None:
+        raise OperatorError("Middleware migration credential identity mismatch")
+    return value
 
 
 OWNER_WINDOW_WAIVER_STATEMENTS = {
@@ -443,7 +479,7 @@ def validate_restore_result(
         "MIDDLEWARE_MIGRATION_HEAD": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
         "MIDDLEWARE_SCHEMA_TABLE_COUNT": "2",
         "MIDDLEWARE_ISOLATED_MIGRATION_GATE": "PASS",
-        "MIDDLEWARE_MIGRATION_IDENTITY": "mw_integration_api",
+        "MIDDLEWARE_MIGRATION_IDENTITY": "middleware_app",
         "MIDDLEWARE_PRODUCTION_GRANTS_MATCH": "PASS",
         "MIDDLEWARE_CANDIDATE_HEALTH_GATE": "PASS",
         "MIDDLEWARE_CANDIDATE_READINESS_GATE": "PASS",
@@ -792,8 +828,16 @@ def validate_control_plane(config: dict[str, str]) -> dict[str, object]:
         "postal_inbound.py": hashlib.sha256((release / "control_plane_service/postal_inbound.py").read_bytes()).hexdigest(),
     }
     for name, digest_value in expected.items():
-        result = run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_API, "sha256sum", f"/app/control_plane_service/{name}"], timeout=30)
-        if result.stdout.decode().split()[0] != digest_value:
+        result = run_bytes([
+            "/usr/bin/docker", "exec", CONTROL_PLANE_API, "python", "-c",
+            (
+                "import hashlib,pathlib;"
+                "print(hashlib.sha256(pathlib.Path("
+                f"'/app/control_plane_service/{name}'"
+                ").read_bytes()).hexdigest())"
+            ),
+        ], timeout=30)
+        if result.stdout.decode().strip() != digest_value:
             raise OperatorError(f"control-plane source readback mismatch: {name}")
     health = docker_inspect(CONTROL_PLANE_API)
     if health["State"].get("Health", {}).get("Status") != "healthy":
@@ -956,6 +1000,105 @@ def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
     run_bytes(["/usr/bin/docker", "exec", "-i", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres", "-d", CONTROL_PLANE_DB, "-v", "ON_ERROR_STOP=1"], stdin=database_dump, timeout=1800)
     run_bytes([*compose, "up", "--detach", "--no-build"], timeout=300)
     return {"rollback_stamp": stamp, "database_restored": "PASS", "external_delivery": "DISABLED"}
+
+
+def validate_klyrow_email_authorization(config: dict[str, str]) -> dict[str, object]:
+    """Validate the root-controlled, exact-release authorization and remote evidence summary."""
+    try:
+        payload = json.loads(checked_root_file(KLYROW_EMAIL_AUTHORIZATION))
+    except json.JSONDecodeError as error:
+        raise OperatorError("Klyrow email authorization is malformed") from error
+    required = {
+        "schema", "approved", "change_id", "protected_sha", "maintenance_date",
+        "klyrow_backup", "klyrow_evidence_sha256", "verified_domains",
+        "held_messages", "smtp_no_data", "authorization_tests", "owner",
+    }
+    if set(payload) != required or payload.get("schema") != "codestra.klyrow-email-authorization.v1":
+        raise OperatorError("Klyrow email authorization schema mismatch")
+    if payload.get("approved") is not True:
+        raise OperatorError("Klyrow email delivery is not approved")
+    for key in ("change_id", "protected_sha", "maintenance_date"):
+        if payload.get(key) != config[key]:
+            raise OperatorError(f"Klyrow email authorization {key} mismatch")
+    if not re.fullmatch(r"/var/backups/codestra-operators/klyrow/[0-9]{8}T[0-9]{6}Z", str(payload.get("klyrow_backup"))):
+        raise OperatorError("Klyrow backup evidence path rejected")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("klyrow_evidence_sha256"))):
+        raise OperatorError("Klyrow evidence digest rejected")
+    if payload.get("verified_domains") != 14 or payload.get("held_messages") != 2:
+        raise OperatorError("Klyrow domain or held-message evidence mismatch")
+    if payload.get("smtp_no_data") != "PASS" or payload.get("authorization_tests") != "PASS":
+        raise OperatorError("Klyrow SMTP or authorization test evidence mismatch")
+    if not isinstance(payload.get("owner"), str) or not payload["owner"]:
+        raise OperatorError("Klyrow owner approval evidence mismatch")
+    return {
+        "authorization": "PASS", "verified_domains": 14, "held_messages_preserved": 2,
+        "smtp_no_data": "PASS", "authorization_tests": "PASS",
+        "klyrow_evidence_sha256": payload["klyrow_evidence_sha256"],
+    }
+
+
+def set_klyrow_email_delivery(config: dict[str, str], enabled: bool) -> dict[str, object]:
+    """Recreate only control-plane API/worker with the fixed email override and read it back."""
+    _, release = control_plane_paths(config)
+    base = release / "deploy/control-plane/compose.yaml"
+    safety = release / "deploy/control-plane/compose.live-delivery-safety.yaml"
+    production = release / "deploy/control-plane/compose.klyrow-production-email.yaml"
+    if enabled:
+        authorization = validate_klyrow_email_authorization(config)
+        require_action_evidence("activate-control-plane", config)
+        validate_control_plane_rollback()
+        layers = [base, safety, production]
+    else:
+        authorization = {"authorization": "NOT_REQUIRED_FOR_DISABLE"}
+        layers = [base, safety]
+    compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT]
+    for layer in layers:
+        compose.extend(["--file", str(layer)])
+    email_delivery_count = lambda: int(run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", CONTROL_PLANE_DB, "-Atc",
+        "set search_path to control_plane; select count(*) from messages where channel='email' and status in ('accepted','sent','delivered');",
+    ], timeout=30).stdout.decode().strip())
+    queued_email_count = lambda: int(run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", CONTROL_PLANE_DB, "-Atc",
+        "set search_path to control_plane; select count(*) from messages where channel='email' and status='queued';",
+    ], timeout=30).stdout.decode().strip())
+    before = email_delivery_count()
+    if enabled and queued_email_count() != 0:
+        raise OperatorError("queued email must be zero before Klyrow activation")
+    try:
+        run_bytes([*compose, "up", "--detach", "--no-build", "api", "worker"], timeout=300)
+        wait_control_plane_health()
+        expected = {
+            "KLYROW_MODE": "production" if enabled else "test",
+            "LIVE_EMAIL_DELIVERY": "true" if enabled else "false",
+            "CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED": "true" if enabled else "false",
+        }
+        for container in (CONTROL_PLANE_API, CONTROL_PLANE_WORKER):
+            inspected = docker_inspect(container)
+            if inspected["State"].get("Health", {}).get("Status") != "healthy":
+                raise OperatorError(f"Klyrow email runtime unhealthy: {container}")
+            env = dict(item.split("=", 1) for item in inspected["Config"].get("Env", []) if "=" in item)
+            if any(env.get(key) != value for key, value in expected.items()):
+                raise OperatorError(f"Klyrow email flag readback mismatch: {container}")
+        after = email_delivery_count()
+        if enabled and after != before:
+            raise OperatorError("email delivery ledger changed during activation")
+        atomic_root_json(KLYROW_EMAIL_POINTER, {
+            "enabled": enabled, "protected_sha": config["protected_sha"],
+            "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }, mode=0o600)
+    except Exception:
+        if enabled:
+            run_bytes(["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
+                       "--file", str(base), "--file", str(safety), "up", "--detach",
+                       "--no-build", "api", "worker"], timeout=300)
+        raise
+    return {**authorization, "klyrow_mode": expected["KLYROW_MODE"],
+            "live_email_delivery": expected["LIVE_EMAIL_DELIVERY"],
+            "email_delivery_ledger_before": before, "email_delivery_ledger_after": after,
+            "messages_sent_during_activation": after - before}
 
 
 def checked_operator_bytes(path: Path, *, expected_mode: int) -> bytes:
@@ -1396,6 +1539,70 @@ def validate_middleware_database_client_names(containers: tuple[str, ...]) -> No
         raise OperatorError("Middleware database client set is malformed")
 
 
+def wait_middleware_database_clients(
+    containers: tuple[str, ...], timeout_seconds: int = 180
+) -> None:
+    """Require every resumed client to remain stable across two read-backs."""
+    validate_middleware_database_client_names(containers)
+    deadline = time.monotonic() + timeout_seconds
+    stable_observations = 0
+    stable_fingerprints: dict[str, tuple[int, str]] | None = None
+    while time.monotonic() < deadline:
+        ready = True
+        fingerprints: dict[str, tuple[int, str]] = {}
+        for container in containers:
+            current = docker_inspect(container)
+            state = current.get("State")
+            if not isinstance(state, dict) or not isinstance(state.get("Running"), bool):
+                raise OperatorError(
+                    f"Middleware database client state unavailable: {container}"
+                )
+            if state["Running"] is not True:
+                raise OperatorError(
+                    f"Middleware database client did not remain running: {container}"
+                )
+            restart_count = current.get("RestartCount")
+            started_at = state.get("StartedAt")
+            if (
+                isinstance(restart_count, bool)
+                or not isinstance(restart_count, int)
+                or restart_count < 0
+                or not isinstance(started_at, str)
+                or not started_at
+            ):
+                raise OperatorError(
+                    f"Middleware database client restart state unavailable: {container}"
+                )
+            fingerprints[container] = (restart_count, started_at)
+            health = state.get("Health")
+            if health is not None:
+                if not isinstance(health, dict) or health.get("Status") not in {
+                    "starting", "healthy", "unhealthy"
+                }:
+                    raise OperatorError(
+                        f"Middleware database client health unavailable: {container}"
+                    )
+                if health["Status"] == "unhealthy":
+                    raise OperatorError(
+                        f"Middleware database client became unhealthy: {container}"
+                    )
+                if health["Status"] != "healthy":
+                    ready = False
+        if ready:
+            if fingerprints == stable_fingerprints:
+                stable_observations += 1
+            else:
+                stable_fingerprints = fingerprints
+                stable_observations = 1
+        else:
+            stable_fingerprints = None
+            stable_observations = 0
+        if stable_observations >= 2:
+            return
+        time.sleep(2)
+    raise OperatorError("Middleware database client health check timed out")
+
+
 def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) -> None:
     validate_middleware_database_client_names(containers)
     state = middleware_database_client_state()
@@ -1407,6 +1614,7 @@ def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) 
     readback = middleware_database_client_state()
     if any(not readback[container] for container in containers):
         raise OperatorError("Middleware database clients did not resume")
+    wait_middleware_database_clients(containers)
     clear_middleware_quiescence(stamp)
 
 
@@ -2058,9 +2266,14 @@ def middleware_database_head() -> str:
     return run_bytes([
         "/usr/bin/docker",
         "exec",
-        MIDDLEWARE_RUNTIME_SERVICES["middleware-integration-api"],
-        "alembic",
-        "current",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        MIDDLEWARE_DB,
+        "-Atc",
+        "select migration_id from middleware_schema_migrations order by migration_id desc limit 1",
     ], timeout=60).stdout.decode()
 
 
@@ -2098,7 +2311,25 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
     compose = middleware_compose(config)
     validate_middleware_compose(config, compose)
     image_matches = middleware_runtime_image_matches(config)
-    if any(image_matches):
+    if all(image_matches):
+        stamp = snapshot_middleware_runtime(config, str(backup_state["backup_stamp"]))
+        try:
+            bundle = validate_middleware_rollback(config)
+            captured_clients = bundle["database_clients_running"]
+            if not isinstance(captured_clients, tuple):
+                raise OperatorError("Middleware database client state is malformed")
+            quiescence_stamp = middleware_quiescence_stamp()
+            if quiescence_stamp is not None:
+                if quiescence_stamp != stamp:
+                    raise OperatorError(
+                        "Middleware quiescence marker does not match rollback point"
+                    )
+                resume_middleware_database_clients(stamp, captured_clients)
+                wait_middleware_health()
+        except Exception:
+            recover_stale_middleware_quiescence()
+            raise
+    elif any(image_matches):
         bundle = validate_middleware_rollback(config)
         stamp = str(bundle["stamp"])
     else:
@@ -2111,8 +2342,6 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
         runtime = verify_middleware_runtime(config)
         if middleware_database_revision() != MIDDLEWARE_REQUIRED_DATABASE_HEAD:
             raise OperatorError("Middleware database head readback mismatch")
-        if middleware_quiescence_stamp() == stamp:
-            resume_middleware_database_clients(stamp, database_clients_running)
         return {
             **runtime,
             **middleware_rollback_evidence(bundle),
@@ -2124,15 +2353,21 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
         raise OperatorError("Middleware database clients are not quiesced for rollout")
     prepare_middleware_rollout(stamp)
     try:
+        middleware_migration_database_url()
         run_bytes([
             *compose,
             "run",
             "--rm",
             "--no-deps",
+            "--volume",
+            f"{MIDDLEWARE_MIGRATION_DATABASE_URL}:/run/secrets/migration_database_url:ro",
+            "--env",
+            "DATABASE_URL_FILE=/run/secrets/migration_database_url",
+            "--entrypoint",
+            "/usr/bin/python3.13",
             "middleware-integration-api",
-            "alembic",
-            "upgrade",
-            "head",
+            "-c",
+            "from alembic.config import Config;from alembic import command;c=Config();c.set_main_option('script_location','/app/migrations');command.upgrade(c,'head')",
         ], timeout=1800)
         run_bytes([
             *compose,
@@ -2284,6 +2519,10 @@ def kong_json(method: str, path: str, payload: dict[str, object] | None = None) 
 
 
 def kong_traffic_gate(enabled: bool) -> None:
+    route = kong_json("GET", f"/routes/{KONG_TRAFFIC_GATE_ROUTE}")
+    route_id = route.get("id")
+    if not isinstance(route_id, str) or not route_id:
+        raise OperatorError("Kong core traffic route lookup failed")
     plugins = kong_json("GET", "/plugins?size=1000").get("data", [])
     matches = [
         item for item in plugins
@@ -2293,11 +2532,22 @@ def kong_traffic_gate(enabled: bool) -> None:
     if len(matches) > 1:
         raise OperatorError("duplicate Kong core traffic gates")
     current = matches[0] if matches else None
+    if current is not None and enabled and (
+        (current.get("route") or {}).get("id") != route_id
+        or current.get("service") is not None
+        or current.get("consumer") is not None
+    ):
+        current = kong_json("PATCH", f"/plugins/{current['id']}", {
+            "route": {"id": route_id},
+            "service": None,
+            "consumer": None,
+        })
     if enabled and current is None:
         current = kong_json("POST", "/plugins", {
             "name": "request-termination",
             "instance_name": KONG_TRAFFIC_GATE_INSTANCE,
             "enabled": True,
+            "route": {"id": route_id},
             "config": {"status_code": 503, "message": "core_web_api_maintenance"},
             "tags": ["codestra-managed", "core-web-api-traffic-gate"],
         })
@@ -2316,10 +2566,22 @@ def kong_traffic_gate(enabled: bool) -> None:
         item.get("name") == "request-termination"
         and item.get("instance_name") == KONG_TRAFFIC_GATE_INSTANCE
         and item.get("enabled") is True
+        and (item.get("route") or {}).get("id") == route_id
+        and item.get("service") is None
+        and item.get("consumer") is None
         and item.get("config", {}).get("status_code") == 503
         for item in readback
     )
-    if present != enabled:
+    misplaced = any(
+        item.get("instance_name") == KONG_TRAFFIC_GATE_INSTANCE
+        and (
+            (item.get("route") or {}).get("id") != route_id
+            or item.get("service") is not None
+            or item.get("consumer") is not None
+        )
+        for item in readback
+    )
+    if present != enabled or misplaced:
         raise OperatorError("Kong traffic gate readback mismatch")
 
 
@@ -2416,10 +2678,14 @@ def kong_runtime_readback() -> dict[str, object]:
         ),
         key=lambda item: str(item["instance_name"] or item["name"] or item["id"]),
     )
+    core_web_route_ids = {
+        item["id"] for item in safe_routes if item["name"] == KONG_TRAFFIC_GATE_ROUTE
+    }
     traffic_gate = any(
         item["name"] == "request-termination"
         and item["instance_name"] == KONG_TRAFFIC_GATE_INSTANCE
         and item["enabled"] is True
+        and item["route_id"] in core_web_route_ids
         for item in safe_plugins
     )
     sanitized = {
@@ -2569,6 +2835,11 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
     if action not in ALLOWED_ACTIONS:
         raise OperatorError("action is not allowlisted")
     config = load_release_config()
+    if config["protected_sha"] == "01f2676772b11919e1d79cc74d36bc5eeaa682cd" and action not in {
+        "status", "collect-evidence", "disable-production-web-traffic",
+        "disable-klyrow-email-delivery",
+    }:
+        raise OperatorError("release is non-activatable: signer trust anchor unrecoverable")
     window: dict[str, str] | None = None
     if action not in READ_ONLY_ACTIONS | RECOVERY_ACTIONS:
         window = require_maintenance_window()
@@ -2646,6 +2917,10 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         result.update(set_core_web_traffic(config, True))
     elif action == "disable-production-web-traffic":
         result.update(set_core_web_traffic(config, False))
+    elif action == "enable-klyrow-email-delivery":
+        result.update(set_klyrow_email_delivery(config, True))
+    elif action == "disable-klyrow-email-delivery":
+        result.update(set_klyrow_email_delivery(config, False))
     elif action in {"preflight", "status"}:
         invocation = run_fixed(["/usr/bin/systemctl", "--failed", "--no-legend", "--plain"])
         result.update({"returncode": invocation.returncode, "failed_units_present": bool(invocation.stdout.strip())})

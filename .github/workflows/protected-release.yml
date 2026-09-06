@@ -6,7 +6,9 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: write
+  packages: read
 
 concurrency:
   group: protected-release-${{ github.ref }}
@@ -17,10 +19,13 @@ jobs:
     if: github.ref == 'refs/heads/release/production-activation'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      EXPECTED_MIGRATION_REVISION: 0056_klyrow_delivery_events
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -30,10 +35,14 @@ jobs:
       - name: Require protected exact SHA
         env:
           EXPECTED_SHA: ${{ github.sha }}
-        run: test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+          test -z "$(git status --porcelain)"
 
       - name: Run complete source tests
         run: |
+          set -Eeuo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends nats-server
           python -m pip install --upgrade "setuptools==83.0.0"
@@ -41,10 +50,8 @@ jobs:
             "fastapi==0.141.1" "PyJWT[crypto]==2.13.0" "psycopg[binary]==3.2.9" "prometheus-client==0.22.1" \
             "openapi-spec-validator==0.7.2"
           python -m pip install -e 'vicidial[test]'
-          sudo --preserve-env=PATH \
-            "$(command -v python)" -m pytest -q
-          python -m pytest -q \
-            deploy/kong-production-standby/auth-middleware/test_token_validation.py
+          sudo --preserve-env=PATH "$(command -v python)" -m pytest -q
+          python -m pytest -q deploy/kong-production-standby/auth-middleware/test_token_validation.py
           python -m pip_audit --local
 
       - name: Install checksum-verified Cosign
@@ -52,70 +59,115 @@ jobs:
           COSIGN_VERSION: v3.1.2
           COSIGN_SHA256: f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf
         run: |
+          set -Eeuo pipefail
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" \
             --output "${RUNNER_TEMP}/cosign"
           echo "${COSIGN_SHA256}  ${RUNNER_TEMP}/cosign" | sha256sum --check --strict
           chmod 0700 "${RUNNER_TEMP}/cosign"
 
-      - name: Verify canonical middleware production evidence
-        env:
-          GH_TOKEN: ${{ secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN }}
-          MIDDLEWARE_RELEASE_RUN_ID: ${{ vars.CODESTRA_MIDDLEWARE_PRODUCTION_RELEASE_RUN_ID }}
-          MIDDLEWARE_RELEASE_ARTIFACT: ${{ vars.CODESTRA_MIDDLEWARE_PRODUCTION_RELEASE_ARTIFACT }}
+      - name: Load exact Middleware tuple
         run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          value = json.loads(Path('config/production-release-tuple.json').read_text())
+          required = {
+              'change_id', 'middleware_artifact', 'middleware_digest',
+              'middleware_openvex_sha256', 'middleware_provenance_sha256',
+              'middleware_run_id', 'middleware_sbom_sha256',
+              'middleware_source_sha', 'release_version',
+          }
+          assert set(value) == required
+          with Path(os.environ['GITHUB_ENV']).open('a') as target:
+              target.write(f"MIDDLEWARE_RELEASE_RUN_ID={value['middleware_run_id']}\n")
+              target.write(f"MIDDLEWARE_RELEASE_ARTIFACT={value['middleware_artifact']}\n")
+              target.write(f"MIDDLEWARE_EXPECTED_SOURCE_SHA={value['middleware_source_sha']}\n")
+              target.write(f"MIDDLEWARE_EXPECTED_IMAGE_DIGEST={value['middleware_digest']}\n")
+          PY
+
+      - name: Download and verify canonical Middleware signed evidence
+        env:
+          GH_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN }}
+          MIDDLEWARE_REPOSITORY: appolon1908-hue/Middleware-
+          EXPECTED_ARTIFACT_DIGEST: sha256:e3af11436039c9812d0e0af4e82a5b3efdfd1736c300f6a6c6f1cfb7ff103e9f
+        run: |
+          set -Eeuo pipefail
           test -n "${GH_TOKEN}"
           [[ "${MIDDLEWARE_RELEASE_RUN_ID}" =~ ^[1-9][0-9]*$ ]]
           test -n "${MIDDLEWARE_RELEASE_ARTIFACT}"
-          mkdir middleware-release
-          gh run download "${MIDDLEWARE_RELEASE_RUN_ID}" \
-            --repo Codestra-SRL/codestra-middleware \
-            --name "${MIDDLEWARE_RELEASE_ARTIFACT}" \
-            --dir middleware-release
-          (cd middleware-release && sha256sum --check --strict SHA256SUMS)
+          artifacts="$(gh api "repos/${MIDDLEWARE_REPOSITORY}/actions/runs/${MIDDLEWARE_RELEASE_RUN_ID}/artifacts?per_page=100")"
+          count="$(jq --arg name "$MIDDLEWARE_RELEASE_ARTIFACT" '[.artifacts[] | select(.expired == false and .name == $name)] | length' <<<"$artifacts")"
+          test "$count" = '1'
+          artifact_id="$(jq -r --arg name "$MIDDLEWARE_RELEASE_ARTIFACT" '.artifacts[] | select(.expired == false and .name == $name) | .id' <<<"$artifacts")"
+          artifact_digest="$(jq -r --arg name "$MIDDLEWARE_RELEASE_ARTIFACT" '.artifacts[] | select(.expired == false and .name == $name) | .digest' <<<"$artifacts")"
+          test "$artifact_digest" = "$EXPECTED_ARTIFACT_DIGEST"
+          mkdir -p middleware-release
+          gh api "repos/${MIDDLEWARE_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "${RUNNER_TEMP}/middleware-release.zip"
+          unzip -q "${RUNNER_TEMP}/middleware-release.zip" -d middleware-release
           python tools/verify_middleware_release_evidence.py \
-            --directory middleware-release --github-env middleware-release-verified.env \
+            --directory middleware-release \
+            --github-env middleware-release-verified.env \
             --tuple config/production-release-tuple.json \
             --run-id "${MIDDLEWARE_RELEASE_RUN_ID}" \
-            --artifact "${MIDDLEWARE_RELEASE_ARTIFACT}"
+            --artifact "${MIDDLEWARE_RELEASE_ARTIFACT}" \
+            --artifact-digest "${artifact_digest}" \
+            --cosign "${RUNNER_TEMP}/cosign" \
+            --derived-provenance-output middleware-derived-provenance.json \
+            --derived-openvex-output middleware-derived-openvex.json
           cat middleware-release-verified.env >> "${GITHUB_ENV}"
           source middleware-release-verified.env
-          subject="ghcr.io/codestra-srl/codestra-middleware@${MIDDLEWARE_IMAGE_DIGEST}"
-          identity="https://github.com/Codestra-SRL/codestra-middleware/.github/workflows/exact-main-production-release.yml@refs/heads/main"
-          issuer="https://token.actions.githubusercontent.com"
-          printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          test "$MIDDLEWARE_PROTECTED_SHA" = "$MIDDLEWARE_EXPECTED_SOURCE_SHA"
+          test "$MIDDLEWARE_IMAGE_DIGEST" = "$MIDDLEWARE_EXPECTED_IMAGE_DIGEST"
+          test "$MIDDLEWARE_MIGRATION_REVISION" = "$EXPECTED_MIGRATION_REVISION"
+
+      - name: Verify image signer, provenance, SBOM, source label, and migration head
+        env:
+          GH_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN }}
+          SIGNER_IDENTITY: https://github.com/appolon1908-hue/Middleware-/.github/workflows/release.yml@refs/heads/main
+          OIDC_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           "${RUNNER_TEMP}/cosign" verify \
-            --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" \
-            "${subject}" > middleware-signature-verification.json
+            --certificate-identity "$SIGNER_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            "$MIDDLEWARE_IMAGE_REFERENCE" > middleware-signature-verification.json
           "${RUNNER_TEMP}/cosign" verify-attestation --type slsaprovenance1 \
-            --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" \
-            "${subject}" > middleware-provenance-verification.json
-          "${RUNNER_TEMP}/cosign" verify-attestation --type cyclonedx \
-            --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" \
-            "${subject}" > middleware-sbom-verification.json
-          python tools/verify_attestation_predicate.py \
-            --verification middleware-sbom-verification.json \
-            --predicate middleware-release/sbom.cdx.json
-          python tools/verify_slsa_provenance_attestation.py \
-            --verification middleware-provenance-verification.json \
-            --provenance middleware-release/provenance.json \
-            --release-env middleware-release/RELEASE.env \
-            --sbom middleware-release/sbom.cdx.json \
-            --trivy middleware-release/trivy.json \
-            --grype middleware-release/grype-vex.json
-          docker pull "${subject}"
-          test "$(docker image inspect "${subject}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "${MIDDLEWARE_PROTECTED_SHA}"
+            --certificate-identity "$SIGNER_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            "$MIDDLEWARE_IMAGE_REFERENCE" > middleware-provenance-verification.json
+          "${RUNNER_TEMP}/cosign" verify-attestation --type spdxjson \
+            --certificate-identity "$SIGNER_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            "$MIDDLEWARE_IMAGE_REFERENCE" > middleware-sbom-verification.json
+          python tools/verify_signed_release_attestations.py \
+            --manifest middleware-release/release-manifest.v1.json \
+            --sbom middleware-release/middleware.spdx.json \
+            --provenance-verification middleware-provenance-verification.json \
+            --sbom-verification middleware-sbom-verification.json \
+            --expected-source "$MIDDLEWARE_PROTECTED_SHA" \
+            --expected-digest "$MIDDLEWARE_IMAGE_DIGEST"
+          docker pull "$MIDDLEWARE_IMAGE_REFERENCE"
+          test "$(docker image inspect "$MIDDLEWARE_IMAGE_REFERENCE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$MIDDLEWARE_PROTECTED_SHA"
           mapfile -t migration_heads < <(
-            docker run --rm --network none "${subject}" alembic heads |
-              awk 'NF {print $1}'
+            docker run --rm --network none \
+              --volume "$PWD/tools/detect_alembic_head.py:/tmp/detect-alembic-head.py:ro" \
+              --entrypoint python "$MIDDLEWARE_IMAGE_REFERENCE" \
+              /tmp/detect-alembic-head.py /app/migrations/versions
           )
           test "${#migration_heads[@]}" -eq 1
-          migration_revision="${migration_heads[0]}"
-          test -n "${migration_revision}"
-          printf 'MIDDLEWARE_MIGRATION_REVISION=%s\n' "${migration_revision}" >> "${GITHUB_ENV}"
+          test "${migration_heads[0]}" = "$EXPECTED_MIGRATION_REVISION"
+          test "${migration_heads[0]}" = "$MIDDLEWARE_MIGRATION_REVISION"
+          printf 'MIDDLEWARE_MIGRATION_REVISION=%s\n' "${migration_heads[0]}" >> "$GITHUB_ENV"
 
       - name: Build deterministic release, SBOM and provenance
         run: |
+          set -Eeuo pipefail
           python tools/build_release_bundle.py \
             --root . \
             --output dist \
@@ -130,44 +182,33 @@ jobs:
             --middleware-provenance-sha256 "${MIDDLEWARE_PROVENANCE_SHA256}" \
             --middleware-openvex-sha256 "${MIDDLEWARE_OPENVEX_SHA256}" \
             --migration-revision "${MIDDLEWARE_MIGRATION_REVISION}"
-          install -m 0644 middleware-signature-verification.json \
-            dist/middleware-signature-verification.json
-          install -m 0644 middleware-provenance-verification.json \
-            dist/middleware-provenance-verification.json
-          install -m 0644 middleware-sbom-verification.json \
-            dist/middleware-sbom-verification.json
-          install -m 0644 middleware-release/RELEASE.env \
-            dist/middleware-RELEASE.env
-          install -m 0644 middleware-release/sbom.cdx.json \
-            dist/middleware-sbom.cdx.json
-          install -m 0644 middleware-release/provenance.json \
-            dist/middleware-provenance.json
-          install -m 0644 middleware-release/trivy.json \
-            dist/middleware-trivy.json
-          install -m 0644 middleware-release/grype-vex.json \
-            dist/middleware-grype-vex.json
-          install -m 0644 middleware-release/vex/openvex.json \
-            dist/middleware-openvex.json
-          install -m 0644 middleware-release/SHA256SUMS \
-            dist/middleware-source-SHA256SUMS
+          install -m 0644 middleware-signature-verification.json dist/middleware-signature-verification.json
+          install -m 0644 middleware-provenance-verification.json dist/middleware-provenance-verification.json
+          install -m 0644 middleware-sbom-verification.json dist/middleware-sbom-verification.json
+          install -m 0644 middleware-release/release-manifest.v1.json dist/middleware-release-manifest.v1.json
+          install -m 0644 middleware-release/release-manifest.v1.sigstore.json dist/middleware-release-manifest.v1.sigstore.json
+          install -m 0644 middleware-release/middleware.spdx.json dist/middleware.spdx.json
+          install -m 0644 middleware-release/middleware.grype.json dist/middleware.grype.json
+          install -m 0644 middleware-derived-provenance.json dist/middleware-derived-provenance.json
+          install -m 0644 middleware-derived-openvex.json dist/middleware-derived-openvex.json
           (cd dist && sha256sum \
             middleware-signature-verification.json \
             middleware-provenance-verification.json \
             middleware-sbom-verification.json \
-            middleware-RELEASE.env middleware-sbom.cdx.json \
-            middleware-provenance.json middleware-openvex.json middleware-trivy.json \
-            middleware-grype-vex.json middleware-source-SHA256SUMS \
+            middleware-release-manifest.v1.json middleware-release-manifest.v1.sigstore.json \
+            middleware.spdx.json middleware.grype.json \
+            middleware-derived-provenance.json middleware-derived-openvex.json \
             >> manifest.sha256)
           (cd dist && sha256sum --check manifest.sha256)
           python - <<'PY'
           import json
           import os
-          manifest = json.load(open("dist/deployment-manifest.json"))
-          release = manifest["release_tuple"]
-          assert release["middleware_protected_sha"] == os.environ["MIDDLEWARE_PROTECTED_SHA"]
-          assert release["middleware_image_digest"] == os.environ["MIDDLEWARE_IMAGE_DIGEST"]
-          assert release["middleware_signature_verification"] == "PASS"
-          assert release["middleware_provenance_verification"] == "PASS"
+          manifest = json.load(open('dist/deployment-manifest.json'))
+          release = manifest['release_tuple']
+          assert release['middleware_protected_sha'] == os.environ['MIDDLEWARE_PROTECTED_SHA']
+          assert release['middleware_image_digest'] == os.environ['MIDDLEWARE_IMAGE_DIGEST']
+          assert release['middleware_signature_verification'] == 'PASS'
+          assert release['middleware_provenance_verification'] == 'PASS'
           PY
 
       - name: Sign and independently verify release manifest
@@ -175,11 +216,14 @@ jobs:
           SIGNING_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_KEY }}
           SIGNING_PUBLIC_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_PUBLIC_KEY }}
         run: |
+          set -Eeuo pipefail
           test -n "${SIGNING_KEY}"
           test -n "${SIGNING_PUBLIC_KEY}"
           install -m 0700 -d "${RUNNER_TEMP}/release-signing"
           printf '%s\n' "${SIGNING_KEY}" > "${RUNNER_TEMP}/release-signing/key"
           chmod 0600 "${RUNNER_TEMP}/release-signing/key"
+          trap 'rm -f "${RUNNER_TEMP}/release-signing/key"' EXIT
+          test "$(printf '%s\n' "${SIGNING_PUBLIC_KEY}" | awk '{print $1}')" = ssh-ed25519
           printf 'codestra-release %s\n' "${SIGNING_PUBLIC_KEY}" > "${RUNNER_TEMP}/release-signing/allowed_signers"
           ssh-keygen -Y sign -q -f "${RUNNER_TEMP}/release-signing/key" -n codestra-release dist/manifest.sha256
           ssh-keygen -Y verify -q \
@@ -199,6 +243,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -Eeuo pipefail
           gh release create "protected-${GITHUB_SHA}" dist/* \
             --target "${GITHUB_SHA}" \
             --title "Protected release ${GITHUB_SHA}" \
