@@ -20,9 +20,9 @@
                 <separator/>
                 <filter name="call_date" string="Call Date" date="ended_at"/>
                 <group>
-                    <filter name="group_day" string="Call Day" context="{'group_by': 'call_day'}"/>
-                    <filter name="group_week" string="Call Week" context="{'group_by': 'call_week'}"/>
-                    <filter name="group_month" string="Call Month" context="{'group_by': 'call_month'}"/>
+                    <filter name="group_day" string="Call Day" context="{'group_by': 'ended_at:day'}"/>
+                    <filter name="group_week" string="Call Week" context="{'group_by': 'ended_at:week'}"/>
+                    <filter name="group_month" string="Call Month" context="{'group_by': 'ended_at:month'}"/>
                     <filter name="group_agent" string="Agent" context="{'group_by': 'agent_id'}"/>
                     <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>
                     <filter name="group_outcome" string="Outcome" context="{'group_by': 'disposition'}"/>
@@ -114,7 +114,7 @@
         <field name="model">codestra.crm.call.followup.report</field>
         <field name="arch" type="xml">
             <pivot string="Call Follow-up Performance" disable_linking="False">
-                <field name="call_month" type="row"/>
+                <field name="ended_at" interval="month" type="row"/>
                 <field name="agent_id" type="row"/>
                 <field name="state" type="col"/>
                 <field name="call_count" type="measure"/>
@@ -128,7 +128,7 @@
         <field name="model">codestra.crm.call.followup.report</field>
         <field name="arch" type="xml">
             <graph string="Call Follow-up Volume" type="bar" stacked="1">
-                <field name="call_day" type="row"/>
+                <field name="ended_at" interval="day" type="row"/>
                 <field name="state" type="col"/>
                 <field name="call_count" type="measure"/>
             </graph>

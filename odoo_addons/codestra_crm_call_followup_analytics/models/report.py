@@ -15,9 +15,6 @@ class CodestraCrmCallFollowupReport(models.Model):
     lead_id = fields.Many2one("crm.lead", readonly=True)
     partner_id = fields.Many2one("res.partner", readonly=True)
     ended_at = fields.Datetime(readonly=True)
-    call_day = fields.Date(readonly=True)
-    call_week = fields.Date(readonly=True)
-    call_month = fields.Date(readonly=True)
     popup_completed_at = fields.Datetime(readonly=True)
     callback_at = fields.Datetime(readonly=True)
     duration_seconds = fields.Integer(readonly=True)
@@ -93,9 +90,6 @@ class CodestraCrmCallFollowupReport(models.Model):
                         f.lead_id AS lead_id,
                         f.partner_id AS partner_id,
                         f.ended_at AS ended_at,
-                        f.ended_at::date AS call_day,
-                        date_trunc('week', f.ended_at)::date AS call_week,
-                        date_trunc('month', f.ended_at)::date AS call_month,
                         f.popup_completed_at AS popup_completed_at,
                         f.callback_at AS callback_at,
                         f.duration_seconds AS duration_seconds,

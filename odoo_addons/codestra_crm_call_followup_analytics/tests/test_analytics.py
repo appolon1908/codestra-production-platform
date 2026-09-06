@@ -161,3 +161,23 @@ class TestCodestraCallFollowupAnalytics(TransactionCase):
             ("followup_id", "=", call.id)
         ])
         self.assertTrue(report)
+
+    def test_summary_counts_only_outgoing_mail_as_queued(self):
+        call = self._register("analytics-sent-mail")
+        mail = self.env["mail.mail"].create(
+            {
+                "subject": "Already sent",
+                "body_html": "<p>sent</p>",
+                "email_to": "customer@test.invalid",
+                "state": "sent",
+            }
+        )
+        call._write_from_workflow({"mail_id": mail.id})
+        result = self.env(user=self.manager)[
+            "codestra.crm.call.followup.analytics.api"
+        ].summary_v1(
+            date_from=fields.Date.to_string(fields.Date.context_today(self.manager)),
+            date_to=fields.Date.to_string(fields.Date.context_today(self.manager)),
+        )
+        self.assertEqual(result["metrics"]["email_queued"], 0)
+        self.assertGreaterEqual(result["metrics"]["email_sent"], 1)
