@@ -6,7 +6,7 @@
   "release_model": "pinned-upstream-image-with-codestra-runtime-lock",
   "runtime_command_sha256": "79cbe64bc2b89770a1edf3fa073a14504c294c91608d76a4d33f832cc14d35d1",
   "acl_policy_sha256": "d7c2738dd83f5653b8c3bc4cfa8cbf87b3fb4e1bed72e10b9d2c311e3df1f082",
-  "live_compose_sha256_at_certification": "4798c36ba65c2274b634b9b0997bfbf86bbccab53574cb3b64fd9897fa472dcb",
+  "live_compose_sha256_at_certification": "d6a7f2d3eeda3fa9e0709caa509f74510d1a552f21148754d8011928a7e3cd2d",
   "volume": "codestra_redis_data",
   "persistence": {
     "aof": true,

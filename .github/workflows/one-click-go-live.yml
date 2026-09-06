@@ -87,7 +87,7 @@ jobs:
           test -z "$(git status --porcelain)"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/release/production-activation" --jq .object.sha)" = "$GITHUB_SHA"
           test -n "$ORCHESTRATOR_TOKEN" || {
-            echo "CODESTRA_RELEASE_ORCHESTRATOR_TOKEN must have Actions read/write access to Codestra-SRL/codestra-middleware and appolon1908-hue/Infustruction-repo" >&2
+            echo "CODESTRA_RELEASE_ORCHESTRATOR_TOKEN must have Actions read/write access to appolon1908-hue/Middleware- and appolon1908-hue/Infustruction-repo" >&2
             exit 1
           }
           python3 - "$CANARY_PERCENT" <<'PY'
@@ -123,8 +123,8 @@ jobs:
               raise SystemExit("invalid change ID in release tuple")
 
           protected = (lock.get("middleware_authorities") or {}).get("protected_production_tuple") or {}
-          if protected.get("repository") != "Codestra-SRL/codestra-middleware":
-              raise SystemExit("canonical Middleware repository is not Codestra-SRL/codestra-middleware")
+          if protected.get("repository") != "appolon1908-hue/Middleware-":
+              raise SystemExit("canonical Middleware repository is not appolon1908-hue/Middleware-")
           if protected.get("source_sha") != source_sha:
               raise SystemExit("source-lock and release-tuple Middleware SHAs differ")
           if protected.get("image_digest") != image_digest:
@@ -156,12 +156,28 @@ jobs:
     timeout-minutes: 180
     env:
       GH_TOKEN: ${{ secrets.CODESTRA_RELEASE_ORCHESTRATOR_TOKEN }}
-      TARGET_REPOSITORY: Codestra-SRL/codestra-middleware
-      RELEASE_WORKFLOW: exact-main-production-release.yml
+      TARGET_REPOSITORY: appolon1908-hue/Middleware-
+      RELEASE_WORKFLOW: release.yml
       SOURCE_SHA: ${{ needs.verify.outputs.middleware_source_sha }}
       EXPECTED_IMAGE_DIGEST: ${{ needs.verify.outputs.middleware_image_digest }}
       RELEASE_REQUEST_B64: ${{ secrets.CODESTRA_MIDDLEWARE_RELEASE_REQUEST_B64 }}
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Install checksum-verified Cosign
+        env:
+          COSIGN_VERSION: v3.1.2
+          COSIGN_SHA256: f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" \
+            --output "${RUNNER_TEMP}/cosign"
+          echo "${COSIGN_SHA256}  ${RUNNER_TEMP}/cosign" | sha256sum --check --strict
+          chmod 0700 "${RUNNER_TEMP}/cosign"
+
       - name: Require canonical source and successful required CI
         id: main
         run: |
@@ -182,7 +198,7 @@ jobs:
           ' <<<"$status_payload" >/dev/null
           echo "main_sha=${main_sha}" >> "$GITHUB_OUTPUT"
 
-      - name: Reuse a matching certified exact-main release
+      - name: Reuse a matching certified signed-v1 release
         id: existing
         run: |
           set -Eeuo pipefail
@@ -194,41 +210,32 @@ jobs:
           payload="$(gh api "repos/${TARGET_REPOSITORY}/actions/workflows/${RELEASE_WORKFLOW}/runs?event=workflow_dispatch&status=success&per_page=100")"
           while IFS=$'\t' read -r candidate_run candidate_attempt; do
             [[ "$candidate_run" =~ ^[1-9][0-9]*$ ]] || continue
-            expected_name="exact-main-production-${SOURCE_SHA}-${candidate_run}-${candidate_attempt}"
+            expected_name="signed-middleware-release-${SOURCE_SHA}-${candidate_run}-${candidate_attempt}"
             artifacts="$(gh api "repos/${TARGET_REPOSITORY}/actions/runs/${candidate_run}/artifacts?per_page=100")"
-            expired="$(
-              jq -r --arg name "$expected_name" '
-                [.artifacts[] | select(.name == $name)] | first | .expired // true
-              ' <<<"$artifacts"
-            )"
-            if [[ "$expired" != false ]]; then
-              continue
-            fi
+            artifact_row="$(jq -c --arg name "$expected_name" '[.artifacts[] | select(.expired == false and .name == $name)] | if length == 1 then .[0] else empty end' <<<"$artifacts")"
+            test -n "$artifact_row" || continue
+            artifact_id="$(jq -r .id <<<"$artifact_row")"
+            artifact_digest="$(jq -r .digest <<<"$artifact_row")"
             rm -rf "$work/content"
             mkdir -m 0700 "$work/content"
-            gh run download "$candidate_run" \
-              --repo "$TARGET_REPOSITORY" \
-              --name "$expected_name" \
-              --dir "$work/content"
-            (
-              cd "$work/content"
-              sha256sum --check --strict SHA256SUMS
-            )
-            test "$(sed -n 's/^SOURCE_SHA=//p' "$work/content/RELEASE.env")" = "$SOURCE_SHA"
-            digest="$(sed -n 's/^IMAGE_DIGEST=//p' "$work/content/RELEASE.env")"
-            test "$digest" = "$EXPECTED_IMAGE_DIGEST"
+            gh api "repos/${TARGET_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "$work/artifact.zip"
+            unzip -q "$work/artifact.zip" -d "$work/content"
+            jq --arg run "$candidate_run" --arg artifact "$expected_name" \
+              '.middleware_run_id=$run | .middleware_artifact=$artifact' \
+              config/production-release-tuple.json > "$work/tuple.json"
+            python tools/verify_middleware_release_evidence.py \
+              --directory "$work/content" --github-env "$work/verified.env" \
+              --tuple "$work/tuple.json" --run-id "$candidate_run" \
+              --artifact "$expected_name" --artifact-digest "$artifact_digest" \
+              --cosign "$RUNNER_TEMP/cosign"
+            source "$work/verified.env"
+            test "$MIDDLEWARE_PROTECTED_SHA" = "$SOURCE_SHA"
+            test "$MIDDLEWARE_IMAGE_DIGEST" = "$EXPECTED_IMAGE_DIGEST"
             found=true
             run_id="$candidate_run"
             artifact_name="$expected_name"
             break
-          done < <(
-            jq -r '
-              [.workflow_runs[] | select(.conclusion == "success")]
-              | sort_by(.created_at)
-              | reverse[]
-              | [.id, .run_attempt] | @tsv
-            ' <<<"$payload"
-          )
+          done < <(jq -r '[.workflow_runs[] | select(.conclusion == "success")] | sort_by(.created_at) | reverse[] | [.id, .run_attempt] | @tsv' <<<"$payload")
           echo "found=${found}" >> "$GITHUB_OUTPUT"
           if [[ "$found" == true ]]; then
             echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
@@ -322,7 +329,7 @@ jobs:
             sleep 5
           done
           [[ "$run_id" =~ ^[1-9][0-9]*$ ]] || {
-            echo "Unable to locate exact-main Middleware release run" >&2
+            echo "Unable to locate signed-v1 Middleware release run" >&2
             exit 1
           }
           echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
@@ -338,26 +345,34 @@ jobs:
             --interval 20 \
             --exit-status
 
-      - name: Verify newly produced release artifact
+      - name: Verify newly produced signed-v1 release artifact
         if: steps.existing.outputs.found != 'true'
         env:
           RUN_ID: ${{ steps.child.outputs.run_id }}
         run: |
           set -Eeuo pipefail
           run_attempt="$(gh api "repos/${TARGET_REPOSITORY}/actions/runs/${RUN_ID}" --jq .run_attempt)"
-          artifact_name="exact-main-production-${SOURCE_SHA}-${RUN_ID}-${run_attempt}"
+          artifact_name="signed-middleware-release-${SOURCE_SHA}-${RUN_ID}-${run_attempt}"
+          artifacts="$(gh api "repos/${TARGET_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100")"
+          artifact_row="$(jq -c --arg name "$artifact_name" '[.artifacts[] | select(.expired == false and .name == $name)] | if length == 1 then .[0] else empty end' <<<"$artifacts")"
+          test -n "$artifact_row"
+          artifact_id="$(jq -r .id <<<"$artifact_row")"
+          artifact_digest="$(jq -r .digest <<<"$artifact_row")"
           work="$RUNNER_TEMP/new-middleware-release"
-          mkdir -m 0700 "$work"
-          gh run download "$RUN_ID" \
-            --repo "$TARGET_REPOSITORY" \
-            --name "$artifact_name" \
-            --dir "$work"
-          (
-            cd "$work"
-            sha256sum --check --strict SHA256SUMS
-          )
-          test "$(sed -n 's/^SOURCE_SHA=//p' "$work/RELEASE.env")" = "$SOURCE_SHA"
-          test "$(sed -n 's/^IMAGE_DIGEST=//p' "$work/RELEASE.env")" = "$EXPECTED_IMAGE_DIGEST"
+          mkdir -m 0700 "$work/content"
+          gh api "repos/${TARGET_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "$work/artifact.zip"
+          unzip -q "$work/artifact.zip" -d "$work/content"
+          jq --arg run "$RUN_ID" --arg artifact "$artifact_name" \
+            '.middleware_run_id=$run | .middleware_artifact=$artifact' \
+            config/production-release-tuple.json > "$work/tuple.json"
+          python tools/verify_middleware_release_evidence.py \
+            --directory "$work/content" --github-env "$work/verified.env" \
+            --tuple "$work/tuple.json" --run-id "$RUN_ID" \
+            --artifact "$artifact_name" --artifact-digest "$artifact_digest" \
+            --cosign "$RUNNER_TEMP/cosign"
+          source "$work/verified.env"
+          test "$MIDDLEWARE_PROTECTED_SHA" = "$SOURCE_SHA"
+          test "$MIDDLEWARE_IMAGE_DIGEST" = "$EXPECTED_IMAGE_DIGEST"
 
       - name: Record canonical Middleware authority
         env:

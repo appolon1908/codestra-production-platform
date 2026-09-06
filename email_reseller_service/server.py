@@ -50,6 +50,13 @@ EVENT_TYPES = {
     "hard_bounce": "email.bounced", "complained": "email.complained",
     "rejected": "email.bounced", "failed": "email.bounced",
 }
+KLYROW_EVENT_STATUSES = {
+    "email.sent": "sent", "klyrow.email.sent": "sent",
+    "email.delivered": "delivered", "klyrow.email.delivered": "delivered",
+    "email.bounced": "hard_bounce", "klyrow.email.bounced": "hard_bounce",
+    "email.complained": "complained", "klyrow.email.complained": "complained",
+    "email.deferred": "soft_bounce", "klyrow.email.deferred": "soft_bounce",
+}
 _rate_lock = threading.Lock()
 _rate: dict[str, list[float]] = {}
 
@@ -378,13 +385,14 @@ def receive_klyrow_event(raw: bytes, headers: Any) -> tuple[dict[str, Any], bool
         raise ApiError(400, "invalid_json") from exc
     if not isinstance(value, dict) or value.get("source_system") != "klyrow" or value.get("event_id") != event_id:
         raise ApiError(422, "invalid_klyrow_event")
-    provider_event = str(value.get("provider_event") or value.get("event_type") or "unknown")
-    canonical = {
-        "email.sent": "sent", "email.delivered": "delivered", "email.bounced": "hard_bounce",
-        "email.complained": "complained", "email.deferred": "soft_bounce",
-    }.get(str(value.get("event")))
+    event_type = str(value.get("event_type") or "")
+    legacy_event = str(value.get("event") or "")
+    canonical = KLYROW_EVENT_STATUSES.get(event_type) if event_type else KLYROW_EVENT_STATUSES.get(legacy_event)
     if not canonical:
         raise ApiError(422, "unsupported_klyrow_event")
+    if event_type and legacy_event and KLYROW_EVENT_STATUSES.get(legacy_event) != canonical:
+        raise ApiError(422, "conflicting_klyrow_event")
+    provider_event = str(value.get("provider_event") or event_type or legacy_event)
     message_id = str(value.get("message_id") or "")
     with connect() as db:
         message = db.execute("SELECT account_id FROM email_messages WHERE id=?", (message_id,)).fetchone()

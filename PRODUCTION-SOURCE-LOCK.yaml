@@ -1,5 +1,5 @@
 schema_version: codestra.production-source-lock.v1
-generated_at: "2026-09-04T15:36:00Z"
+generated_at: "2026-09-06T13:12:00Z"
 status: FAIL
 target: 65.109.65.169
 protected_platform:
@@ -14,30 +14,30 @@ protected_platform:
   note: The resulting commit SHA cannot be embedded in its own source tree; release provenance supplies that exact identity.
 middleware_authorities:
   protected_production_tuple:
-    repository: Codestra-SRL/codestra-middleware
-    source_sha: f199b6c40f4e467979e9a8b255a0e686321a182d
-    image: ghcr.io/codestra-srl/codestra-middleware
-    image_digest: sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b
+    repository: appolon1908-hue/Middleware-
+    source_sha: 63b6c0c8bca5168a1178895bd12858d0b1e8086e
+    image: ghcr.io/appolon1908-hue/codestra-middleware
+    image_digest: sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a
     migration_head: 0056_klyrow_delivery_events
-    authority_state: CURRENT_PRODUCTION_AUTHORITY_REQUIRES_NEW_CANONICAL_RELEASE
+    authority_state: SELECTED_SIGNED_AUTHORITY_PENDING_STAGING_CERTIFICATION
   appolon_n8n_gap_candidate:
     repository: appolon1908-hue/Middleware-
-    source_sha: 1aa4d505846b7494aff94bec3d7ea68c895e2dd3
+    source_sha: 63b6c0c8bca5168a1178895bd12858d0b1e8086e
     image: ghcr.io/appolon1908-hue/codestra-middleware
-    image_digest: sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504
-    migration_head: 0009_observability_incidents
-    release_id: 1aa4d505846b-cec8b5a1b0e7
-    release_run: 33767657962
-    production_promotion_gate_run: 33767951234
-    release_artifact_digest: sha256:cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
-    sbom_sha256: sha256:87cab4a84d73ddff1acb198560e872b882f3cd6cdcce1a4b046b7a2d3f3a9049
-    contracts_sha256: sha256:2d3033d1819fb1d92c9da69b21e059e5e3c8c5217d5236f2d7536af9cd850ef3
-    migrations_sha256: sha256:6bd0d1ba307e51b5fd1705b8f93ed7d5edc1a9f80e74cbb4fa9a12e413603f58
+    image_digest: sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a
+    migration_head: 0056_klyrow_delivery_events
+    release_id: 63b6c0c8bca5-bca7a220b9ce
+    release_run: 34035226830
+    production_promotion_gate_run: null
+    release_artifact_digest: sha256:e3af11436039c9812d0e0af4e82a5b3efdfd1736c300f6a6c6f1cfb7ff103e9f
+    sbom_sha256: sha256:c870828a291e924cb0ca4604c37f95b9c93aee4bda9623f685eb679552f8bc9f
+    contracts_sha256: sha256:b72199383dccc19472bc8fbce76b3bb65fd3ba706a2fa6ac82d12cf74bad6a5d
+    migrations_sha256: sha256:ed3b8e7132c5501ce8f4ff7c15a7867903ea4a70e06960669e8b267d4834a844
     runtime_profiles_sha256: sha256:c46c2bf17e955de663c271b33b95e2256fbecea9607ee5fcb29422605a799b84
     vulnerability_matches: 0
     runtime_state: SIGNED_IMMUTABLE_CANDIDATE_NOT_DEPLOYED
-    authority_classification: COMPATIBILITY_CANDIDATE_NOT_PRODUCTION_AUTHORITY
-    promotion_decision: REQUIRE_EXPLICIT_ISOLATED_SCHEMA_DATA_CONTRACT_AND_ROLLBACK_CERTIFICATION
+    authority_classification: CANONICAL_FORWARD_AUTHORITY
+    promotion_decision: DO_NOT_DEPLOY_UNTIL_STAGING_RESTORE_ROLLBACK_AND_CANARY_CERTIFICATION
     external_effects_default: DISABLED
   canonical_n8n_gap_convergence:
     repository: Codestra-SRL/codestra-middleware
@@ -50,11 +50,11 @@ middleware_authorities:
     image_digest: null
     deployment_authorized: false
   authority_decision:
-    status: REQUIRES_RUNTIME_CERTIFICATION
-    preferred_path: RESTORE_CODESTRA_SRL_ACTIONS_CERTIFY_MERGE_PR_283_AND_BUILD_CANONICAL_SIGNED_IMAGE
-    alternate_path: CERTIFY_EXPLICIT_SCHEMA_DATA_CONTRACT_AND_ROLLBACK_MIGRATION_TO_APPOLON_REPOSITORY
+    status: APPOLON_SELECTED_AS_CANONICAL_FORWARD_AUTHORITY
+    preferred_path: CERTIFY_EXPLICIT_SCHEMA_DATA_CONTRACT_AND_ROLLBACK_MIGRATION_TO_APPOLON_REPOSITORY
+    alternate_path: NONE
     prohibited_path: SILENTLY_REPLACE_CANONICAL_AUTHORITY_WITH_DIFFERENT_MIGRATION_LINEAGE
-    reason: Codestra-SRL and Appolon candidates have different source lineages and migration heads; exact staging recovery and rollback evidence is mandatory.
+    reason: Appolon is the sole forward authority; the legacy Codestra-SRL deployment is rollback-only and staging recovery proof remains mandatory.
 custom_release_candidates:
   codestra_ai:
     repository: appolon1908-hue/Codestra-AI
@@ -150,27 +150,10 @@ release_readiness:
   source_lock_status: FAIL
   reason: Current staging, complete candidate, API/gateway, recovery, rollback, canary, and soak evidence is incomplete.
 blockers:
-  - id: canonical-middleware-authority
-    reason: >-
-      Codestra-SRL/codestra-middleware PR 283 still has no executable exact-head
-      CI because the organization Actions budget stopped run 33667817256 before
-      job creation. The signed Appolon compatibility candidate has a different
-      migration lineage and requires explicit isolated schema/data/contract and
-      two-way rollback certification before it can replace canonical authority.
-  - id: current-runtime-inventory-and-immutable-replacement
-    historical_snapshot_count: 24
-    historically_proven_replaced_after_snapshot: 3
-    current_remaining_count: FRESH_READONLY_RUNTIME_INVENTORY_REQUIRED
-    historical_snapshot: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml
-    authority_map: evidence/server65/CUSTOM-RUNTIME-CANDIDATE-AUTHORITY-20260903.yaml
-    reason: >-
-      The September 2 inventory is stale. Three services have protected
-      replacement evidence, but the exact current workload set and remaining
-      unsigned or local-only images must be read back before the count changes.
-  - id: runtime-candidate-matrix-not-authorized
-    repository: appolon1908-hue/codestra-production-runtime-authority
-    pull_request: 6
-    exact_head: ee3ec25b28881cac100b713842e7ec682dbe4da9
+  - id: unpinned-custom-runtime
+    count: 24
+    evidence: evidence/server65/UNPINNED-CUSTOM-DEPLOYMENTS.yaml
+  - id: protected-staging-not-executed
     reason: >-
       The 64-workload evidence gate is green but still lacks CODEOWNER approval,
       complete signed artifact records, runtime identities, distinct rollback

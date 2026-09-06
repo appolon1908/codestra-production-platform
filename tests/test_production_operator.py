@@ -523,7 +523,7 @@ def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, 
                 f"MIDDLEWARE_MIGRATION_HEAD={OPERATOR.MIDDLEWARE_REQUIRED_DATABASE_HEAD}",
                 "MIDDLEWARE_SCHEMA_TABLE_COUNT=2",
                 "MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS",
-                "MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api",
+                "MIDDLEWARE_MIGRATION_IDENTITY=middleware_app",
                 "MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS",
                 "MIDDLEWARE_CANDIDATE_HEALTH_GATE=PASS",
                 "MIDDLEWARE_CANDIDATE_READINESS_GATE=PASS",
@@ -585,7 +585,7 @@ def test_restore_result_rejects_unadvertised_backup(monkeypatch, tmp_path):
         f"MIDDLEWARE_MIGRATION_HEAD={OPERATOR.MIDDLEWARE_REQUIRED_DATABASE_HEAD}\n"
         "MIDDLEWARE_SCHEMA_TABLE_COUNT=2\n"
         "MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS\n"
-        "MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api\n"
+        "MIDDLEWARE_MIGRATION_IDENTITY=middleware_app\n"
         "MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS\n"
         "MIDDLEWARE_CANDIDATE_HEALTH_GATE=PASS\n"
         "MIDDLEWARE_CANDIDATE_READINESS_GATE=PASS\n"
@@ -617,6 +617,23 @@ def test_restore_evidence_rejects_a_different_backup_stamp(tmp_path):
             "tested_backup_stamp",
             "20260830T180000Z",
         )
+
+
+def test_middleware_migration_database_url_enforces_deployed_contract(monkeypatch, tmp_path):
+    credential = tmp_path / "database_url"
+    credential.write_text(
+        "postgresql+asyncpg://middleware_app:secret@postgres/codestra_middleware\n"
+    )
+    credential.chmod(0o400)
+    os.chown(credential, 10001, 999)
+    monkeypatch.setattr(OPERATOR, "MIDDLEWARE_MIGRATION_DATABASE_URL", credential)
+    assert OPERATOR.middleware_migration_database_url().startswith(
+        "postgresql+asyncpg://middleware_app:"
+    )
+
+    os.chown(credential, 0, 0)
+    with pytest.raises(OPERATOR.OperatorError, match="credential ownership"):
+        OPERATOR.middleware_migration_database_url()
 
 
 def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypatch):
@@ -670,6 +687,11 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
     monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
     monkeypatch.setattr(
         OPERATOR,
+        "middleware_migration_database_url",
+        lambda: "postgresql+asyncpg://middleware_app:secret@postgres/codestra_middleware",
+    )
+    monkeypatch.setattr(
+        OPERATOR,
         "verify_middleware_runtime",
         lambda value: {"middleware_runtime_digest": "PASS"},
     )
@@ -697,14 +719,12 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
     ]
     assert result["middleware_rollout"] == "PASS"
     assert result["middleware_database_head"] == "0056_klyrow_delivery_events"
-    assert calls[0][-6:] == [
-        "--rm",
-        "--no-deps",
-        "middleware-integration-api",
-        "alembic",
-        "upgrade",
-        "head",
-    ]
+    assert "--volume" in calls[0]
+    assert f"{OPERATOR.MIDDLEWARE_MIGRATION_DATABASE_URL}:/run/secrets/migration_database_url:ro" in calls[0]
+    assert "/usr/bin/python3.13" in calls[0]
+    assert "middleware-integration-api" in calls[0]
+    assert "c.set_main_option('script_location','/app/migrations')" in calls[0][-1]
+    assert "command.upgrade(c,'head')" in calls[0][-1]
     recreate = next(command for command in calls if "--force-recreate" in command)
     assert "--no-deps" in recreate
     assert recreate[-3:] == list(OPERATOR.MIDDLEWARE_RUNTIME_SERVICES)
@@ -741,6 +761,11 @@ def test_middleware_rollout_failure_invokes_bounded_rollback(monkeypatch):
         OPERATOR,
         "middleware_quiescence_stamp",
         lambda: "20260830T200000Z",
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_migration_database_url",
+        lambda: "postgresql+asyncpg://middleware_app:secret@postgres/codestra_middleware",
     )
     monkeypatch.setattr(
         OPERATOR,
@@ -1366,7 +1391,7 @@ def test_middleware_rollback_restores_database_and_reads_back_images(monkeypatch
     writer_fence_index = next(
         index
         for index, command in enumerate(commands)
-        if any("alter database codestra_middleware with connection limit 0" in part for part in command)
+        if any("alter database codestra_middleware_appolon with connection limit 0" in part for part in command)
     )
     destructive_fence_index = next(
         index
@@ -1751,6 +1776,21 @@ def test_worker_healthcheck_is_not_disabled():
     assert "control-plane-worker-heartbeat" in worker
 
 
+def test_control_plane_source_readback_uses_runtime_python():
+    source = (ROOT / "operations/production-operator/codestra-production-operator").read_text(
+        encoding="utf-8"
+    )
+    assert '"exec", CONTROL_PLANE_API, "python", "-c"' in source
+    assert '"exec", CONTROL_PLANE_API, "sha256sum"' not in source
+
+
+def test_control_plane_build_uses_a_valid_local_image_tag():
+    compose = (ROOT / "deploy/control-plane/compose.yaml").read_text(encoding="utf-8")
+    assert compose.count("build:") == 1
+    assert compose.count("image: codestra/codestra-integration-control-plane:protected-release") == 2
+    assert "image: ghcr.io/appolon1908-hue/integration-control-plane@sha256:" not in compose
+
+
 def test_activation_rejects_incomplete_rollback_bundle(monkeypatch):
     monkeypatch.setattr(
         OPERATOR,
@@ -2107,7 +2147,7 @@ def test_diagnostics_and_rollback_remain_available_when_unsafe(monkeypatch, acti
 
 def test_kong_runtime_readback_is_sanitized_and_reports_traffic_gate(monkeypatch) -> None:
     responses = {
-        "/routes?size=1000": {"data": [{"id": "r1", "name": "health",
+        "/routes?size=1000": {"data": [{"id": "r1", "name": OPERATOR.KONG_TRAFFIC_GATE_ROUTE,
             "service": {"id": "s1"}, "protocols": ["https"], "methods": ["GET"],
             "hosts": ["api.example.invalid"], "paths": ["/health"],
             "headers": {"x-api-key": ["secret"]}}]},
@@ -2124,7 +2164,7 @@ def test_kong_runtime_readback_is_sanitized_and_reports_traffic_gate(monkeypatch
         "/plugins?size=1000": {"data": [{"id": "p1",
             "name": "request-termination",
             "instance_name": OPERATOR.KONG_TRAFFIC_GATE_INSTANCE, "enabled": True,
-            "route": None, "service": None, "consumer": None,
+            "route": {"id": "r1"}, "service": None, "consumer": None,
             "config": {"message": "secret"}}]},
     }
     monkeypatch.setattr(OPERATOR, "kong_json", lambda method, path: responses[path])
@@ -2137,6 +2177,63 @@ def test_kong_runtime_readback_is_sanitized_and_reports_traffic_gate(monkeypatch
     assert "certificate" not in serialized
     assert '"config"' not in serialized
     assert len(result["sanitized_configuration_sha256"]) == 64
+
+
+def test_kong_traffic_gate_is_scoped_to_callback_route(monkeypatch) -> None:
+    plugins = []
+
+    def fake_kong_json(method, path, payload=None):
+        if method == "GET" and path == f"/routes/{OPERATOR.KONG_TRAFFIC_GATE_ROUTE}":
+            return {"id": "callback-route-id"}
+        if method == "GET" and path == "/plugins?size=1000":
+            return {"data": list(plugins)}
+        if method == "POST" and path == "/plugins":
+            created = {
+                "id": "gate-id",
+                **payload,
+                "service": None,
+                "consumer": None,
+            }
+            plugins.append(created)
+            return created
+        raise AssertionError((method, path, payload))
+
+    monkeypatch.setattr(OPERATOR, "kong_json", fake_kong_json)
+    OPERATOR.kong_traffic_gate(True)
+    assert plugins[0]["route"] == {"id": "callback-route-id"}
+    assert plugins[0]["service"] is None
+    assert plugins[0]["consumer"] is None
+
+
+def test_kong_traffic_gate_migrates_global_gate_in_place(monkeypatch) -> None:
+    plugins = [{
+        "id": "gate-id",
+        "name": "request-termination",
+        "instance_name": OPERATOR.KONG_TRAFFIC_GATE_INSTANCE,
+        "enabled": True,
+        "route": None,
+        "service": None,
+        "consumer": None,
+        "config": {"status_code": 503},
+    }]
+    calls = []
+
+    def fake_kong_json(method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET" and path == f"/routes/{OPERATOR.KONG_TRAFFIC_GATE_ROUTE}":
+            return {"id": "callback-route-id"}
+        if method == "GET" and path == "/plugins?size=1000":
+            return {"data": list(plugins)}
+        if method == "PATCH" and path == "/plugins/gate-id":
+            plugins[0].update(payload)
+            return dict(plugins[0])
+        raise AssertionError((method, path, payload))
+
+    monkeypatch.setattr(OPERATOR, "kong_json", fake_kong_json)
+    OPERATOR.kong_traffic_gate(True)
+    assert plugins[0]["route"] == {"id": "callback-route-id"}
+    assert any(method == "PATCH" for method, _, _ in calls)
+    assert not any(method == "POST" for method, _, _ in calls)
 
 
 def test_rollback_remains_available_when_unsafe(monkeypatch) -> None:
@@ -2212,6 +2309,7 @@ def test_payload_checksums_are_real() -> None:
         "codestra-production-forced-command",
         "codestra-production-operator.sudoers",
         "codestra-production-operator.sshd",
+        "codestra-readiness-restore.override.conf",
     ):
         digest = subprocess.check_output(["sha256sum", str(PACKAGE / name)], text=True).split()[0]
         assert f"{digest}  {name}" in installer
@@ -2227,6 +2325,11 @@ def test_payload_checksums_are_real() -> None:
     restore_digest = subprocess.check_output(["sha256sum", str(restore)], text=True).split()[0]
     assert restore_digest in installer
     assert 'restore_source=$script_dir/../readiness/codestra-isolated-restore-rehearsal.sh' in installer
+    assert "codestra-readiness-restore.override.conf" in installer
+    assert "/etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf" in installer
+    assert "systemctl daemon-reload" in installer
+    assert "effective_restore_exec=$(systemctl show codestra-readiness-restore.service -p ExecStart --value)" in installer
+    assert "wc -l" in installer
 
     assert "-g codestra-production-operator -m 0710" in installer
     assert installer.index("useradd --system") < installer.index(
@@ -2247,6 +2350,8 @@ def test_validator_proves_authorized_key_is_readable_by_operator():
     assert "codestra-production-operator:codestra-production-operator 600" in validator
     assert "sudo -u codestra-production-operator" in validator
     assert "test -r /var/lib/codestra-production-operator/.ssh/authorized_keys" in validator
+    assert "/etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf" in validator
+    assert "effective_restore_exec=$(systemctl show codestra-readiness-restore.service -p ExecStart --value)" in validator
 
 
 def test_forced_command_binds_exact_release_tuple_before_sudo() -> None:
@@ -2290,7 +2395,7 @@ def test_stage_uses_exact_digest_and_isolated_standby() -> None:
     assert '"--network", "none"' in text
     assert '"--read-only", "--cap-drop", "ALL"' in text
     assert '"ENABLE_EXTERNAL_DELIVERY=false"' in text
-    assert 'STANDBY_ENTRYPOINT = ["/opt/venv/bin/python"]' in text
+    assert 'STANDBY_ENTRYPOINT = ["/usr/bin/python3.13"]' in text
     assert 'STANDBY_COMMAND = ["-c", "import threading; threading.Event().wait()"]' in text
     assert '"--entrypoint", STANDBY_ENTRYPOINT[0]' in text
     assert 'subject, *STANDBY_COMMAND' in text

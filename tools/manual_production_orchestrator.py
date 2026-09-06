@@ -97,7 +97,7 @@ def validate_catalog(catalog: dict[str, Any]) -> None:
     require(catalog.get("release_intent_workflow") == INTENT_WORKFLOW, "unexpected release-intent workflow")
 
     repositories = catalog.get("repositories")
-    require(isinstance(repositories, list) and len(repositories) == 13, "catalog must contain exactly 13 repositories")
+    require(isinstance(repositories, list) and len(repositories) == 12, "catalog must contain exactly 12 repositories")
     names: list[str] = []
     ids: list[int] = []
     orders: list[int] = []
@@ -118,7 +118,7 @@ def validate_catalog(catalog: dict[str, Any]) -> None:
     require(len(names) == len(set(names)), "catalog repositories must be unique")
     require(len(ids) == len(set(ids)), "catalog repository IDs must be unique")
     require(len(orders) == len(set(orders)), "catalog orders must be unique")
-    require("Codestra-SRL/codestra-middleware" in names, "canonical Middleware authority missing")
+    require("appolon1908-hue/Middleware-" in names, "canonical Middleware authority missing")
     require("appolon1908-hue/Middleware-" in names, "transitional Middleware evidence repository missing")
     require("appolon1908-hue/Infustruction-repo" in names, "infrastructure authority missing")
 
