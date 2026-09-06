@@ -4,7 +4,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/email-reseller/Dockerfile
-    image: ghcr.io/appolon1908-hue/email-reseller@sha256:e1dddbb9055528b702dd27d99b42ee59b1929a2de826ca966075bd0b59e5e005
+    image: ghcr.io/appolon1908-hue/email-reseller@sha256:d02ac0fffcfe98ab04f2e14cd49d009ca651db99a59c2d9ecc39fd8e708c26a2
     restart: unless-stopped
     env_file:
       - /etc/codestra/secrets/kyqra-telnexa/middleware.env
@@ -14,8 +14,8 @@ services:
       EMAIL_MAX_REQUEST_BYTES: "262144"
       EMAIL_MAX_RECIPIENTS: "50"
       EMAIL_RATE_PER_MINUTE: "60"
-      CODESTRA_IMAGE_DIGEST: sha256:e1dddbb9055528b702dd27d99b42ee59b1929a2de826ca966075bd0b59e5e005
-      CODESTRA_BUILD_TIMESTAMP: "2026-09-03T00:24:59.766579167Z"
+      CODESTRA_IMAGE_DIGEST: sha256:d02ac0fffcfe98ab04f2e14cd49d009ca651db99a59c2d9ecc39fd8e708c26a2
+      CODESTRA_BUILD_TIMESTAMP: "2026-09-06T19:09:20.443674871Z"
       CODESTRA_MIGRATION_REVISION: email-reseller-schema-v1
       CODESTRA_ENVIRONMENT: production
       KLYROW_HEALTH_URL: https://klyrow.internal.codestra.agency:18000/v1/health
@@ -28,7 +28,7 @@ services:
     ports:
       # TLS/mTLS is terminated by the host Caddy listener on 10.40.0.1:18080.
       # Keep the application origin unreachable from the private network.
-      - "127.0.0.1:18180:8080"
+      - "127.0.0.1:18181:8080"
     networks: [edge, backend]
     read_only: true
     tmpfs: [/tmp]
