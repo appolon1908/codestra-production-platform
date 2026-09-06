@@ -17,7 +17,7 @@ def write_manifest(path):
         json.dumps(
             {
                 "release_tuple": {
-                    "middleware_image": "ghcr.io/codestra-srl/codestra-middleware",
+                    "middleware_image": "ghcr.io/appolon1908-hue/codestra-middleware",
                     "middleware_image_digest": DIGEST,
                 }
             }
@@ -48,7 +48,7 @@ def test_worker_image_must_equal_signed_release_tuple(tmp_path, monkeypatch) -> 
     manifest = tmp_path / "deployment-manifest.json"
     environment = tmp_path / "worker.env"
     write_manifest(manifest)
-    expected = f"ghcr.io/codestra-srl/codestra-middleware@{DIGEST}"
+    expected = f"ghcr.io/appolon1908-hue/codestra-middleware@{DIGEST}"
     environment.write_text(f"MIDDLEWARE_IMAGE={expected}\n")
     checksums, signature, signers, calls = signed_inputs(
         tmp_path, manifest, monkeypatch
@@ -60,8 +60,8 @@ def test_worker_image_must_equal_signed_release_tuple(tmp_path, monkeypatch) -> 
 @pytest.mark.parametrize(
     "selected",
     [
-        "ghcr.io/codestra-srl/codestra-middleware:latest",
-        "ghcr.io/codestra-srl/codestra-middleware@sha256:" + "b" * 64,
+        "ghcr.io/appolon1908-hue/codestra-middleware:latest",
+        "ghcr.io/appolon1908-hue/codestra-middleware@sha256:" + "b" * 64,
     ],
 )
 def test_worker_image_rejects_mutable_or_different_artifact(
@@ -84,7 +84,7 @@ def test_worker_image_rejects_manifest_outside_signed_checksums(
     manifest = tmp_path / "deployment-manifest.json"
     environment = tmp_path / "worker.env"
     write_manifest(manifest)
-    expected = f"ghcr.io/codestra-srl/codestra-middleware@{DIGEST}"
+    expected = f"ghcr.io/appolon1908-hue/codestra-middleware@{DIGEST}"
     environment.write_text(f"MIDDLEWARE_IMAGE={expected}\n")
     checksums, signature, signers, _calls = signed_inputs(
         tmp_path, manifest, monkeypatch

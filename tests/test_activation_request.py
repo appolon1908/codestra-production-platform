@@ -65,6 +65,7 @@ def test_rejects_non_boolean_false_flag(tmp_path):
     "rollout-middleware", "rollback-middleware",
     "activate-control-plane", "enable-production-web-traffic",
     "disable-production-web-traffic",
+    "enable-klyrow-email-delivery", "disable-klyrow-email-delivery",
 ])
 def test_state_change_window_authority_is_deferred_to_root_operator(tmp_path, action):
     # The runner cannot read the root-owned waiver evidence. It binds the exact
@@ -85,6 +86,17 @@ def test_superseded_digest_is_denied_even_when_manifest_matches(tmp_path):
     with open(args.manifest, "w", encoding="utf-8") as stream:
         json.dump(manifest, stream)
     with pytest.raises(ValueError, match="superseded"):
+        validate(args)
+
+
+def test_unrecoverable_signer_release_is_denied(tmp_path):
+    sha = "01f2676772b11919e1d79cc74d36bc5eeaa682cd"
+    args = request(tmp_path, sha=sha)
+    manifest = json.loads(open(args.manifest, encoding="utf-8").read())
+    manifest["commit"] = sha
+    with open(args.manifest, "w", encoding="utf-8") as stream:
+        json.dump(manifest, stream)
+    with pytest.raises(ValueError, match="explicitly non-activatable"):
         validate(args)
 
 

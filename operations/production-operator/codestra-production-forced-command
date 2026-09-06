@@ -11,6 +11,7 @@ allowed = {
     "stage-control-plane", "validate-control-plane", "rollback-control-plane",
     "rollout-middleware", "rollback-middleware",
     "activate-control-plane", "enable-production-web-traffic", "disable-production-web-traffic",
+    "enable-klyrow-email-delivery", "disable-klyrow-email-delivery",
 }
 if len(parts) != 5 or parts[0] not in allowed:
     raise SystemExit(2)

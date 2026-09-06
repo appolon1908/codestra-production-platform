@@ -20,6 +20,12 @@ jobs:
           build-args: |
             VCS_REF=${{ github.sha }}
             VERSION=${{ github.sha }}
+      - name: Smoke-test hardened runtime entrypoint
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            codestra/email-reseller:${{ github.sha }} \
+            -c 'import email_reseller_service.server'
       - uses: aquasecurity/trivy-action@v0.36.0
         with: {image-ref: 'codestra/email-reseller:${{ github.sha }}', severity: 'CRITICAL,HIGH', ignore-unfixed: true, exit-code: '1'}
       - name: Install checksum-verified Gitleaks

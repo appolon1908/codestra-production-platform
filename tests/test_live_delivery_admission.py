@@ -42,10 +42,19 @@ def test_admission_executes_only_when_all_channels_are_disabled() -> None:
 
 
 def test_admission_denies_each_enabled_or_missing_channel() -> None:
-    for flag in ("LIVE_SMS_DELIVERY", "LIVE_EMAIL_DELIVERY", "LIVE_PSTN_DIALING"):
+    for flag in ("LIVE_SMS_DELIVERY", "LIVE_PSTN_DIALING"):
         result = run_admission(**{flag: "true"})
         assert result.returncode != 0
         assert f"admission denied: {flag}" in result.stdout
+
+
+def test_admission_accepts_only_narrow_klyrow_email_production() -> None:
+    result = run_admission(
+        LIVE_EMAIL_DELIVERY="true", CONTROL_PLANE_OUTBOUND_ENABLED="true",
+        CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED="true",
+        KLYROW_MODE="production", TELNEXA_MODE="simulator",
+    )
+    assert result.returncode == 0
 
 
 def test_compose_uses_baked_python_entrypoint_without_host_shell_script() -> None:
