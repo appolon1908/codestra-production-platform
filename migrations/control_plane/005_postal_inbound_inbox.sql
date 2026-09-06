@@ -18,6 +18,7 @@ CREATE INDEX IF NOT EXISTS postal_inbound_event_tenant_status
 REVOKE ALL ON control_plane.postal_inbound_event FROM PUBLIC;
 GRANT SELECT,INSERT,UPDATE ON control_plane.postal_inbound_event TO codestra_control_plane_runtime;
 ALTER TABLE control_plane.postal_inbound_event ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS postal_inbound_event_tenant ON control_plane.postal_inbound_event;
 CREATE POLICY postal_inbound_event_tenant ON control_plane.postal_inbound_event
  USING (tenant_id=current_setting('app.tenant_id',true))
  WITH CHECK (tenant_id=current_setting('app.tenant_id',true));
