@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.automation_executions(
   event_id text NOT NULL,
   workflow_key text NOT NULL,
   request_hash text NOT NULL,
-  status text NOT NULL CHECK(status IN ('RUNNING','COMPLETED','FAILED','RETRY_PENDING','DEAD_LETTER')),
+  status text NOT NULL CHECK(status IN ('RUNNING','ACTIONS_COMPLETED','COMPLETED','FAILED','RETRY_PENDING','DEAD_LETTER')),
   approved_actions text NOT NULL,
   correlation_id text NOT NULL,
   execution_id text,
@@ -42,5 +42,19 @@ CREATE TABLE IF NOT EXISTS public.automation_executions(
 );
 CREATE INDEX IF NOT EXISTS automation_executions_status
   ON public.automation_executions(tenant_id,status,updated_at);
+
+CREATE TABLE IF NOT EXISTS public.automation_action_executions(
+  tenant_id text NOT NULL,
+  event_id text NOT NULL,
+  workflow_key text NOT NULL,
+  action text NOT NULL,
+  request_hash text NOT NULL,
+  status text NOT NULL CHECK(status IN ('COMPLETED')),
+  receipt text NOT NULL,
+  completed_at text NOT NULL,
+  PRIMARY KEY(tenant_id,event_id,workflow_key,action),
+  FOREIGN KEY(tenant_id,event_id,workflow_key)
+    REFERENCES public.automation_executions(tenant_id,event_id,workflow_key)
+);
 
 COMMIT;

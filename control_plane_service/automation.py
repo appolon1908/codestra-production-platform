@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
+import urllib.request
+from pathlib import Path
 from typing import Any
 
 from .campaign_gates import authorize_channel
@@ -54,6 +58,11 @@ CREATE TABLE IF NOT EXISTS automation_executions(
  correlation_id TEXT NOT NULL,execution_id TEXT,started_at TEXT NOT NULL,
  completed_at TEXT,updated_at TEXT NOT NULL,
  PRIMARY KEY(tenant_id,event_id,workflow_key));
+CREATE TABLE IF NOT EXISTS automation_action_executions(
+ tenant_id TEXT NOT NULL,event_id TEXT NOT NULL,workflow_key TEXT NOT NULL,
+ action TEXT NOT NULL,request_hash TEXT NOT NULL,status TEXT NOT NULL,
+ receipt TEXT NOT NULL,completed_at TEXT NOT NULL,
+ PRIMARY KEY(tenant_id,event_id,workflow_key,action));
 """
 
 
@@ -64,6 +73,53 @@ def _ensure_embedded_schema(db: Any) -> None:
 
 def _canonical(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _action_environment(action: str) -> str:
+    return "CONTROL_PLANE_ACTION_" + "".join(
+        character.upper() if character.isalnum() else "_" for character in action
+    ) + "_URL"
+
+
+def _action_secret() -> bytes:
+    path = os.getenv("CONTROL_PLANE_AUTOMATION_ACTION_SECRET_FILE", "")
+    if not path:
+        raise ControlPlaneError("automation_action_secret_missing")
+    try:
+        secret = Path(path).read_bytes().strip()
+    except OSError as exc:
+        raise ControlPlaneError("automation_action_secret_unreadable") from exc
+    if len(secret) < 32:
+        raise ControlPlaneError("automation_action_secret_invalid")
+    return secret
+
+
+def _invoke_action(action: str, value: dict[str, Any], request_hash: str) -> dict[str, Any]:
+    url = os.getenv(_action_environment(action), "")
+    if not url:
+        raise ControlPlaneError(f"automation_action_handler_missing:{action}")
+    action_key = f"{value['tenant_id']}:{value['event_id']}:{value['automation_key']}:{action}"
+    body = _canonical({"action": action, "idempotency_key": action_key, "event": value}).encode()
+    signature = hmac.new(_action_secret(), body, hashlib.sha256).hexdigest()
+    request = urllib.request.Request(url, body, {
+        "Content-Type": "application/json",
+        "Idempotency-Key": action_key,
+        "X-Codestra-Action": action,
+        "X-Codestra-Request-Hash": request_hash,
+        "X-Codestra-Signature": "sha256=" + signature,
+    }, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            if response.status < 200 or response.status >= 300:
+                raise ControlPlaneError(f"automation_action_failed:{action}")
+            receipt = json.loads(response.read())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ControlPlaneError(f"automation_action_failed:{action}") from exc
+    if not isinstance(receipt, dict) or receipt.get("status") != "COMPLETED":
+        raise ControlPlaneError(f"automation_action_incomplete:{action}")
+    if receipt.get("action") != action or receipt.get("idempotency_key") != action_key:
+        raise ControlPlaneError(f"automation_action_receipt_mismatch:{action}")
+    return receipt
 
 
 def authorize_automation(store: Store, value: dict[str, Any], tenant: str) -> dict[str, Any]:
@@ -144,9 +200,46 @@ def execute_automation(store: Store, value: dict[str, Any], tenant: str) -> dict
         ).fetchone()
     if not row or row["request_hash"] != request_hash:
         raise ControlPlaneError("idempotency_conflict")
+    completed_actions = []
+    for action in expected:
+        with store.connect() as db:
+            prior = db.execute(
+                """SELECT request_hash,status,receipt FROM automation_action_executions
+                   WHERE tenant_id=? AND event_id=? AND workflow_key=? AND action=?""",
+                (tenant, event_id, workflow_key, action),
+            ).fetchone()
+        if prior:
+            if prior["request_hash"] != request_hash or prior["status"] != "COMPLETED":
+                raise ControlPlaneError("idempotency_conflict")
+            receipt = json.loads(prior["receipt"])
+        else:
+            receipt = _invoke_action(action, value, request_hash)
+            with store.connect() as db:
+                db.execute(
+                    """INSERT INTO automation_action_executions(
+                         tenant_id,event_id,workflow_key,action,request_hash,status,receipt,completed_at)
+                       VALUES(?,?,?,?,?,'COMPLETED',?,?) ON CONFLICT DO NOTHING""",
+                    (tenant, event_id, workflow_key, action, request_hash,
+                     _canonical(receipt), now_iso()),
+                )
+                persisted = db.execute(
+                    """SELECT request_hash,status,receipt FROM automation_action_executions
+                       WHERE tenant_id=? AND event_id=? AND workflow_key=? AND action=?""",
+                    (tenant, event_id, workflow_key, action),
+                ).fetchone()
+            if not persisted or persisted["request_hash"] != request_hash or persisted["status"] != "COMPLETED":
+                raise ControlPlaneError("idempotency_conflict")
+            receipt = json.loads(persisted["receipt"])
+        completed_actions.append({"type": action, "receipt": receipt})
+    with store.connect() as db:
+        db.execute(
+            """UPDATE automation_executions SET status='ACTIONS_COMPLETED',updated_at=?
+               WHERE tenant_id=? AND event_id=? AND workflow_key=? AND request_hash=?""",
+            (now_iso(), tenant, event_id, workflow_key, request_hash),
+        )
     return {
-        **value, "business_process_status": row["status"],
-        "executed_actions": json.loads(row["approved_actions"]),
+        **value, "business_process_status": "ACTIONS_COMPLETED",
+        "executed_actions": completed_actions,
         "business_process_started_at": row["started_at"],
     }
 
@@ -158,6 +251,18 @@ def record_execution_result(store: Store, value: dict[str, Any], tenant: str):
         raise ControlPlaneError("invalid_execution_status")
     with store.connect() as db:
         _ensure_embedded_schema(db)
+        if value["status"] == "COMPLETED":
+            execution = db.execute(
+                """SELECT status,approved_actions FROM automation_executions
+                   WHERE tenant_id=? AND event_id=? AND workflow_key=?""",
+                (tenant, str(value["event_id"]), str(value["workflow_key"])),
+            ).fetchone()
+            if not execution or execution["status"] not in {"ACTIONS_COMPLETED", "COMPLETED"}:
+                raise ControlPlaneError("automation_actions_incomplete")
+            expected_actions = json.loads(execution["approved_actions"])
+            reported_actions = [item.get("type") for item in value["actions"] if isinstance(item, dict)]
+            if reported_actions != expected_actions:
+                raise ControlPlaneError("automation_action_result_mismatch")
         if value["status"] != "COMPLETED":
             stamp = now_iso()
             failure_hash = "failure:" + hashlib.sha256(_canonical(value).encode()).hexdigest()

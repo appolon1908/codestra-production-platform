@@ -27,7 +27,15 @@ def test_route_contract_is_consistent_across_boundaries():
         assert route in server
     assert "@realtime path /ws/agent" in caddy
     assert "@realtime path /ws/agent /api/v1/realtime/sessions" not in caddy
+    assert "url: http://realtime:18103" in kong
+    assert "codestra-control-plane-realtime" not in kong
     assert "auth.codestra.agency" not in registry + openapi + kong + caddy
+
+
+def test_event_parent_updates_are_fenced_by_the_child_delivery_lease():
+    worker = text("control_plane_service/worker.py")
+    assert worker.count("if changed == 1:") >= 2
+    assert "WHERE event_id=? AND target=? AND lease_owner=? AND lease_token=?" in worker
 
 
 def test_provider_examples_use_provider_server_and_delivery_stays_off():

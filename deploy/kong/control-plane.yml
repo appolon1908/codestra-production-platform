@@ -129,7 +129,7 @@ services:
               end
               kong.service.request.set_header("X-Codestra-Gateway-Secret",gateway_secret)
   - name: codestra-agent-realtime-sessions
-    url: http://codestra-control-plane-realtime:18103
+    url: http://realtime:18103
     connect_timeout: 3000
     read_timeout: 5000
     write_timeout: 5000

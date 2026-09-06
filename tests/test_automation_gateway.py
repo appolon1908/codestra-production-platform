@@ -1,3 +1,5 @@
+import json
+
 from control_plane_service.automation import (
     authorize_automation,
     execute_automation,
@@ -31,17 +33,69 @@ def test_policy_is_tenant_bound_and_fail_closed_for_communications(tmp_path, mon
     assert authorize_automation(store, denied, "COD")["authorized"] is True
 
 
-def test_result_is_durable_and_idempotent(tmp_path):
+def test_result_is_durable_and_idempotent(tmp_path, monkeypatch):
     store = Store(str(tmp_path / "control-plane.db"))
+    secret = tmp_path / "action-secret"
+    secret.write_bytes(b"test-only-action-secret-material-32-bytes")
+    monkeypatch.setenv("CONTROL_PLANE_AUTOMATION_ACTION_SECRET_FILE", str(secret))
+    monkeypatch.setenv(
+        "CONTROL_PLANE_ACTION_CAMPAIGN_FOLLOWUP_EXECUTE_URL",
+        "http://middleware-handler.test/followup",
+    )
+    calls = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def read(self):
+            request = calls[-1]
+            body = json.loads(request.data)
+            return json.dumps({
+                "status": "COMPLETED",
+                "action": body["action"],
+                "idempotency_key": body["idempotency_key"],
+            }).encode()
+
+    def invoke(request, timeout):
+        assert timeout == 10
+        calls.append(request)
+        return Response()
+
+    monkeypatch.setattr("control_plane_service.automation.urllib.request.urlopen", invoke)
     authorized = authorize_automation(store, envelope(), "COD")
     execution = execute_automation(store, authorized, "COD")
-    assert execution["business_process_status"] == "RUNNING"
+    replay = execute_automation(store, authorized, "COD")
+    assert execution["business_process_status"] == "ACTIONS_COMPLETED"
+    assert replay["executed_actions"] == execution["executed_actions"]
+    assert len(calls) == 1
     result = {"event_id":"evt-1", "correlation_id":"corr-1", "idempotency_key":"result-1",
               "workflow_key":"test_syn_followup", "execution_id":"exec-1", "status":"COMPLETED",
-              "actions":[], "completed_at":"2026-08-22T00:00:01Z"}
+              "actions":[{"type":"campaign.followup.execute"}], "completed_at":"2026-08-22T00:00:01Z"}
     first = record_execution_result(store, result, "COD")
     second = record_execution_result(store, result, "COD")
     assert first.duplicate is False and second.duplicate is True
+
+
+def test_missing_action_handler_cannot_be_reported_complete(tmp_path):
+    store = Store(str(tmp_path / "control-plane.db"))
+    authorized = authorize_automation(store, envelope(), "COD")
+    try:
+        execute_automation(store, authorized, "COD")
+    except ControlPlaneError as exc:
+        assert str(exc) == "automation_action_handler_missing:campaign.followup.execute"
+    else:
+        raise AssertionError("missing business action handler was accepted")
+    result = {"event_id":"evt-1", "correlation_id":"corr-1", "idempotency_key":"result-1",
+              "workflow_key":"test_syn_followup", "execution_id":"exec-1", "status":"COMPLETED",
+              "actions":[{"type":"campaign.followup.execute"}], "completed_at":"2026-08-22T00:00:01Z"}
+    try:
+        record_execution_result(store, result, "COD")
+    except ControlPlaneError as exc:
+        assert str(exc) == "automation_actions_incomplete"
+    else:
+        raise AssertionError("incomplete business action was reported complete")
 
 
 def test_cod_web_out_email_requires_exact_contact_policy(tmp_path, monkeypatch):

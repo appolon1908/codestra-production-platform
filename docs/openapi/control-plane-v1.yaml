@@ -171,7 +171,7 @@ paths:
         "403": {$ref: "#/components/responses/Error"}
   /api/v1/automation/execute:
     post:
-      summary: Start an idempotent allowlisted business process in Middleware
+      summary: Execute idempotent allowlisted Middleware actions and retain receipts
       security: [{operatorToken: []}]
       parameters:
         - {name: X-Tenant-ID, in: header, required: true, schema: {type: string}}
@@ -182,11 +182,11 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/AutomationEnvelope"}
       responses:
-        "202": {description: Business process durably started or exact retry returned}
+        "202": {description: Every approved action completed with a durable exact receipt}
         "409": {$ref: "#/components/responses/Error"}
   /api/v1/automation/results:
     post:
-      summary: Record an idempotent n8n completion or failure result
+      summary: Record completion only after every approved action has completed
       security: [{operatorToken: []}]
       parameters:
         - {name: X-Tenant-ID, in: header, required: true, schema: {type: string}}

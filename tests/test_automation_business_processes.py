@@ -21,3 +21,8 @@ def test_automation_execution_is_durable_idempotent_and_tenant_scoped():
     assert "ON CONFLICT DO NOTHING" in source
     assert 'value.get("tenant_id") != tenant' in source
     assert "automation_action_plan_mismatch" in source
+    assert "automation_action_executions" in migration
+    assert "automation_action_executions" in source
+    assert "automation_action_handler_missing" in source
+    assert "automation_action_receipt_mismatch" in source
+    assert "automation_actions_incomplete" in source

@@ -34,8 +34,8 @@ return [{json:{...b,event_id:eventId,customer_id:String(b.customer_id||b.entity_
 
 def result_code() -> str:
     return """const b=$json;
-if(!['RUNNING','COMPLETED'].includes(b.business_process_status)) throw new Error('business_process_not_started');
-return [{json:{event_id:b.event_id,correlation_id:b.correlation_id,idempotency_key:'n8n:'+b.idempotency_key,workflow_key:b.workflow_key,execution_id:String($execution.id),status:'COMPLETED',actions:(b.executed_actions||[]).map(type=>({type})),completed_at:new Date().toISOString(),tenant_id:b.tenant_id}}];"""
+if(b.business_process_status!=='ACTIONS_COMPLETED') throw new Error('business_actions_incomplete');
+return [{json:{event_id:b.event_id,correlation_id:b.correlation_id,idempotency_key:'n8n:'+b.idempotency_key,workflow_key:b.workflow_key,execution_id:String($execution.id),status:'COMPLETED',actions:(b.executed_actions||[]).map(item=>({type:item.type})),completed_at:new Date().toISOString(),tenant_id:b.tenant_id}}];"""
 
 
 def middleware_request(node_id: str, name: str, path: str, body: str, position: list[int]) -> dict:
