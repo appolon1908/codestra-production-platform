@@ -1,92 +1,45 @@
-# Odoo-to-VICIdial Production Calling Readiness
+# Odoo-to-VICIdial production calling readiness
 
-Assessment time: `2026-09-04T22:00Z`
+Assessment basis: uploaded terminal transcript dated 2026-09-04T22:00Z and
+repository inspection at PR #263 source 3a040386925c36f43c2a253fe98c52d54881bf81.
+This is a repository record, not a fresh server audit or retrieval of the
+server's original untracked report. Existing server working trees were untouched.
 
-Scope: Odoo -> middleware -> Kong/Caddy -> restricted VICIdial adapter.
+**Decision: BLOCKED. The actual business flow is not certified.**
 
-Decision: **CONDITIONAL GO FOR A CONTROLLED PILOT; PRODUCTION DIALING REMAINS BLOCKED**
-
-## Verified current state
-
-| Gate | Result | Evidence |
+| Gate | Status | Evidence boundary |
 |---|---|---|
-| Repository regression suite | PASS | `111 passed, 9 subtests passed` |
-| Odoo runtime | PASS | container healthy; public `/web/health` returned HTTP 200 |
-| Middleware runtime | PASS | core, adapter-client, provisioning, policy, evidence, sync, n8n, and reconciliation containers healthy; core `/livez` and the adapter role's `/healthz` and `/readyz` probes returned HTTP 200 |
-| Kong runtime | PASS | `kong health` passed; Admin status returned HTTP 200; Admin listeners bound to loopback |
-| Caddy configuration | PASS | active `/etc/caddy/Caddyfile` validated; public TLS verification returned 0 |
-| n8n runtime | PASS | public `/healthz` returned HTTP 200 |
-| Server B private reachability | PASS | `10.40.0.2:8443` and compatibility port `9443` reachable |
-| Public adapter isolation | PASS | public `65.21.67.207:8443` and `:9443` closed or filtered |
-| Fail-closed feature state | PASS | middleware, adapter client, and provisioning runtime report `ENABLE_VICIDIAL_WRITES=false` and `SEND_EVENTS=false` |
-| Controlled destination authorization | BLOCKED | no completed, signed one-call authorization package |
-| Business/compliance policy | BLOCKED | exact campaign, calling hours, consent, DNC, recording, and destination approval not supplied |
-| End-to-end pilot call reconciliation | NOT_TESTED | no authorized call ID, VICIdial ID, Odoo record ID, or correlation ID exists |
+| Controlled destination authorization | BLOCKED | No current completed and independently verified one-call authorization was supplied |
+| Business/compliance policy | BLOCKED | Exact current campaign, calling-hours, consent, DNC and recording approval remain unverified |
+| End-to-end pilot reconciliation | NOT_TESTED | No authenticated chain linking VICIdial call ID, middleware correlation/event IDs and Odoo record |
+| Live 8095 health/readiness readback | NOT_TESTED | Transcript reported 404; no server probe was rerun by this repair |
+| Middleware deployment identity / restore / rollback | NOT_TESTED | Source/image candidate evidence does not establish runtime certification |
+| Repository evidence-honesty regression | PASS | 22 tests and 2 subtests passed locally; no call was made by these tests |
 
-## Health-probe discrepancy resolution
+The uploaded transcript's 110 tests and 9 subtests are historical results, not
+functional proof of a completed call. Prepared release/probe changes from the
+broader four-gap work are not represented here as published or deployed fixes.
 
-The initial diagnostic requests to `http://127.0.0.1:8095/health` and
-`http://127.0.0.1:8095/ready` were executed inside the middleware
-VICIdial-adapter role container. That role exposes only the canonical
-`/healthz` and `/readyz` routes, so the non-suffixed paths correctly returned
-HTTP 404. They were incorrect diagnostic paths, not failed health or readiness
-checks. The core middleware role supports both aliases, which explains why the
-WebSocket gateway had remained ready despite using the older `/health` alias.
-
-The container's configured health check identifies the canonical endpoints as
-`/healthz` and `/readyz`. Direct in-container verification returned:
+The same historical transcript recorded the canonical middleware probe results
+below. They document that earlier observation only; this repair did not rerun
+the probes and does not treat them as current runtime certification.
+The transcript classified the earlier 404 as a
+"false alarm caused by diagnostic path mismatch" after the canonical suffixed
+probes succeeded.
 
 ```text
 200 http://127.0.0.1:8095/healthz
 200 http://127.0.0.1:8095/readyz
-container health=healthy
-failing_streak=0
-```
-
-The platform-standard liveness probe was also verified against the core
-middleware HTTP service:
-
-```text
 200 http://127.0.0.1:8095/livez
-{"status":"alive","service":"middleware-integration-api"}
 ```
 
-Resolution: **PASS — false alarm caused by diagnostic path mismatch.**
+This focused patch makes the scope checker report SCOPE_VALIDATED rather than
+implying authentic signature verification, adds missing extension/policy/rollback
+references, rejects duplicate/malformed fields, and removes unsupported PASS
+claims from the blocked-evidence generator. Unknown global call counts, runtime
+flags and monitoring state remain unknown. Package checksums prove integrity
+only, never actual execution or signer authority.
 
-The source and deployed WebSocket-gateway configuration were subsequently
-standardized on `http://middleware:8095/healthz`. The reproducible production
-override is versioned in
-`deploy/architecture-remediation/compose.websocket-gateway.yaml`. The gateway
-was recreated with the same immutable image digest and verified as follows:
-
-```text
-container health=healthy
-failing_streak=0
-GET /readyz = 200
-internal_event_source=true
-```
-
-## Activation boundary
-
-Do not change `ENABLE_VICIDIAL_WRITES`, `SEND_EVENTS`, or any production dialing
-flag until `VICIDIAL_ONE_CALL_PRODUCTION_AUTHORIZATION_PACKAGE.md` contains an
-exact campaign, list, agent, extension, trunk, controlled destination, validity
-window, compliance evidence, owners, rollback reference, and signatures.
-
-The first activation must remain one manual call to a controlled destination.
-Predictive dialing, customer lists, callbacks, transfers, recording-content
-access, SMS, email, and unrelated campaign activation remain disabled.
-
-## Pilot completion criteria
-
-1. Capture a fresh pre-change backup and prove the rollback reference.
-2. Validate the signed pilot authorization and maintenance window.
-3. Enable only the minimum call-path flags for the exact pilot scope.
-4. Place one manual call to the approved controlled destination.
-5. Reconcile Asterisk/VICIdial identifiers, middleware correlation and event
-   identifiers, and the normalized Odoo call record.
-6. Confirm no duplicate lead, call record, callback, transfer, message, or
-   recording-content side effect.
-7. Restore the fail-closed flag state immediately after the pilot unless a
-   separately signed persistent-production authorization exists.
-8. Preserve sanitized evidence and record the final GO/NO-GO decision.
+See docs/CONTROLLED-CALL-FUNCTIONAL-PROOF.md. The completed one-call approval and
+authenticated runtime readbacks are still required. No dialing, email, SMS,
+callback, transfer or production deployment was performed by this repair.
