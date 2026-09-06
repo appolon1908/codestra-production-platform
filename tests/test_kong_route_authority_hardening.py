@@ -286,6 +286,21 @@ def test_exporter_redacts_credentials_embedded_in_route_paths():
     assert module.sanitize_route_path("/api/v1/events") == "/api/v1/events"
 
 
+def test_exporter_redacts_credentials_in_upstream_service_paths(monkeypatch):
+    module = _exporter()
+    monkeypatch.setattr(module, "all_rows", lambda *_args: [])
+    secret = "upstream-signing-token-0123456789"
+    service = {"id": "service-1", "name": "service", "path": f"/hooks/{secret}"}
+    route = {"id": "route-1", "service": {"id": "service-1"}, "paths": ["/public"], "name": "route"}
+    record = module.route_record("http://127.0.0.1:8001", route, {"service-1": service})
+    assert secret not in record["service"]["path"]
+
+
+def test_exporter_includes_hostless_routes_in_public_evidence():
+    source = EXPORTER_PATH.read_text()
+    assert "if route_hosts and not public_hosts.intersection(route_hosts):" in source
+
+
 def test_inline_and_standalone_control_plane_scope_policies_are_identical():
     assert _inline_scope_policy() == SCOPE_POLICY_PATH.read_text().strip()
 
@@ -298,7 +313,8 @@ def test_control_plane_scope_policy_covers_exact_admin_and_message_roots():
     assert 'required = "communications.message.read"' in policy
     assert 'error="route_scope_undefined"' in policy
     assert 'path == "/api/v1/health"' in policy
-    assert 'path:find("^/api/v1/events/")' in policy
+    for root in ("events", "results", "reconciliation"):
+        assert f'path == "/api/v1/{root}"' in policy
     assert 'X-Authenticated-Role", "platform_admin"' in policy
 
 

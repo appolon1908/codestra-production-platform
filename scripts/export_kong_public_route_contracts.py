@@ -241,7 +241,8 @@ def route_record(
             "protocol": service.get("protocol"),
             "host": service.get("host"),
             "port": service.get("port"),
-            "path": service.get("path"),
+            "path": sanitize_route_path(service["path"])
+            if isinstance(service.get("path"), str) else None,
             "retries": service.get("retries"),
             "connect_timeout": service.get("connect_timeout"),
             "read_timeout": service.get("read_timeout"),
@@ -282,7 +283,8 @@ def main() -> int:
             f"route named {name}",
         )
         public_hosts = {manifest["canonicalHost"], manifest["legacyHost"]}
-        if not public_hosts.intersection(route.get("hosts") or []):
+        route_hosts = route.get("hosts") or []
+        if route_hosts and not public_hosts.intersection(route_hosts):
             raise RuntimeError(f"declared unverified route is not public: {name}")
         records.append(route_record(args.admin_url, route, services))
 

@@ -20,11 +20,11 @@ elseif path:find("^/api/v1/messages/.+/events$") then
   required = "communications.message.events.read"
 elseif path == "/api/v1/messages" or path:find("^/api/v1/messages/") then
   required = "communications.message.read"
-elseif path:find("^/api/v1/reconciliation/") and method == "POST" then
+elseif (path == "/api/v1/reconciliation" or path:find("^/api/v1/reconciliation/")) and method == "POST" then
   required = "communications.reconciliation.execute"
-elseif path:find("^/api/v1/reconciliation/") then
+elseif path == "/api/v1/reconciliation" or path:find("^/api/v1/reconciliation/") then
   required = "communications.reconciliation.read"
-elseif path:find("^/api/v1/results/") then
+elseif path == "/api/v1/results" or path:find("^/api/v1/results/") then
   required = "sync.result.write"
 elseif path:find("^/api/v1/control/campaigns") then
   required = method == "GET" and "mapping.read" or "campaign.write"
@@ -36,7 +36,7 @@ elseif path:find("^/api/v1/control/adapters") then
   required = "sync.execute"
 elseif path == "/api/v1/health" then
   application_auth_only = true
-elseif path:find("^/api/v1/events/") then
+elseif path == "/api/v1/events" or path:find("^/api/v1/events/") then
   application_auth_only = true
 else
   return kong.response.exit(403,{error="route_scope_undefined"})
