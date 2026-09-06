@@ -33,7 +33,7 @@ class Project:
 
 
 PROJECTS = (
-    Project("codestra", "codestra-middleware-1", ("postgres", "middleware"), "compose.core-provider-networks.yaml"),
+    Project("codestra", "codestra-middleware-1", ("postgres", "middleware", "private-vicidial-ingress"), "compose.core-provider-networks.yaml"),
     Project("codestra-beyvra-email", "codestra-beyvra-email-api-1", ("api", "worker"), "compose.beyvra-email.yaml", image_environment=(("BEYVRA_EMAIL_IMAGE", "codestra-beyvra-email-api-1"),)),
     Project("codestra-email-reseller", "codestra-email-reseller-api-1", ("api",), "compose.email-reseller.yaml"),
     Project("codestra-integration-control-plane", "codestra-integration-control-plane-api-1", ("api", "worker"), "compose.endpoint-overrides.yaml"),
@@ -228,7 +228,9 @@ def main() -> int:
         if args.apply:
             result["networks"] = {name: ensure_network(name) for name in NETWORKS}
             for project, command, workdir, environment in prepared:
-                run([*command, "up", "--detach", "--no-deps", *project.services], cwd=workdir, env=environment)
+                run([*command, "up", "--detach", "--no-deps", "--wait",
+                     "--wait-timeout", "180", *project.services],
+                    cwd=workdir, env=environment)
                 result["projects"][project.name] = verify_project(
                     project, command, workdir, environment
                 )

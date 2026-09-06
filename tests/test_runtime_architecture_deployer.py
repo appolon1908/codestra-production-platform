@@ -12,6 +12,7 @@ def test_deployer_has_fixed_complete_project_inventory():
         "codestra-sms-api", "codestra-websocket-gateway",
     ):
         assert f'Project("{project}"' in SOURCE
+    assert '("postgres", "middleware", "private-vicidial-ingress")' in SOURCE
 
 
 def test_deployer_preflights_every_compose_model_before_mutation():
@@ -51,3 +52,11 @@ def test_apply_pass_requires_health_and_exact_network_readback():
     assert 'health not in {"", "healthy"}' in SOURCE
     assert 'actual_networks != desired_networks' in SOURCE
     assert SOURCE.index('verify_project(') < SOURCE.rindex('result["apply"] = "PASS"')
+    assert '"--wait",' in SOURCE
+    assert '"--wait-timeout", "180"' in SOURCE
+
+
+def test_vicidial_ingress_is_moved_to_the_governed_voice_network():
+    override = (ROOT / "deploy/architecture-remediation/compose.core-provider-networks.yaml").read_text()
+    assert "private-vicidial-ingress:" in override
+    assert "networks: !override [provider_voice]" in override
