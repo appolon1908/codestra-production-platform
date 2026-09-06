@@ -84,13 +84,13 @@ def test_resolved_gap_requires_structured_existing_evidence() -> None:
         "summary": "Synthetic resolution evidence for validation coverage.",
         "evidence": ["docs/architecture/API_GOVERNANCE.md"],
     }
-    assert not {
+    assert "gap-resolution-evidence" in {
         item.rule
         for item in validate_catalog(ROOT, value)
         if item.location == gap["gap_id"]
     }
     blockers = deployment_blockers(value, {feature_id})
-    assert gap["gap_id"] not in {item.location for item in blockers}
+    assert gap["gap_id"] in {item.location for item in blockers}
 
 
 def test_resolved_gap_rejects_non_repository_evidence() -> None:
@@ -138,6 +138,26 @@ def test_required_server_push_flag_must_be_boolean() -> None:
     value["known_gaps"][0]["required_before_server_push"] = 0
     rules = {item.rule for item in validate_catalog(ROOT, value)}
     assert "gap-server-push-flag" in rules
+
+
+def test_required_gap_must_name_at_least_one_affected_feature() -> None:
+    value = catalog()
+    gap = next(item for item in value["known_gaps"] if item["required_before_server_push"])
+    gap["affected_features"] = []
+    rules = {item.rule for item in validate_catalog(ROOT, value)}
+    assert "gap-feature" in rules
+
+
+def test_resolved_gap_rejects_unbound_general_document() -> None:
+    value = catalog()
+    gap = next(item for item in value["known_gaps"] if item["required_before_server_push"])
+    gap["status"] = "resolved"
+    gap["resolution"] = {
+        "summary": "Claimed resolution.",
+        "evidence": ["docs/architecture/API_GOVERNANCE.md"],
+    }
+    rules = {item.rule for item in validate_catalog(ROOT, value)}
+    assert "gap-resolution-evidence" in rules
 
 
 def test_duplicate_public_route_is_rejected() -> None:

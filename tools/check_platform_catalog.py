@@ -131,6 +131,34 @@ def _repository_evidence_file(root: Path, reference: str) -> bool:
     return tracked.returncode == 0
 
 
+def _gap_bound_resolution_evidence(root: Path, gap_id: str, reference: str) -> bool:
+    """Require a tracked, machine-readable artifact bound to this exact gap."""
+
+    prefix = f"evidence/catalog-gaps/{gap_id}/"
+    if not reference.startswith(prefix) or not reference.endswith(".json"):
+        return False
+    if not _repository_evidence_file(root, reference):
+        return False
+    try:
+        evidence = json.loads((root / reference).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(evidence, dict)
+        and evidence.get("schema") == "codestra.catalog-gap-resolution.v1"
+        and evidence.get("gap_id") == gap_id
+        and evidence.get("status") == "resolved"
+        and isinstance(evidence.get("source_sha"), str)
+        and len(evidence["source_sha"]) == 40
+        and all(character in "0123456789abcdef" for character in evidence["source_sha"])
+        and isinstance(evidence.get("observed_at"), str)
+        and evidence["observed_at"].endswith("Z")
+        and isinstance(evidence.get("artifacts"), list)
+        and bool(evidence["artifacts"])
+        and all(isinstance(item, str) and item.strip() for item in evidence["artifacts"])
+    )
+
+
 def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
     findings: list[Finding] = []
     if catalog.get("version") != 1:
@@ -256,6 +284,16 @@ def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
             findings.append(Finding("critical", "gap-severity", identity, str(row["severity"])))
         if row["status"] not in GAP_STATUSES:
             findings.append(Finding("critical", "gap-status", identity, str(row["status"])))
+        if row["required_before_server_push"] is True and (
+            not isinstance(row["affected_features"], list)
+            or not row["affected_features"]
+        ):
+            findings.append(Finding(
+                "critical",
+                "gap-feature",
+                identity,
+                "required server-push gaps must affect at least one feature",
+            ))
         unknown = sorted(set(row["affected_features"]) - feature_ids)
         if unknown:
             findings.append(Finding("critical", "gap-feature", identity, f"unknown features: {', '.join(unknown)}"))
@@ -270,12 +308,12 @@ def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
                 ))
             else:
                 for reference in resolution["evidence"]:
-                    if not _repository_evidence_file(root, reference):
+                    if not _gap_bound_resolution_evidence(root, identity, reference):
                         findings.append(Finding(
                             "critical",
                             "gap-resolution-evidence",
                             identity,
-                            f"resolution evidence must be an existing repository file: {reference}",
+                            f"resolution evidence must be a tracked gap-bound JSON artifact: {reference}",
                         ))
 
     for name, reference in catalog.get("canonical_sources", {}).items():
@@ -285,7 +323,13 @@ def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
     return findings
 
 
-def deployment_blockers(catalog: dict[str, Any], requested_features: set[str]) -> list[Finding]:
+def deployment_blockers(
+    catalog: dict[str, Any],
+    requested_features: set[str],
+    root: Path | None = None,
+) -> list[Finding]:
+    if root is None:
+        root = Path(__file__).resolve().parents[1]
     features = {row["feature_id"]: row for row in catalog.get("features", [])}
     if not requested_features:
         requested_features = {
@@ -303,7 +347,11 @@ def deployment_blockers(catalog: dict[str, Any], requested_features: set[str]) -
         # A risk classification is not deployment authorization. Required
         # server-push gaps remain blocking until source-controlled resolution
         # evidence is present and the gap is explicitly resolved.
-        if gap.get("status") == "resolved" and _structured_resolution(gap):
+        resolution = _structured_resolution(gap)
+        if gap.get("status") == "resolved" and resolution and all(
+            _gap_bound_resolution_evidence(root, str(gap["gap_id"]), reference)
+            for reference in resolution["evidence"]
+        ):
             continue
         affected = set(gap.get("affected_features", []))
         if requested_features.intersection(affected):

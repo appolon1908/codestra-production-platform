@@ -2,6 +2,13 @@
 
 The platform should be improved through a small number of ordered, focused PRs. Do not send the current collection of stacked drafts directly to a server.
 
+Every gap required before server push must name at least one affected catalog
+feature. A resolved gap must cite tracked JSON under
+`evidence/catalog-gaps/<gap-id>/` with schema
+`codestra.catalog-gap-resolution.v1`, the exact gap ID and source SHA, a UTC
+observation time, and a non-empty proof-artifact list. General documentation or
+unrelated evidence cannot clear a deployment blocker.
+
 ## Phase 1 — structure and catalog
 
 - Establish the platform service/feature/API catalog.
