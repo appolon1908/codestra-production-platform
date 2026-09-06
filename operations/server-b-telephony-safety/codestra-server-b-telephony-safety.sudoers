@@ -1,3 +1,3 @@
-Defaults!CODESTRA_SERVER_B_TELEPHONY_SAFETY env_reset,!setenv,secure_path=/usr/sbin:/usr/bin:/sbin:/bin
+Defaults!CODESTRA_SERVER_B_TELEPHONY_SAFETY env_reset,!setenv,env_keep += "SSH_ORIGINAL_COMMAND",secure_path=/usr/sbin:/usr/bin:/sbin:/bin
 Cmnd_Alias CODESTRA_SERVER_B_TELEPHONY_SAFETY = /usr/local/sbin/codestra-server-b-telephony-safety
 codestra-admin ALL=(root) NOPASSWD: CODESTRA_SERVER_B_TELEPHONY_SAFETY

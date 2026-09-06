@@ -12,8 +12,11 @@ reviewed provisioning process; never commit key material.
 
 `install.sh <protected-commit>` refuses dirty source, a revision other than HEAD,
 or a revision not contained in `origin/release/production-activation`. It creates
-a root-only backup before atomically replacing files and installs `REVISION` and
-`SHA256SUMS` read-backs under `/etc/codestra/server-b-telephony-safety`.
+a root-only, randomized and checksummed backup before atomically replacing files
+and installs `REVISION` and `SHA256SUMS` read-backs under
+`/etc/codestra/server-b-telephony-safety`. An exclusive root lock serializes the
+entire backup/staging/install transaction. Rollback rejects unsealed, altered,
+misowned, or legacy timestamp-only backup directories.
 
 The installer does not edit `authorized_keys` and does not reload SSH. After an
 administrator installs the separately reviewed authorized-key entry, validate

@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 [[ $EUID -eq 0 && $# -eq 1 ]] || { echo ERROR=ROOT_AND_BACKUP_REQUIRED >&2; exit 64; }
+lock_path=/run/lock/codestra-server-b-telephony-safety-install.lock
+[[ -f $lock_path && ! -L $lock_path && $(stat -c '%U:%G %a' "$lock_path") == 'root:root 600' ]] || { echo ERROR=UNSAFE_INSTALLER_LOCK >&2; exit 64; }
+exec {installer_lock}>"$lock_path"
+flock -n "$installer_lock" || { echo ERROR=INSTALLER_ALREADY_RUNNING >&2; exit 64; }
 backup=$1
-[[ $backup =~ ^/root/codestra-server-b-telephony-safety-backup-[0-9]{8}T[0-9]{6}Z$ && -d $backup && ! -L $backup ]] || { echo ERROR=INVALID_BACKUP >&2; exit 64; }
+[[ $backup =~ ^/root/codestra-server-b-telephony-safety-backup-[A-Za-z0-9]{12}$ && -d $backup && ! -L $backup ]] || { echo ERROR=INVALID_BACKUP >&2; exit 64; }
+[[ $(stat -c '%U:%G %a' "$backup") == 'root:root 700' ]] || { echo ERROR=UNSAFE_BACKUP_METADATA >&2; exit 64; }
+[[ -f $backup/COMPLETE && ! -L $backup/COMPLETE && $(cat "$backup/COMPLETE") == 'BACKUP_FORMAT=server-b-telephony-safety-v2' ]] || { echo ERROR=INCOMPLETE_BACKUP >&2; exit 64; }
+[[ -f $backup/BACKUP-SHA256SUMS && ! -L $backup/BACKUP-SHA256SUMS ]] || { echo ERROR=BACKUP_MANIFEST_MISSING >&2; exit 64; }
+(cd "$backup" && sha256sum -c BACKUP-SHA256SUMS >/dev/null) || { echo ERROR=BACKUP_CHECKSUM_MISMATCH >&2; exit 64; }
 [[ -f $backup/state.tsv && ! -L $backup/state.tsv ]] || { echo ERROR=BACKUP_STATE_MISSING >&2; exit 64; }
 while IFS=$'\t' read -r state name path; do
   case "$name:$path" in

@@ -163,6 +163,9 @@ def test_policy_templates_are_narrow():
     assert "*" not in sudoers
     assert "noexec" not in sudoers  # The wrapper must exec its one fixed Asterisk child.
     assert "!setenv" in sudoers
+    assert 'env_keep += "SSH_ORIGINAL_COMMAND"' in sudoers
+    assert sudoers.count("env_keep") == 1
+    assert not re.search(r'env_keep[^\n]*\b(PATH|HOME|USER|SHELL|PYTHONPATH)\b', sudoers)
     assert "command=\"/usr/bin/sudo -n /usr/local/sbin/codestra-server-b-telephony-safety\"" in auth
     for restriction in ("restrict", "no-agent-forwarding", "no-port-forwarding", "no-X11-forwarding", "no-pty"):
         assert restriction in auth
@@ -207,7 +210,10 @@ def test_installer_and_rollback_contracts_are_fail_closed():
         "sshd -t",
         "sha256sum -c /etc/codestra/server-b-telephony-safety/SHA256SUMS",
         "INSTALLED_REVISION_MISMATCH",
-        "install -d -o root -g root -m 0700",
+        "flock -n \"$installer_lock\" || die INSTALLER_ALREADY_RUNNING",
+        "mktemp -d /root/codestra-server-b-telephony-safety-backup-XXXXXXXXXXXX",
+        "BACKUP_FORMAT=server-b-telephony-safety-v2",
+        "BACKUP-SHA256SUMS",
         "mv -f",
     ):
         assert required in installer
@@ -215,6 +221,60 @@ def test_installer_and_rollback_contracts_are_fail_closed():
     assert "visudo -cf /etc/sudoers" in rollback
     assert "sshd -t" in rollback
     assert re.search(r"backup=\$1", rollback)
+    assert "[A-Za-z0-9]{12}" in rollback
+    assert "INCOMPLETE_BACKUP" in rollback
+    assert "BACKUP_CHECKSUM_MISMATCH" in rollback
+
+
+def test_lock_is_exclusive_and_precedes_all_backup_or_staging_resources(tmp_path):
+    installer = INSTALLER.read_text()
+    lock = installer.index('flock -n "$installer_lock"')
+    assert lock < installer.index("backup=$(mktemp -d")
+    assert lock < installer.index("stage=$(mktemp -d")
+
+    lock_path = tmp_path / "installer.lock"
+    marker = tmp_path / "backup-created"
+    holder = subprocess.Popen(
+        ["flock", str(lock_path), "sh", "-c", "printf ready; sleep 5"],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert holder.stdout and holder.stdout.read(5) == "ready"
+    contender = subprocess.run(
+        ["flock", "-n", str(lock_path), "sh", "-c", f"touch {marker}"],
+        check=False,
+    )
+    holder.terminate()
+    holder.wait(timeout=2)
+    assert contender.returncode != 0
+    assert not marker.exists()
+
+
+def test_randomized_backup_and_temporary_targets_cannot_collide(tmp_path):
+    created = []
+    for _ in range(32):
+        result = subprocess.run(
+            ["mktemp", "-d", str(tmp_path / "codestra-server-b-telephony-safety-backup-XXXXXXXXXXXX")],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+        )
+        created.append(Path(result.stdout.strip()))
+    assert len(set(created)) == 32
+    assert all(re.fullmatch(r"codestra-server-b-telephony-safety-backup-[A-Za-z0-9]{12}", path.name) for path in created)
+
+    installer = INSTALLER.read_text()
+    assert ".new" not in installer
+    assert installer.count("XXXXXXXXXXXX)") >= 6
+
+
+def test_completed_backup_seal_is_written_before_staging_and_required_by_rollback():
+    installer = INSTALLER.read_text()
+    rollback = ROLLBACK.read_text()
+    assert installer.index('>"$backup/COMPLETE"') < installer.index("stage=$(mktemp -d")
+    assert installer.index('>BACKUP-SHA256SUMS') < installer.index('>"$backup/COMPLETE"')
+    assert rollback.index("INCOMPLETE_BACKUP") < rollback.index("while IFS=")
+    assert rollback.index("BACKUP_CHECKSUM_MISMATCH") < rollback.index("while IFS=")
 
 
 def test_evidence_template_is_machine_readable_and_locally_derived():
