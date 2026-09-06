@@ -179,7 +179,7 @@ MIDDLEWARE_DB = "codestra_middleware_appolon"
 MIDDLEWARE_REQUIRED_DATABASE_HEAD = "0056_klyrow_delivery_events"
 MIDDLEWARE_REQUIRED_SOURCE_SHA = "63b6c0c8bca5168a1178895bd12858d0b1e8086e"
 MIDDLEWARE_COMPOSE_LAYERS = (
-    (Path("/opt/codestra/compose/compose.yaml"), "4798c36ba65c2274b634b9b0997bfbf86bbccab53574cb3b64fd9897fa472dcb"),
+    (Path("/opt/codestra/compose/compose.yaml"), "d6a7f2d3eeda3fa9e0709caa509f74510d1a552f21148754d8011928a7e3cd2d"),
     (Path("/opt/codestra/compose/compose.middleware-runtime.yaml"), "d6e2ba0372ecc8f7bc6e7a2bc0fb124bb71159664ab6110cc7478aa63a6a2906"),
     (Path("/opt/codestra/compose/compose.phase-n2-activation.yaml"), "b8923298d8cd8216a4129ac7b3ef9e9a9f6b32013bdc743bce531ab12411e390"),
     (Path("/opt/codestra/compose/compose.final-production-trust.yaml"), "30d0ff29813d69d44ea185ca23d5222632058e253283fc1cfc2913f9ebd4e2db"),
