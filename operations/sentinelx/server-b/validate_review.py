@@ -13,38 +13,64 @@ import sys
 from pathlib import Path
 from typing import Any
 
+def require(condition: bool, message: str) -> None:
+    """Raise unconditionally when review evidence does not satisfy a gate."""
+    if not condition:
+        raise RuntimeError(message)
+
+
 core = Path(sys.argv[1]).resolve()
 expected = "d6b33822b61e7fccf39547d5cce8add8bc7021f9"
-assert subprocess.check_output(
+actual_head = subprocess.check_output(
     ["git", "-C", str(core), "rev-parse", "HEAD"], text=True
-).strip() == expected
-assert not subprocess.check_output(
+).strip()
+require(actual_head == expected, f"Reviewed source head {actual_head} != {expected}")
+dirty = subprocess.check_output(
     ["git", "-C", str(core), "status", "--porcelain"], text=True
-).strip(), "Reviewed source must be clean"
+).strip()
+require(not dirty, "Reviewed source must be clean")
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(core / "src"))
 from sentinelx_core.policy import Policy
 
 policy = Policy.from_file(Path(__file__).with_name("config.yaml.candidate"))
-assert not policy.allowed_commands and not policy.services
-assert not policy.trusted_fetch_hosts
-assert policy.file_ops_max_read_bytes == 8192
+require(
+    not policy.allowed_commands and not policy.services,
+    "Commands and services must remain disabled",
+)
+require(not policy.trusted_fetch_hosts, "Trusted fetch hosts must remain empty")
+require(policy.file_ops_max_read_bytes == 8192, "Unexpected maximum read size")
 for path in ("/proc/loadavg", "/proc/meminfo", "/proc/uptime"):
-    assert policy.resolve_path(path) == Path(path).resolve()
-    assert policy.resolve_path(path, need_write=True) is None
+    require(
+        policy.resolve_path(path) == Path(path).resolve(),
+        f"Required health path is not readable: {path}",
+    )
+    require(
+        policy.resolve_path(path, need_write=True) is None,
+        f"Required health path became writable: {path}",
+    )
 for path in (
     "/etc/sentinelx/identity.json", "/etc/sentinelx/config.yaml",
     "/root/.ssh/id_ed25519", "/etc/shadow", "/etc/asterisk",
     "/var/lib/mysql", "/var/spool/asterisk/monitor", "/var/backups",
     "/proc/loadavg/../../etc/shadow",
 ):
-    assert policy.resolve_path(path) is None
-    assert policy.resolve_path(path, need_write=True) is None
+    require(policy.resolve_path(path) is None, f"Forbidden path became readable: {path}")
+    require(
+        policy.resolve_path(path, need_write=True) is None,
+        f"Forbidden path became writable: {path}",
+    )
 for command in ("uptime", "bash -c true", "sudo true", "cat /etc/shadow"):
-    assert not policy.is_command_allowed(command)
+    require(
+        not policy.is_command_allowed(command),
+        f"Forbidden command became allowed: {command}",
+    )
 for service in ("asterisk", "mariadb", "sentinelx-cloud-core"):
     for action in ("start", "stop", "restart", "reload"):
-        assert not policy.is_service_action_allowed(service, action)
+        require(
+            not policy.is_service_action_allowed(service, action),
+            f"Forbidden service action became allowed: {service} {action}",
+        )
 
 class ReachedFilesystem(Exception):
     pass
@@ -71,7 +97,7 @@ async def probe(filename, factory_name, payload):
         await handler(payload)
     except ReachedFilesystem:
         return "REACHES_FILESYSTEM_WITHOUT_POLICY_REJECTION"
-    raise AssertionError("Upstream behavior changed; re-review required")
+    raise RuntimeError("Upstream behavior changed; re-review required")
 
 async def main():
     results = {
