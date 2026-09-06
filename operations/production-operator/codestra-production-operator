@@ -174,8 +174,8 @@ MIDDLEWARE_QUIESCE_MARKER = MIDDLEWARE_BACKUP_ROOT / "QUIESCED"
 MIDDLEWARE_ROLLBACK_PROGRESS = "rollback-progress.json"
 MIDDLEWARE_DB_CONTAINER = "codestra-postgres-1"
 MIDDLEWARE_DB = "codestra_middleware_appolon"
-MIDDLEWARE_REQUIRED_DATABASE_HEAD = "0010_realtime_gateway"
-MIDDLEWARE_REQUIRED_SOURCE_SHA = "29b25cba8302cd15ef4d87b68f501da6347f2f17"
+MIDDLEWARE_REQUIRED_DATABASE_HEAD = "0056_klyrow_delivery_events"
+MIDDLEWARE_REQUIRED_SOURCE_SHA = "63b6c0c8bca5168a1178895bd12858d0b1e8086e"
 MIDDLEWARE_COMPOSE_LAYERS = (
     (Path("/opt/codestra/compose/compose.yaml"), "4798c36ba65c2274b634b9b0997bfbf86bbccab53574cb3b64fd9897fa472dcb"),
     (Path("/opt/codestra/compose/compose.middleware-runtime.yaml"), "d6e2ba0372ecc8f7bc6e7a2bc0fb124bb71159664ab6110cc7478aa63a6a2906"),
