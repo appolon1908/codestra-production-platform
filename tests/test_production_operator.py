@@ -723,7 +723,8 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
     assert f"{OPERATOR.MIDDLEWARE_MIGRATION_DATABASE_URL}:/run/secrets/migration_database_url:ro" in calls[0]
     assert "/usr/bin/python3.13" in calls[0]
     assert "middleware-integration-api" in calls[0]
-    assert "runpy.run_path('/app/scripts/migrate_runtime.py',run_name='__main__')" in calls[0][-1]
+    assert "c.set_main_option('script_location','/app/migrations')" in calls[0][-1]
+    assert "command.upgrade(c,'head')" in calls[0][-1]
     recreate = next(command for command in calls if "--force-recreate" in command)
     assert "--no-deps" in recreate
     assert recreate[-3:] == list(OPERATOR.MIDDLEWARE_RUNTIME_SERVICES)
@@ -1773,6 +1774,21 @@ def test_worker_healthcheck_is_not_disabled():
     worker = compose.split("  worker:\n", 1)[1]
     assert "disable: true" not in worker
     assert "control-plane-worker-heartbeat" in worker
+
+
+def test_control_plane_source_readback_uses_runtime_python():
+    source = (ROOT / "operations/production-operator/codestra-production-operator").read_text(
+        encoding="utf-8"
+    )
+    assert '"exec", CONTROL_PLANE_API, "python", "-c"' in source
+    assert '"exec", CONTROL_PLANE_API, "sha256sum"' not in source
+
+
+def test_control_plane_build_uses_a_valid_local_image_tag():
+    compose = (ROOT / "deploy/control-plane/compose.yaml").read_text(encoding="utf-8")
+    assert compose.count("build:") == 1
+    assert compose.count("image: codestra/codestra-integration-control-plane:protected-release") == 2
+    assert "image: ghcr.io/appolon1908-hue/integration-control-plane@sha256:" not in compose
 
 
 def test_activation_rejects_incomplete_rollback_bundle(monkeypatch):
