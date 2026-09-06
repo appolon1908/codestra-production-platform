@@ -23,7 +23,7 @@ def test_legacy_role_retirement_is_fail_closed_and_non_destructive():
         "FROM pg_shdepend",
     }
     assert all(fragment in sql for fragment in required)
-    assert "middleware_app still has active sessions" in sql
+    assert "codestra_middleware is not quiescent after draining sessions" in sql
     assert "middleware_data_owner must exist as a NOLOGIN owner role" in sql
     assert "DROP " not in sql.upper()
     assert "DELETE " not in sql.upper()
@@ -33,9 +33,24 @@ def test_legacy_role_retirement_is_fail_closed_and_non_destructive():
 def test_login_is_disabled_and_committed_before_session_drain():
     sql = MIGRATION.read_text()
     no_login = sql.index("ALTER ROLE middleware_app NOLOGIN")
+    connection_fence = sql.index("ALTER DATABASE codestra_middleware CONNECTION LIMIT 0")
     first_commit = sql.index("COMMIT;", no_login)
-    active_session_check = sql.index("middleware_app still has active sessions")
-    assert no_login < first_commit < active_session_check
+    drain = sql.index("SELECT pg_terminate_backend(pid)")
+    active_session_check = sql.index(
+        "codestra_middleware is not quiescent after draining sessions"
+    )
+    assert no_login < connection_fence < first_commit < drain < active_session_check
+    assert "WHERE datname = 'codestra_middleware'" in sql
+    assert "WHERE usename = 'middleware_app'" not in sql
+
+
+def test_connection_limit_is_restored_only_after_ownership_postcondition():
+    sql = MIGRATION.read_text()
+    postcondition = sql.index("DO $postcondition$")
+    restore = sql.index("DO $restore_connection_limit$")
+    final_commit = sql.rindex("COMMIT;")
+    assert postcondition < restore < final_commit
+    assert "original_connection_limit" in sql
 
 
 def test_reporting_owner_is_not_overwritten_unconditionally():

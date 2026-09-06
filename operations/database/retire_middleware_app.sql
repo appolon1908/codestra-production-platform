@@ -4,6 +4,15 @@
 -- the cluster, no new legacy sessions can race the ownership migration.
 BEGIN;
 
+CREATE TEMP TABLE middleware_retirement_state(
+    original_connection_limit integer NOT NULL
+) ON COMMIT PRESERVE ROWS;
+
+INSERT INTO middleware_retirement_state(original_connection_limit)
+SELECT datconnlimit
+FROM pg_database
+WHERE datname = 'codestra_middleware';
+
 DO $preflight$
 BEGIN
     IF current_database() <> 'codestra_middleware' THEN
@@ -66,8 +75,18 @@ END
 $preflight$;
 
 ALTER ROLE middleware_app NOLOGIN NOCREATEDB NOCREATEROLE NOSUPERUSER NOBYPASSRLS;
+-- A zero connection limit becomes visible with the phase-one commit. It blocks
+-- every ordinary login while the next statement drains all already-connected
+-- sessions, including sessions that executed SET ROLE before membership was
+-- removed. Superuser operators must preserve this maintenance quiescence.
+ALTER DATABASE codestra_middleware CONNECTION LIMIT 0;
 
 COMMIT;
+
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = 'codestra_middleware'
+  AND pid <> pg_backend_pid();
 
 BEGIN;
 
@@ -89,9 +108,10 @@ BEGIN
 
     IF EXISTS (
         SELECT 1 FROM pg_stat_activity
-        WHERE usename = 'middleware_app' AND pid <> pg_backend_pid()
+        WHERE datname = 'codestra_middleware' AND pid <> pg_backend_pid()
     ) THEN
-        RAISE EXCEPTION 'middleware_app still has active sessions';
+        RAISE EXCEPTION
+            'codestra_middleware is not quiescent after draining sessions';
     END IF;
 END
 $migration$;
@@ -137,5 +157,19 @@ BEGIN
     END IF;
 END
 $postcondition$;
+
+DO $restore_connection_limit$
+DECLARE
+    original_limit integer;
+BEGIN
+    SELECT original_connection_limit
+    INTO STRICT original_limit
+    FROM middleware_retirement_state;
+    EXECUTE format(
+        'ALTER DATABASE %I CONNECTION LIMIT %s',
+        'codestra_middleware', original_limit
+    );
+END
+$restore_connection_limit$;
 
 COMMIT;
