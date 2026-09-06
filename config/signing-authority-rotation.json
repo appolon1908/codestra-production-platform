@@ -1,0 +1,20 @@
+{
+  "schema": "codestra.signing-authority-rotation.v1",
+  "blocked_release_sha": "01f2676772b11919e1d79cc74d36bc5eeaa682cd",
+  "status": "NON_ACTIVATABLE",
+  "reason": "Signer trust anchor cannot be independently recovered",
+  "authority_creation": "PENDING_SECURITY_OWNER",
+  "github_secrets_update": "PENDING_SECURITY_OWNER",
+  "independent_fingerprint_handoff": "PENDING_SECURITY_OWNER",
+  "independent_approval": "PENDING",
+  "replacement_release_url": null,
+  "production_delivery_authorized": false,
+  "production_operator_sha256": "6dd46114217da585227b2e18e23ad55dcf6a1d269415738e479701b2432bd5ba",
+  "installed_tuple": {
+    "protected_sha": "01f2676772b11919e1d79cc74d36bc5eeaa682cd",
+    "image_digest": "sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b",
+    "change_id": "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01",
+    "maintenance_date": "2026-09-05"
+  },
+  "runbook": "operations/runbooks/signing-authority-recovery.md"
+}
