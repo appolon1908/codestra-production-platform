@@ -63,7 +63,7 @@ def test_operator_digest_references_are_exact_and_current():
     import hashlib
     operator = ROOT / 'operations/production-operator/codestra-production-operator'
     expected = hashlib.sha256(operator.read_bytes()).hexdigest()
-    assert expected == '6dd46114217da585227b2e18e23ad55dcf6a1d269415738e479701b2432bd5ba'
+    assert expected == '9ce7215330d8543bb88d104c6f325bd5a14b47c832a3bf6d63fea86c71868a91'
     installer = (ROOT / 'operations/production-operator/install-server-a-operator.sh').read_text()
     readme = (ROOT / 'operations/production-operator/README.md').read_text()
     assert expected in installer
@@ -113,7 +113,7 @@ def test_incident_record_requires_new_authority_and_no_delivery():
     assert record['status'] == 'NON_ACTIVATABLE'
     assert record['replacement_release_url'] is None
     assert record['production_delivery_authorized'] is False
-    assert record['production_operator_sha256'] == '6dd46114217da585227b2e18e23ad55dcf6a1d269415738e479701b2432bd5ba'
+    assert record['production_operator_sha256'] == '9ce7215330d8543bb88d104c6f325bd5a14b47c832a3bf6d63fea86c71868a91'
 
 
 def test_non_activatable_release_record_is_exact():

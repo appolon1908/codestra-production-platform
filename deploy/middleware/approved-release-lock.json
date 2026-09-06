@@ -1,8 +1,8 @@
 {
   "source": "https://github.com/appolon1908-hue/Middleware-",
-  "revision": "29b25cba8302cd15ef4d87b68f501da6347f2f17",
-  "image": "ghcr.io/appolon1908-hue/codestra-middleware@sha256:0f5a5b3b1c8166d6509b228541bee01533f5feb1dbef24ed2d241194ba610802",
-  "required_database_head": "0010_realtime_gateway",
+  "revision": "63b6c0c8bca5168a1178895bd12858d0b1e8086e",
+  "image": "ghcr.io/appolon1908-hue/codestra-middleware@sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a",
+  "required_database_head": "0056_klyrow_delivery_events",
   "webphone_endpoint_adapter_url": "",
   "webphone_features_enabled": false,
   "deployment_state": "BLOCKED_PENDING_PROTECTED_BACKUP_RESTORE_AND_ROLLOUT"
