@@ -283,6 +283,14 @@ async def replay(pool: asyncpg.Pool, scope: dict[str, Any], last_event_id: str |
     return result
 
 
+async def session_is_active(pool: asyncpg.Pool, scope: dict[str, Any]) -> bool:
+    return bool(await pool.fetchval(
+        """SELECT EXISTS(SELECT 1 FROM realtime_sessions
+        WHERE session_id=$1 AND revoked_at IS NULL AND expires_at>now())""",
+        scope["session_id"],
+    ))
+
+
 @app.websocket("/ws/agent")
 async def ws_agent(websocket: WebSocket) -> None:
     origin = websocket.headers.get("origin")
@@ -316,7 +324,18 @@ async def ws_agent(websocket: WebSocket) -> None:
         for event in missing:
             await connection.queue.put(event); REPLAYED.inc()
         while True:
-            message = await websocket.receive_json()
+            remaining = (scope["expires_at"] - now()).total_seconds()
+            if remaining <= 0:
+                await websocket.close(code=4401, reason="session_expired"); return
+            try:
+                message = await asyncio.wait_for(
+                    websocket.receive_json(), timeout=min(30.0, remaining)
+                )
+            except asyncio.TimeoutError:
+                if not await session_is_active(websocket.app.state.pool, scope):
+                    await websocket.close(code=4401, reason="session_expired_or_revoked")
+                    return
+                continue
             if message.get("type") == "pong":
                 continue
             if message.get("type") == "disconnect":

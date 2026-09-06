@@ -38,6 +38,11 @@ const duringProxy=make("Recovered After Proxy Restart"); publish(duringProxy);
 execFileSync("docker",["start","codestra-reverse-proxy-1"]);
 await page.waitForFunction(()=>document.querySelector('[data-testid="realtime-status"]')?.textContent?.includes("Connected"),undefined,{timeout:30000});
 await page.getByText("Recovered After Proxy Restart").waitFor({timeout:15000});
+for (const customer of ["Before Restart", "Recovered After Gateway Restart", "Recovered After Proxy Restart"]) {
+  const deliveries=page.getByText(customer,{exact:true});
+  if(await deliveries.count() !== 1) throw new Error(`replay exactly-once failed for ${customer}`);
+}
+if(new Set([baseline.event_id,duringGateway.event_id,duringProxy.event_id]).size !== 3) throw new Error("recovery event IDs are not unique");
 const result={MIDDLEWARE_RESTART_RECOVERY:"PASS",PROXY_RESTART_RECOVERY:"PASS",REPLAY_EXACTLY_ONCE:"PASS"};
 writeFileSync("/root/codestra-production-completion/evidence/websocket-gateway-20260817/recovery-results.json",JSON.stringify(result,null,2)+"\n",{mode:0o640});
 console.log(JSON.stringify(result,null,2));

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -103,6 +104,9 @@ async def no_message(websocket, seconds: float = 0.35) -> None:
 async def main() -> None:
     results: dict[str, str | float | int] = {}
     access_token = await token()
+    token_subject = json.loads(
+        base64.urlsafe_b64decode(access_token.split(".")[1] + "==")
+    )["sub"]
 
     async with httpx.AsyncClient(timeout=10) as client:
         invalid = await client.post(f"{PUBLIC_API}/api/v1/realtime/sessions", headers={"Authorization": "Bearer expired.invalid.token"})
@@ -116,44 +120,44 @@ async def main() -> None:
 
     ring_id = f"ring-{uuid.uuid4()}"
     started = time.perf_counter()
-    accepted = await publish(event(ring_id, 1, "call.ringing", user="2a725359-2b9d-42da-af45-9af008a61353", payload={"direction": "inbound", "customer_name": "Synthetic Customer", "campaign": "TEST_SYN", "phone": "+1XXXXXXXXXX", "lead_id": "SYNTHETIC-LEAD-6101"}))
+    accepted = await publish(event(ring_id, 1, "call.ringing", user=token_subject, payload={"direction": "inbound", "customer_name": "Synthetic Customer", "campaign": "TEST_SYN", "phone": "+1XXXXXXXXXX", "lead_id": "SYNTHETIC-LEAD-6101"}))
     received = json.loads(await asyncio.wait_for(ws_a.recv(), 5))
     latency_ms = (time.perf_counter() - started) * 1000
     assert accepted["delivered"] == 1 and received["event_id"] == ring_id
     results["SCREEN_POP_WEBSOCKET"] = "PASS"
 
-    duplicate = await publish(event(ring_id, 1, "call.ringing", user="2a725359-2b9d-42da-af45-9af008a61353"))
+    duplicate = await publish(event(ring_id, 1, "call.ringing", user=token_subject))
     assert duplicate["duplicate"] is True
     await no_message(ws_a)
     results["DUPLICATE_EVENT_PROTECTION"] = "PASS"
 
     recording_started = f"recording-started-{uuid.uuid4()}"
-    await publish(event(recording_started, 2, "recording.started", user="2a725359-2b9d-42da-af45-9af008a61353", payload={"state": "ON"}))
+    await publish(event(recording_started, 2, "recording.started", user=token_subject, payload={"state": "ON"}))
     assert json.loads(await ws_a.recv())["type"] == "recording.started"
     recording_available = f"recording-available-{uuid.uuid4()}"
-    await publish(event(recording_available, 3, "recording.available", user="2a725359-2b9d-42da-af45-9af008a61353", payload={"state": "available", "recording_id": "SYNTHETIC-REC-1"}))
+    await publish(event(recording_available, 3, "recording.available", user=token_subject, payload={"state": "available", "recording_id": "SYNTHETIC-REC-1"}))
     assert json.loads(await ws_a.recv())["type"] == "recording.available"
     results["RECORDING_WEBSOCKET"] = "PASS"
 
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
     _, ticket_b = await seeded_ticket(pool, agent="CERT-AGENT-B")
     ws_b, _ = await connect(ticket_b)
-    event_a = event(f"isolation-a-{uuid.uuid4()}", 4, "call.ringing", user="2a725359-2b9d-42da-af45-9af008a61353")
+    event_a = event(f"isolation-a-{uuid.uuid4()}", 4, "call.ringing", user=token_subject)
     assert (await publish(event_a))["delivered"] == 1
     assert json.loads(await ws_a.recv())["event_id"] == event_a["event_id"]
     await no_message(ws_b)
     results["CROSS_AGENT_ISOLATION"] = "PASS"
 
-    wrong_tenant = event(f"wrong-tenant-{uuid.uuid4()}", 1, "call.ringing", tenant="other-tenant", user="2a725359-2b9d-42da-af45-9af008a61353")
-    wrong_campaign = event(f"wrong-campaign-{uuid.uuid4()}", 5, "call.ringing", campaign="OTHER_CAMPAIGN", user="2a725359-2b9d-42da-af45-9af008a61353")
+    wrong_tenant = event(f"wrong-tenant-{uuid.uuid4()}", 1, "call.ringing", tenant="other-tenant", user=token_subject)
+    wrong_campaign = event(f"wrong-campaign-{uuid.uuid4()}", 5, "call.ringing", campaign="OTHER_CAMPAIGN", user=token_subject)
     assert (await publish(wrong_tenant))["delivered"] == 0
     assert (await publish(wrong_campaign))["delivered"] == 0
     await no_message(ws_a); await no_message(ws_b)
     results["CROSS_TENANT_ISOLATION"] = results["WRONG_CAMPAIGN_ISOLATION"] = "PASS"
 
     await ws_a.close()
-    replay_two = event(f"replay-2-{uuid.uuid4()}", 6, "call.answered", user="2a725359-2b9d-42da-af45-9af008a61353")
-    replay_three = event(f"replay-3-{uuid.uuid4()}", 7, "call.connected", user="2a725359-2b9d-42da-af45-9af008a61353")
+    replay_two = event(f"replay-2-{uuid.uuid4()}", 6, "call.answered", user=token_subject)
+    replay_three = event(f"replay-3-{uuid.uuid4()}", 7, "call.connected", user=token_subject)
     await publish(replay_two); await publish(replay_three)
     resumed = await issue(access_token)
     ws_a, authenticated = await connect(resumed["ticket"], event_a["event_id"])

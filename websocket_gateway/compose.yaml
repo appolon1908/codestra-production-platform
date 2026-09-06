@@ -49,6 +49,8 @@ services:
       WRITE_TIMEOUT_SECONDS: "3"
     secrets: [database_url, internal_token]
     networks: [backend, edge, identity]
+    ports:
+      - "127.0.0.1:18102:8080"
     extra_hosts: ["host.docker.internal:host-gateway"]
     read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]

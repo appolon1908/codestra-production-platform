@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: websocket-6101-${{ github.ref }}
+  group: websocket-6101-${{ github.event_name == 'workflow_dispatch' && inputs.release_version || github.ref }}
   cancel-in-progress: false
 
 env:
