@@ -483,7 +483,7 @@ def test_restore_test_records_one_stable_backup_stamp(monkeypatch):
             "tested_backup_stamp": stamp,
             "tested_backup_evidence_integrity": "PASS",
             "isolated_middleware_migration": "PASS",
-            "tested_middleware_database_head": "0010_realtime_gateway",
+            "tested_middleware_database_head": "0056_klyrow_delivery_events",
         },
     )
     monkeypatch.setattr(
@@ -556,7 +556,7 @@ def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, 
 
     assert validated["restore_evidence_stamp"] == stamp
     assert validated["isolated_middleware_migration"] == "PASS"
-    assert validated["tested_middleware_database_head"] == "0010_realtime_gateway"
+    assert validated["tested_middleware_database_head"] == "0056_klyrow_delivery_events"
 
 
 def test_restore_result_rejects_unadvertised_backup(monkeypatch, tmp_path):
@@ -676,7 +676,7 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
 
     def run(command, **kwargs):
         calls.append(command)
-        return subprocess.CompletedProcess(command, 0, b"0010_realtime_gateway (head)\n")
+        return subprocess.CompletedProcess(command, 0, b"0056_klyrow_delivery_events (head)\n")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
     result = OPERATOR.rollout_middleware(config)
@@ -692,11 +692,11 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
         (
             Path("/restore-test.json"),
             "tested_middleware_database_head",
-            "0010_realtime_gateway",
+            "0056_klyrow_delivery_events",
         ),
     ]
     assert result["middleware_rollout"] == "PASS"
-    assert result["middleware_database_head"] == "0010_realtime_gateway"
+    assert result["middleware_database_head"] == "0056_klyrow_delivery_events"
     assert calls[0][-6:] == [
         "--rm",
         "--no-deps",
@@ -791,7 +791,7 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
     monkeypatch.setattr(
         OPERATOR,
         "middleware_database_revision",
-        lambda: "0010_realtime_gateway",
+        lambda: "0056_klyrow_delivery_events",
     )
     monkeypatch.setattr(OPERATOR, "middleware_quiescence_stamp", lambda: None)
     result = OPERATOR.rollout_middleware(config)
@@ -870,7 +870,7 @@ def test_middleware_rollout_resumes_fresh_snapshot_before_health(monkeypatch):
     monkeypatch.setattr(
         OPERATOR,
         "middleware_database_revision",
-        lambda: "0010_realtime_gateway",
+        lambda: "0056_klyrow_delivery_events",
     )
     result = OPERATOR.rollout_middleware(config)
     assert result["middleware_already_current"] is True
@@ -2107,7 +2107,7 @@ def test_diagnostics_and_rollback_remain_available_when_unsafe(monkeypatch, acti
 
 def test_kong_runtime_readback_is_sanitized_and_reports_traffic_gate(monkeypatch) -> None:
     responses = {
-        "/routes?size=1000": {"data": [{"id": "r1", "name": "health",
+        "/routes?size=1000": {"data": [{"id": "r1", "name": OPERATOR.KONG_TRAFFIC_GATE_ROUTE,
             "service": {"id": "s1"}, "protocols": ["https"], "methods": ["GET"],
             "hosts": ["api.example.invalid"], "paths": ["/health"],
             "headers": {"x-api-key": ["secret"]}}]},
@@ -2124,7 +2124,7 @@ def test_kong_runtime_readback_is_sanitized_and_reports_traffic_gate(monkeypatch
         "/plugins?size=1000": {"data": [{"id": "p1",
             "name": "request-termination",
             "instance_name": OPERATOR.KONG_TRAFFIC_GATE_INSTANCE, "enabled": True,
-            "route": None, "service": None, "consumer": None,
+            "route": {"id": "r1"}, "service": None, "consumer": None,
             "config": {"message": "secret"}}]},
     }
     monkeypatch.setattr(OPERATOR, "kong_json", lambda method, path: responses[path])
@@ -2137,6 +2137,63 @@ def test_kong_runtime_readback_is_sanitized_and_reports_traffic_gate(monkeypatch
     assert "certificate" not in serialized
     assert '"config"' not in serialized
     assert len(result["sanitized_configuration_sha256"]) == 64
+
+
+def test_kong_traffic_gate_is_scoped_to_callback_route(monkeypatch) -> None:
+    plugins = []
+
+    def fake_kong_json(method, path, payload=None):
+        if method == "GET" and path == f"/routes/{OPERATOR.KONG_TRAFFIC_GATE_ROUTE}":
+            return {"id": "callback-route-id"}
+        if method == "GET" and path == "/plugins?size=1000":
+            return {"data": list(plugins)}
+        if method == "POST" and path == "/plugins":
+            created = {
+                "id": "gate-id",
+                **payload,
+                "service": None,
+                "consumer": None,
+            }
+            plugins.append(created)
+            return created
+        raise AssertionError((method, path, payload))
+
+    monkeypatch.setattr(OPERATOR, "kong_json", fake_kong_json)
+    OPERATOR.kong_traffic_gate(True)
+    assert plugins[0]["route"] == {"id": "callback-route-id"}
+    assert plugins[0]["service"] is None
+    assert plugins[0]["consumer"] is None
+
+
+def test_kong_traffic_gate_migrates_global_gate_in_place(monkeypatch) -> None:
+    plugins = [{
+        "id": "gate-id",
+        "name": "request-termination",
+        "instance_name": OPERATOR.KONG_TRAFFIC_GATE_INSTANCE,
+        "enabled": True,
+        "route": None,
+        "service": None,
+        "consumer": None,
+        "config": {"status_code": 503},
+    }]
+    calls = []
+
+    def fake_kong_json(method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET" and path == f"/routes/{OPERATOR.KONG_TRAFFIC_GATE_ROUTE}":
+            return {"id": "callback-route-id"}
+        if method == "GET" and path == "/plugins?size=1000":
+            return {"data": list(plugins)}
+        if method == "PATCH" and path == "/plugins/gate-id":
+            plugins[0].update(payload)
+            return dict(plugins[0])
+        raise AssertionError((method, path, payload))
+
+    monkeypatch.setattr(OPERATOR, "kong_json", fake_kong_json)
+    OPERATOR.kong_traffic_gate(True)
+    assert plugins[0]["route"] == {"id": "callback-route-id"}
+    assert any(method == "PATCH" for method, _, _ in calls)
+    assert not any(method == "POST" for method, _, _ in calls)
 
 
 def test_rollback_remains_available_when_unsafe(monkeypatch) -> None:
@@ -2212,6 +2269,7 @@ def test_payload_checksums_are_real() -> None:
         "codestra-production-forced-command",
         "codestra-production-operator.sudoers",
         "codestra-production-operator.sshd",
+        "codestra-readiness-restore.override.conf",
     ):
         digest = subprocess.check_output(["sha256sum", str(PACKAGE / name)], text=True).split()[0]
         assert f"{digest}  {name}" in installer
@@ -2227,6 +2285,11 @@ def test_payload_checksums_are_real() -> None:
     restore_digest = subprocess.check_output(["sha256sum", str(restore)], text=True).split()[0]
     assert restore_digest in installer
     assert 'restore_source=$script_dir/../readiness/codestra-isolated-restore-rehearsal.sh' in installer
+    assert "codestra-readiness-restore.override.conf" in installer
+    assert "/etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf" in installer
+    assert "systemctl daemon-reload" in installer
+    assert "effective_restore_exec=$(systemctl show codestra-readiness-restore.service -p ExecStart --value)" in installer
+    assert "wc -l" in installer
 
     assert "-g codestra-production-operator -m 0710" in installer
     assert installer.index("useradd --system") < installer.index(
@@ -2247,6 +2310,8 @@ def test_validator_proves_authorized_key_is_readable_by_operator():
     assert "codestra-production-operator:codestra-production-operator 600" in validator
     assert "sudo -u codestra-production-operator" in validator
     assert "test -r /var/lib/codestra-production-operator/.ssh/authorized_keys" in validator
+    assert "/etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf" in validator
+    assert "effective_restore_exec=$(systemctl show codestra-readiness-restore.service -p ExecStart --value)" in validator
 
 
 def test_forced_command_binds_exact_release_tuple_before_sudo() -> None:
@@ -2290,7 +2355,7 @@ def test_stage_uses_exact_digest_and_isolated_standby() -> None:
     assert '"--network", "none"' in text
     assert '"--read-only", "--cap-drop", "ALL"' in text
     assert '"ENABLE_EXTERNAL_DELIVERY=false"' in text
-    assert 'STANDBY_ENTRYPOINT = ["/opt/venv/bin/python"]' in text
+    assert 'STANDBY_ENTRYPOINT = ["/usr/bin/python3.13"]' in text
     assert 'STANDBY_COMMAND = ["-c", "import threading; threading.Event().wait()"]' in text
     assert '"--entrypoint", STANDBY_ENTRYPOINT[0]' in text
     assert 'subject, *STANDBY_COMMAND' in text
