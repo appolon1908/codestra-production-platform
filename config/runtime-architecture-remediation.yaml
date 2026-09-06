@@ -1,4 +1,5 @@
 schema: codestra.runtime-architecture-remediation.v1
+deployment_entrypoint: tools/reconcile_runtime_architecture.py
 canonical_api_host: api.codestra.co
 canonical_websocket_url: wss://api.codestra.co/ws/agent
 provider_owners:
