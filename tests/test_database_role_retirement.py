@@ -18,6 +18,7 @@ def test_legacy_role_retirement_is_fail_closed_and_non_destructive():
         "middleware_app owns an unexpected database",
         "middleware_app owns an unexpected tablespace",
         "middleware_app has default ACLs requiring separate reviewed cleanup",
+        "middleware_data_owner must not have member roles capable of owner access",
         "FROM pg_default_acl",
         "FROM pg_depend",
         "FROM pg_shdepend",
@@ -51,6 +52,25 @@ def test_connection_limit_is_restored_only_after_ownership_postcondition():
     final_commit = sql.rindex("COMMIT;")
     assert postcondition < restore < final_commit
     assert "original_connection_limit" in sql
+
+
+def test_session_lock_serializes_both_transactions_and_the_session_drain():
+    sql = MIGRATION.read_text()
+    lock = sql.index("pg_try_advisory_lock")
+    phase_one = sql.index("BEGIN;")
+    final_commit = sql.rindex("COMMIT;")
+    unlock = sql.index("pg_advisory_unlock")
+    assert lock < phase_one < final_commit < unlock
+    assert "middleware_app retirement is already running" in sql
+
+
+def test_replacement_owner_has_no_membership_path():
+    sql = MIGRATION.read_text()
+    membership_guard = sql.index(
+        "middleware_data_owner must not have member roles capable of owner access"
+    )
+    reassign = sql.index("REASSIGN OWNED BY middleware_app")
+    assert membership_guard < reassign
 
 
 def test_reporting_owner_is_not_overwritten_unconditionally():

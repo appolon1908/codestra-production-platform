@@ -1,5 +1,19 @@
 \set ON_ERROR_STOP on
 
+-- The session lock spans both transactions and the out-of-transaction drain.
+-- A concurrent retry must fail before either invocation can change connection
+-- policy or terminate the other operator's backend.
+DO $retirement_lock$
+BEGIN
+    IF NOT pg_try_advisory_lock(
+        hashtext(current_database()),
+        hashtext('codestra.middleware_app.retirement.v1')
+    ) THEN
+        RAISE EXCEPTION 'middleware_app retirement is already running';
+    END IF;
+END
+$retirement_lock$;
+
 -- Phase 1 is intentionally committed separately.  Once NOLOGIN is visible to
 -- the cluster, no new legacy sessions can race the ownership migration.
 BEGIN;
@@ -33,6 +47,17 @@ BEGIN
     ) THEN
         RAISE EXCEPTION
             'middleware_data_owner must exist as a NOLOGIN owner role';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_auth_members
+        WHERE roleid = (
+            SELECT oid FROM pg_roles WHERE rolname = 'middleware_data_owner'
+        )
+    ) THEN
+        RAISE EXCEPTION
+            'middleware_data_owner must not have member roles capable of owner access';
     END IF;
 
     IF EXISTS (
@@ -173,3 +198,8 @@ END
 $restore_connection_limit$;
 
 COMMIT;
+
+SELECT pg_advisory_unlock(
+    hashtext(current_database()),
+    hashtext('codestra.middleware_app.retirement.v1')
+);
