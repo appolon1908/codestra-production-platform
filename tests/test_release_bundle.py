@@ -26,9 +26,9 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
                 "--workflow-ref",
                 "fixture-workflow",
                 "--middleware-sha",
-                "f199b6c40f4e467979e9a8b255a0e686321a182d",
+                "29b25cba8302cd15ef4d87b68f501da6347f2f17",
                 "--middleware-image-digest",
-                "sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b",
+                "sha256:0f5a5b3b1c8166d6509b228541bee01533f5feb1dbef24ed2d241194ba610802",
                 "--middleware-signature-status",
                 "PASS",
                 "--middleware-provenance-status",
@@ -57,10 +57,10 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
         "PRODUCTION_DIALING",
     } <= deployment["required_flags"].keys()
     assert deployment["release_tuple"]["middleware_protected_sha"] == (
-        "f199b6c40f4e467979e9a8b255a0e686321a182d"
+        "29b25cba8302cd15ef4d87b68f501da6347f2f17"
     )
     assert deployment["release_tuple"]["middleware_image_digest"] == (
-        "sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b"
+        "sha256:0f5a5b3b1c8166d6509b228541bee01533f5feb1dbef24ed2d241194ba610802"
     )
     sbom = json.loads((outputs[0] / "sbom.cdx.json").read_text())
     assert sbom["bomFormat"] == "CycloneDX"

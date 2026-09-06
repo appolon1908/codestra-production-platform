@@ -35,9 +35,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Check out trusted activation authority
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: authority
+          persist-credentials: false
+      - name: Check out requested protected release
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ inputs.protected_sha }}
+          path: release
           persist-credentials: false
       - name: Require protected source and fixed release tuple
         env:
@@ -48,7 +56,7 @@ jobs:
           MAINTENANCE_DATE: ${{ inputs.maintenance_date }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(git rev-parse HEAD)" = "${PROTECTED_SHA}"
+          test "$(git -C release rev-parse HEAD)" = "${PROTECTED_SHA}"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/release%2Fproduction-activation" --jq .commit.sha)" = "${PROTECTED_SHA}"
           mkdir -m 0700 "${RUNNER_TEMP}/release"
           gh release download "protected-${PROTECTED_SHA}" \
@@ -66,13 +74,13 @@ jobs:
             printf '%s\n' "${{ secrets.CODESTRA_RELEASE_SIGNING_PUBLIC_KEY }}" |
               ssh-keygen -lf /dev/stdin -E sha256 | awk '{print $2}'
           )"
-          python tools/validate_activation_request.py \
+          python authority/tools/validate_activation_request.py \
             --action "${ACTION}" --sha "${PROTECTED_SHA}" \
             --digest "${IMAGE_DIGEST}" --change-id "${CHANGE_ID}" \
             --maintenance-date "${MAINTENANCE_DATE}" \
             --manifest "${RUNNER_TEMP}/release/deployment-manifest.json"
           python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
-          python tools/check_integration_architecture.py \
+          python release/tools/check_integration_architecture.py \
             --evidence "${RUNNER_TEMP}/integration-architecture.json"
       - name: Preserve fail-closed result
         run: |
