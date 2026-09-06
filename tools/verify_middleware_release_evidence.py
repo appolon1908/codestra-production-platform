@@ -27,9 +27,9 @@ HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 STAGING_ONLY_DIGEST = (
     "sha256:2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff"
 )
-CANONICAL_REPOSITORY = "Codestra-SRL/codestra-middleware"
-CANONICAL_IMAGE = "ghcr.io/codestra-srl/codestra-middleware"
-CANONICAL_WORKFLOW = ".github/workflows/exact-main-production-release.yml"
+CANONICAL_REPOSITORY = "appolon1908-hue/Middleware-"
+CANONICAL_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware"
+CANONICAL_WORKFLOW = ".github/workflows/release.yml"
 CANONICAL_BUILDER = (
     f"https://github.com/{CANONICAL_REPOSITORY}/{CANONICAL_WORKFLOW}@refs/heads/main"
 )

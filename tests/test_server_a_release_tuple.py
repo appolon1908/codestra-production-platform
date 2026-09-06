@@ -9,9 +9,7 @@ def test_release_tuple_has_distinct_authorities_and_fails_closed() -> None:
     assert manifest["orchestration"]["repository"] == (
         "appolon1908-hue/codestra-production-platform"
     )
-    assert manifest["middleware"]["repository"] == (
-        "Codestra-SRL/codestra-middleware"
-    )
+    assert manifest["middleware"]["repository"] == "appolon1908-hue/Middleware-"
     assert manifest["middleware"]["production_signature_verified"] is False
     assert manifest["middleware"]["production_provenance_verified"] is False
     assert all(value is False for value in manifest["required_false_flags"].values())
@@ -60,16 +58,29 @@ def test_protected_release_gate_requires_current_signed_middleware_tuple() -> No
     assert "verify-attestation --type spdxjson" in workflow
     assert workflow.count("--certificate-identity") == 3
     assert workflow.count("--certificate-oidc-issuer") == 3
-    assert "tools/verify_attestation_predicate.py" in workflow
-    assert "--predicate middleware-release/middleware.spdx.json" in workflow
+    assert "tools/verify_signed_release_attestations.py" in workflow
+    for argument in (
+        "--manifest middleware-release/release-manifest.v1.json",
+        "--sbom middleware-release/middleware.spdx.json",
+        "--provenance-verification middleware-provenance-verification.json",
+        "--sbom-verification middleware-sbom-verification.json",
+        '--expected-source "$MIDDLEWARE_PROTECTED_SHA"',
+        '--expected-digest "$MIDDLEWARE_IMAGE_DIGEST"',
+    ):
+        assert argument in workflow
     assert "docker image inspect" in workflow
     assert "org.opencontainers.image.revision" in workflow
-    assert "alembic heads" in workflow
+    assert "tools/detect_alembic_head.py" in workflow
+    assert "/app/migrations/versions" in workflow
     assert 'test "${#migration_heads[@]}" -eq 1' in workflow
+    assert "EXPECTED_MIGRATION_REVISION: 0056_klyrow_delivery_events" in workflow
+    assert 'test "$MIDDLEWARE_MIGRATION_REVISION" = "$EXPECTED_MIGRATION_REVISION"' in workflow
+    assert 'test "${migration_heads[0]}" = "$EXPECTED_MIGRATION_REVISION"' in workflow
     assert 'test "${migration_heads[0]}" = "$MIDDLEWARE_MIGRATION_REVISION"' in workflow
+    assert "MIDDLEWARE_MIGRATION_REVISION=%s" in workflow
 
-    # The protected release retains the exact files present in the signed v1 bundle,
-    # plus deterministic verification and derived evidence generated from those inputs.
+    # The protected release retains the exact files present in the canonical signed v1
+    # evidence bundle plus deterministic verification of those inputs.
     for retained_evidence in (
         "dist/middleware-signature-verification.json",
         "dist/middleware-provenance-verification.json",

@@ -5,8 +5,8 @@ umask 077
 backup_root=/opt/codestra/backups/production-readiness-local
 evidence_root=/opt/codestra/evidence/production-readiness-restore
 release_config=/etc/codestra/production-operator/release.json
-middleware_repository=ghcr.io/codestra-srl/codestra-middleware
-middleware_source_sha=f199b6c40f4e467979e9a8b255a0e686321a182d
+middleware_repository=ghcr.io/appolon1908-hue/codestra-middleware
+middleware_source_sha=63b6c0c8bca5168a1178895bd12858d0b1e8086e
 middleware_required_head=0056_klyrow_delivery_events
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 work_dir="${evidence_root}/.work-${stamp}"
@@ -74,6 +74,9 @@ on_error() {
 }
 trap on_error ERR
 
+mkdir -p "$work_dir" "$final_dir"
+chmod 0700 "$work_dir" "$final_dir"
+
 backup_stamp=$(python3 - "$backup_root/LAST_SUCCESS" <<'PY'
 import os
 import re
@@ -136,15 +139,12 @@ docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$middlewar
     | grep -Fx "$middleware_image" >/dev/null
 test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$middleware_image")" = "$middleware_source_sha"
 
-mkdir -p "$work_dir" "$final_dir"
-chmod 0700 "$work_dir" "$final_dir"
-
 # Read-only production baselines prove the rehearsal cannot alter live roles.
 docker exec codestra-postgres-1 psql -U postgres -d postgres -At -v ON_ERROR_STOP=1 \
     -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit||'|'||r.rolbypassrls from pg_roles r where r.rolname in ('middleware_app','middleware_data_owner','mw_integration_api') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname in ('middleware_app','mw_integration_api') order by 1; select 'mw_integration_api|public|CREATE|'||has_schema_privilege('mw_integration_api','public','CREATE')||'|USAGE|'||has_schema_privilege('mw_integration_api','public','USAGE')" \
     > "$work_dir/production-middleware-role-baseline.txt"
 grep -qx 'middleware_data_owner|false|false|true|false' "$work_dir/production-middleware-role-baseline.txt"
-grep -qx 'mw_integration_api|true|false|true|false' "$work_dir/production-middleware-role-baseline.txt"
+grep -qx 'mw_integration_api|true|false|false|false' "$work_dir/production-middleware-role-baseline.txt"
 production_membership_count=$(grep -c '^middleware_app->middleware_data_owner$' "$work_dir/production-middleware-role-baseline.txt" || true)
 test "$production_membership_count" -eq 0
 test "$(grep -c '^mw_integration_api->' "$work_dir/production-middleware-role-baseline.txt" || true)" -eq 0
@@ -218,7 +218,7 @@ CREATE ROLE middleware_data_owner;
 CREATE ROLE mw_event_gateway;
 CREATE ROLE mw_evidence_runner;
 CREATE ROLE mw_extension_allocator;
-CREATE ROLE mw_integration_api LOGIN PASSWORD :'rehearsal_password';
+CREATE ROLE mw_integration_api LOGIN NOINHERIT PASSWORD :'rehearsal_password';
 CREATE ROLE mw_notification_worker;
 CREATE ROLE mw_pjsip_adapter;
 CREATE ROLE mw_policy_engine;
@@ -318,10 +318,10 @@ middleware_container_args=(
 )
 docker run --rm --name "$middleware_migrate_container" \
     "${middleware_container_args[@]}" "$middleware_image" \
-    alembic upgrade head > "$work_dir/middleware-alembic-upgrade.txt"
+    -m alembic upgrade head > "$work_dir/middleware-alembic-upgrade.txt"
 docker run --rm --name "$middleware_current_container" \
     "${middleware_container_args[@]}" "$middleware_image" \
-    alembic current > "$work_dir/middleware-alembic-current.txt"
+    -m alembic current > "$work_dir/middleware-alembic-current.txt"
 middleware_database_head=$(awk 'NF {value=$1} END {print value}' "$work_dir/middleware-alembic-current.txt")
 test "$middleware_database_head" = "$middleware_required_head"
 middleware_schema_table_count=$(docker exec "$container" psql -U postgres -d codestra_middleware -At -v ON_ERROR_STOP=1 \
@@ -359,10 +359,10 @@ docker run -d --name "$middleware_candidate_container" \
     -v "$quarantine_encryption_file:/run/secrets/quarantine_encryption_key:ro" \
     -v "$quarantine_fingerprint_file:/run/secrets/quarantine_fingerprint_key:ro" \
     -v "$quarantine_reviewer_file:/run/secrets/quarantine_reviewer_key:ro" \
-    "$middleware_image" python -m app.entrypoints.integration_api >/dev/null
+    "$middleware_image" -m app.entrypoints.integration_api >/dev/null
 middleware_candidate_health=failed
 for _ in $(seq 1 90); do
-    if docker run --rm --network "$network" "$middleware_image" python -c \
+    if docker run --rm --network "$network" "$middleware_image" -c \
         'import json,urllib.request; health=json.load(urllib.request.urlopen("http://middleware-candidate:8095/healthz",timeout=2)); ready=json.load(urllib.request.urlopen("http://middleware-candidate:8095/readyz",timeout=2)); assert health["status"]=="ok"; assert ready["status"]=="ready" and ready["database"]=="online" and ready["delivery"]=="disabled"' \
         >/dev/null 2>&1; then
         middleware_candidate_health=healthy

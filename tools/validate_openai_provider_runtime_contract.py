@@ -21,7 +21,7 @@ SERVICE = "middleware-openai-provider-worker"
 PROFILE = "openai-provider"
 BLOCKED_STATUS = "BLOCKED_PENDING_PROTECTED_SECRETS_REGISTRATION_AND_STAGING_CANARY"
 DIGEST_IMAGE_RE = re.compile(
-    r"^ghcr\.io/codestra-srl/codestra-middleware@sha256:[0-9a-f]{64}$"
+    r"^ghcr\.io/appolon1908-hue/codestra-middleware@sha256:[0-9a-f]{64}$"
 )
 SOURCE_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REQUIRED_FALSE_FLAGS = {

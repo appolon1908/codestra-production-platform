@@ -9,12 +9,12 @@ import ssl
 
 
 TARGETS = (
-    ("public_postal", "mail.klyrow.com", 25),
-    ("private_submission", "10.40.0.4", 587),
+    ("public_postal", "mail.klyrow.com", 25, "mail.klyrow.com"),
+    ("private_submission", "10.40.0.4", 587, "mail.klyrow.com"),
 )
 
 
-def probe(name: str, host: str, port: int) -> dict[str, object]:
+def probe(name: str, host: str, port: int, tls_hostname: str) -> dict[str, object]:
     result: dict[str, object] = {"target": name, "host": host, "port": port, "data_issued": False}
     client = smtplib.SMTP(timeout=10)
     try:
@@ -23,7 +23,10 @@ def probe(name: str, host: str, port: int) -> dict[str, object]:
         result.update({"connect_code": connect_code, "ehlo_code": ehlo_code, "starttls_offered": client.has_extn("starttls")})
         if client.has_extn("starttls"):
             context = ssl.create_default_context()
-            client._host = host
+            # The private route is addressed by IP, but it presents the public
+            # mail.klyrow.com certificate. Keep transport routing and TLS
+            # identity separate so STARTTLS still performs hostname validation.
+            client._host = tls_hostname
             tls_code, _ = client.starttls(context=context)
             result["starttls_code"] = tls_code
             result["certificate_hostname_verified"] = True
