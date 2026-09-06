@@ -82,7 +82,7 @@ class TestCodestraCrmCallDeliveryOutbox(TransactionCase):
     def _complete_with_email(self, event_id):
         ended_at = fields.Datetime.now()
         registration = self.env(user=self.service_user)[
-            "codestra.crm.call.followup.api"
+            "codestra.crm.call.followup"
         ].register_completed_call(
             {
                 "api_version": "1.0",
