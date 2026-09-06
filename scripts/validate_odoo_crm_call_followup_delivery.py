@@ -78,6 +78,8 @@ def main() -> int:
         errors.append("delivery addon must preserve the native queued-mail workflow")
     if "enqueue_post_call_email" not in wizard:
         errors.append("post-call email must create a delivery ledger record")
+    if '_inherit = "codestra.crm.post.call.wizard"' not in wizard:
+        errors.append("delivery addon must inherit the installed post-call wizard model")
 
     cron = (MODULE / "data" / "ir_cron_data.xml").read_text(encoding="utf-8")
     for snippet in (

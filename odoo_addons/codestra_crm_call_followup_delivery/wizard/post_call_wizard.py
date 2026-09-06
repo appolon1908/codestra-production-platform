@@ -2,7 +2,7 @@ from odoo import models
 
 
 class CodestraPostCallWizardDelivery(models.TransientModel):
-    _inherit = "codestra.post.call.wizard"
+    _inherit = "codestra.crm.post.call.wizard"
 
     def _queue_post_call_email(self):
         """Retain the native queued mail and bind it to an auditable ledger."""
