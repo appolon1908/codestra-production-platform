@@ -125,8 +125,9 @@ class BackupOperationsTests(unittest.TestCase):
         self.assertIn("middleware_required_head=0056_klyrow_delivery_events", source)
         self.assertIn('middleware_image="${middleware_repository}@${release_values[0]}"', source)
         self.assertIn('"${middleware_container_args[@]}"', source)
-        self.assertIn("-m alembic upgrade head", source)
-        self.assertIn("-m alembic current", source)
+        self.assertIn("command.upgrade(c,'head')", source)
+        self.assertIn("command.current(c)", source)
+        self.assertIn("c.set_main_option('script_location','/app/migrations')", source)
         self.assertIn('"$middleware_image" -m app.entrypoints.integration_api', source)
         self.assertIn('"$middleware_image" -c', source)
         self.assertIn("MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS", source)
@@ -231,6 +232,7 @@ class MonitoringGovernanceTests(unittest.TestCase):
 
     def test_platform_ci_publishes_required_legacy_status(self) -> None:
         workflow = (ROOT / ".github/workflows/platform-source-gate.yml").read_text()
+        self.assertIn('- "reports/**"', workflow)
         self.assertIn("statuses: write", workflow)
         self.assertIn("TARGET_SHA: ${{ github.event.pull_request.head.sha }}", workflow)
         self.assertIn('statuses/${TARGET_SHA}', workflow)
