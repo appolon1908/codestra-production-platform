@@ -125,6 +125,7 @@ KLYROW_EMAIL_AUTHORIZATION = CONFIG_DIR / "klyrow-email-authorization.json"
 KLYROW_EMAIL_POINTER = CONFIG_DIR / "klyrow-email-delivery.json"
 KONG_ADMIN_URL = "http://127.0.0.1:8001"
 KONG_TRAFFIC_GATE_INSTANCE = "codestra-core-web-api-traffic-gate"
+KONG_TRAFFIC_GATE_ROUTE = "codestra-callback-read"
 CORE_WEB_PROBE_URL = "https://api.codestra.co/api/v1/callbacks"
 AUTH_GATEWAY_CONTAINER = "codestra-identity-auth-gateway-1"
 AUTH_GATEWAY_NETWORK = "codestra_backend"
@@ -2475,6 +2476,10 @@ def kong_json(method: str, path: str, payload: dict[str, object] | None = None) 
 
 
 def kong_traffic_gate(enabled: bool) -> None:
+    route = kong_json("GET", f"/routes/{KONG_TRAFFIC_GATE_ROUTE}")
+    route_id = route.get("id")
+    if not isinstance(route_id, str) or not route_id:
+        raise OperatorError("Kong core traffic route lookup failed")
     plugins = kong_json("GET", "/plugins?size=1000").get("data", [])
     matches = [
         item for item in plugins
@@ -2484,11 +2489,22 @@ def kong_traffic_gate(enabled: bool) -> None:
     if len(matches) > 1:
         raise OperatorError("duplicate Kong core traffic gates")
     current = matches[0] if matches else None
+    if current is not None and enabled and (
+        (current.get("route") or {}).get("id") != route_id
+        or current.get("service") is not None
+        or current.get("consumer") is not None
+    ):
+        current = kong_json("PATCH", f"/plugins/{current['id']}", {
+            "route": {"id": route_id},
+            "service": None,
+            "consumer": None,
+        })
     if enabled and current is None:
         current = kong_json("POST", "/plugins", {
             "name": "request-termination",
             "instance_name": KONG_TRAFFIC_GATE_INSTANCE,
             "enabled": True,
+            "route": {"id": route_id},
             "config": {"status_code": 503, "message": "core_web_api_maintenance"},
             "tags": ["codestra-managed", "core-web-api-traffic-gate"],
         })
@@ -2507,10 +2523,22 @@ def kong_traffic_gate(enabled: bool) -> None:
         item.get("name") == "request-termination"
         and item.get("instance_name") == KONG_TRAFFIC_GATE_INSTANCE
         and item.get("enabled") is True
+        and (item.get("route") or {}).get("id") == route_id
+        and item.get("service") is None
+        and item.get("consumer") is None
         and item.get("config", {}).get("status_code") == 503
         for item in readback
     )
-    if present != enabled:
+    misplaced = any(
+        item.get("instance_name") == KONG_TRAFFIC_GATE_INSTANCE
+        and (
+            (item.get("route") or {}).get("id") != route_id
+            or item.get("service") is not None
+            or item.get("consumer") is not None
+        )
+        for item in readback
+    )
+    if present != enabled or misplaced:
         raise OperatorError("Kong traffic gate readback mismatch")
 
 
@@ -2607,10 +2635,14 @@ def kong_runtime_readback() -> dict[str, object]:
         ),
         key=lambda item: str(item["instance_name"] or item["name"] or item["id"]),
     )
+    core_web_route_ids = {
+        item["id"] for item in safe_routes if item["name"] == KONG_TRAFFIC_GATE_ROUTE
+    }
     traffic_gate = any(
         item["name"] == "request-termination"
         and item["instance_name"] == KONG_TRAFFIC_GATE_INSTANCE
         and item["enabled"] is True
+        and item["route_id"] in core_web_route_ids
         for item in safe_plugins
     )
     sanitized = {
