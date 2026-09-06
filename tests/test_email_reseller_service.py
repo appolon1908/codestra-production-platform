@@ -73,6 +73,24 @@ class EmailResellerAdmissionTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(f"admission denied: {flag}", result.stdout)
 
+    def test_deployment_uses_baked_admission_and_matching_private_origin(self):
+        base = (ROOT / "deploy/email-reseller/compose.yaml").read_text()
+        safety = (ROOT / "deploy/email-reseller/compose.live-delivery-safety.yaml").read_text()
+        caddy = (ROOT / "operations/caddy/klyrow-events.caddy").read_text()
+
+        self.assertIn('entrypoint: ["/opt/venv/bin/python", "-m", "email_reseller_service.admission"]', safety)
+        self.assertIn('command: ["/opt/venv/bin/python", "-m", "email_reseller_service.server"]', safety)
+        self.assertNotIn("/opt/codestra/safety/live-delivery-admission.sh", safety)
+        self.assertIn('"127.0.0.1:18181:8080"', base)
+        self.assertIn("reverse_proxy 127.0.0.1:18181", caddy)
+        image = next(line.strip().split("@", 1)[1] for line in base.splitlines() if line.strip().startswith("image:"))
+        runtime_digest = next(
+            line.strip().split(": ", 1)[1]
+            for line in base.splitlines()
+            if line.strip().startswith("CODESTRA_IMAGE_DIGEST:")
+        )
+        self.assertEqual(image, runtime_digest)
+
 
 class EmailResellerTest(unittest.TestCase):
     def setUp(self):
