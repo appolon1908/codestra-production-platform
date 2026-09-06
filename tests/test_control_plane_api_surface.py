@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import subprocess
 import sys
 from pathlib import Path
@@ -112,6 +113,28 @@ def test_event_ingest_gateway_auth_mismatch_is_fail_closed() -> None:
         "api-health",
         "messages-api-list",
         "source-event-ingest",
+    }
+
+
+def test_gateway_auth_status_requires_configuration_and_behavioral_proof() -> None:
+    value = assurance()
+    value = copy.deepcopy(value)
+    gateway = value["endpoints"]["source-event-ingest"]["gateway_auth"]
+    gateway["status"] = "present"
+    findings = validate(ROOT, manifest(), value)
+    assert {finding.rule for finding in findings if finding.location == "source-event-ingest"} >= {
+        "gateway-auth-config-proof", "gateway-auth-test-proof"
+    }
+
+    gateway.update({
+        "config_path": "deploy/kong/control-plane.yml",
+        "config_tokens": ["definitely-not-a-real-route-token"],
+        "test_path": "tests/test_kong_control_plane.py",
+        "test_tokens": ["definitely-not-a-real-behavior-token"],
+    })
+    findings = validate(ROOT, manifest(), value)
+    assert {finding.rule for finding in findings if finding.location == "source-event-ingest"} >= {
+        "gateway-auth-config-proof", "gateway-auth-test-proof"
     }
 
 

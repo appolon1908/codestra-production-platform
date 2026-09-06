@@ -44,7 +44,14 @@ IDEMPOTENCY_ASSURANCE_FIELDS = {
     "test_tokens",
     "remediation",
 }
-GATEWAY_AUTH_ASSURANCE_FIELDS = {"status", "remediation"}
+GATEWAY_AUTH_ASSURANCE_FIELDS = {
+    "status",
+    "remediation",
+    "config_path",
+    "config_tokens",
+    "test_path",
+    "test_tokens",
+}
 
 
 @dataclass(frozen=True)
@@ -283,6 +290,30 @@ def _assurance_entries(assurance: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def _gap_remediation(row: dict[str, Any], evidence: dict[str, Any]) -> str:
     return str(evidence.get("remediation") or row.get("remediation") or "").strip()
+
+
+def _repository_token_proof(
+    root: Path,
+    path_value: object,
+    tokens_value: object,
+) -> bool:
+    if not isinstance(path_value, str) or not path_value.strip():
+        return False
+    path = Path(path_value)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    candidate = (root / path).resolve()
+    repository_root = root.resolve()
+    if not candidate.is_relative_to(repository_root) or not candidate.is_file():
+        return False
+    if (
+        not isinstance(tokens_value, list)
+        or not tokens_value
+        or any(not isinstance(token, str) or not token for token in tokens_value)
+    ):
+        return False
+    source = candidate.read_text(encoding="utf-8")
+    return all(token in source for token in tokens_value)
 
 
 def validate(
@@ -649,6 +680,36 @@ def validate(
                         "authentication mismatch requires remediation",
                     )
                 )
+            if status in {"present", "not_required"}:
+                if not _repository_token_proof(
+                    root,
+                    gateway_auth.get("config_path"),
+                    gateway_auth.get("config_tokens"),
+                ):
+                    findings.append(Finding(
+                        "critical",
+                        "gateway-auth-config-proof",
+                        identity,
+                        f"status={status} requires gateway configuration path and tokens",
+                    ))
+                if not _repository_token_proof(
+                    root,
+                    gateway_auth.get("test_path"),
+                    gateway_auth.get("test_tokens"),
+                ):
+                    findings.append(Finding(
+                        "critical",
+                        "gateway-auth-test-proof",
+                        identity,
+                        f"status={status} requires behavioral authentication test path and tokens",
+                    ))
+                if status == "not_required" and not _gap_remediation(row, gateway_auth):
+                    findings.append(Finding(
+                        "critical",
+                        "gateway-auth-exemption",
+                        identity,
+                        "not_required authentication requires a documented rationale",
+                    ))
 
         for method in methods:
             if row["openapi"] == "present" and (method, path) not in openapi:

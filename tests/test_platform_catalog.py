@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
+import subprocess
 from pathlib import Path
 
 from tools.check_platform_catalog import deployment_blockers, load_catalog, validate_catalog
@@ -158,6 +161,47 @@ def test_resolved_gap_rejects_unbound_general_document() -> None:
     }
     rules = {item.rule for item in validate_catalog(ROOT, value)}
     assert "gap-resolution-evidence" in rules
+
+
+def test_resolved_gap_validates_every_claimed_proof_artifact(tmp_path) -> None:
+    repository = tmp_path / "repository"
+    wrapper_dir = repository / "evidence/catalog-gaps/runtime-gap"
+    wrapper_dir.mkdir(parents=True)
+    proof = repository / "evidence/runtime-proof.json"
+    proof.write_text('{"result":"pass"}\n', encoding="utf-8")
+    wrapper = wrapper_dir / "resolution.json"
+    wrapper.write_text(json.dumps({
+        "schema": "codestra.catalog-gap-resolution.v1",
+        "gap_id": "runtime-gap",
+        "status": "resolved",
+        "source_sha": "a" * 40,
+        "observed_at": "2026-09-06T00:00:00Z",
+        "artifacts": [{
+            "path": "evidence/runtime-proof.json",
+            "sha256": hashlib.sha256(proof.read_bytes()).hexdigest(),
+        }],
+    }), encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    subprocess.run(["git", "add", "evidence"], cwd=repository, check=True)
+    value = {
+        "version": 1,
+        "systems": [],
+        "features": [],
+        "apis": [],
+        "known_gaps": [{
+            "gap_id": "runtime-gap", "severity": "critical", "status": "resolved",
+            "owner": "platform", "required_before_server_push": False,
+            "affected_features": [], "remediation": "capture proof",
+            "resolution": {"summary": "verified", "evidence": [
+                "evidence/catalog-gaps/runtime-gap/resolution.json"
+            ]},
+        }],
+    }
+    assert validate_catalog(repository, value) == []
+    proof.write_text('{"result":"changed"}\n', encoding="utf-8")
+    assert "gap-resolution-evidence" in {
+        finding.rule for finding in validate_catalog(repository, value)
+    }
 
 
 def test_duplicate_public_route_is_rejected() -> None:

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 from dataclasses import asdict, dataclass
@@ -143,7 +144,7 @@ def _gap_bound_resolution_evidence(root: Path, gap_id: str, reference: str) -> b
         evidence = json.loads((root / reference).read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
-    return (
+    if not (
         isinstance(evidence, dict)
         and evidence.get("schema") == "codestra.catalog-gap-resolution.v1"
         and evidence.get("gap_id") == gap_id
@@ -155,8 +156,26 @@ def _gap_bound_resolution_evidence(root: Path, gap_id: str, reference: str) -> b
         and evidence["observed_at"].endswith("Z")
         and isinstance(evidence.get("artifacts"), list)
         and bool(evidence["artifacts"])
-        and all(isinstance(item, str) and item.strip() for item in evidence["artifacts"])
-    )
+    ):
+        return False
+    for artifact in evidence["artifacts"]:
+        if not isinstance(artifact, dict) or set(artifact) != {"path", "sha256"}:
+            return False
+        artifact_path = artifact.get("path")
+        digest = artifact.get("sha256")
+        if (
+            not isinstance(artifact_path, str)
+            or not artifact_path.startswith("evidence/")
+            or artifact_path == reference
+            or not _repository_evidence_file(root, artifact_path)
+            or not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            return False
+        if hashlib.sha256((root / artifact_path).read_bytes()).hexdigest() != digest:
+            return False
+    return True
 
 
 def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
