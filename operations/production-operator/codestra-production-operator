@@ -1349,6 +1349,9 @@ def middleware_compose(config: dict[str, str], *, rollback_override: Path | None
         checked_root_bytes(rollback_override)
         layers.append(rollback_override)
     command = [
+        "/usr/bin/env",
+        "ODOO_CALLBACK_ADDON_RELEASE=/home/codestra-admin/releases/odoo-callback-1e450061b3db/codestra_appointments",
+        "ODOO_CALLBACK_CAMPAIGN_ADDON_RELEASE=/home/codestra-admin/releases/odoo-callback-1e450061b3db/call_center_campaign",
         "/usr/bin/docker",
         "compose",
         "--project-name",
