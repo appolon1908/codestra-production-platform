@@ -221,6 +221,8 @@ jobs:
           install -m 0700 -d "${RUNNER_TEMP}/release-signing"
           printf '%s\n' "${SIGNING_KEY}" > "${RUNNER_TEMP}/release-signing/key"
           chmod 0600 "${RUNNER_TEMP}/release-signing/key"
+          trap 'rm -f "${RUNNER_TEMP}/release-signing/key"' EXIT
+          test "$(printf '%s\n' "${SIGNING_PUBLIC_KEY}" | awk '{print $1}')" = ssh-ed25519
           printf 'codestra-release %s\n' "${SIGNING_PUBLIC_KEY}" > "${RUNNER_TEMP}/release-signing/allowed_signers"
           ssh-keygen -Y sign -q -f "${RUNNER_TEMP}/release-signing/key" -n codestra-release dist/manifest.sha256
           ssh-keygen -Y verify -q \

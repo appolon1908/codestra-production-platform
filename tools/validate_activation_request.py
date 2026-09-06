@@ -12,6 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 NON_ACTIVATABLE_RELEASES = ROOT / "config" / "non-activatable-releases.json"
 
 CHANGE_ID = "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01"
+NON_ACTIVATABLE_SHAS = {"01f2676772b11919e1d79cc74d36bc5eeaa682cd"}
+# These actions belong to the separate fixed-tuple recovery dispatcher. They
+# never exempt a revoked release from this generic activation validator.
+RECOVERY_ONLY_ACTIONS = {
+    "status", "collect-evidence", "disable-production-web-traffic",
+    "disable-klyrow-email-delivery",
+}
 SUPERSEDED_DIGESTS = {
     "sha256:336c9a31648a0481737fa4bcc3eafb02a22e4b4fc66ba7b8ec1759c087e05e02",
 }
@@ -50,7 +57,11 @@ def validate(args: argparse.Namespace) -> None:
     if args.change_id != CHANGE_ID:
         raise ValueError("change identifier mismatch")
     revoked = json.loads(NON_ACTIVATABLE_RELEASES.read_text(encoding="utf-8"))
-    denied = {entry["protected_sha"] for entry in revoked.get("releases", [])}
+    # Preserve both the permanent incident quarantine and the protected branch's
+    # extensible revocation registry. A candidate manifest cannot override either.
+    denied = NON_ACTIVATABLE_SHAS | {
+        entry["protected_sha"] for entry in revoked.get("releases", [])
+    }
     if args.sha in denied:
         raise ValueError("protected release is explicitly non-activatable")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.maintenance_date):

@@ -2760,6 +2760,11 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
     if action not in ALLOWED_ACTIONS:
         raise OperatorError("action is not allowlisted")
     config = load_release_config()
+    if config["protected_sha"] == "01f2676772b11919e1d79cc74d36bc5eeaa682cd" and action not in {
+        "status", "collect-evidence", "disable-production-web-traffic",
+        "disable-klyrow-email-delivery",
+    }:
+        raise OperatorError("release is non-activatable: signer trust anchor unrecoverable")
     window: dict[str, str] | None = None
     if action not in READ_ONLY_ACTIONS | RECOVERY_ACTIONS:
         window = require_maintenance_window()
