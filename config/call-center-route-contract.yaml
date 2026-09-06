@@ -7,7 +7,7 @@ routes:
   - {method: POST, path: /api/v1/automation/authorize, boundary: kong, upstream: codestra-control-plane:8096, scope: automation.execute}
   - {method: POST, path: /api/v1/automation/execute, boundary: kong, upstream: codestra-control-plane:8096, scope: automation.execute}
   - {method: POST, path: /api/v1/automation/results, boundary: kong, upstream: codestra-control-plane:8096, scope: automation.result.write}
-  - {method: POST, path: /api/v1/realtime/sessions, boundary: kong, upstream: codestra-control-plane-realtime:18103, scope: realtime.session}
+  - {method: POST, path: /api/v1/realtime/sessions, boundary: kong, upstream: codestra-control-plane-realtime:18103, scope: 'realtime:session:create'}
   - {method: GET, path: /ws/agent, boundary: caddy_one_time_token, upstream: 127.0.0.1:18102, scope: realtime.connect}
   - {method: GET, path: /v1/admin/system/health, boundary: kong, upstream: codestra-control-plane:8096, scope: platform.admin}
   - {method: GET, path: /v1/admin/system/readiness, boundary: kong, upstream: codestra-control-plane:8096, scope: platform.admin}

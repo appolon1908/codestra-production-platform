@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from control_plane_service.automation import (
     authorize_automation,
     execute_automation,
@@ -123,6 +125,51 @@ def test_failure_callback_resolves_original_identity_from_n8n_execution(tmp_path
         "status":"FAILED", "event_id":"evt-1", "workflow_key":"test_syn_followup",
         "correlation_id":"corr-1",
     }
+
+
+def test_altered_result_retry_cannot_change_execution_status(tmp_path, monkeypatch):
+    store = Store(str(tmp_path / "control-plane.db"))
+    secret = tmp_path / "action-secret"
+    secret.write_bytes(b"test-only-action-secret-material-32-bytes")
+    monkeypatch.setenv("CONTROL_PLANE_AUTOMATION_ACTION_SECRET_FILE", str(secret))
+    monkeypatch.setenv(
+        "CONTROL_PLANE_ACTION_CAMPAIGN_FOLLOWUP_EXECUTE_URL",
+        "http://middleware-handler.test/followup",
+    )
+    authorized = authorize_automation(store, envelope(), "COD")
+
+    class Response:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self):
+            action_key = "COD:evt-1:test_syn_followup:campaign.followup.execute"
+            return json.dumps({
+                "status": "COMPLETED", "action": "campaign.followup.execute",
+                "idempotency_key": action_key,
+            }).encode()
+
+    monkeypatch.setattr(
+        "control_plane_service.automation.urllib.request.urlopen",
+        lambda *_args, **_kwargs: Response(),
+    )
+    execute_automation(store, authorized, "COD")
+    result = {
+        "event_id": "evt-1", "correlation_id": "corr-1",
+        "idempotency_key": "result-immutable", "workflow_key": "test_syn_followup",
+        "execution_id": "exec-1", "status": "COMPLETED",
+        "actions": [{"type": "campaign.followup.execute"}],
+        "completed_at": "2026-08-22T00:00:01Z",
+    }
+    record_execution_result(store, result, "COD")
+    altered = {**result, "status": "FAILED", "actions": []}
+    with pytest.raises(ControlPlaneError, match="idempotency_conflict"):
+        record_execution_result(store, altered, "COD")
+    with store.connect() as db:
+        status = db.execute(
+            "SELECT status FROM automation_executions WHERE execution_id='exec-1'"
+        ).fetchone()["status"]
+    assert status == "COMPLETED"
 
 
 def test_cod_web_out_email_requires_exact_contact_policy(tmp_path, monkeypatch):

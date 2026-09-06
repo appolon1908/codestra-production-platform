@@ -50,7 +50,9 @@ def test_workflows_are_inactive_authenticated_idempotent_and_context_preserving(
         assert execute["parameters"]["url"].endswith("/api/v1/automation/execute")
         assert callback["type"] == "n8n-nodes-base.httpRequest"
         assert callback["parameters"]["url"].endswith("/api/v1/automation/results")
-        assert "MIDDLEWARE_INTERNAL_URL" in json.dumps((authorize, execute, callback))
+        requests = json.dumps((authorize, execute, callback))
+        assert "http://codestra-middleware-integration-api-1:8095" in requests
+        assert "$env." not in requests
         assert authorize["parameters"]["nodeCredentialType"] == "oAuth2Api"
         assert execute["parameters"]["nodeCredentialType"] == "oAuth2Api"
         assert callback["parameters"]["nodeCredentialType"] == "oAuth2Api"

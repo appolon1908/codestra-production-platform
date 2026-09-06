@@ -160,8 +160,22 @@ class SessionHandler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_GET(self) -> None:
-        if urlparse(self.path).path == "/healthz":
+        path = urlparse(self.path).path
+        if path == "/healthz":
             return self._json(200, {"status": "ok"})
+        if path == "/readyz":
+            try:
+                with STORE.connect() as db:
+                    db.execute("SELECT 1").fetchone()
+            except Exception:
+                return self._json(503, {"status": "not_ready", "database": "offline"})
+            return self._json(200, {"status": "ready", "database": "online"})
+        if path == "/version":
+            return self._json(200, {
+                "service": "codestra-realtime-session",
+                "version": "1.0",
+                "source_revision": os.getenv("SOURCE_REVISION", "unattributed"),
+            })
         return self._json(404, {"error": "not_found"})
 
     def do_POST(self) -> None:

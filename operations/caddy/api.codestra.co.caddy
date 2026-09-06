@@ -15,9 +15,15 @@ api.codestra.co {
 	# The realtime gateway owns only WebSocket transport and its own read-only
 	# health/version endpoints. Realtime ticket creation remains a POST owned by
 	# Middleware and therefore falls through to the canonical API backend below.
-	@realtime path /ws/agent /healthz /readyz /version
+	@realtime path /ws/agent
 	handle @realtime {
 		reverse_proxy 127.0.0.1:18102 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	@realtime_meta path /healthz /readyz /version
+	handle @realtime_meta {
+		reverse_proxy 127.0.0.1:18103 {
 			header_up X-Real-IP {remote_host}
 		}
 	}

@@ -162,8 +162,8 @@ services:
               local claims = token and token.claims or {}
               local scopes = {}
               for value in string.gmatch(claims.scope or "", "%S+") do scopes[value] = true end
-              if not scopes["realtime.session"] then
-                return kong.response.exit(403,{error="insufficient_scope",required_scope="realtime.session"})
+              if not scopes["realtime:session:create"] then
+                return kong.response.exit(403,{error="insufficient_scope",required_scope="realtime:session:create"})
               end
               if not claims.tenant or claims.tenant == "" then
                 return kong.response.exit(403,{error="tenant_claim_required"})

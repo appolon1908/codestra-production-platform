@@ -271,6 +271,27 @@ def record_execution_result(store: Store, value: dict[str, Any], tenant: str):
             event_id=execution["event_id"], workflow_key=execution["workflow_key"],
             correlation_id=execution["correlation_id"],
         )
+    envelope = {
+        "event_id": "n8n-result-" + str(value["event_id"]),
+        "source": "n8n",
+        "event_type": "workflow.completed" if value["status"] == "COMPLETED" else "workflow.failed",
+        "event_version": "1.0", "occurred_at": value["completed_at"],
+        "tenant_id": tenant, "customer_id": None,
+        "correlation_id": value["correlation_id"], "idempotency_key": value["idempotency_key"],
+        "payload": {
+            "origin_event_id": value["event_id"], "workflow_key": value["workflow_key"],
+            "execution_id": value["execution_id"], "status": value["status"],
+            "actions": value["actions"],
+        },
+        "metadata": {"gateway_authenticated": True},
+    }
+    # Validate an existing immutable result before touching execution state.
+    # This keeps an altered retry from committing a new status and only then
+    # discovering its idempotency conflict during event ingestion.
+    if store.event_exists(envelope["event_id"]):
+        if store.exact_event_replay(envelope) is None:
+            raise ControlPlaneError("idempotency_conflict")
+
     with store.connect() as db:
         _ensure_embedded_schema(db)
         if value["status"] == "COMPLETED":
@@ -295,18 +316,4 @@ def record_execution_result(store: Store, value: dict[str, Any], tenant: str):
         ).rowcount
     if changed != 1:
         raise ControlPlaneError("automation_execution_not_found")
-    envelope = {
-        "event_id": "n8n-result-" + str(value["event_id"]),
-        "source": "n8n",
-        "event_type": "workflow.completed" if value["status"] == "COMPLETED" else "workflow.failed",
-        "event_version": "1.0", "occurred_at": value["completed_at"],
-        "tenant_id": tenant, "customer_id": None,
-        "correlation_id": value["correlation_id"], "idempotency_key": value["idempotency_key"],
-        "payload": {
-            "origin_event_id": value["event_id"], "workflow_key": value["workflow_key"],
-            "execution_id": value["execution_id"], "status": value["status"],
-            "actions": value["actions"],
-        },
-        "metadata": {"gateway_authenticated": True},
-    }
     return store.ingest(envelope)
