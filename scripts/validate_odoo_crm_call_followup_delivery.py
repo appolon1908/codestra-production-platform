@@ -68,6 +68,7 @@ def main() -> int:
         "_cron_retry_failed",
         "action_retry_now",
         "action_cancel",
+        'check_access("read")',
         "_prevent_delivery_deletion",
         '"auto_delete": False',
     ):

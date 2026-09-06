@@ -343,12 +343,17 @@ class CodestraCrmCallDelivery(models.Model):
     def action_retry_now(self):
         self._require_manager()
         for delivery in self:
+            delivery.check_access("read")
             delivery.sudo()._queue_retry(manual=True)
         return True
 
     def action_cancel(self):
         self._require_manager()
         for delivery in self:
+            delivery.check_access("read")
+            if delivery.mail_id.sudo().state == "sent":
+                delivery.sudo()._mark_sent()
+                continue
             if delivery.state == "sent":
                 raise ValidationError(_("A sent delivery cannot be cancelled."))
             if delivery.mail_id and delivery.mail_id.state == "outgoing":
