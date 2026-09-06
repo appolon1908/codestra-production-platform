@@ -156,7 +156,7 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
         self.assertFalse(followup.automation_missed_callback_at)
 
         followup._write_from_workflow(
-            {"callback_at": fields.Datetime.now() - timedelta(minutes=30)}
+            {"callback_at": fields.Datetime.now() - timedelta(minutes=45)}
         )
         self.assertEqual(Job._cron_enqueue_due_jobs(company_ids=[self.company.id]), 1)
         self.assertEqual(
