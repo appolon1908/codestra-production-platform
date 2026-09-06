@@ -1,8 +1,12 @@
 import importlib
+import hashlib
+import hmac
 import json
 import os
 import tempfile
+import time
 import unittest
+import uuid
 
 
 class EmailResellerTest(unittest.TestCase):
@@ -10,6 +14,8 @@ class EmailResellerTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         os.environ["EMAIL_DATABASE_PATH"] = self.temp.name + "/email.db"
         os.environ["EMAIL_RATE_PER_MINUTE"] = "3"
+        os.environ["KLYROW_WEBHOOK_SECRET"] = "test-klyrow-webhook-secret"
+        os.environ["KLYROW_MIDDLEWARE_API_KEY"] = "test-klyrow-api-key"
         import email_reseller_service.server as server
         self.s = importlib.reload(server)
         self.s.initialize()
@@ -46,6 +52,24 @@ class EmailResellerTest(unittest.TestCase):
 
     def create(self, key="key-1", consumer="consumer-a", **changes):
         return self.s.create_message(consumer, key, "correlation-a", self.payload(**changes))
+
+    def klyrow_event(self, value):
+        event_id = value.setdefault("event_id", str(uuid.uuid4()))
+        value.setdefault("source_system", "klyrow")
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        timestamp = str(int(time.time()))
+        signature = hmac.new(
+            os.environ["KLYROW_WEBHOOK_SECRET"].encode(),
+            timestamp.encode() + b"\n" + event_id.encode() + b"\nklyrow\n" + raw,
+            hashlib.sha256,
+        ).hexdigest()
+        headers = {
+            "Authorization": "Bearer " + os.environ["KLYROW_MIDDLEWARE_API_KEY"],
+            "X-Klyrow-Timestamp": timestamp,
+            "X-Klyrow-Event-Id": event_id,
+            "X-Klyrow-Signature": "sha256=" + signature,
+        }
+        return self.s.receive_klyrow_event(raw, headers)
 
     def test_disabled_account_denied(self):
         self.seed(enabled=0)
@@ -120,6 +144,41 @@ class EmailResellerTest(unittest.TestCase):
         self.assertEqual((current["status"], current["raw_provider_status"], current["correlation_id"]), ("hard_bounce", "HardBounce", "correlation-a"))
         with self.s.connect() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) n FROM suppressions WHERE account_id='account-a' AND kind='hard_bounce' AND active=1").fetchone()["n"], 1)
+
+    def test_klyrow_receiver_accepts_canonical_event_type_and_deduplicates(self):
+        message, _ = self.create()
+        event = {
+            "event_type": "klyrow.email.delivered",
+            "message_id": message["message_id"],
+            "status": "delivered",
+        }
+        first, changed = self.klyrow_event(event)
+        duplicate, changed_again = self.klyrow_event(event)
+
+        self.assertTrue(changed)
+        self.assertEqual(first["status"], "delivered")
+        self.assertFalse(changed_again)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(self.s.get_message("consumer-a", message["message_id"])["status"], "delivered")
+
+    def test_klyrow_receiver_preserves_legacy_event_compatibility(self):
+        message, _ = self.create()
+        value, changed = self.klyrow_event({
+            "event": "email.deferred",
+            "message_id": message["message_id"],
+            "status": "deferred",
+        })
+
+        self.assertTrue(changed)
+        self.assertEqual(value["status"], "soft_bounce")
+
+    def test_klyrow_receiver_rejects_conflicting_event_names(self):
+        message, _ = self.create()
+        self.rejected("conflicting_klyrow_event", lambda: self.klyrow_event({
+            "event_type": "klyrow.email.delivered",
+            "event": "email.bounced",
+            "message_id": message["message_id"],
+        }))
 
     def test_late_provider_event_cannot_regress_terminal_state(self):
         message, _ = self.create()
