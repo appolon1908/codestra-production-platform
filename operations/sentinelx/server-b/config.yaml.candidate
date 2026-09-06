@@ -1,0 +1,28 @@
+# REVIEW ONLY: schema-valid, but NOT sufficient to disable script/upload handlers.
+# Do not install or connect until the runbook's enforcement blocker is resolved.
+agent:
+  hostname_label: codestra-server-b-vicidial
+allowed_commands: []
+services: {}
+locations: {}
+playbooks: {}
+exec:
+  timeout_default: 5
+  timeout_max: 10
+security:
+  trusted_fetch_hosts: []
+  file_url_timeout_seconds: 5
+# A future root-owned, non-writable staging location is defense in depth only.
+# This is not a supported upload-disable setting.
+upload_base: /etc/sentinelx/disabled-staging
+file_ops:
+  paths:
+    - path: /proc/loadavg
+      access: r
+    - path: /proc/meminfo
+      access: r
+    - path: /proc/uptime
+      access: r
+  max_read_bytes: 8192
+  max_list_entries: 10
+  max_search_results: 10
