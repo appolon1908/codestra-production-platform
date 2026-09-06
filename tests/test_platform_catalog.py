@@ -170,18 +170,25 @@ def test_resolved_gap_validates_every_claimed_proof_artifact(tmp_path) -> None:
     proof = repository / "evidence/runtime-proof.json"
     proof.write_text('{"result":"pass"}\n', encoding="utf-8")
     wrapper = wrapper_dir / "resolution.json"
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    subprocess.run(["git", "config", "user.email", "catalog-test@example.invalid"], cwd=repository, check=True)
+    subprocess.run(["git", "config", "user.name", "Catalog Test"], cwd=repository, check=True)
+    subprocess.run(["git", "add", "evidence/runtime-proof.json"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "add proof"], cwd=repository, check=True)
+    source_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repository, text=True
+    ).strip()
     wrapper.write_text(json.dumps({
         "schema": "codestra.catalog-gap-resolution.v1",
         "gap_id": "runtime-gap",
         "status": "resolved",
-        "source_sha": "a" * 40,
+        "source_sha": source_sha,
         "observed_at": "2026-09-06T00:00:00Z",
         "artifacts": [{
             "path": "evidence/runtime-proof.json",
             "sha256": hashlib.sha256(proof.read_bytes()).hexdigest(),
         }],
     }), encoding="utf-8")
-    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
     subprocess.run(["git", "add", "evidence"], cwd=repository, check=True)
     value = {
         "version": 1,
@@ -202,6 +209,37 @@ def test_resolved_gap_validates_every_claimed_proof_artifact(tmp_path) -> None:
     assert "gap-resolution-evidence" in {
         finding.rule for finding in validate_catalog(repository, value)
     }
+
+
+def test_nonexistent_resolution_source_commit_is_rejected(tmp_path) -> None:
+    repository = tmp_path / "repository"
+    wrapper_dir = repository / "evidence/catalog-gaps/runtime-gap"
+    wrapper_dir.mkdir(parents=True)
+    proof = repository / "evidence/proof.json"
+    proof.write_text('{"status":"PASS"}\n', encoding="utf-8")
+    wrapper = wrapper_dir / "resolution.json"
+    wrapper.write_text(json.dumps({
+        "schema": "codestra.catalog-gap-resolution.v1", "gap_id": "runtime-gap",
+        "status": "resolved", "source_sha": "a" * 40,
+        "observed_at": "2026-09-06T00:00:00Z", "artifacts": [{
+            "path": "evidence/proof.json",
+            "sha256": hashlib.sha256(proof.read_bytes()).hexdigest(),
+        }],
+    }), encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+    subprocess.run(["git", "add", "evidence"], cwd=repository, check=True)
+    assert not deployment_blockers({
+        "features": [], "known_gaps": []
+    }, set(), repository)
+    from tools.check_platform_catalog import _gap_bound_resolution_evidence
+    assert not _gap_bound_resolution_evidence(
+        repository, "runtime-gap", "evidence/catalog-gaps/runtime-gap/resolution.json"
+    )
+
+
+def test_deployment_requires_feature_level_evidence() -> None:
+    blockers = deployment_blockers(catalog(), {"middleware-health"}, ROOT)
+    assert "feature-deployment-evidence" in {finding.rule for finding in blockers}
 
 
 def test_duplicate_public_route_is_rejected() -> None:

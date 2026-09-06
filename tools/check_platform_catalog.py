@@ -132,6 +132,21 @@ def _repository_evidence_file(root: Path, reference: str) -> bool:
     return tracked.returncode == 0
 
 
+def _reviewed_source_commit(root: Path, source_sha: str) -> bool:
+    """Accept only a real commit that is an ancestor of the certified checkout."""
+    exists = subprocess.run(
+        ["git", "cat-file", "-e", f"{source_sha}^{{commit}}"], cwd=root,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+    if exists.returncode != 0:
+        return False
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source_sha, "HEAD"], cwd=root,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+    return ancestor.returncode == 0
+
+
 def _gap_bound_resolution_evidence(root: Path, gap_id: str, reference: str) -> bool:
     """Require a tracked, machine-readable artifact bound to this exact gap."""
 
@@ -152,6 +167,7 @@ def _gap_bound_resolution_evidence(root: Path, gap_id: str, reference: str) -> b
         and isinstance(evidence.get("source_sha"), str)
         and len(evidence["source_sha"]) == 40
         and all(character in "0123456789abcdef" for character in evidence["source_sha"])
+        and _reviewed_source_commit(root, evidence["source_sha"])
         and isinstance(evidence.get("observed_at"), str)
         and evidence["observed_at"].endswith("Z")
         and isinstance(evidence.get("artifacts"), list)
@@ -379,6 +395,16 @@ def deployment_blockers(
         row = features[feature_id]
         if row["lifecycle"] not in {"active", "source_ready"}:
             blockers.append(Finding("critical", "feature-not-deployable", feature_id, f"lifecycle is {row['lifecycle']}"))
+        evidence = row.get("deployment_evidence")
+        if not isinstance(evidence, list) or not evidence or not all(
+            isinstance(reference, str)
+            and _gap_bound_resolution_evidence(root, f"feature-{feature_id}", reference)
+            for reference in evidence
+        ):
+            blockers.append(Finding(
+                "critical", "feature-deployment-evidence", feature_id,
+                "tracked, SHA-bound deployment evidence is required",
+            ))
     return blockers
 
 

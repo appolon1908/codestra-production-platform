@@ -55,8 +55,12 @@ endpoints:
 
   messages-api-detail:
     tokens: ['else STORE.get_message(message_id,tenant)']
+    gateway_auth: &public_gateway_auth_gap
+      status: gap
+      remediation: Bind the exact public route to its declared Kong scope and add behavioral allow/deny tests.
   messages-api-events:
     tokens: ['event_request=parts[-1]=="events"', 'STORE.message_events(message_id,tenant)']
+    gateway_auth: *public_gateway_auth_gap
   messages-detail:
     tokens: ['else STORE.get_message(message_id,tenant)']
   messages-events:
@@ -137,6 +141,7 @@ endpoints:
         - 'idempotency_conflict'
 
   mapping-campaign-create:
+    gateway_auth: *public_gateway_auth_gap
     idempotency:
       status: present
       implementation_tokens:
@@ -171,6 +176,7 @@ endpoints:
         - 'self.assertTrue(duplicate)'
         - 'idempotency_conflict'
   message-create-public:
+    gateway_auth: *public_gateway_auth_gap
     idempotency:
       status: present
       implementation_tokens:
@@ -181,3 +187,30 @@ endpoints:
         - 'def test_idempotency_and_conflict'
         - 'self.assertTrue(duplicate)'
         - 'idempotency_conflict'
+
+  mapping-job-read:
+    gateway_auth: *public_gateway_auth_gap
+  ops-summary:
+    gateway_auth: *public_gateway_auth_gap
+  ops-events:
+    gateway_auth: *public_gateway_auth_gap
+  ops-correlation:
+    gateway_auth: *public_gateway_auth_gap
+  ops-event-replay:
+    gateway_auth: *public_gateway_auth_gap
+  ops-integration-pause:
+    gateway_auth: *public_gateway_auth_gap
+  ops-integration-resume:
+    gateway_auth: *public_gateway_auth_gap
+  mapping-job-result:
+    gateway_auth: *public_gateway_auth_gap
+  reconciliation-run:
+    gateway_auth: *public_gateway_auth_gap
+  message-dispatch:
+    gateway_auth: *public_gateway_auth_gap
+  message-result:
+    gateway_auth: *public_gateway_auth_gap
+  preferences-write:
+    gateway_auth: *public_gateway_auth_gap
+  preferences-check:
+    gateway_auth: *public_gateway_auth_gap

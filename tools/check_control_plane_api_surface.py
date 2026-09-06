@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -305,6 +306,13 @@ def _repository_token_proof(
     candidate = (root / path).resolve()
     repository_root = root.resolve()
     if not candidate.is_relative_to(repository_root) or not candidate.is_file():
+        return False
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--", str(path)],
+        cwd=repository_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if tracked.returncode != 0:
         return False
     if (
         not isinstance(tokens_value, list)
@@ -650,6 +658,11 @@ def validate(
                 )
 
         gateway_auth = evidence.get("gateway_auth", {})
+        if row["exposure"] in {"public_api", "public_health"} and not gateway_auth:
+            findings.append(Finding(
+                "critical", "gateway-auth-assurance-missing", identity,
+                "public routes require an explicit evidenced status or owned gap",
+            ))
         if gateway_auth and not isinstance(gateway_auth, dict):
             findings.append(
                 Finding("critical", "gateway-auth-assurance-schema", identity, "must be a mapping")

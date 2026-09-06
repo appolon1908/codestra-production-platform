@@ -106,14 +106,29 @@ def test_event_ingest_gateway_auth_mismatch_is_fail_closed() -> None:
         for finding in coverage_gaps(manifest(), assurance())
         if finding.rule == "gateway-auth-coverage-gap"
     }
-    assert gateway_gaps == {
-        "admin-system-databases",
-        "admin-system-health",
-        "admin-system-readiness",
-        "api-health",
-        "messages-api-list",
-        "source-event-ingest",
+    public_ids = {
+        row["endpoint_id"] for row in manifest()["endpoints"]
+        if row["exposure"] in {"public_api", "public_health"}
     }
+    assert gateway_gaps == public_ids
+
+
+def test_public_route_cannot_omit_gateway_assurance() -> None:
+    value = copy.deepcopy(assurance())
+    value["endpoints"]["source-event-ingest"].pop("gateway_auth")
+    rules = {
+        finding.rule for finding in validate(ROOT, manifest(), value)
+        if finding.location == "source-event-ingest"
+    }
+    assert "gateway-auth-assurance-missing" in rules
+
+
+def test_gateway_proof_must_be_git_tracked(tmp_path) -> None:
+    from tools.check_control_plane_api_surface import _repository_token_proof
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    proof = tmp_path / "untracked.txt"
+    proof.write_text("required-token\n", encoding="utf-8")
+    assert not _repository_token_proof(tmp_path, "untracked.txt", ["required-token"])
 
 
 def test_gateway_auth_status_requires_configuration_and_behavioral_proof() -> None:
