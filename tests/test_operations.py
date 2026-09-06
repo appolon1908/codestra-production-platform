@@ -76,6 +76,13 @@ class BackupOperationsTests(unittest.TestCase):
         self.assertIn('tar -tzf "$work_dir/runtime-images.tar.gz" manifest.json >/dev/null', source)
         self.assertNotIn("tar -tzf \"$work_dir/runtime-images.tar.gz\" | grep", source)
 
+    def test_postal_inbound_policy_migration_is_replay_safe(self) -> None:
+        migration = (ROOT / "migrations/control_plane/005_postal_inbound_inbox.sql").read_text()
+        drop = "DROP POLICY IF EXISTS postal_inbound_event_tenant"
+        create = "CREATE POLICY postal_inbound_event_tenant"
+        self.assertIn(drop, migration)
+        self.assertLess(migration.index(drop), migration.index(create))
+
     def test_restore_rehearsal_recreates_rbac_owners_before_exact_restore(self) -> None:
         backup = (ROOT / "operations" / "readiness" / "codestra-local-consistency-backup.sh").read_text()
         source = (ROOT / "operations" / "readiness" / "codestra-isolated-restore-rehearsal.sh").read_text()
