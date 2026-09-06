@@ -523,7 +523,7 @@ def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, 
                 f"MIDDLEWARE_MIGRATION_HEAD={OPERATOR.MIDDLEWARE_REQUIRED_DATABASE_HEAD}",
                 "MIDDLEWARE_SCHEMA_TABLE_COUNT=2",
                 "MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS",
-                "MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api",
+                "MIDDLEWARE_MIGRATION_IDENTITY=middleware_app",
                 "MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS",
                 "MIDDLEWARE_CANDIDATE_HEALTH_GATE=PASS",
                 "MIDDLEWARE_CANDIDATE_READINESS_GATE=PASS",
@@ -585,7 +585,7 @@ def test_restore_result_rejects_unadvertised_backup(monkeypatch, tmp_path):
         f"MIDDLEWARE_MIGRATION_HEAD={OPERATOR.MIDDLEWARE_REQUIRED_DATABASE_HEAD}\n"
         "MIDDLEWARE_SCHEMA_TABLE_COUNT=2\n"
         "MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS\n"
-        "MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api\n"
+        "MIDDLEWARE_MIGRATION_IDENTITY=middleware_app\n"
         "MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS\n"
         "MIDDLEWARE_CANDIDATE_HEALTH_GATE=PASS\n"
         "MIDDLEWARE_CANDIDATE_READINESS_GATE=PASS\n"
@@ -617,6 +617,23 @@ def test_restore_evidence_rejects_a_different_backup_stamp(tmp_path):
             "tested_backup_stamp",
             "20260830T180000Z",
         )
+
+
+def test_middleware_migration_database_url_enforces_deployed_contract(monkeypatch, tmp_path):
+    credential = tmp_path / "database_url"
+    credential.write_text(
+        "postgresql+asyncpg://middleware_app:secret@postgres/codestra_middleware\n"
+    )
+    credential.chmod(0o400)
+    os.chown(credential, 10001, 999)
+    monkeypatch.setattr(OPERATOR, "MIDDLEWARE_MIGRATION_DATABASE_URL", credential)
+    assert OPERATOR.middleware_migration_database_url().startswith(
+        "postgresql+asyncpg://middleware_app:"
+    )
+
+    os.chown(credential, 0, 0)
+    with pytest.raises(OPERATOR.OperatorError, match="credential ownership"):
+        OPERATOR.middleware_migration_database_url()
 
 
 def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypatch):
@@ -670,6 +687,11 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
     monkeypatch.setattr(OPERATOR, "wait_middleware_health", lambda: None)
     monkeypatch.setattr(
         OPERATOR,
+        "middleware_migration_database_url",
+        lambda: "postgresql+asyncpg://middleware_app:secret@postgres/codestra_middleware",
+    )
+    monkeypatch.setattr(
+        OPERATOR,
         "verify_middleware_runtime",
         lambda value: {"middleware_runtime_digest": "PASS"},
     )
@@ -697,14 +719,11 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
     ]
     assert result["middleware_rollout"] == "PASS"
     assert result["middleware_database_head"] == "0056_klyrow_delivery_events"
-    assert calls[0][-6:] == [
-        "--rm",
-        "--no-deps",
-        "middleware-integration-api",
-        "--entrypoint",
-        "python",
-        "scripts/migrate_runtime.py",
-    ]
+    assert "--volume" in calls[0]
+    assert f"{OPERATOR.MIDDLEWARE_MIGRATION_DATABASE_URL}:/run/secrets/migration_database_url:ro" in calls[0]
+    assert "/usr/bin/python3.13" in calls[0]
+    assert "middleware-integration-api" in calls[0]
+    assert "runpy.run_path('/app/scripts/migrate_runtime.py',run_name='__main__')" in calls[0][-1]
     recreate = next(command for command in calls if "--force-recreate" in command)
     assert "--no-deps" in recreate
     assert recreate[-3:] == list(OPERATOR.MIDDLEWARE_RUNTIME_SERVICES)
@@ -741,6 +760,11 @@ def test_middleware_rollout_failure_invokes_bounded_rollback(monkeypatch):
         OPERATOR,
         "middleware_quiescence_stamp",
         lambda: "20260830T200000Z",
+    )
+    monkeypatch.setattr(
+        OPERATOR,
+        "middleware_migration_database_url",
+        lambda: "postgresql+asyncpg://middleware_app:secret@postgres/codestra_middleware",
     )
     monkeypatch.setattr(
         OPERATOR,
