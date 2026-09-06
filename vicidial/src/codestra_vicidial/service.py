@@ -328,6 +328,21 @@ class AdapterService:
             desired_hash = self.state.digest(desired)
             mapping = self.state.mapping("agent", command.agent.user_id)
             existing = self.repository.agent(command.agent.user_id)
+            controlled_match = bool(existing) and (
+                existing.get("user_id") == desired["user_id"]
+                and existing.get("full_name") == desired["full_name"]
+                and existing.get("user_group") == desired["user_group"]
+                and existing.get("active") in (False, "N")
+                and set(desired["campaigns"]).issubset(set(existing.get("campaigns", [])))
+                and set(existing.get("inbound_groups", [])) == set(desired["inbound_groups"])
+            )
+            if mapping is not None:
+                if mapping["actual_id"] != command.agent.user_id:
+                    raise CollisionError("agent ownership mapping collision")
+                stored = self.state.agent_desired(command.agent.user_id)
+                if (mapping["payload_hash"] == desired_hash and stored is not None
+                        and stored["desired_hash"] == desired_hash and controlled_match):
+                    return {"status": "disabled", "actual": existing}
             if mapping is None and existing is not None:
                 adoption_hash = command.agent.adopt_existing_sha256
                 intent = self.state.agent_adoption_intent(command.agent.user_id)
@@ -342,24 +357,12 @@ class AdapterService:
                 elif (adoption_hash != intent["original_hash"]
                       or desired_hash != intent["desired_hash"]):
                     raise CollisionError("agent adoption intent mismatch")
-                controlled_match = (
-                    existing.get("user_id") == desired["user_id"]
-                    and existing.get("full_name") == desired["full_name"]
-                    and existing.get("user_group") == desired["user_group"]
-                    and existing.get("active") in (False, "N")
-                    and set(desired["campaigns"]).issubset(
-                        set(existing.get("campaigns", [])))
-                    and set(existing.get("inbound_groups", []))
-                    == set(desired["inbound_groups"])
-                )
                 if intent is not None and controlled_match:
                     self.state.finalize_agent_adoption(
                         command.agent.user_id, command.agent.user_id,
                         desired_hash, desired,
                     )
                     return {"status": "disabled", "actual": existing}
-            if mapping and mapping["actual_id"] != command.agent.user_id:
-                raise CollisionError("agent ownership mapping collision")
             try:
                 actual = self.repository.sync_agent_disabled(command.agent)
                 mismatches = []

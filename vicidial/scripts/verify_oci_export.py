@@ -86,6 +86,8 @@ def main() -> int:
             raise ValueError("OCI archive does not contain exactly one root manifest")
         root_descriptor = roots[0]
         outer = blob_json(archive, root_descriptor)
+        if not isinstance(outer, dict) or outer.get("schemaVersion") != 2:
+            raise ValueError("OCI root manifest schema version is not 2")
         if "manifests" in outer:
             candidates = [
                 item for item in outer["manifests"]
@@ -100,6 +102,8 @@ def main() -> int:
             manifest = outer
         else:
             raise ValueError("OCI root is neither an image manifest nor an image index")
+        if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 2:
+            raise ValueError("OCI image manifest schema version is not 2")
         if manifest["config"]["digest"] != expected_config:
             raise ValueError("OCI config digest differs from tested Docker image ID")
         config = blob_json(archive, manifest["config"])

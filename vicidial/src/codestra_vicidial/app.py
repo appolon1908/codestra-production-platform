@@ -391,9 +391,11 @@ def app_from_environment() -> FastAPI:
     if secret_file.exists():
         key = secret_file.read_bytes().strip()
     elif deployment == "development-loopback":
-        key = b"development-disabled"
+        key = b"development-disabled-non-secret-key"
     else:
         raise RuntimeError("adapter HMAC credential is required")
+    if len(key) < 32:
+        raise RuntimeError("adapter HMAC credential must contain at least 32 bytes")
     flags = FeatureFlags(
         writes=os.environ.get("ENABLE_VICIDIAL_WRITES") == "true",
         provisioning=os.environ.get("ENABLE_PROVISIONING") == "true",

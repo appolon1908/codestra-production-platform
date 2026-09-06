@@ -226,6 +226,25 @@ def test_first_agent_adoption_recovers_after_mysql_commit_before_mapping(
     assert service.state.agent_adoption_intent("COD1001") is None
 
 
+def test_completed_agent_adoption_replays_after_result_record_crash(tmp_path, monkeypatch):
+    service, repository = enabled_service(tmp_path)
+    existing = {"user_id":"COD1001", "full_name":"Legacy Agent", "user_group":"LEGACY",
+                "campaigns":["LEGACY01"], "inbound_groups":[], "active":False}
+    repository.agents["COD1001"] = dict(existing)
+    payload = {"context":context(), "agent": {"user_id":"COD1001",
+        "full_name":"Codestra Agent", "user_group":"COD_TEST_SDR",
+        "campaigns":["CODT0001"], "inbound_groups":["COD_TEST_CLOSERS"],
+        "active":False, "adopt_existing_sha256":service.state.digest(existing)}}
+    command = AgentCommand.model_validate(payload)
+    original_record = service.state.record
+    monkeypatch.setattr(service.state, "record", lambda *_args: (_ for _ in ()).throw(RuntimeError("record crash")))
+    with pytest.raises(RuntimeError, match="record crash"):
+        service.sync_agent("adopt-result-crash", command)
+    monkeypatch.setattr(service.state, "record", original_record)
+    replay = service.sync_agent("adopt-result-crash", command)
+    assert replay["actual"]["full_name"] == "Codestra Agent"
+
+
 def test_mysql_agent_adoption_uses_myisam_table_lock_through_ownership():
     source = inspect.getsource(MySQLRepository.sync_agent_disabled)
     service_source = inspect.getsource(AdapterService.sync_agent)

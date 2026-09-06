@@ -118,6 +118,33 @@ def test_verifier_rejects_invalid_index_schema_version(
         runpy.run_path("vicidial/scripts/verify_oci_export.py", run_name="__main__")
 
 
+def test_verifier_rejects_invalid_root_manifest_schema_version(monkeypatch, tmp_path):
+    source_sha = "a" * 40
+    archive_path = tmp_path / "image.oci.tar"
+    image_id, diff_id = _direct_oci_archive(archive_path, source_sha)
+    with tarfile.open(archive_path, "r") as source:
+        members = {item.name: source.extractfile(item).read() for item in source if item.isfile()}
+    index = json.loads(members["index.json"])
+    old_name = "blobs/sha256/" + index["manifests"][0]["digest"].split(":")[1]
+    manifest = json.loads(members.pop(old_name))
+    manifest["schemaVersion"] = 1
+    payload = _json_bytes(manifest)
+    descriptor = _descriptor(payload)
+    index["manifests"][0] = descriptor
+    members["index.json"] = _json_bytes(index)
+    members["blobs/sha256/" + descriptor["digest"].split(":")[1]] = payload
+    with tarfile.open(archive_path, "w") as target:
+        for name, value in members.items():
+            _write_member(target, name, value)
+    metadata = tmp_path / "metadata.json"
+    metadata.write_text(json.dumps([{"Id": image_id, "RootFS": {"Layers": [diff_id]}}]))
+    output = tmp_path / "verification.json"
+    monkeypatch.setattr(sys, "argv", ["verify_oci_export.py", "--archive", str(archive_path),
+        "--metadata", str(metadata), "--source-sha", source_sha, "--output", str(output)])
+    with pytest.raises(ValueError, match="root manifest schema version is not 2"):
+        runpy.run_path("vicidial/scripts/verify_oci_export.py", run_name="__main__")
+
+
 @pytest.mark.parametrize("mutation,match", [
     ("missing", "member missing: oci-layout"),
     ("version", "layout version is not 1.0.0"),
