@@ -2290,7 +2290,7 @@ def test_stage_uses_exact_digest_and_isolated_standby() -> None:
     assert '"--network", "none"' in text
     assert '"--read-only", "--cap-drop", "ALL"' in text
     assert '"ENABLE_EXTERNAL_DELIVERY=false"' in text
-    assert 'STANDBY_ENTRYPOINT = ["/opt/venv/bin/python"]' in text
+    assert 'STANDBY_ENTRYPOINT = ["/usr/bin/python3.13"]' in text
     assert 'STANDBY_COMMAND = ["-c", "import threading; threading.Event().wait()"]' in text
     assert '"--entrypoint", STANDBY_ENTRYPOINT[0]' in text
     assert 'subject, *STANDBY_COMMAND' in text
