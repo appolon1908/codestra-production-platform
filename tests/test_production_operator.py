@@ -1776,6 +1776,14 @@ def test_worker_healthcheck_is_not_disabled():
     assert "control-plane-worker-heartbeat" in worker
 
 
+def test_control_plane_source_readback_uses_runtime_python():
+    source = (ROOT / "operations/production-operator/codestra-production-operator").read_text(
+        encoding="utf-8"
+    )
+    assert '"exec", CONTROL_PLANE_API, "python", "-c"' in source
+    assert '"exec", CONTROL_PLANE_API, "sha256sum"' not in source
+
+
 def test_control_plane_build_uses_a_valid_local_image_tag():
     compose = (ROOT / "deploy/control-plane/compose.yaml").read_text(encoding="utf-8")
     assert compose.count("build:") == 1
