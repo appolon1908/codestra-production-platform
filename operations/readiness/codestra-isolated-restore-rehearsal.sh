@@ -144,7 +144,7 @@ docker exec codestra-postgres-1 psql -U postgres -d postgres -At -v ON_ERROR_STO
     -c "select r.rolname||'|'||r.rolcanlogin||'|'||r.rolsuper||'|'||r.rolinherit||'|'||r.rolbypassrls from pg_roles r where r.rolname in ('middleware_app','middleware_data_owner','mw_integration_api') order by 1; select mr.rolname||'->'||gr.rolname from pg_auth_members am join pg_roles mr on mr.oid=am.member join pg_roles gr on gr.oid=am.roleid where mr.rolname in ('middleware_app','mw_integration_api') order by 1; select 'mw_integration_api|public|CREATE|'||has_schema_privilege('mw_integration_api','public','CREATE')||'|USAGE|'||has_schema_privilege('mw_integration_api','public','USAGE')" \
     > "$work_dir/production-middleware-role-baseline.txt"
 grep -qx 'middleware_data_owner|false|false|true|false' "$work_dir/production-middleware-role-baseline.txt"
-grep -qx 'mw_integration_api|true|false|true|false' "$work_dir/production-middleware-role-baseline.txt"
+grep -qx 'mw_integration_api|true|false|false|false' "$work_dir/production-middleware-role-baseline.txt"
 production_membership_count=$(grep -c '^middleware_app->middleware_data_owner$' "$work_dir/production-middleware-role-baseline.txt" || true)
 test "$production_membership_count" -eq 0
 test "$(grep -c '^mw_integration_api->' "$work_dir/production-middleware-role-baseline.txt" || true)" -eq 0
@@ -218,7 +218,7 @@ CREATE ROLE middleware_data_owner;
 CREATE ROLE mw_event_gateway;
 CREATE ROLE mw_evidence_runner;
 CREATE ROLE mw_extension_allocator;
-CREATE ROLE mw_integration_api LOGIN PASSWORD :'rehearsal_password';
+CREATE ROLE mw_integration_api LOGIN NOINHERIT PASSWORD :'rehearsal_password';
 CREATE ROLE mw_notification_worker;
 CREATE ROLE mw_pjsip_adapter;
 CREATE ROLE mw_policy_engine;
