@@ -1,0 +1,69 @@
+name: codestra
+
+services:
+  appolon-middleware-integration-api:
+    image: ghcr.io/appolon1908-hue/codestra-middleware@sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,uid=65532,gid=65532
+    env_file:
+      - path: /etc/codestra/secrets/appolon-middleware-production.env
+        required: true
+    environment:
+      APP_ENV: production
+      RUNTIME_PROFILE_ID: codestra-middleware-production-compose-v1
+      APP_SOURCE_SHA: f3437709c06747249586598590145234ea2c7327
+      IMAGE_DIGEST: sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484
+      BUILD_TIME: "2026-09-02T10:04:02Z"
+      SCHEMA_HEAD: 0006_outbox_attempt_events
+      OUTBOX_DISPATCH_ENABLED: "false"
+      ODOO_WRITE: "false"
+      LIVE_WRITE: "false"
+      LIVE_WRITES: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      N8N_DELIVERY_ENABLED: "false"
+      CALLBACK_DISPATCH: "false"
+      LIVE_SMS_DELIVERY: "false"
+      LIVE_EMAIL_DELIVERY: "false"
+      LIVE_PSTN_DIALING: "false"
+      SEND_EVENTS: "false"
+      ODOO_DELIVERY_ENABLED: "false"
+      ENABLE_VICIDIAL_WRITES: "false"
+      VICIDIAL_WRITES_ENABLED: "false"
+      EXTERNAL_DIAL_ENABLED: "false"
+      PRODUCTION_CALLBACKS_ENABLED: "false"
+      N8N_PRODUCTION_WORKFLOWS_ENABLED: "false"
+      FORM_ODOO_DELIVERY_ENABLED: "false"
+      CRAWLER_ODOO_DELIVERY_ENABLED: "false"
+      SCRAPPER_ODOO_DELIVERY_ENABLED: "false"
+      CRAWLER_EXTERNAL_CONTACT_ENABLED: "false"
+      SCRAPPER_EXTERNAL_CONTACT_ENABLED: "false"
+      SMS_DELIVERY_ENABLED: "false"
+      EMAIL_DELIVERY_ENABLED: "false"
+      SOCIAL_DELIVERY_ENABLED: "false"
+      CRAWLER_EXECUTION_ENABLED: "false"
+      SCRAPPER_EXECUTION_ENABLED: "false"
+      UNRESTRICTED_CRAWLING: "false"
+      LIVE_CALL_CONTROL: "false"
+      GENERAL_AI_DIALING: "false"
+      PRODUCTION_DIALING: DISABLED
+    expose: ["8080"]
+    networks:
+      kong_backend:
+        aliases: [middleware-integration-api]
+      backend: {}
+      identity: {}
+
+networks:
+  kong_backend:
+    name: codestra-kong_kong_backend
+    external: true
+  backend:
+    name: codestra_backend
+    external: true
+  identity:
+    name: codestra-identity_identity_service
+    external: true

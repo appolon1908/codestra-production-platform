@@ -1,0 +1,5 @@
+schema: codestra.api-route-inventory.v1
+captured_at: "2026-09-02T14:25:00Z"
+status: IN_PROGRESS
+operations: []
+note: Empty means not yet proven, not no required operations.

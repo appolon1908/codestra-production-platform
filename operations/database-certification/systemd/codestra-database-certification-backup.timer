@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Codestra all-database certification backup
+
+[Timer]
+OnCalendar=*-*-* 01:30:00 UTC
+RandomizedDelaySec=900
+Persistent=true
+Unit=codestra-database-certification-backup.service
+
+[Install]
+WantedBy=timers.target

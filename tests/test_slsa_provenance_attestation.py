@@ -18,7 +18,7 @@ from tools.verify_slsa_provenance_attestation import (
 
 DIGEST_HEX = "a" * 64
 SOURCE_SHA = "b" * 40
-IMAGE_NAME = "ghcr.io/codestra-srl/codestra-middleware"
+IMAGE_NAME = "ghcr.io/appolon1908-hue/codestra-middleware"
 
 
 def encoded(document: dict) -> dict:
@@ -43,7 +43,7 @@ def fixture(tmp_path: Path):
             "externalParameters": {"sourceSha": SOURCE_SHA, "platform": "linux/amd64"},
             "resolvedDependencies": [
                 {
-                    "uri": f"git+https://github.com/Codestra-SRL/codestra-middleware@{SOURCE_SHA}",
+                    "uri": f"git+https://github.com/appolon1908-hue/Middleware-@{SOURCE_SHA}",
                     "digest": {"gitCommit": SOURCE_SHA},
                 }
             ],

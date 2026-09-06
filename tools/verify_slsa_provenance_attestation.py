@@ -21,13 +21,13 @@ except ModuleNotFoundError:  # Direct execution: python tools/verify_*.py
 STATEMENT_TYPE = "https://in-toto.io/Statement/v0.1"
 PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 AUTHORIZED_BUILDER = (
-    "https://github.com/Codestra-SRL/codestra-middleware/"
-    ".github/workflows/exact-main-production-release.yml@refs/heads/main"
+    "https://github.com/appolon1908-hue/Middleware-/"
+    ".github/workflows/release.yml@refs/heads/main"
 )
 EXPECTED_BUILD_TYPE = (
     "https://codestra.example/buildtypes/exact-main-middleware-production/v1"
 )
-SOURCE_REPOSITORY = "https://github.com/Codestra-SRL/codestra-middleware"
+SOURCE_REPOSITORY = "https://github.com/appolon1908-hue/Middleware-"
 HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 SLSA_FIELDS = ("buildDefinition", "runDetails")
 EVIDENCE_FILES = {

@@ -1,0 +1,23 @@
+services:
+  odoo:
+    command:
+      - odoo
+      - --database=odoo19_module_staging
+      - --addons-path=/usr/lib/python3/dist-packages/odoo/addons,/mnt/integration-addons,/mnt/call-center-addons,/mnt/vertical-addons,/mnt/staging-mail-inbox-addons,/mnt/crm-call-followup-addons
+      - --max-cron-threads=0
+      - --workers=0
+      - --http-interface=0.0.0.0
+      - --without-demo=true
+    volumes:
+      # Pin the complete installed call-center module set from one immutable
+      # release. The staging checkout contains older source for this database.
+      - ${ODOO_CALL_CENTER_ADDON_RELEASE:?exact reviewed call-center addon release directory required}/call_center_core:/mnt/call-center-addons/call_center_core:ro
+      - ${ODOO_CALL_CENTER_ADDON_RELEASE:?exact reviewed call-center addon release directory required}/call_center_campaign:/mnt/call-center-addons/call_center_campaign:ro
+      - ${ODOO_CALL_CENTER_ADDON_RELEASE:?exact reviewed call-center addon release directory required}/call_center_compliance:/mnt/call-center-addons/call_center_compliance:ro
+      - ${ODOO_CALL_CENTER_ADDON_RELEASE:?exact reviewed call-center addon release directory required}/call_center_lead_validation:/mnt/call-center-addons/call_center_lead_validation:ro
+      - ${ODOO_CALL_CENTER_ADDON_RELEASE:?exact reviewed call-center addon release directory required}/call_center_orchestration:/mnt/call-center-addons/call_center_orchestration:ro
+      - ${ODOO_CRM_CALL_FOLLOWUP_ADDON_RELEASE:?exact reviewed addon release directory required}/codestra_crm_call_followup:/mnt/crm-call-followup-addons/codestra_crm_call_followup:ro
+      # The staging database already has codestra_mail_inbox installed. Keep its
+      # independently reviewed release visible so registry validation cannot
+      # silently proceed with a missing installed module.
+      - ${ODOO_CRM_CALL_FOLLOWUP_STAGING_MAIL_INBOX_RELEASE:?exact reviewed mail inbox release directory required}/codestra_mail_inbox:/mnt/staging-mail-inbox-addons/codestra_mail_inbox:ro

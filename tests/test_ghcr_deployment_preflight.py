@@ -16,7 +16,7 @@ def test_preflight_is_manual_environment_gated_and_read_only() -> None:
 def test_preflight_uses_only_protected_secret_and_exact_digest() -> None:
     assert "secrets.CODESTRA_GHCR_DEPLOYMENT_READ_TOKEN" in TEXT
     assert 'test -n "${GHCR_TOKEN}"' in TEXT
-    assert 'ghcr.io/codestra-srl/codestra-middleware@${IMAGE_DIGEST}' in TEXT
+    assert 'ghcr.io/appolon1908-hue/codestra-middleware@${IMAGE_DIGEST}' in TEXT
     assert 'middleware_image_digest"] == sys.argv[3]' in TEXT
     assert "docker pull --quiet" in TEXT
     assert "docker push" not in TEXT

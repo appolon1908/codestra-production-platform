@@ -35,16 +35,42 @@ ALLOWED_ACTIONS = {
     "status",
     "rollback",
     "collect-evidence",
+    "kong-readback",
     "stage-control-plane",
     "validate-control-plane",
     "rollback-control-plane",
+    "rollout-middleware",
+    "rollback-middleware",
     "activate-control-plane",
     "enable-production-web-traffic",
     "disable-production-web-traffic",
+    "enable-klyrow-email-delivery",
+    "disable-klyrow-email-delivery",
 }
-READ_ONLY_ACTIONS = {"preflight", "status", "collect-evidence", "validate-control-plane"}
-RECOVERY_ACTIONS = {"rollback", "rollback-control-plane", "disable-production-web-traffic"}
-SAFETY_BYPASS_ACTIONS = {"status", "collect-evidence", "rollback", "rollback-control-plane", "disable-production-web-traffic"}
+READ_ONLY_ACTIONS = {
+    "preflight",
+    "status",
+    "collect-evidence",
+    "kong-readback",
+    "validate-control-plane",
+}
+RECOVERY_ACTIONS = {
+    "rollback",
+    "rollback-control-plane",
+    "rollback-middleware",
+    "disable-production-web-traffic",
+    "disable-klyrow-email-delivery",
+}
+SAFETY_BYPASS_ACTIONS = {
+    "status",
+    "collect-evidence",
+    "kong-readback",
+    "rollback",
+    "rollback-control-plane",
+    "rollback-middleware",
+    "disable-production-web-traffic",
+    "disable-klyrow-email-delivery",
+}
 CANONICAL_FALSE_FLAGS = {
     "SEND_EVENTS",
     "ENABLE_EXTERNAL_DELIVERY",
@@ -64,6 +90,10 @@ SYSTEMD_ACTIONS = {
 }
 BACKUP_STATE_VALIDATOR = Path("/opt/codestra/operations/backup/check-backup-state.sh")
 READINESS_BACKUP_ROOT = Path("/opt/codestra/backups/production-readiness-local")
+READINESS_RESTORE_ROOT = Path("/opt/codestra/evidence/production-readiness-restore")
+DATABASE_MANIFEST = Path("/etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml")
+DATABASE_MANIFEST_VALIDATOR = Path("/usr/local/libexec/validate-production-database-manifest")
+DATABASE_EVIDENCE_ROOT = Path("/opt/codestra/evidence/database-certification")
 CONFIG_DIR = Path("/etc/codestra/production-operator")
 RELEASE_CONFIG = CONFIG_DIR / "release.json"
 MAINTENANCE_DATE = CONFIG_DIR / "maintenance-date"
@@ -76,9 +106,10 @@ EVIDENCE_DIR = Path("/var/lib/codestra-production-operator/evidence")
 LOCK_FILE = Path("/run/lock/codestra-production-operator.lock")
 DATE_RE = re.compile(r"20[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])")
 STANDBY_CONTAINER = "codestra-production-standby-approved"
-STANDBY_ENTRYPOINT = ["/opt/venv/bin/python"]
+STANDBY_ENTRYPOINT = ["/usr/bin/python3.13"]
 STANDBY_COMMAND = ["-c", "import threading; threading.Event().wait()"]
-MIDDLEWARE_IMAGE = "ghcr.io/codestra-srl/codestra-middleware"
+MIDDLEWARE_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware"
+MIDDLEWARE_MIGRATION_DATABASE_URL = Path("/etc/codestra/secrets/codestra-compose/database_url")
 CONTROL_PLANE_PROJECT = "codestra-integration-control-plane"
 CONTROL_PLANE_RELEASE_ROOT = Path("/opt/codestra/releases/control-plane")
 CONTROL_PLANE_ARCHIVE_ROOT = Path("/home/codestra-admin")
@@ -91,8 +122,11 @@ CONTROL_PLANE_WORKER = "codestra-integration-control-plane-worker-1"
 ACTIVE_RELEASE_POINTER = CONFIG_DIR / "active-release.json"
 PREVIOUS_RELEASE_POINTER = CONFIG_DIR / "previous-active-release.json"
 CORE_WEB_TRAFFIC_POINTER = CONFIG_DIR / "core-web-traffic.json"
+KLYROW_EMAIL_AUTHORIZATION = CONFIG_DIR / "klyrow-email-authorization.json"
+KLYROW_EMAIL_POINTER = CONFIG_DIR / "klyrow-email-delivery.json"
 KONG_ADMIN_URL = "http://127.0.0.1:8001"
 KONG_TRAFFIC_GATE_INSTANCE = "codestra-core-web-api-traffic-gate"
+KONG_TRAFFIC_GATE_ROUTE = "codestra-callback-read"
 CORE_WEB_PROBE_URL = "https://api.codestra.co/api/v1/callbacks"
 AUTH_GATEWAY_CONTAINER = "codestra-identity-auth-gateway-1"
 AUTH_GATEWAY_NETWORK = "codestra_backend"
@@ -104,6 +138,57 @@ MIDDLEWARE_RUNTIME_CONTAINERS = (
     "codestra-middleware-integration-api-1",
     "codestra-middleware-scheduler-1",
     "codestra-middleware-notification-worker-1",
+)
+MIDDLEWARE_DATABASE_CLIENT_CONTAINERS = (
+    "codestra-middleware-1",
+    "codestra-middleware-breero-odoo-worker-1",
+    "codestra-middleware-event-gateway-1",
+    "codestra-middleware-integration-api-1",
+    "codestra-middleware-klyrow-mail-odoo-worker-1",
+    "codestra-middleware-scraper-odoo-delivery-worker-1",
+    "codestra-middleware-policy-engine-1",
+    "codestra-middleware-sync-worker-1",
+    "codestra-middleware-notification-worker-1",
+    "codestra-middleware-n8n-runtime-worker-1",
+    "codestra-middleware-social-n8n-delivery-worker-1",
+    "codestra-middleware-postly-polling-worker-1",
+    "codestra-middleware-reconciliation-worker-1",
+    "codestra-middleware-scheduler-1",
+    "codestra-middleware-odoo-result-worker-1",
+    "codestra-middleware-evidence-runner-1",
+    "codestra-middleware-extension-allocator-1",
+    "codestra-middleware-telephony-provisioning-1",
+    "codestra-middleware-vicidial-adapter-1",
+    "codestra-middleware-pjsip-adapter-1",
+    "codestra-middleware-webphone-session-issuer-1",
+)
+MIDDLEWARE_RUNTIME_SERVICES = {
+    "middleware-integration-api": "codestra-middleware-integration-api-1",
+    "middleware-scheduler": "codestra-middleware-scheduler-1",
+    "middleware-notification-worker": "codestra-middleware-notification-worker-1",
+}
+MIDDLEWARE_PROJECT = "codestra"
+MIDDLEWARE_PROJECT_DIRECTORY = Path("/opt/codestra/compose")
+MIDDLEWARE_COMPOSE_RELEASE_ROOT = Path("/opt/codestra/releases/middleware-compose")
+MIDDLEWARE_BACKUP_ROOT = Path("/opt/codestra/backups/middleware-protected-deploy")
+MIDDLEWARE_ROLLBACK_MARKER = MIDDLEWARE_BACKUP_ROOT / "LAST_SUCCESS"
+MIDDLEWARE_QUIESCE_MARKER = MIDDLEWARE_BACKUP_ROOT / "QUIESCED"
+MIDDLEWARE_ROLLBACK_PROGRESS = "rollback-progress.json"
+MIDDLEWARE_DB_CONTAINER = "codestra-postgres-1"
+MIDDLEWARE_DB = "codestra_middleware_appolon"
+MIDDLEWARE_REQUIRED_DATABASE_HEAD = "0056_klyrow_delivery_events"
+MIDDLEWARE_REQUIRED_SOURCE_SHA = "63b6c0c8bca5168a1178895bd12858d0b1e8086e"
+MIDDLEWARE_COMPOSE_LAYERS = (
+    (Path("/opt/codestra/compose/compose.yaml"), "d6a7f2d3eeda3fa9e0709caa509f74510d1a552f21148754d8011928a7e3cd2d"),
+    (Path("/opt/codestra/compose/compose.middleware-runtime.yaml"), "d6e2ba0372ecc8f7bc6e7a2bc0fb124bb71159664ab6110cc7478aa63a6a2906"),
+    (Path("/opt/codestra/compose/compose.phase-n2-activation.yaml"), "b8923298d8cd8216a4129ac7b3ef9e9a9f6b32013bdc743bce531ab12411e390"),
+    (Path("/opt/codestra/compose/compose.final-production-trust.yaml"), "30d0ff29813d69d44ea185ca23d5222632058e253283fc1cfc2913f9ebd4e2db"),
+    (Path("/opt/codestra/compose/compose.scraper-ingress-disabled.yaml"), "1825a3aa2df125e750add89f60c1b660112f9003b8dd803cb0282bac24bf0190"),
+    (Path("/opt/codestra/compose/compose.health-contract-remediation.yaml"), "a254ee5df345dc0d3e15a3e4b229c7eeaeffb4ed08a6d26b164d1983d6658ed6"),
+    (Path("/opt/codestra/compose/compose.live-delivery-safety.yaml"), "447995f20b3443eca8c10d0110031dfe4e05394140a8a7b8f093419fe3c57d9a"),
+    (Path("/home/codestra-admin/releases/callback-production-ded863c289c4.override.yaml"), "b179fab8726c59f554aa4e3200003366d4f2f9e6ae887ec5daad9386ca8f52cb"),
+    (Path("/home/codestra-admin/releases/campaign-crm-middleware-d30babd.override.yaml"), "7d327f26e94b0eab2824393031bed82c18d0a6d48cb05e70c8480f141633820b"),
+    (Path("/home/codestra-admin/releases/contact-center-91e22ef4.override.yaml"), "976f53321a7802afb2ab4354aab79c2d5b41d7618d9d99a2185d17491f156d97"),
 )
 MIDDLEWARE_REQUIRED_FALSE_FLAGS = {
     "CALLBACK_DELIVERY_ENABLED",
@@ -160,6 +245,34 @@ def checked_root_file(path: Path, *, expected_mode: int = 0o600) -> str:
         return checked_root_bytes(path, expected_mode=expected_mode).decode("ascii").strip()
     except UnicodeError as error:
         raise OperatorError(f"required root file unreadable: {path}") from error
+
+
+def middleware_migration_database_url() -> str:
+    """Read the fixed migration DSN using its deployed least-privilege contract."""
+    try:
+        descriptor = os.open(
+            MIDDLEWARE_MIGRATION_DATABASE_URL,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise OperatorError("unsafe Middleware migration credential type") from error
+        raise OperatorError("Middleware migration credential unavailable") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OperatorError("unsafe Middleware migration credential type")
+        if info.st_uid != 10001 or info.st_gid != 999:
+            raise OperatorError("unsafe Middleware migration credential ownership")
+        if stat.S_IMODE(info.st_mode) != 0o400:
+            raise OperatorError("unsafe Middleware migration credential mode")
+        try:
+            value = stream.read().decode("ascii").strip()
+        except UnicodeError as error:
+            raise OperatorError("Middleware migration credential is unreadable") from error
+    if re.match(r"^postgresql(?:\+asyncpg)?://middleware_app:", value) is None:
+        raise OperatorError("Middleware migration credential identity mismatch")
+    return value
 
 
 OWNER_WINDOW_WAIVER_STATEMENTS = {
@@ -236,7 +349,9 @@ def load_release_config() -> dict[str, str]:
     return config
 
 
-def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
+def run_fixed(
+    command: list[str], *, timeout: int = 1800
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         check=False,
@@ -244,7 +359,7 @@ def run_fixed(command: list[str]) -> subprocess.CompletedProcess[str]:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        timeout=1800,
+        timeout=timeout,
         env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
     )
 
@@ -300,6 +415,88 @@ def validate_backup_state() -> dict[str, object]:
     }
 
 
+def validate_restore_result(
+    expected_backup_stamp: str, config: dict[str, str]
+) -> dict[str, str]:
+    """Bind the published restore PASS to one backup and exact candidate image."""
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", expected_backup_stamp) is None:
+        raise OperatorError("expected restore backup stamp is malformed")
+    restore_stamp = checked_root_file(READINESS_RESTORE_ROOT / "LAST_SUCCESS")
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", restore_stamp) is None:
+        raise OperatorError("readiness restore marker is malformed")
+    restore_dir = READINESS_RESTORE_ROOT / restore_stamp
+    try:
+        directory_info = restore_dir.lstat()
+    except OSError as error:
+        raise OperatorError("readiness restore directory unavailable") from error
+    if (
+        stat.S_ISLNK(directory_info.st_mode)
+        or not stat.S_ISDIR(directory_info.st_mode)
+        or directory_info.st_uid != 0
+        or directory_info.st_gid != 0
+        or stat.S_IMODE(directory_info.st_mode) != 0o700
+    ):
+        raise OperatorError("readiness restore directory is unsafe")
+    checksum_text = checked_root_file(restore_dir / "SHA256SUMS")
+    records: dict[str, str] = {}
+    for line in checksum_text.splitlines():
+        match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9._-]+)", line)
+        if match is None or match.group(2) in records:
+            raise OperatorError("readiness restore checksum manifest is malformed")
+        records[match.group(2)] = match.group(1)
+    expected_files = {
+        "RESTORE-RESULT.txt",
+        "ODOO-FILESTORE-VALIDATION.json",
+        "PRODUCTION-MIDDLEWARE-ROLE-BASELINE.txt",
+        "PRODUCTION-MIDDLEWARE-ROLE-AFTER.txt",
+        "PRODUCTION-KEYCLOAK-ROLE-BASELINE.txt",
+        "PRODUCTION-KEYCLOAK-ROLE-AFTER.txt",
+        "RESTORED-MIDDLEWARE-MIGRATION-ROLE.txt",
+    }
+    if set(records) != expected_files:
+        raise OperatorError("readiness restore checksum manifest is incomplete")
+    for name, expected in records.items():
+        actual, _ = hash_operator_file(restore_dir / name)
+        if not hmac.compare_digest(actual, expected):
+            raise OperatorError("readiness restore evidence checksum mismatch")
+    result_text = checked_root_file(restore_dir / "RESTORE-RESULT.txt")
+    values: dict[str, str] = {}
+    for line in result_text.splitlines():
+        key, separator, value = line.partition("=")
+        if (
+            not separator
+            or re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", key) is None
+            or key in values
+            or not value
+        ):
+            raise OperatorError("readiness restore result is malformed")
+        values[key] = value
+    expected_values = {
+        "RESTORE_REHEARSAL_GATE": "PASS",
+        "RESTORE_BACKUP_STAMP": expected_backup_stamp,
+        "MIDDLEWARE_CANDIDATE_IMAGE": f"{MIDDLEWARE_IMAGE}@{config['image_digest']}",
+        "MIDDLEWARE_CANDIDATE_SOURCE_SHA": MIDDLEWARE_REQUIRED_SOURCE_SHA,
+        "MIDDLEWARE_MIGRATION_HEAD": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
+        "MIDDLEWARE_SCHEMA_TABLE_COUNT": "2",
+        "MIDDLEWARE_ISOLATED_MIGRATION_GATE": "PASS",
+        "MIDDLEWARE_MIGRATION_IDENTITY": "middleware_app",
+        "MIDDLEWARE_PRODUCTION_GRANTS_MATCH": "PASS",
+        "MIDDLEWARE_CANDIDATE_HEALTH_GATE": "PASS",
+        "MIDDLEWARE_CANDIDATE_READINESS_GATE": "PASS",
+        "MIDDLEWARE_CANDIDATE_DATABASE_READINESS": "PASS",
+    }
+    if any(values.get(key) != value for key, value in expected_values.items()):
+        raise OperatorError("readiness restore result binding mismatch")
+    return {
+        "restore_evidence_stamp": restore_stamp,
+        "tested_backup_stamp": expected_backup_stamp,
+        "tested_backup_evidence_integrity": "PASS",
+        "isolated_middleware_migration": "PASS",
+        "tested_middleware_database_head": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
+        "tested_middleware_source_sha": MIDDLEWARE_REQUIRED_SOURCE_SHA,
+    }
+
+
 def run_bytes(command: list[str], *, stdin: bytes | None = None, timeout: int = 1800) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         command,
@@ -310,6 +507,131 @@ def run_bytes(command: list[str], *, stdin: bytes | None = None, timeout: int = 
         timeout=timeout,
         env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
     )
+
+
+def hash_operator_file(path: Path, *, expected_mode: int = 0o600) -> tuple[str, int]:
+    """Hash a protected file incrementally without buffering it in memory."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise OperatorError(f"operator stream unavailable: {path}") from error
+    digest = hashlib.sha256()
+    size = 0
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or info.st_gid != os.getegid()
+            or stat.S_IMODE(info.st_mode) != expected_mode
+        ):
+            raise OperatorError(f"operator stream metadata unsafe: {path}")
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def stream_command_to_atomic_file(
+    command: list[str],
+    path: Path,
+    *,
+    timeout: int = 1800,
+    mode: int = 0o600,
+) -> tuple[str, int]:
+    """Stream command stdout to an atomic protected file and hash it incrementally."""
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        mode,
+    )
+    try:
+        with tempfile.TemporaryFile() as errors:
+            with os.fdopen(descriptor, "wb") as stream:
+                os.fchmod(stream.fileno(), mode)
+                completed = subprocess.run(
+                    command,
+                    check=False,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stream,
+                    stderr=errors,
+                    timeout=timeout,
+                    env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+                )
+                stream.flush()
+                os.fsync(stream.fileno())
+            if completed.returncode != 0:
+                errors.seek(0, os.SEEK_END)
+                error_size = errors.tell()
+                errors.seek(max(0, error_size - 4096))
+                raise subprocess.CalledProcessError(
+                    completed.returncode,
+                    command,
+                    stderr=errors.read(),
+                )
+        digest, size = hash_operator_file(temporary, expected_mode=mode)
+        if size == 0:
+            raise OperatorError("streamed command output is empty")
+        os.replace(temporary, path)
+        fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+    readback_digest, readback_size = hash_operator_file(path, expected_mode=mode)
+    if not hmac.compare_digest(readback_digest, digest) or readback_size != size:
+        raise OperatorError(f"operator stream readback mismatch: {path}")
+    return digest, size
+
+
+def run_with_verified_file_stdin(
+    command: list[str],
+    path: Path,
+    expected_digest: str,
+    *,
+    timeout: int = 1800,
+) -> subprocess.CompletedProcess[bytes]:
+    """Verify a protected file through one descriptor, then stream it to stdin."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise OperatorError(f"operator stream unavailable: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or info.st_gid != os.getegid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+        ):
+            raise OperatorError(f"operator stream metadata unsafe: {path}")
+        digest = hashlib.sha256()
+        size = 0
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            size += len(chunk)
+        if (
+            size == 0
+            or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
+            or not hmac.compare_digest(digest.hexdigest(), expected_digest)
+        ):
+            raise OperatorError("operator input stream checksum mismatch")
+        stream.seek(0)
+        return subprocess.run(
+            command,
+            stdin=stream,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout,
+            env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
+        )
 
 
 def docker_inspect(name: str) -> dict[str, object]:
@@ -506,8 +828,16 @@ def validate_control_plane(config: dict[str, str]) -> dict[str, object]:
         "postal_inbound.py": hashlib.sha256((release / "control_plane_service/postal_inbound.py").read_bytes()).hexdigest(),
     }
     for name, digest_value in expected.items():
-        result = run_bytes(["/usr/bin/docker", "exec", CONTROL_PLANE_API, "sha256sum", f"/app/control_plane_service/{name}"], timeout=30)
-        if result.stdout.decode().split()[0] != digest_value:
+        result = run_bytes([
+            "/usr/bin/docker", "exec", CONTROL_PLANE_API, "python", "-c",
+            (
+                "import hashlib,pathlib;"
+                "print(hashlib.sha256(pathlib.Path("
+                f"'/app/control_plane_service/{name}'"
+                ").read_bytes()).hexdigest())"
+            ),
+        ], timeout=30)
+        if result.stdout.decode().strip() != digest_value:
             raise OperatorError(f"control-plane source readback mismatch: {name}")
     health = docker_inspect(CONTROL_PLANE_API)
     if health["State"].get("Health", {}).get("Status") != "healthy":
@@ -639,14 +969,23 @@ def stage_control_plane(config: dict[str, str]) -> dict[str, object]:
 def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
     rollback = validate_control_plane_rollback()
     stamp = rollback["rollback_stamp"]
-    for label in ("api", "worker"):
-        run_bytes(["/usr/bin/docker", "tag", f"codestra/{CONTROL_PLANE_PROJECT}-{label}:rollback-{stamp}", f"{CONTROL_PLANE_PROJECT}-{label}:latest"], timeout=60)
     _, release = control_plane_paths(config)
+    backup = CONTROL_PLANE_BACKUP_ROOT / stamp
+    rollback_images = backup / "rollback-images.yaml"
+    atomic_root_bytes(
+        rollback_images,
+        (
+            "services:\n"
+            f"  api:\n    image: codestra/{CONTROL_PLANE_PROJECT}-api:rollback-{stamp}\n"
+            f"  worker:\n    image: codestra/{CONTROL_PLANE_PROJECT}-worker:rollback-{stamp}\n"
+        ).encode("ascii"),
+        mode=0o600,
+    )
     compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
                "--file", str(release / "deploy/control-plane/compose.yaml"),
-               "--file", str(release / "deploy/control-plane/compose.live-delivery-safety.yaml")]
+               "--file", str(release / "deploy/control-plane/compose.live-delivery-safety.yaml"),
+               "--file", str(rollback_images)]
     run_bytes([*compose, "stop", "--timeout", "30"], timeout=120)
-    backup = CONTROL_PLANE_BACKUP_ROOT / stamp
     database_owner = checked_root_file(backup / "database-owner", expected_mode=0o600)
     if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
         raise OperatorError("control-plane rollback database owner is malformed")
@@ -663,22 +1002,173 @@ def rollback_control_plane(config: dict[str, str]) -> dict[str, object]:
     return {"rollback_stamp": stamp, "database_restored": "PASS", "external_delivery": "DISABLED"}
 
 
-def atomic_root_json(path: Path, payload: dict[str, object]) -> None:
-    """Commit a small root-owned state pointer without a partial-write window."""
-    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+def validate_klyrow_email_authorization(config: dict[str, str]) -> dict[str, object]:
+    """Validate the root-controlled, exact-release authorization and remote evidence summary."""
+    try:
+        payload = json.loads(checked_root_file(KLYROW_EMAIL_AUTHORIZATION))
+    except json.JSONDecodeError as error:
+        raise OperatorError("Klyrow email authorization is malformed") from error
+    required = {
+        "schema", "approved", "change_id", "protected_sha", "maintenance_date",
+        "klyrow_backup", "klyrow_evidence_sha256", "verified_domains",
+        "held_messages", "smtp_no_data", "authorization_tests", "owner",
+    }
+    if set(payload) != required or payload.get("schema") != "codestra.klyrow-email-authorization.v1":
+        raise OperatorError("Klyrow email authorization schema mismatch")
+    if payload.get("approved") is not True:
+        raise OperatorError("Klyrow email delivery is not approved")
+    for key in ("change_id", "protected_sha", "maintenance_date"):
+        if payload.get(key) != config[key]:
+            raise OperatorError(f"Klyrow email authorization {key} mismatch")
+    if not re.fullmatch(r"/var/backups/codestra-operators/klyrow/[0-9]{8}T[0-9]{6}Z", str(payload.get("klyrow_backup"))):
+        raise OperatorError("Klyrow backup evidence path rejected")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("klyrow_evidence_sha256"))):
+        raise OperatorError("Klyrow evidence digest rejected")
+    if payload.get("verified_domains") != 14 or payload.get("held_messages") != 2:
+        raise OperatorError("Klyrow domain or held-message evidence mismatch")
+    if payload.get("smtp_no_data") != "PASS" or payload.get("authorization_tests") != "PASS":
+        raise OperatorError("Klyrow SMTP or authorization test evidence mismatch")
+    if not isinstance(payload.get("owner"), str) or not payload["owner"]:
+        raise OperatorError("Klyrow owner approval evidence mismatch")
+    return {
+        "authorization": "PASS", "verified_domains": 14, "held_messages_preserved": 2,
+        "smtp_no_data": "PASS", "authorization_tests": "PASS",
+        "klyrow_evidence_sha256": payload["klyrow_evidence_sha256"],
+    }
+
+
+def set_klyrow_email_delivery(config: dict[str, str], enabled: bool) -> dict[str, object]:
+    """Recreate only control-plane API/worker with the fixed email override and read it back."""
+    _, release = control_plane_paths(config)
+    base = release / "deploy/control-plane/compose.yaml"
+    safety = release / "deploy/control-plane/compose.live-delivery-safety.yaml"
+    production = release / "deploy/control-plane/compose.klyrow-production-email.yaml"
+    if enabled:
+        authorization = validate_klyrow_email_authorization(config)
+        require_action_evidence("activate-control-plane", config)
+        validate_control_plane_rollback()
+        layers = [base, safety, production]
+    else:
+        authorization = {"authorization": "NOT_REQUIRED_FOR_DISABLE"}
+        layers = [base, safety]
+    compose = ["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT]
+    for layer in layers:
+        compose.extend(["--file", str(layer)])
+    email_delivery_count = lambda: int(run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", CONTROL_PLANE_DB, "-Atc",
+        "set search_path to control_plane; select count(*) from messages where channel='email' and status in ('accepted','sent','delivered');",
+    ], timeout=30).stdout.decode().strip())
+    queued_email_count = lambda: int(run_bytes([
+        "/usr/bin/docker", "exec", CONTROL_PLANE_DB_CONTAINER, "psql", "-U", "postgres",
+        "-d", CONTROL_PLANE_DB, "-Atc",
+        "set search_path to control_plane; select count(*) from messages where channel='email' and status='queued';",
+    ], timeout=30).stdout.decode().strip())
+    before = email_delivery_count()
+    if enabled and queued_email_count() != 0:
+        raise OperatorError("queued email must be zero before Klyrow activation")
+    try:
+        run_bytes([*compose, "up", "--detach", "--no-build", "api", "worker"], timeout=300)
+        wait_control_plane_health()
+        expected = {
+            "KLYROW_MODE": "production" if enabled else "test",
+            "LIVE_EMAIL_DELIVERY": "true" if enabled else "false",
+            "CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED": "true" if enabled else "false",
+        }
+        for container in (CONTROL_PLANE_API, CONTROL_PLANE_WORKER):
+            inspected = docker_inspect(container)
+            if inspected["State"].get("Health", {}).get("Status") != "healthy":
+                raise OperatorError(f"Klyrow email runtime unhealthy: {container}")
+            env = dict(item.split("=", 1) for item in inspected["Config"].get("Env", []) if "=" in item)
+            if any(env.get(key) != value for key, value in expected.items()):
+                raise OperatorError(f"Klyrow email flag readback mismatch: {container}")
+        after = email_delivery_count()
+        if enabled and after != before:
+            raise OperatorError("email delivery ledger changed during activation")
+        atomic_root_json(KLYROW_EMAIL_POINTER, {
+            "enabled": enabled, "protected_sha": config["protected_sha"],
+            "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }, mode=0o600)
+    except Exception:
+        if enabled:
+            run_bytes(["/usr/bin/docker", "compose", "--project-name", CONTROL_PLANE_PROJECT,
+                       "--file", str(base), "--file", str(safety), "up", "--detach",
+                       "--no-build", "api", "worker"], timeout=300)
+        raise
+    return {**authorization, "klyrow_mode": expected["KLYROW_MODE"],
+            "live_email_delivery": expected["LIVE_EMAIL_DELIVERY"],
+            "email_delivery_ledger_before": before, "email_delivery_ledger_after": after,
+            "messages_sent_during_activation": after - before}
+
+
+def checked_operator_bytes(path: Path, *, expected_mode: int) -> bytes:
+    """Read a no-follow file owned by the effective operator identity."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise OperatorError(f"operator state unavailable: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OperatorError(f"operator state type unsafe: {path}")
+        if info.st_uid != os.geteuid() or info.st_gid != os.getegid():
+            raise OperatorError(f"operator state ownership unsafe: {path}")
+        if stat.S_IMODE(info.st_mode) != expected_mode:
+            raise OperatorError(f"operator state mode unsafe: {path}")
+        return stream.read()
+
+
+def fsync_directory(path: Path) -> None:
     descriptor = os.open(
-        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644
+        path,
+        os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
     )
     try:
-        with os.fdopen(descriptor, "w", encoding="ascii") as stream:
-            json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
-            stream.write("\n")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def atomic_root_bytes(path: Path, payload: bytes, *, mode: int) -> None:
+    """Atomically publish and read back root-operator state."""
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    descriptor = os.open(
+        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            os.fchmod(stream.fileno(), mode)
+            stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        fsync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
+    if checked_operator_bytes(path, expected_mode=mode) != payload:
+        raise OperatorError(f"operator state readback mismatch: {path}")
+
+
+def atomic_root_text(path: Path, value: str, *, mode: int) -> None:
+    try:
+        payload = value.encode("ascii")
+    except UnicodeError as error:
+        raise OperatorError("operator state is not ASCII") from error
+    atomic_root_bytes(path, payload, mode=mode)
+
+
+def atomic_root_json(
+    path: Path,
+    payload: dict[str, object],
+    *,
+    mode: int = 0o644,
+) -> None:
+    """Commit a small root-owned state pointer without a partial-write window."""
+    encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "ascii"
+    )
+    atomic_root_bytes(path, encoded, mode=mode)
 
 
 def validate_control_plane_rollback() -> dict[str, str]:
@@ -731,12 +1221,25 @@ def require_action_evidence(action: str, config: dict[str, str]) -> Path:
                 or stat.S_IMODE(info.st_mode) != 0o600
             ):
                 continue
-            payload = json.loads(candidate.read_text(encoding="utf-8"))
+            payload = json.loads(
+                checked_operator_bytes(candidate, expected_mode=0o600).decode("utf-8")
+            )
         except (OSError, UnicodeError, json.JSONDecodeError):
             continue
         if payload.get("status") == "PASS" and payload.get("release") == config:
             return candidate
     raise OperatorError(f"exact-tuple {action} evidence unavailable")
+
+
+def require_evidence_value(path: Path, key: str, expected: object) -> None:
+    try:
+        payload = json.loads(
+            checked_operator_bytes(path, expected_mode=0o600).decode("utf-8")
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OperatorError("operator evidence is malformed") from error
+    if payload.get(key) != expected:
+        raise OperatorError(f"operator evidence {key} mismatch")
 
 
 def verify_middleware_runtime(config: dict[str, str]) -> dict[str, str]:
@@ -756,6 +1259,1140 @@ def verify_middleware_runtime(config: dict[str, str]) -> dict[str, str]:
     return {"middleware_subject": expected, "middleware_runtime_digest": "PASS"}
 
 
+def verified_middleware_compose_layer(path: Path, expected: str) -> bytes:
+    """Read an approved layer once without following a replaceable pathname."""
+    allowed_owners = {0, pwd.getpwnam("codestra-admin").pw_uid}
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise OperatorError(f"middleware Compose layer unavailable: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid not in allowed_owners
+            or info.st_mode & 0o022
+        ):
+            raise OperatorError(f"middleware Compose layer is unsafe: {path}")
+        content = stream.read(2 * 1024 * 1024)
+        if stream.read(1):
+            raise OperatorError(f"middleware Compose layer is too large: {path}")
+    if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), expected):
+        raise OperatorError(f"middleware Compose layer checksum mismatch: {path}")
+    return content
+
+
+def checked_middleware_compose_layers(config: dict[str, str]) -> list[Path]:
+    """Copy verified layers to an immutable root-owned exact-release directory."""
+    trusted = MIDDLEWARE_COMPOSE_RELEASE_ROOT / config["protected_sha"]
+    names = [f"{index:02d}-{path.name}" for index, (path, _) in enumerate(MIDDLEWARE_COMPOSE_LAYERS, 1)]
+    if trusted.exists() or trusted.is_symlink():
+        info = trusted.lstat()
+        if (
+            trusted.is_symlink()
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) != 0o700
+        ):
+            raise OperatorError("trusted Middleware Compose directory is unsafe")
+        paths = [trusted / name for name in names]
+        for copied, (_, expected) in zip(paths, MIDDLEWARE_COMPOSE_LAYERS):
+            if not hmac.compare_digest(
+                hashlib.sha256(checked_root_bytes(copied)).hexdigest(), expected
+            ):
+                raise OperatorError("trusted Middleware Compose checksum mismatch")
+        return paths
+    MIDDLEWARE_COMPOSE_RELEASE_ROOT.mkdir(mode=0o755, parents=True, exist_ok=True)
+    root_info = MIDDLEWARE_COMPOSE_RELEASE_ROOT.lstat()
+    if (
+        MIDDLEWARE_COMPOSE_RELEASE_ROOT.is_symlink()
+        or not stat.S_ISDIR(root_info.st_mode)
+        or root_info.st_uid != 0
+        or root_info.st_gid != 0
+        or stat.S_IMODE(root_info.st_mode) != 0o755
+    ):
+        raise OperatorError("Middleware Compose release root is unsafe")
+    candidate = Path(tempfile.mkdtemp(prefix=f".{config['protected_sha']}.", dir=MIDDLEWARE_COMPOSE_RELEASE_ROOT))
+    try:
+        os.chmod(candidate, 0o700)
+        for name, (source, expected) in zip(names, MIDDLEWARE_COMPOSE_LAYERS):
+            content = verified_middleware_compose_layer(source, expected)
+            destination = candidate / name
+            descriptor = os.open(
+                destination,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+            )
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        candidate.rename(trusted)
+    except Exception:
+        shutil.rmtree(candidate, ignore_errors=True)
+        raise
+    return [trusted / name for name in names]
+
+
+def middleware_compose(config: dict[str, str], *, rollback_override: Path | None = None) -> list[str]:
+    layers = checked_middleware_compose_layers(config)
+    _, release = control_plane_paths(config)
+    approved = release / "deploy/middleware/compose.approved-release.yaml"
+    if rollback_override is None:
+        approved_text = checked_root_file(approved, expected_mode=0o644)
+        expected_subject = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
+        if approved_text.count(expected_subject) != 1:
+            raise OperatorError("approved Middleware override does not bind the exact digest")
+        layers.append(approved)
+    else:
+        checked_root_bytes(rollback_override)
+        layers.append(rollback_override)
+    command = [
+        "/usr/bin/docker",
+        "compose",
+        "--project-name",
+        MIDDLEWARE_PROJECT,
+        "--project-directory",
+        str(MIDDLEWARE_PROJECT_DIRECTORY),
+    ]
+    for layer in layers:
+        command.extend(("--file", str(layer)))
+    return command
+
+
+def validate_middleware_compose(config: dict[str, str], compose: list[str]) -> None:
+    try:
+        rendered = json.loads(run_bytes([*compose, "config", "--format", "json"], timeout=120).stdout)
+    except (json.JSONDecodeError, subprocess.CalledProcessError) as error:
+        raise OperatorError("Middleware Compose rendering failed") from error
+    services = rendered.get("services")
+    expected_subject = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
+    if not isinstance(services, dict):
+        raise OperatorError("Middleware Compose service graph is malformed")
+    for service in MIDDLEWARE_RUNTIME_SERVICES:
+        definition = services.get(service)
+        if not isinstance(definition, dict) or definition.get("image") != expected_subject:
+            raise OperatorError(f"Middleware Compose digest mismatch: {service}")
+        environment = definition.get("environment")
+        if not isinstance(environment, dict):
+            raise OperatorError(f"Middleware Compose environment unavailable: {service}")
+        if any(str(environment.get(name, "")).lower() != "false" for name in MIDDLEWARE_REQUIRED_FALSE_FLAGS):
+            raise OperatorError(f"Middleware Compose delivery flag unsafe: {service}")
+
+
+def wait_middleware_health(timeout_seconds: int = 180) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    pending = set(MIDDLEWARE_RUNTIME_CONTAINERS)
+    while pending and time.monotonic() < deadline:
+        for container in tuple(pending):
+            status_value = docker_inspect(container)["State"].get("Health", {}).get("Status")
+            if status_value == "healthy":
+                pending.remove(container)
+            elif status_value == "unhealthy":
+                raise OperatorError(f"Middleware runtime became unhealthy: {container}")
+        if pending:
+            time.sleep(2)
+    if pending:
+        raise OperatorError("Middleware runtime health check timed out")
+
+
+def middleware_rollback_target(stamp: str) -> dict[str, str]:
+    target = MIDDLEWARE_BACKUP_ROOT / stamp / "rollout-target.json"
+    try:
+        value = json.loads(checked_root_file(target))
+    except json.JSONDecodeError as error:
+        raise OperatorError("Middleware rollback target is malformed") from error
+    if not isinstance(value, dict) or set(value) != {
+        "protected_sha", "image_digest", "change_id", "maintenance_date"
+    }:
+        raise OperatorError("Middleware rollback target schema mismatch")
+    return value
+
+
+def reusable_middleware_snapshot(config: dict[str, str]) -> str | None:
+    """Reuse only an active attempt; a completed rollback needs fresh state."""
+    if not (MIDDLEWARE_ROLLBACK_MARKER.exists() or MIDDLEWARE_ROLLBACK_MARKER.is_symlink()):
+        return None
+    previous_stamp = checked_root_file(MIDDLEWARE_ROLLBACK_MARKER)
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", previous_stamp) is None:
+        raise OperatorError("Middleware rollback marker malformed")
+    if middleware_rollback_target(previous_stamp) != config:
+        return None
+    bundle = validate_middleware_rollback(config)
+    progress = middleware_rollback_progress(MIDDLEWARE_BACKUP_ROOT / previous_stamp)
+    if progress is not None and progress["phase"] == "COMPLETE":
+        verify_middleware_rollback_readback(bundle)
+        return None
+    return previous_stamp
+
+
+def middleware_database_client_canonical(container: str) -> str | None:
+    match = re.fullmatch(
+        r"(codestra-middleware(?:-[a-z0-9-]+)?)-([1-9][0-9]*)",
+        container,
+    )
+    if match is None:
+        return None
+    return f"{match.group(1)}-1"
+
+
+def middleware_database_client_state() -> dict[str, bool]:
+    """Read every replica of each database-using service in the approved graph."""
+    output = run_bytes([
+        "/usr/bin/docker",
+        "ps",
+        "--all",
+        "--format",
+        "{{.Names}}",
+    ], timeout=30).stdout.decode().splitlines()
+    names = tuple(value.strip() for value in output if value.strip())
+    if (
+        len(names) != len(set(names))
+        or any(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", name) is None for name in names)
+    ):
+        raise OperatorError("Docker container inventory is malformed")
+    observed_middleware = {
+        name for name in names if name.startswith("codestra-middleware")
+    }
+    known = set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
+    canonical = {
+        name: middleware_database_client_canonical(name)
+        for name in observed_middleware
+    }
+    unknown = {
+        name for name, service in canonical.items() if service not in known
+    }
+    if unknown:
+        raise OperatorError("Unclassified Middleware database client requires review")
+    state: dict[str, bool] = {}
+    for service in MIDDLEWARE_DATABASE_CLIENT_CONTAINERS:
+        replicas = sorted(
+            (
+                name
+                for name, candidate in canonical.items()
+                if candidate == service
+            ),
+            key=lambda name: int(name.rsplit("-", 1)[1]),
+        )
+        for container in replicas:
+            running = docker_inspect(container).get("State", {}).get("Running")
+            if not isinstance(running, bool):
+                raise OperatorError(
+                    f"Middleware database client state unavailable: {container}"
+                )
+            state[container] = running
+    return state
+
+
+def middleware_quiescence_stamp() -> str | None:
+    if not (MIDDLEWARE_QUIESCE_MARKER.exists() or MIDDLEWARE_QUIESCE_MARKER.is_symlink()):
+        return None
+    stamp = checked_root_file(MIDDLEWARE_QUIESCE_MARKER)
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp) is None:
+        raise OperatorError("Middleware quiescence marker malformed")
+    return stamp
+
+
+def quiesce_middleware_database_clients(stamp: str) -> tuple[str, ...]:
+    """Stop the closed set of Middleware DB clients and publish crash state."""
+    current_stamp = middleware_quiescence_stamp()
+    if current_stamp is not None and current_stamp != stamp:
+        raise OperatorError("A different Middleware quiescence attempt is active")
+    if current_stamp is None:
+        atomic_root_text(MIDDLEWARE_QUIESCE_MARKER, stamp + "\n", mode=0o600)
+    state = middleware_database_client_state()
+    running = tuple(container for container, value in state.items() if value)
+    if running:
+        run_bytes([
+            "/usr/bin/docker",
+            "stop",
+            "--time",
+            "30",
+            *running,
+        ], timeout=900)
+    remaining = [
+        container
+        for container, value in middleware_database_client_state().items()
+        if value
+    ]
+    if remaining:
+        raise OperatorError("Middleware database clients did not quiesce")
+    return running
+
+
+def clear_middleware_quiescence(stamp: str) -> None:
+    if middleware_quiescence_stamp() != stamp:
+        raise OperatorError("Middleware quiescence marker does not match rollback point")
+    MIDDLEWARE_QUIESCE_MARKER.unlink()
+    fsync_directory(MIDDLEWARE_BACKUP_ROOT)
+
+
+def validate_middleware_database_client_names(containers: tuple[str, ...]) -> None:
+    known = set(MIDDLEWARE_DATABASE_CLIENT_CONTAINERS)
+    unknown = {
+        container
+        for container in containers
+        if middleware_database_client_canonical(container) not in known
+    }
+    if unknown or len(containers) != len(set(containers)):
+        raise OperatorError("Middleware database client set is malformed")
+
+
+def wait_middleware_database_clients(
+    containers: tuple[str, ...], timeout_seconds: int = 180
+) -> None:
+    """Require every resumed client to remain stable across two read-backs."""
+    validate_middleware_database_client_names(containers)
+    deadline = time.monotonic() + timeout_seconds
+    stable_observations = 0
+    stable_fingerprints: dict[str, tuple[int, str]] | None = None
+    while time.monotonic() < deadline:
+        ready = True
+        fingerprints: dict[str, tuple[int, str]] = {}
+        for container in containers:
+            current = docker_inspect(container)
+            state = current.get("State")
+            if not isinstance(state, dict) or not isinstance(state.get("Running"), bool):
+                raise OperatorError(
+                    f"Middleware database client state unavailable: {container}"
+                )
+            if state["Running"] is not True:
+                raise OperatorError(
+                    f"Middleware database client did not remain running: {container}"
+                )
+            restart_count = current.get("RestartCount")
+            started_at = state.get("StartedAt")
+            if (
+                isinstance(restart_count, bool)
+                or not isinstance(restart_count, int)
+                or restart_count < 0
+                or not isinstance(started_at, str)
+                or not started_at
+            ):
+                raise OperatorError(
+                    f"Middleware database client restart state unavailable: {container}"
+                )
+            fingerprints[container] = (restart_count, started_at)
+            health = state.get("Health")
+            if health is not None:
+                if not isinstance(health, dict) or health.get("Status") not in {
+                    "starting", "healthy", "unhealthy"
+                }:
+                    raise OperatorError(
+                        f"Middleware database client health unavailable: {container}"
+                    )
+                if health["Status"] == "unhealthy":
+                    raise OperatorError(
+                        f"Middleware database client became unhealthy: {container}"
+                    )
+                if health["Status"] != "healthy":
+                    ready = False
+        if ready:
+            if fingerprints == stable_fingerprints:
+                stable_observations += 1
+            else:
+                stable_fingerprints = fingerprints
+                stable_observations = 1
+        else:
+            stable_fingerprints = None
+            stable_observations = 0
+        if stable_observations >= 2:
+            return
+        time.sleep(2)
+    raise OperatorError("Middleware database client health check timed out")
+
+
+def resume_middleware_database_clients(stamp: str, containers: tuple[str, ...]) -> None:
+    validate_middleware_database_client_names(containers)
+    state = middleware_database_client_state()
+    if any(container not in state for container in containers):
+        raise OperatorError("Captured Middleware database client is unavailable")
+    stopped = tuple(container for container in containers if not state[container])
+    if stopped:
+        run_bytes(["/usr/bin/docker", "start", *stopped], timeout=900)
+    readback = middleware_database_client_state()
+    if any(not readback[container] for container in containers):
+        raise OperatorError("Middleware database clients did not resume")
+    wait_middleware_database_clients(containers)
+    clear_middleware_quiescence(stamp)
+
+
+def recover_stale_middleware_quiescence() -> None:
+    """Recover a crash that occurred before a rollback bundle was published."""
+    stamp = middleware_quiescence_stamp()
+    if stamp is None:
+        return
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    clients_path = backup / "database-clients-running.json"
+    limit_path = backup / "database-connection-limit"
+    if not clients_path.exists() or not limit_path.exists():
+        raise OperatorError("Incomplete Middleware quiescence evidence requires operator review")
+    try:
+        clients_value = json.loads(checked_root_file(clients_path))
+    except json.JSONDecodeError as error:
+        raise OperatorError("Middleware database client state is malformed") from error
+    if not isinstance(clients_value, dict) or set(clients_value) != {"containers"}:
+        raise OperatorError("Middleware database client state schema mismatch")
+    containers = clients_value["containers"]
+    if not isinstance(containers, list) or any(not isinstance(item, str) for item in containers):
+        raise OperatorError("Middleware database client state is malformed")
+    connection_limit = checked_root_file(limit_path)
+    if re.fullmatch(r"-1|[0-9]{1,10}", connection_limit) is None:
+        raise OperatorError("Middleware rollback connection limit is malformed")
+    set_middleware_database_connection_limit(connection_limit)
+    resume_middleware_database_clients(stamp, tuple(containers))
+
+
+def snapshot_middleware_runtime(config: dict[str, str], readiness_backup_stamp: str) -> str:
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", readiness_backup_stamp) is None:
+        raise OperatorError("readiness backup reference is malformed")
+    previous_stamp = reusable_middleware_snapshot(config)
+    if previous_stamp is not None:
+        return previous_stamp
+    recover_stale_middleware_quiescence()
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    backup.mkdir(mode=0o700, parents=True)
+    fsync_directory(MIDDLEWARE_BACKUP_ROOT)
+    override = backup / "rollback.override.yaml"
+    lines = ["services:"]
+    for service, container in MIDDLEWARE_RUNTIME_SERVICES.items():
+        current = docker_inspect(container)
+        image_id = str(current.get("Image", ""))
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
+            raise OperatorError(f"Middleware rollback image ID malformed: {container}")
+        tag = f"codestra/middleware-{service}:rollback-{stamp}"
+        run_bytes(["/usr/bin/docker", "tag", image_id, tag], timeout=60)
+        lines.extend((f"  {service}:", f"    image: {tag}"))
+        atomic_root_text(backup / f"{service}.image-id", image_id + "\n", mode=0o600)
+    database_owner = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        f"select pg_get_userbyid(datdba) from pg_database where datname='{MIDDLEWARE_DB}'",
+    ], timeout=30).stdout.decode().strip()
+    if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
+        raise OperatorError("Middleware database owner readback failed")
+    database_allows_connections = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        f"select case when datallowconn then 'true' else 'false' end from pg_database where datname='{MIDDLEWARE_DB}'",
+    ], timeout=30).stdout.decode().strip()
+    if database_allows_connections not in {"true", "false"}:
+        raise OperatorError("Middleware database connection policy readback failed")
+    database_connection_limit = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        f"select datconnlimit from pg_database where datname='{MIDDLEWARE_DB}'",
+    ], timeout=30).stdout.decode().strip()
+    if re.fullmatch(r"-1|[0-9]{1,10}", database_connection_limit) is None:
+        raise OperatorError("Middleware database connection limit readback failed")
+    database_head = middleware_database_revision()
+    database_clients_running = tuple(
+        container
+        for container, running in middleware_database_client_state().items()
+        if running
+    )
+    atomic_root_text(backup / "database-owner", database_owner + "\n", mode=0o600)
+    atomic_root_text(
+        backup / "database-allows-connections",
+        database_allows_connections + "\n",
+        mode=0o600,
+    )
+    atomic_root_text(
+        backup / "database-connection-limit",
+        database_connection_limit + "\n",
+        mode=0o600,
+    )
+    atomic_root_text(backup / "database-head", database_head + "\n", mode=0o600)
+    atomic_root_json(
+        backup / "database-clients-running.json",
+        {"containers": list(database_clients_running)},
+        mode=0o600,
+    )
+    atomic_root_text(
+        backup / "readiness-backup-stamp",
+        readiness_backup_stamp + "\n",
+        mode=0o600,
+    )
+    atomic_root_text(override, "\n".join(lines) + "\n", mode=0o600)
+    atomic_root_text(
+        backup / "rollout-target.json",
+        json.dumps(config, sort_keys=True, separators=(",", ":")) + "\n",
+        mode=0o600,
+    )
+    fsync_directory(backup)
+    quiesced = True
+    try:
+        quiesce_middleware_database_clients(stamp)
+        if not fence_middleware_database_clients():
+            raise OperatorError("Middleware database missing before pre-change snapshot")
+        database_digest, _ = stream_command_to_atomic_file(
+            [
+                "/usr/bin/docker",
+                "exec",
+                MIDDLEWARE_DB_CONTAINER,
+                "pg_dump",
+                "-U",
+                "postgres",
+                "-Fc",
+                MIDDLEWARE_DB,
+            ],
+            backup / "middleware.dump",
+            timeout=1800,
+        )
+        atomic_root_text(
+            backup / "middleware.dump.sha256",
+            database_digest + "\n",
+            mode=0o600,
+        )
+        set_middleware_database_connection_limit(database_connection_limit)
+        fsync_directory(backup)
+        atomic_root_text(MIDDLEWARE_ROLLBACK_MARKER, stamp + "\n", mode=0o600)
+    except Exception:
+        if quiesced:
+            set_middleware_database_connection_limit(database_connection_limit)
+            resume_middleware_database_clients(stamp, database_clients_running)
+        raise
+    return stamp
+
+
+def validate_middleware_rollback(config: dict[str, str]) -> dict[str, object]:
+    stamp = checked_root_file(MIDDLEWARE_ROLLBACK_MARKER)
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp) is None:
+        raise OperatorError("Middleware rollback marker malformed")
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    info = backup.lstat()
+    if (
+        backup.is_symlink()
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise OperatorError("Middleware rollback directory is unsafe")
+    rollback_target = middleware_rollback_target(stamp)
+    if rollback_target != config:
+        raise OperatorError("Middleware rollback target does not match the exact release")
+    image_ids: dict[str, str] = {}
+    for service in MIDDLEWARE_RUNTIME_SERVICES:
+        image_id = checked_root_file(backup / f"{service}.image-id")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
+            raise OperatorError("Middleware rollback image ID malformed")
+        tag = docker_inspect(f"codestra/middleware-{service}:rollback-{stamp}")
+        if tag.get("Id") != image_id:
+            raise OperatorError("Middleware rollback image tag mismatch")
+        image_ids[service] = image_id
+    override = backup / "rollback.override.yaml"
+    override_digest = hashlib.sha256(checked_root_bytes(override)).hexdigest()
+    database_owner = checked_root_file(backup / "database-owner")
+    if re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database_owner) is None:
+        raise OperatorError("Middleware rollback database owner is malformed")
+    database_allows_connections = checked_root_file(backup / "database-allows-connections")
+    if database_allows_connections not in {"true", "false"}:
+        raise OperatorError("Middleware rollback connection policy is malformed")
+    database_connection_limit = checked_root_file(backup / "database-connection-limit")
+    if re.fullmatch(r"-1|[0-9]{1,10}", database_connection_limit) is None:
+        raise OperatorError("Middleware rollback connection limit is malformed")
+    database_head = checked_root_file(backup / "database-head")
+    if re.fullmatch(r"[0-9a-z_]{1,80}", database_head) is None:
+        raise OperatorError("Middleware rollback database head is malformed")
+    try:
+        database_clients_value = json.loads(
+            checked_root_file(backup / "database-clients-running.json")
+        )
+    except json.JSONDecodeError as error:
+        raise OperatorError("Middleware database client state is malformed") from error
+    if (
+        not isinstance(database_clients_value, dict)
+        or set(database_clients_value) != {"containers"}
+        or not isinstance(database_clients_value["containers"], list)
+        or any(not isinstance(item, str) for item in database_clients_value["containers"])
+    ):
+        raise OperatorError("Middleware database client state schema mismatch")
+    database_clients_running = tuple(database_clients_value["containers"])
+    validate_middleware_database_client_names(database_clients_running)
+    readiness_backup_stamp = checked_root_file(backup / "readiness-backup-stamp")
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", readiness_backup_stamp) is None:
+        raise OperatorError("Middleware readiness backup reference is malformed")
+    database_dump_path = backup / "middleware.dump"
+    database_dump_digest, database_dump_size = hash_operator_file(database_dump_path)
+    expected_dump_digest = checked_root_file(backup / "middleware.dump.sha256")
+    if (
+        database_dump_size == 0
+        or re.fullmatch(r"[0-9a-f]{64}", expected_dump_digest) is None
+        or not hmac.compare_digest(database_dump_digest, expected_dump_digest)
+    ):
+        raise OperatorError("Middleware rollback database dump checksum mismatch")
+    bundle_manifest = {
+        "stamp": stamp,
+        "release": rollback_target,
+        "image_ids": image_ids,
+        "override_sha256": override_digest,
+        "database_owner": database_owner,
+        "database_allows_connections": database_allows_connections,
+        "database_connection_limit": database_connection_limit,
+        "database_head": database_head,
+        "database_clients_running": list(database_clients_running),
+        "database_dump_sha256": expected_dump_digest,
+        "readiness_backup_stamp": readiness_backup_stamp,
+    }
+    bundle_digest = hashlib.sha256(
+        json.dumps(
+            bundle_manifest,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "stamp": stamp,
+        "override": override,
+        "image_ids": image_ids,
+        "database_owner": database_owner,
+        "database_allows_connections": database_allows_connections,
+        "database_connection_limit": database_connection_limit,
+        "database_head": database_head,
+        "database_clients_running": database_clients_running,
+        "database_dump_path": database_dump_path,
+        "database_dump_sha256": expected_dump_digest,
+        "readiness_backup_stamp": readiness_backup_stamp,
+        "bundle_sha256": bundle_digest,
+    }
+
+
+def middleware_rollback_evidence(bundle: dict[str, object]) -> dict[str, str]:
+    stamp = bundle.get("stamp")
+    digest = bundle.get("bundle_sha256")
+    if (
+        not isinstance(stamp, str)
+        or re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp) is None
+        or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+    ):
+        raise OperatorError("Middleware rollback evidence binding is malformed")
+    return {
+        "middleware_backup_stamp": stamp,
+        "middleware_rollback_bundle_sha256": digest,
+    }
+
+
+def middleware_rollback_progress(backup: Path) -> dict[str, str] | None:
+    progress_path = backup / MIDDLEWARE_ROLLBACK_PROGRESS
+    if not progress_path.exists():
+        if progress_path.is_symlink():
+            raise OperatorError("Middleware rollback progress is unsafe")
+        return None
+    try:
+        progress = json.loads(
+            checked_operator_bytes(progress_path, expected_mode=0o600).decode("ascii")
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OperatorError("Middleware rollback progress is malformed") from error
+    required = {"phase", "failed_state", "failed_state_sha256"}
+    if not isinstance(progress, dict) or set(progress) != required:
+        raise OperatorError("Middleware rollback progress schema mismatch")
+    if progress["phase"] not in {
+        "FAILED_STATE_PRESERVED",
+        "DATABASE_RESTORED_FENCED",
+        "CONNECTION_POLICY_RESTORED",
+        "COMPLETE",
+    }:
+        raise OperatorError("Middleware rollback progress phase is invalid")
+    failed_state = progress["failed_state"]
+    failed_digest = progress["failed_state_sha256"]
+    if (
+        not isinstance(failed_state, str)
+        or re.fullmatch(r"failed-state-[0-9]{8}T[0-9]{6}Z-[0-9]+\.dump", failed_state) is None
+        or not isinstance(failed_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", failed_digest) is None
+    ):
+        raise OperatorError("Middleware rollback failed-state reference is malformed")
+    actual_failed_digest, failed_size = hash_operator_file(backup / failed_state)
+    checksum = checked_operator_bytes(
+        backup / f"{failed_state}.sha256", expected_mode=0o600
+    ).decode("ascii").strip()
+    if (
+        failed_size == 0
+        or not hmac.compare_digest(actual_failed_digest, failed_digest)
+        or not hmac.compare_digest(checksum, failed_digest)
+    ):
+        raise OperatorError("Middleware rollback failed-state checksum mismatch")
+    return {key: str(value) for key, value in progress.items()}
+
+
+def record_middleware_rollback_progress(
+    backup: Path,
+    phase: str,
+    failed_state: str,
+    failed_digest: str,
+) -> dict[str, str]:
+    progress = {
+        "phase": phase,
+        "failed_state": failed_state,
+        "failed_state_sha256": failed_digest,
+    }
+    atomic_root_json(
+        backup / MIDDLEWARE_ROLLBACK_PROGRESS,
+        progress,
+        mode=0o600,
+    )
+    readback = middleware_rollback_progress(backup)
+    if readback != progress:
+        raise OperatorError("Middleware rollback progress readback mismatch")
+    return progress
+
+
+def prepare_middleware_rollout(stamp: str) -> None:
+    """Retire only a completed retry marker before a new rollout attempt."""
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    progress = middleware_rollback_progress(backup)
+    if progress is None:
+        return
+    if progress["phase"] != "COMPLETE":
+        raise OperatorError("Middleware rollback is incomplete; resume rollback before rollout")
+    progress_path = backup / MIDDLEWARE_ROLLBACK_PROGRESS
+    archived = backup / f"rollback-progress-complete-{time.time_ns()}.json"
+    expected = checked_operator_bytes(progress_path, expected_mode=0o600)
+    os.replace(progress_path, archived)
+    fsync_directory(backup)
+    if checked_operator_bytes(archived, expected_mode=0o600) != expected:
+        raise OperatorError("Middleware completed rollback archive readback mismatch")
+
+
+def verify_middleware_rollback_readback(bundle: dict[str, object]) -> str:
+    image_ids = bundle["image_ids"]
+    if not isinstance(image_ids, dict):
+        raise OperatorError("Middleware rollback image map is malformed")
+    wait_middleware_health()
+    for service, container in MIDDLEWARE_RUNTIME_SERVICES.items():
+        current = docker_inspect(container)
+        if current.get("Image") != image_ids[service]:
+            raise OperatorError(f"Middleware rollback image readback mismatch: {container}")
+        environment = dict(
+            item.split("=", 1) for item in current["Config"].get("Env", []) if "=" in item
+        )
+        if any(environment.get(name) != "false" for name in MIDDLEWARE_REQUIRED_FALSE_FLAGS):
+            raise OperatorError(f"Middleware rollback delivery flag unsafe: {container}")
+    restored_head = middleware_database_revision()
+    if restored_head != bundle["database_head"]:
+        raise OperatorError("Middleware rollback database head readback mismatch")
+    return restored_head
+
+
+def middleware_database_exists() -> bool:
+    result = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        f"select case when exists(select 1 from pg_database where datname='{MIDDLEWARE_DB}') then 'true' else 'false' end",
+    ], timeout=30).stdout.decode().strip()
+    if result not in {"true", "false"}:
+        raise OperatorError("Middleware database existence readback failed")
+    return result == "true"
+
+
+def set_middleware_database_connection_limit(connection_limit: str) -> None:
+    if re.fullmatch(r"-1|[0-9]{1,10}", connection_limit) is None:
+        raise OperatorError("Middleware database connection limit is malformed")
+    run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        f"alter database {MIDDLEWARE_DB} with connection limit {connection_limit}",
+    ], timeout=30)
+
+
+def fence_middleware_database_clients() -> bool:
+    """Block non-superuser writers and terminate existing target sessions."""
+    if not middleware_database_exists():
+        return False
+    run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        f"alter database {MIDDLEWARE_DB} with connection limit 0",
+    ], timeout=30)
+    run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{MIDDLEWARE_DB}' and pid<>pg_backend_pid()",
+    ], timeout=30)
+    remaining = run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-Atc",
+        f"select count(*) from pg_stat_activity where datname='{MIDDLEWARE_DB}'",
+    ], timeout=30).stdout.decode().strip()
+    if remaining != "0":
+        raise OperatorError("Middleware database sessions remain after fencing")
+    return True
+
+
+def rollback_middleware(config: dict[str, str]) -> dict[str, object]:
+    bundle = validate_middleware_rollback(config)
+    stamp = str(bundle["stamp"])
+    backup = MIDDLEWARE_BACKUP_ROOT / stamp
+    progress = middleware_rollback_progress(backup)
+    if progress is not None and progress["phase"] == "COMPLETE":
+        restored_head = verify_middleware_rollback_readback(bundle)
+        return {
+            "middleware_rollback_stamp": stamp,
+            "middleware_rollback": "PASS",
+            "middleware_database_head": restored_head,
+            "readiness_backup_stamp": bundle["readiness_backup_stamp"],
+            "failed_state_preserved": progress["failed_state"],
+            "middleware_rollback_already_complete": True,
+        }
+    database_clients_running = bundle["database_clients_running"]
+    if not isinstance(database_clients_running, tuple):
+        raise OperatorError("Middleware database client state is malformed")
+    quiesce_middleware_database_clients(stamp)
+    compose = middleware_compose(config, rollback_override=bundle["override"])
+    run_bytes([
+        *compose,
+        "stop",
+        "--timeout",
+        "30",
+        *MIDDLEWARE_RUNTIME_SERVICES,
+    ], timeout=180)
+    database_fenced = False
+    if progress is None:
+        database_fenced = fence_middleware_database_clients()
+        if not database_fenced:
+            raise OperatorError(
+                "Middleware database missing before failed-state preservation"
+            )
+        failed_state_name = (
+            f"failed-state-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+            f"-{os.getpid()}.dump"
+        )
+        failed_digest, _ = stream_command_to_atomic_file(
+            [
+                "/usr/bin/docker",
+                "exec",
+                MIDDLEWARE_DB_CONTAINER,
+                "pg_dump",
+                "-U",
+                "postgres",
+                "-Fc",
+                MIDDLEWARE_DB,
+            ],
+            backup / failed_state_name,
+            timeout=1800,
+        )
+        atomic_root_text(
+            backup / f"{failed_state_name}.sha256",
+            failed_digest + "\n",
+            mode=0o600,
+        )
+        progress = record_middleware_rollback_progress(
+            backup,
+            "FAILED_STATE_PRESERVED",
+            failed_state_name,
+            failed_digest,
+        )
+    if progress["phase"] == "FAILED_STATE_PRESERVED":
+        database_exists = database_fenced or fence_middleware_database_clients()
+        if database_exists:
+            run_bytes([
+                "/usr/bin/docker",
+                "exec",
+                MIDDLEWARE_DB_CONTAINER,
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                "postgres",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                f"alter database {MIDDLEWARE_DB} with allow_connections false",
+            ], timeout=30)
+        run_bytes([
+            "/usr/bin/docker", "exec", MIDDLEWARE_DB_CONTAINER,
+            "dropdb", "-U", "postgres", "--if-exists", MIDDLEWARE_DB,
+        ], timeout=60)
+        run_bytes([
+            "/usr/bin/docker",
+            "exec",
+            MIDDLEWARE_DB_CONTAINER,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f"create database {MIDDLEWARE_DB} with owner {bundle['database_owner']} connection limit 0",
+        ], timeout=60)
+        database_dump_path = bundle["database_dump_path"]
+        database_dump_digest = bundle["database_dump_sha256"]
+        if not isinstance(database_dump_path, Path) or not isinstance(database_dump_digest, str):
+            raise OperatorError("Middleware rollback database stream is malformed")
+        run_with_verified_file_stdin(
+            [
+                "/usr/bin/docker", "exec", "-i", MIDDLEWARE_DB_CONTAINER,
+                "pg_restore", "-U", "postgres", "--exit-on-error", "-d", MIDDLEWARE_DB,
+            ],
+            database_dump_path,
+            database_dump_digest,
+            timeout=1800,
+        )
+        progress = record_middleware_rollback_progress(
+            backup,
+            "DATABASE_RESTORED_FENCED",
+            progress["failed_state"],
+            progress["failed_state_sha256"],
+        )
+    if progress["phase"] == "DATABASE_RESTORED_FENCED":
+        set_middleware_database_connection_limit(
+            str(bundle["database_connection_limit"])
+        )
+        run_bytes([
+            "/usr/bin/docker",
+            "exec",
+            MIDDLEWARE_DB_CONTAINER,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f"alter database {MIDDLEWARE_DB} with allow_connections {bundle['database_allows_connections']}",
+        ], timeout=30)
+        progress = record_middleware_rollback_progress(
+            backup,
+            "CONNECTION_POLICY_RESTORED",
+            progress["failed_state"],
+            progress["failed_state_sha256"],
+        )
+    if progress["phase"] != "CONNECTION_POLICY_RESTORED":
+        raise OperatorError("Middleware rollback connection policy is not restored")
+    run_bytes([
+        *compose,
+        "up",
+        "--detach",
+        "--no-deps",
+        "--force-recreate",
+        *MIDDLEWARE_RUNTIME_SERVICES,
+    ], timeout=600)
+    restored_head = verify_middleware_rollback_readback(bundle)
+    resume_middleware_database_clients(stamp, database_clients_running)
+    progress = record_middleware_rollback_progress(
+        backup,
+        "COMPLETE",
+        progress["failed_state"],
+        progress["failed_state_sha256"],
+    )
+    return {
+        "middleware_rollback_stamp": stamp,
+        "middleware_rollback": "PASS",
+        "middleware_database_head": restored_head,
+        "readiness_backup_stamp": bundle["readiness_backup_stamp"],
+        "failed_state_preserved": progress["failed_state"],
+    }
+
+
+def middleware_runtime_image_matches(config: dict[str, str]) -> list[bool]:
+    expected = f"{MIDDLEWARE_IMAGE}@{config['image_digest']}"
+    return [
+        docker_inspect(container)["Config"].get("Image") == expected
+        for container in MIDDLEWARE_RUNTIME_CONTAINERS
+    ]
+
+
+def middleware_database_head() -> str:
+    return run_bytes([
+        "/usr/bin/docker",
+        "exec",
+        MIDDLEWARE_DB_CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        MIDDLEWARE_DB,
+        "-Atc",
+        "select migration_id from middleware_schema_migrations order by migration_id desc limit 1",
+    ], timeout=60).stdout.decode()
+
+
+def middleware_database_revision() -> str:
+    output = middleware_database_head().strip()
+    revision = output.split(maxsplit=1)[0] if output else ""
+    if re.fullmatch(r"[0-9a-z_]{1,80}", revision) is None:
+        raise OperatorError("Middleware database revision readback failed")
+    return revision
+
+
+def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
+    """Migrate and replace only the three approved Middleware runtimes."""
+    require_action_evidence("stage", config)
+    require_action_evidence("stage-control-plane", config)
+    require_action_evidence("validate-backup", config)
+    restore_evidence = require_action_evidence("restore-test", config)
+    backup_state = validate_backup_state()
+    require_evidence_value(
+        restore_evidence,
+        "tested_backup_stamp",
+        backup_state["backup_stamp"],
+    )
+    require_evidence_value(
+        restore_evidence,
+        "isolated_middleware_migration",
+        "PASS",
+    )
+    require_evidence_value(
+        restore_evidence,
+        "tested_middleware_database_head",
+        MIDDLEWARE_REQUIRED_DATABASE_HEAD,
+    )
+    certify_standby(config)
+    compose = middleware_compose(config)
+    validate_middleware_compose(config, compose)
+    image_matches = middleware_runtime_image_matches(config)
+    if all(image_matches):
+        stamp = snapshot_middleware_runtime(config, str(backup_state["backup_stamp"]))
+        try:
+            bundle = validate_middleware_rollback(config)
+            captured_clients = bundle["database_clients_running"]
+            if not isinstance(captured_clients, tuple):
+                raise OperatorError("Middleware database client state is malformed")
+            quiescence_stamp = middleware_quiescence_stamp()
+            if quiescence_stamp is not None:
+                if quiescence_stamp != stamp:
+                    raise OperatorError(
+                        "Middleware quiescence marker does not match rollback point"
+                    )
+                resume_middleware_database_clients(stamp, captured_clients)
+                wait_middleware_health()
+        except Exception:
+            recover_stale_middleware_quiescence()
+            raise
+    elif any(image_matches):
+        bundle = validate_middleware_rollback(config)
+        stamp = str(bundle["stamp"])
+    else:
+        stamp = snapshot_middleware_runtime(config, str(backup_state["backup_stamp"]))
+        bundle = validate_middleware_rollback(config)
+    database_clients_running = bundle["database_clients_running"]
+    if not isinstance(database_clients_running, tuple):
+        raise OperatorError("Middleware database client state is malformed")
+    if all(image_matches):
+        runtime = verify_middleware_runtime(config)
+        if middleware_database_revision() != MIDDLEWARE_REQUIRED_DATABASE_HEAD:
+            raise OperatorError("Middleware database head readback mismatch")
+        return {
+            **runtime,
+            **middleware_rollback_evidence(bundle),
+            "middleware_database_head": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
+            "middleware_rollout": "PASS",
+            "middleware_already_current": True,
+        }
+    if middleware_quiescence_stamp() != stamp:
+        raise OperatorError("Middleware database clients are not quiesced for rollout")
+    prepare_middleware_rollout(stamp)
+    try:
+        middleware_migration_database_url()
+        run_bytes([
+            *compose,
+            "run",
+            "--rm",
+            "--no-deps",
+            "--volume",
+            f"{MIDDLEWARE_MIGRATION_DATABASE_URL}:/run/secrets/migration_database_url:ro",
+            "--env",
+            "DATABASE_URL_FILE=/run/secrets/migration_database_url",
+            "--entrypoint",
+            "/usr/bin/python3.13",
+            "middleware-integration-api",
+            "-c",
+            "from alembic.config import Config;from alembic import command;c=Config();c.set_main_option('script_location','/app/migrations');command.upgrade(c,'head')",
+        ], timeout=1800)
+        run_bytes([
+            *compose,
+            "up",
+            "--detach",
+            "--no-deps",
+            "--force-recreate",
+            *MIDDLEWARE_RUNTIME_SERVICES,
+        ], timeout=600)
+        wait_middleware_health()
+        runtime = verify_middleware_runtime(config)
+        if middleware_database_revision() != MIDDLEWARE_REQUIRED_DATABASE_HEAD:
+            raise OperatorError("Middleware database head readback mismatch")
+        resume_middleware_database_clients(stamp, database_clients_running)
+    except Exception:
+        rollback_middleware(config)
+        raise
+    return {
+        **runtime,
+        **middleware_rollback_evidence(bundle),
+        "middleware_database_head": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
+        "middleware_rollout": "PASS",
+    }
+
+
 def load_pointer(path: Path) -> dict[str, object] | None:
     if not path.exists():
         return None
@@ -771,11 +2408,21 @@ def load_pointer(path: Path) -> dict[str, object] | None:
 
 def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
     """Commit the exact staged tuple only after every recovery gate passes."""
+    database_certification = validate_database_certification()
     stage_evidence = require_action_evidence("stage-control-plane", config)
     validation_evidence = require_action_evidence("validate-control-plane", config)
     restore_evidence = require_action_evidence("restore-test", config)
+    middleware_evidence = require_action_evidence("rollout-middleware", config)
     backup = validate_backup_state()
+    require_evidence_value(
+        restore_evidence,
+        "tested_backup_stamp",
+        backup["backup_stamp"],
+    )
     rollback = validate_control_plane_rollback()
+    middleware_rollback = validate_middleware_rollback(config)
+    for key, expected in middleware_rollback_evidence(middleware_rollback).items():
+        require_evidence_value(middleware_evidence, key, expected)
     previous = load_pointer(ACTIVE_RELEASE_POINTER)
     if previous is not None:
         atomic_root_json(PREVIOUS_RELEASE_POINTER, previous)
@@ -790,8 +2437,11 @@ def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
             "stage_evidence": stage_evidence.name,
             "validation_evidence": validation_evidence.name,
             "restore_evidence": restore_evidence.name,
+            "middleware_evidence": middleware_evidence.name,
             "backup_stamp": backup["backup_stamp"],
             "rollback_stamp": rollback["rollback_stamp"],
+            "middleware_backup_stamp": middleware_rollback["stamp"],
+            "middleware_rollback_bundle_sha256": middleware_rollback["bundle_sha256"],
         }
         atomic_root_json(ACTIVE_RELEASE_POINTER, active)
     except Exception:
@@ -800,6 +2450,7 @@ def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
     return {
         **control_plane,
         **middleware,
+        **database_certification,
         "active_platform_sha": config["protected_sha"],
         "active_middleware_digest": config["image_digest"],
         "rollback_ready": "PASS",
@@ -807,6 +2458,7 @@ def activate_control_plane(config: dict[str, str]) -> dict[str, object]:
 
 
 def core_web_health(config: dict[str, str]) -> dict[str, object]:
+    validate_database_certification()
     active = load_pointer(ACTIVE_RELEASE_POINTER)
     if not active or active.get("protected_sha") != config["protected_sha"] or active.get("image_digest") != config["image_digest"]:
         raise OperatorError("exact control-plane release is not active")
@@ -824,6 +2476,24 @@ def core_web_health(config: dict[str, str]) -> dict[str, object]:
         "auth_gateway_readiness": "PASS",
         "caddy_serving_path": "PASS",
     }
+
+
+def validate_database_certification() -> dict[str, str]:
+    """Require checksum-bound evidence for every production persistence authority."""
+    result = run_fixed(
+        [
+            str(DATABASE_MANIFEST_VALIDATOR),
+            str(DATABASE_MANIFEST),
+            str(DATABASE_EVIDENCE_ROOT),
+        ],
+        timeout=30,
+    )
+    if result.returncode != 0 or "PRODUCTION_DATABASE_MANIFEST=PASS" not in result.stdout:
+        raise OperatorError("production database certification is not PASS")
+    manifest = checked_root_file(DATABASE_MANIFEST, expected_mode=0o644)
+    if not re.search(r"(?m)^certification_status: PASS$", manifest):
+        raise OperatorError("production database certification is not PASS")
+    return {"production_database_certification": "PASS"}
 
 
 def kong_json(method: str, path: str, payload: dict[str, object] | None = None) -> dict[str, object]:
@@ -849,6 +2519,10 @@ def kong_json(method: str, path: str, payload: dict[str, object] | None = None) 
 
 
 def kong_traffic_gate(enabled: bool) -> None:
+    route = kong_json("GET", f"/routes/{KONG_TRAFFIC_GATE_ROUTE}")
+    route_id = route.get("id")
+    if not isinstance(route_id, str) or not route_id:
+        raise OperatorError("Kong core traffic route lookup failed")
     plugins = kong_json("GET", "/plugins?size=1000").get("data", [])
     matches = [
         item for item in plugins
@@ -858,11 +2532,22 @@ def kong_traffic_gate(enabled: bool) -> None:
     if len(matches) > 1:
         raise OperatorError("duplicate Kong core traffic gates")
     current = matches[0] if matches else None
+    if current is not None and enabled and (
+        (current.get("route") or {}).get("id") != route_id
+        or current.get("service") is not None
+        or current.get("consumer") is not None
+    ):
+        current = kong_json("PATCH", f"/plugins/{current['id']}", {
+            "route": {"id": route_id},
+            "service": None,
+            "consumer": None,
+        })
     if enabled and current is None:
         current = kong_json("POST", "/plugins", {
             "name": "request-termination",
             "instance_name": KONG_TRAFFIC_GATE_INSTANCE,
             "enabled": True,
+            "route": {"id": route_id},
             "config": {"status_code": 503, "message": "core_web_api_maintenance"},
             "tags": ["codestra-managed", "core-web-api-traffic-gate"],
         })
@@ -881,11 +2566,146 @@ def kong_traffic_gate(enabled: bool) -> None:
         item.get("name") == "request-termination"
         and item.get("instance_name") == KONG_TRAFFIC_GATE_INSTANCE
         and item.get("enabled") is True
+        and (item.get("route") or {}).get("id") == route_id
+        and item.get("service") is None
+        and item.get("consumer") is None
         and item.get("config", {}).get("status_code") == 503
         for item in readback
     )
-    if present != enabled:
+    misplaced = any(
+        item.get("instance_name") == KONG_TRAFFIC_GATE_INSTANCE
+        and (
+            (item.get("route") or {}).get("id") != route_id
+            or item.get("service") is not None
+            or item.get("consumer") is not None
+        )
+        for item in readback
+    )
+    if present != enabled or misplaced:
         raise OperatorError("Kong traffic gate readback mismatch")
+
+
+def kong_runtime_readback() -> dict[str, object]:
+    """Return an allowlisted, credential-free view of Kong runtime authority."""
+    routes = kong_json("GET", "/routes?size=1000").get("data", [])
+    services = kong_json("GET", "/services?size=1000").get("data", [])
+    upstreams = kong_json("GET", "/upstreams?size=1000").get("data", [])
+    plugins = kong_json("GET", "/plugins?size=1000").get("data", [])
+    if not all(isinstance(items, list) for items in (routes, services, upstreams, plugins)):
+        raise OperatorError("Kong runtime readback returned invalid collections")
+
+    safe_routes = sorted(
+        (
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "service_id": (item.get("service") or {}).get("id"),
+                "protocols": item.get("protocols") or [],
+                "methods": item.get("methods") or [],
+                "hosts": item.get("hosts") or [],
+                "paths": item.get("paths") or [],
+                "strip_path": item.get("strip_path"),
+                "preserve_host": item.get("preserve_host"),
+            }
+            for item in routes
+            if isinstance(item, dict)
+        ),
+        key=lambda item: str(item["name"] or item["id"]),
+    )
+    safe_services = sorted(
+        (
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "protocol": item.get("protocol"),
+                "host": item.get("host"),
+                "port": item.get("port"),
+                "path": item.get("path"),
+                "retries": item.get("retries"),
+                "connect_timeout": item.get("connect_timeout"),
+                "read_timeout": item.get("read_timeout"),
+                "write_timeout": item.get("write_timeout"),
+                "enabled": item.get("enabled"),
+            }
+            for item in services
+            if isinstance(item, dict)
+        ),
+        key=lambda item: str(item["name"] or item["id"]),
+    )
+    safe_upstreams: list[dict[str, object]] = []
+    for item in upstreams:
+        if not isinstance(item, dict):
+            continue
+        upstream_id = item.get("id")
+        health = kong_json("GET", f"/upstreams/{upstream_id}/health")
+        health_items = health.get("data", [])
+        if not isinstance(health_items, list):
+            raise OperatorError("Kong upstream health returned invalid data")
+        safe_upstreams.append(
+            {
+                "id": upstream_id,
+                "name": item.get("name"),
+                "algorithm": item.get("algorithm"),
+                "targets": sorted(
+                    (
+                        {
+                            "id": target.get("id"),
+                            "target": target.get("target"),
+                            "weight": target.get("weight"),
+                            "health": target.get("health"),
+                        }
+                        for target in health_items
+                        if isinstance(target, dict)
+                    ),
+                    key=lambda target: str(target["target"] or target["id"]),
+                ),
+            }
+        )
+    safe_upstreams.sort(key=lambda item: str(item["name"] or item["id"]))
+    safe_plugins = sorted(
+        (
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "instance_name": item.get("instance_name"),
+                "enabled": item.get("enabled"),
+                "route_id": (item.get("route") or {}).get("id"),
+                "service_id": (item.get("service") or {}).get("id"),
+                "consumer_id": (item.get("consumer") or {}).get("id"),
+            }
+            for item in plugins
+            if isinstance(item, dict)
+        ),
+        key=lambda item: str(item["instance_name"] or item["name"] or item["id"]),
+    )
+    core_web_route_ids = {
+        item["id"] for item in safe_routes if item["name"] == KONG_TRAFFIC_GATE_ROUTE
+    }
+    traffic_gate = any(
+        item["name"] == "request-termination"
+        and item["instance_name"] == KONG_TRAFFIC_GATE_INSTANCE
+        and item["enabled"] is True
+        and item["route_id"] in core_web_route_ids
+        for item in safe_plugins
+    )
+    sanitized = {
+        "routes": safe_routes,
+        "services": safe_services,
+        "upstreams": safe_upstreams,
+        "plugins": safe_plugins,
+        "core_web_traffic_gate_present": traffic_gate,
+    }
+    checksum = hashlib.sha256(
+        json.dumps(sanitized, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {
+        **sanitized,
+        "route_count": len(safe_routes),
+        "service_count": len(safe_services),
+        "upstream_count": len(safe_upstreams),
+        "plugin_count": len(safe_plugins),
+        "sanitized_configuration_sha256": checksum,
+    }
 
 
 def probe_auth_gateway() -> None:
@@ -999,10 +2819,27 @@ def safety_state() -> dict[str, object]:
     }
 
 
+def recovery_safety_state() -> dict[str, object]:
+    """Keep recovery callable without waiting on fallible remote safety probes."""
+    return {
+        "probe_status": "SKIPPED_FOR_RECOVERY",
+        "telephony_probe_pass": False,
+        "active_calls_zero": False,
+        "active_channels_zero": False,
+        "required_runtime_flags_false": False,
+        "sip_registration_performed": False,
+    }
+
+
 def execute(action: str) -> tuple[int, dict[str, object]]:
     if action not in ALLOWED_ACTIONS:
         raise OperatorError("action is not allowlisted")
     config = load_release_config()
+    if config["protected_sha"] == "01f2676772b11919e1d79cc74d36bc5eeaa682cd" and action not in {
+        "status", "collect-evidence", "disable-production-web-traffic",
+        "disable-klyrow-email-delivery",
+    }:
+        raise OperatorError("release is non-activatable: signer trust anchor unrecoverable")
     window: dict[str, str] | None = None
     if action not in READ_ONLY_ACTIONS | RECOVERY_ACTIONS:
         window = require_maintenance_window()
@@ -1018,7 +2855,7 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
                 "owner_window_waiver_evidence": "FAIL",
                 "window_check": "DENIED",
             }
-    state = safety_state()
+    state = recovery_safety_state() if action in RECOVERY_ACTIONS else safety_state()
     safe_for_activation = (
         state["telephony_probe_pass"]
         and state["active_calls_zero"]
@@ -1037,10 +2874,23 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
     }
     if action in SYSTEMD_ACTIONS:
         unit = SYSTEMD_ACTIONS[action]
+        restore_backup_before = validate_backup_state() if action == "restore-test" else None
+        if restore_backup_before is not None:
+            require_action_evidence("stage", config)
+            certify_standby(config)
         invocation = run_fixed(["/usr/bin/systemctl", "start", "--wait", unit])
         result.update({"unit": unit, "returncode": invocation.returncode})
         if invocation.returncode != 0:
             raise OperatorError(f"fixed unit failed: {unit}")
+        if restore_backup_before is not None:
+            restore_backup_after = validate_backup_state()
+            if restore_backup_after["backup_stamp"] != restore_backup_before["backup_stamp"]:
+                raise OperatorError("readiness backup changed during restore test")
+            result.update(
+                validate_restore_result(
+                    str(restore_backup_before["backup_stamp"]), config
+                )
+            )
     elif action == "validate-backup":
         result.update(validate_backup_state())
     elif action == "stage":
@@ -1053,14 +2903,24 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         result.update(stage_control_plane(config))
     elif action == "validate-control-plane":
         result.update(validate_control_plane(config))
+    elif action == "kong-readback":
+        result.update(kong_runtime_readback())
     elif action == "rollback-control-plane":
         result.update(rollback_control_plane(config))
+    elif action == "rollout-middleware":
+        result.update(rollout_middleware(config))
+    elif action == "rollback-middleware":
+        result.update(rollback_middleware(config))
     elif action == "activate-control-plane":
         result.update(activate_control_plane(config))
     elif action == "enable-production-web-traffic":
         result.update(set_core_web_traffic(config, True))
     elif action == "disable-production-web-traffic":
         result.update(set_core_web_traffic(config, False))
+    elif action == "enable-klyrow-email-delivery":
+        result.update(set_klyrow_email_delivery(config, True))
+    elif action == "disable-klyrow-email-delivery":
+        result.update(set_klyrow_email_delivery(config, False))
     elif action in {"preflight", "status"}:
         invocation = run_fixed(["/usr/bin/systemctl", "--failed", "--no-legend", "--plain"])
         result.update({"returncode": invocation.returncode, "failed_units_present": bool(invocation.stdout.strip())})
