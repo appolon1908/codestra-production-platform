@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codestra.media/schemas/staging-readonly-endpoint-manifest.v1.schema.json",
+  "title": "Codestra staging-readonly endpoint manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "environment",
+    "candidate",
+    "previous_candidate",
+    "identity",
+    "business_apis",
+    "kong",
+    "database",
+    "counters",
+    "backups",
+    "rollback",
+    "canary",
+    "safety_controls",
+    "credential_policy"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "environment": {"const": "staging-readonly"},
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["release_id", "platform_source_sha", "source_lock_sha256", "candidate_manifest_sha256", "components"],
+      "properties": {
+        "release_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{7,127}$"},
+        "platform_source_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "source_lock_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "candidate_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "components": {"type": "array", "minItems": 64, "maxItems": 64, "uniqueItems": true}
+      }
+    },
+    "previous_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["release_id", "components"],
+      "properties": {
+        "release_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{7,127}$"},
+        "components": {"type": "array", "minItems": 1}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer", "discovery_path", "expected_http_status"],
+      "properties": {
+        "issuer": {"type": "string", "pattern": "^https://[^/]+/realms/[A-Za-z0-9._-]+$"},
+        "discovery_path": {"const": "/.well-known/openid-configuration"},
+        "expected_http_status": {"const": 200}
+      }
+    },
+    "business_apis": {
+      "type": "array",
+      "minItems": 15,
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["application", "repository", "source_sha", "image_digest", "base_url", "health", "readiness", "version", "capabilities", "openapi", "runtime_attribution"],
+        "properties": {
+          "application": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$"},
+          "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+          "source_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "image_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "base_url": {"type": "string", "pattern": "^https://"},
+          "health": {"$ref": "#/$defs/endpoint"},
+          "readiness": {"$ref": "#/$defs/endpoint"},
+          "version": {"$ref": "#/$defs/endpoint"},
+          "capabilities": {"$ref": "#/$defs/endpoint"},
+          "openapi": {"$ref": "#/$defs/endpoint"},
+          "runtime_attribution": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_sha_field", "image_digest_field"],
+            "properties": {
+              "source_sha_field": {"type": "string", "minLength": 1},
+              "image_digest_field": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "kong": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_url", "route_count", "routes"],
+      "properties": {
+        "base_url": {"type": "string", "pattern": "^https://"},
+        "route_count": {"const": 29},
+        "routes": {
+          "type": "array",
+          "minItems": 29,
+          "maxItems": 29,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "application", "method", "path", "expected_statuses", "write_effect_allowed"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,127}$"},
+              "application": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$"},
+              "method": {"enum": ["GET", "HEAD"]},
+              "path": {"type": "string", "pattern": "^/"},
+              "expected_statuses": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 200, "maximum": 499, "not": {"const": 404}}},
+              "write_effect_allowed": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    "database": {"type": "object"},
+    "counters": {"type": "object"},
+    "backups": {"type": "object"},
+    "rollback": {"type": "object"},
+    "canary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maximum_traffic_percent", "allowed_methods", "denied_methods", "automatic_rollback_required"],
+      "properties": {
+        "maximum_traffic_percent": {"type": "number", "minimum": 0, "maximum": 1},
+        "allowed_methods": {"const": ["GET", "HEAD"]},
+        "denied_methods": {"const": ["POST", "PUT", "PATCH", "DELETE", "CONNECT", "TRACE"]},
+        "automatic_rollback_required": {"const": true}
+      }
+    },
+    "safety_controls": {"type": "object"},
+    "credential_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["credentials_embedded", "bearer_credential_ref", "metrics_credential_ref"],
+      "properties": {
+        "credentials_embedded": {"const": false},
+        "bearer_credential_ref": {"const": "CODESTRA_STAGING_READONLY_BEARER_TOKEN"},
+        "metrics_credential_ref": {"const": "CODESTRA_STAGING_METRICS_BEARER_TOKEN"}
+      }
+    }
+  },
+  "$defs": {
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "path", "expected_statuses", "authentication", "write_effect_allowed"],
+      "properties": {
+        "method": {"enum": ["GET", "HEAD"]},
+        "path": {"type": "string", "pattern": "^/"},
+        "expected_statuses": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 200, "maximum": 499, "not": {"const": 404}}},
+        "authentication": {"enum": ["public-health", "bearer", "oidc", "mtls", "bearer-or-mtls"]},
+        "write_effect_allowed": {"const": false}
+      }
+    }
+  }
+}

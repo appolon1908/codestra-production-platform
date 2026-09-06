@@ -121,9 +121,10 @@ def validate_caddy_home() -> None:
         encoding="utf-8"
     )
     assert "api.codestra.co" in api and "import security_headers" in api
-    assert "reverse_proxy codestra-websocket-gateway-gateway-1:8080" in api
-    assert "reverse_proxy codestra-kong-kong-gateway-1:8000" in api
-    assert "reverse_proxy 127.0.0.1" not in api
+    assert "reverse_proxy 127.0.0.1:18102" in api
+    assert "reverse_proxy 127.0.0.1:18101" in api
+    assert "reverse_proxy codestra-websocket-gateway-gateway-1:8080" not in api
+    assert "reverse_proxy codestra-kong-kong-gateway-1:8000" not in api
     assert "auth.codestra.co" in auth and "import security_headers" in auth
     assert "reverse_proxy keycloak:8080" in auth
     assert re.search(r"\(security_headers\)\s*\{", snippets)

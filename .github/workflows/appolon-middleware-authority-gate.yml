@@ -1,0 +1,108 @@
+name: Gate exact Appolon Middleware authority PR
+
+on:
+  push:
+    branches:
+      - release/appolon-middleware-authority-20260903
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: appolon-middleware-authority-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate-and-ready:
+    name: Verify generated authority and enable protected auto-merge
+    if: >-
+      contains(github.event.head_commit.message, '[authority-generated]') &&
+      !contains(github.event.head_commit.message, '[authority-gated]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PUSH_TOKEN: ${{ github.token }}
+      EXPECTED_SOURCE_SHA: 1aa4d505846b7494aff94bec3d7ea68c895e2dd3
+      EXPECTED_IMAGE_DIGEST: sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504
+      EXPECTED_ARTIFACT_DIGEST: sha256:cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a
+
+    steps:
+      - name: Check out exact generated head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: release/appolon-middleware-authority-20260903
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require exact generated authority result
+        run: |
+          set -Eeuo pipefail
+          test -f authority-migration-result.json
+          test ! -f .github/workflows/appolon-middleware-authority-migration.yml
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path('authority-migration-result.json').read_text())
+          assert result['source_sha'] == '1aa4d505846b7494aff94bec3d7ea68c895e2dd3'
+          assert result['image_digest'] == 'sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504'
+          assert result['image_reference'] == 'ghcr.io/appolon1908-hue/codestra-middleware@sha256:cec8b5a1b0e713857be1dbc94b73780bf9ae1a200d0901f95cb62193b9c2f504'
+          assert result['artifact_digest'] == 'sha256:cfd5ef83132da1683c0c053e7025739aa4c2747344aa7fc1feed48bf838a566a'
+          assert result['migration_head'] == '0009_observability_incidents'
+          assert result['builder'] == 'https://github.com/appolon1908-hue/Middleware-/.github/workflows/release.yml@refs/heads/main'
+          assert result['deployment_authorized'] is False
+          assert result['production_changed'] is False
+
+          tuple_value = json.loads(Path('config/production-release-tuple.json').read_text())
+          assert tuple_value['middleware_source_sha'] == result['source_sha']
+          assert tuple_value['middleware_digest'] == result['image_digest']
+          assert tuple_value['middleware_run_id'] == '33767657962'
+          assert tuple_value['middleware_artifact'] == result['artifact']
+          assert tuple_value['middleware_sbom_sha256'] == result['sbom_sha256']
+          assert tuple_value['middleware_provenance_sha256'] == result['provenance_sha256']
+          assert tuple_value['middleware_openvex_sha256'] == result['openvex_sha256']
+
+          for key in ('binding_path', 'provenance_path', 'openvex_path'):
+              path = Path(result[key])
+              assert path.is_file() and not path.is_symlink()
+          assert hashlib.sha256(Path(result['provenance_path']).read_bytes()).hexdigest() == result['provenance_sha256']
+          assert hashlib.sha256(Path(result['openvex_path']).read_bytes()).hexdigest() == result['openvex_sha256']
+
+          source_lock = Path('PRODUCTION-SOURCE-LOCK.yaml').read_text()
+          assert 'status: FAIL' in source_lock
+          assert 'CANONICAL_SOURCE_AUTHORITY_PENDING_STAGING_CERTIFICATION' in source_lock
+          assert 'deployment_authorized: false' in source_lock
+          assert 'former_codestra_srl_authority:' in source_lock
+          PY
+          git diff --check
+          python3 -m compileall -q tools
+
+      - name: Remove one-shot gate from final review tree
+        run: |
+          set -Eeuo pipefail
+          rm -f .github/workflows/appolon-middleware-authority-gate.yml
+          git config user.name 'codestra-authority-bot'
+          git config user.email 'appolon1908-hue@users.noreply.github.com'
+          git add --all
+          git commit -m 'ci: finalize authority migration review tree [authority-gated]'
+          git push \
+            "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:refs/heads/release/appolon-middleware-authority-20260903
+
+      - name: Mark the exact PR ready and enable gate-dependent auto-merge
+        run: |
+          set -Eeuo pipefail
+          pr_number="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --head release/appolon-middleware-authority-20260903 \
+            --base release/production-activation \
+            --state open \
+            --json number \
+            --jq 'if length == 1 then .[0].number else error("authority PR missing or ambiguous") end')"
+          gh pr ready "$pr_number" --repo "$GITHUB_REPOSITORY"
+          gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-reviewer kazan555
+          gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" --body 'Exact generated authority binding is ready for independent review. Protected auto-merge is enabled only after all required checks pass, an authorized non-author approval exists, and all conversations are resolved. No administrator bypass is permitted.'
+          gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --auto --squash

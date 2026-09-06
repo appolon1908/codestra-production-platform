@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "evidence_id": "codestra.staging-readonly.entry-gate.2026-09-03",
+  "recorded_at": "2026-09-03T14:42:00Z",
+  "environment": "staging-readonly",
+  "status": "BLOCKED",
+  "next_allowed_action": "CONFIGURE_AND_REVALIDATE_PREREQUISITES",
+  "stop_before": "STAGING_DEPLOYMENT",
+  "production_changed": false,
+  "runtime_contacted": false,
+  "ssh_attempted": false,
+  "secret_values_read": false,
+  "secret_values_recorded": false,
+  "workflow_evidence": {
+    "repository": "appolon1908-hue/codestra-production-platform",
+    "source_and_environment_preflight_run": {
+      "workflow": ".github/workflows/staging-readonly-certification.yml",
+      "run_id": 33766914118,
+      "head_sha": "50a387d9a017554165a1b824995911ae53010242",
+      "source_policy": "PASS",
+      "environment_preflight": "BLOCKED_BEFORE_SSH",
+      "environment_reference_executed": true,
+      "artifact_id": 9897906438,
+      "artifact_sha256": "08ab5e3e6575781a9988b90e5f805967b2e39769e9c9e07aa5894fa25ddd8ab4"
+    },
+    "environment_administration_run": {
+      "workflow": ".github/workflows/configure-staging-readonly-environment.yml",
+      "run_id": 33768347031,
+      "head_sha": "c0fddb271806615589a330263531de835f3eab23",
+      "source_policy": "PASS",
+      "configuration": "BLOCKED",
+      "administration_token_present": false,
+      "environment_changed": false,
+      "artifact_id": 9898492919,
+      "artifact_sha256": "f92d55e58e8535e9d1158cc8d37a54cee712b7635733330c8508f19701bdf454"
+    }
+  },
+  "observations": {
+    "platform_repository": "appolon1908-hue/codestra-production-platform",
+    "platform_source_lock_path": "PRODUCTION-SOURCE-LOCK.yaml",
+    "platform_source_lock_status": "FAIL",
+    "platform_observed_commit": "ba3dd6471ab78d0fc7203d69ac8514519404dca1",
+    "runtime_authority_repository": "appolon1908-hue/codestra-production-runtime-authority",
+    "runtime_authority_ref": "470591454b681092cc8fdde57b2a921802dffd3f",
+    "runtime_candidate_deployment_authorized": false,
+    "infrastructure_repository": "appolon1908-hue/Infustruction-repo",
+    "infrastructure_ref": "f53ecf4a7d739dea8e633431e836510b2471d4d2",
+    "staging_host_status": "NOT_RUN_HOST_NOT_CREATED",
+    "staging_environment_reference_executed": true,
+    "staging_environment_branch_policy_configured": false,
+    "staging_environment_safe_constants_configured": false,
+    "staging_environment_protection_verified": false,
+    "staging_environment_configuration_verified": false,
+    "complete_candidate_manifest_verified": false,
+    "staging_deployment_performed": false,
+    "staging_certification_performed": false,
+    "paired_backups_performed": false,
+    "off_host_copy_performed": false,
+    "rollback_rehearsal_performed": false,
+    "production_readonly_canary_performed": false
+  },
+  "missing_account_administration_secret": "CODESTRA_REPOSITORY_ADMIN_TOKEN",
+  "missing_variables": [
+    "CODESTRA_STAGING_OPERATOR_HOST",
+    "CODESTRA_STAGING_OPERATOR_USER",
+    "CODESTRA_STAGING_OPERATOR_PORT",
+    "CODESTRA_STAGING_CANDIDATE_ID",
+    "CODESTRA_STAGING_CANDIDATE_MANIFEST_SHA256",
+    "CODESTRA_STAGING_ENDPOINT_MANIFEST_SHA256",
+    "CODESTRA_STAGING_KEYCLOAK_ISSUER",
+    "CODESTRA_STAGING_OFF_HOST_BACKUP_URI",
+    "CODESTRA_STAGING_CANARY_MAX_PERCENT",
+    "CODESTRA_STAGING_KONG_ROUTE_COUNT"
+  ],
+  "missing_secrets": [
+    "CODESTRA_STAGING_READONLY_OPERATOR_SSH_KEY",
+    "CODESTRA_STAGING_READONLY_OPERATOR_KNOWN_HOSTS",
+    "CODESTRA_GHCR_DEPLOYMENT_READ_TOKEN",
+    "CODESTRA_STAGING_READONLY_ENDPOINT_MANIFEST",
+    "CODESTRA_STAGING_READONLY_BEARER_TOKEN",
+    "CODESTRA_STAGING_METRICS_BEARER_TOKEN",
+    "CODESTRA_STAGING_OFF_HOST_BACKUP_CREDENTIAL"
+  ],
+  "observed_secret_presence": {
+    "CODESTRA_RELEASE_SIGNING_PUBLIC_KEY": true,
+    "scope_verified_as_environment_only": false
+  },
+  "blocking_conditions": [
+    "repository-scoped CODESTRA_REPOSITORY_ADMIN_TOKEN is absent, so branch-policy and environment-variable writes cannot execute",
+    "source lock is FAIL rather than PASS",
+    "runtime candidate matrix does not authorize deployment",
+    "isolated staging host is not created and verified",
+    "all ten required staging-readonly variables are absent",
+    "seven required staging-readonly encrypted secrets are absent",
+    "the endpoint manifest secret is empty",
+    "component source approvals and exact immutable artifacts are incomplete"
+  ],
+  "safety_readback": {
+    "LIVE_WRITE": false,
+    "ODOO_WRITE": false,
+    "ENABLE_EXTERNAL_DELIVERY": false,
+    "N8N_DELIVERY_ENABLED": false,
+    "LIVE_EMAIL_DELIVERY": false,
+    "LIVE_SMS_DELIVERY": false,
+    "LIVE_PSTN_DIALING": false,
+    "PRODUCTION_DIALING": false,
+    "CAMPAIGN_ACTIVATION": false,
+    "PROVIDER_DELIVERY": false,
+    "ADVERTISING_ACTIVATION": false,
+    "PAYMENT_EXECUTION": false,
+    "FINANCIAL_TRADING": false
+  }
+}

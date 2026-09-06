@@ -46,10 +46,15 @@ class BackupOperationsTests(unittest.TestCase):
             / "codestra-isolated-restore-rehearsal.sh"
         ).read_text()
         self.assertIn("CREATE ROLE middleware_data_owner;", source)
+        self.assertIn("grep -qx 'mw_integration_api|true|false|false|false'", source)
+        self.assertIn(
+            "CREATE ROLE mw_integration_api LOGIN NOINHERIT PASSWORD :'rehearsal_password';",
+            source,
+        )
         self.assertIn("CREATE ROLE keycloak_data_owner;", source)
         self.assertNotIn("GRANT middleware_data_owner TO middleware_app;", source)
         self.assertNotIn("GRANT keycloak_data_owner TO keycloak;", source)
-        self.assertIn("-O middleware_data_owner codestra_middleware", source)
+        self.assertIn("-O middleware_app codestra_middleware", source)
         self.assertIn("-O keycloak_data_owner keycloak", source)
         self.assertIn("PRODUCTION-MIDDLEWARE-ROLE-BASELINE.txt", source)
         self.assertIn("PRODUCTION-KEYCLOAK-ROLE-AFTER.txt", source)
@@ -83,6 +88,67 @@ class BackupOperationsTests(unittest.TestCase):
         self.assertIn("OBJECT_OWNERSHIP=PASS", source)
         self.assertIn("DEFAULT_PRIVILEGES_RESTORED=PASS", source)
         self.assertIn("PRODUCTION_ROLE_PRIVILEGES_UNCHANGED=PASS", source)
+
+    def test_restore_rehearsal_uses_advertised_backup_and_publishes_bound_result(self) -> None:
+        source = (
+            ROOT
+            / "operations"
+            / "readiness"
+            / "codestra-isolated-restore-rehearsal.sh"
+        ).read_text()
+        self.assertIn('backup_stamp=$(python3 - "$backup_root/LAST_SUCCESS"', source)
+        self.assertIn('backup_dir="${backup_root}/${backup_stamp}"', source)
+        self.assertNotIn("find \"$backup_root\" -mindepth 2", source)
+        self.assertIn("RESTORE_BACKUP_STAMP=${backup_stamp}", source)
+        checksum = source.index("sha256sum RESTORE-RESULT.txt")
+        marker = source.index(
+            'mv "$evidence_root/.LAST_SUCCESS-${stamp}" "$evidence_root/LAST_SUCCESS"'
+        )
+        self.assertGreater(marker, checksum)
+        self.assertIn('sync -d "$evidence_root"', source)
+
+    def test_restore_rehearsal_migrates_exact_candidate_on_internal_network(self) -> None:
+        source = (
+            ROOT
+            / "operations"
+            / "readiness"
+            / "codestra-isolated-restore-rehearsal.sh"
+        ).read_text()
+        self.assertIn(
+            "middleware_source_sha=63b6c0c8bca5168a1178895bd12858d0b1e8086e",
+            source,
+        )
+        self.assertIn(
+            "middleware_repository=ghcr.io/appolon1908-hue/codestra-middleware",
+            source,
+        )
+        self.assertIn("middleware_required_head=0056_klyrow_delivery_events", source)
+        self.assertIn('middleware_image="${middleware_repository}@${release_values[0]}"', source)
+        self.assertIn('"${middleware_container_args[@]}"', source)
+        self.assertIn("command.upgrade(c,'head')", source)
+        self.assertIn("command.current(c)", source)
+        self.assertIn("c.set_main_option('script_location','/app/migrations')", source)
+        self.assertIn('"$middleware_image" -m app.entrypoints.integration_api', source)
+        self.assertIn('"$middleware_image" -c', source)
+        self.assertIn("MIDDLEWARE_ISOLATED_MIGRATION_GATE=PASS", source)
+        self.assertIn("MIDDLEWARE_SCHEMA_TABLE_COUNT=${middleware_schema_table_count}", source)
+        self.assertIn(
+            "postgresql+asyncpg://mw_integration_api:%s@postgres:5432/codestra_middleware",
+            source,
+        )
+        self.assertIn(
+            "postgresql+asyncpg://middleware_app:%s@postgres:5432/codestra_middleware",
+            source,
+        )
+        self.assertIn("MIDDLEWARE_MIGRATION_IDENTITY=middleware_app", source)
+        self.assertIn("MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS", source)
+        self.assertIn('"$middleware_image" -m app.entrypoints.integration_api', source)
+        self.assertIn('urlopen("http://middleware-candidate:8095/healthz"', source)
+        self.assertIn('urlopen("http://middleware-candidate:8095/readyz"', source)
+        self.assertIn("MIDDLEWARE_CANDIDATE_DATABASE_READINESS=PASS", source)
+        self.assertIn('docker network create --internal', source)
+        self.assertNotIn("--publish", source)
+        self.assertNotIn("--publish-all", source)
 
     def test_readiness_backup_validates_exact_root_owned_owner_waiver(self) -> None:
         source = (ROOT / "operations" / "readiness" / "codestra-local-consistency-backup.sh").read_text()
@@ -166,6 +232,7 @@ class MonitoringGovernanceTests(unittest.TestCase):
 
     def test_platform_ci_publishes_required_legacy_status(self) -> None:
         workflow = (ROOT / ".github/workflows/platform-source-gate.yml").read_text()
+        self.assertIn('- "reports/**"', workflow)
         self.assertIn("statuses: write", workflow)
         self.assertIn("TARGET_SHA: ${{ github.event.pull_request.head.sha }}", workflow)
         self.assertIn('statuses/${TARGET_SHA}', workflow)
@@ -200,6 +267,34 @@ class MonitoringGovernanceTests(unittest.TestCase):
         self.assertEqual(
             jobs["postgres-exporter"]["static_configs"][0]["targets"],
             ["postgres-exporter:9187"],
+        )
+        staging = jobs["operations-dashboard-middleware-staging"]
+        self.assertEqual(
+            staging["static_configs"][0]["targets"],
+            ["middleware-intake-staging:8080"],
+        )
+        self.assertEqual(
+            staging["oauth2"]["token_url"],
+            "https://auth-staging.codestra.co/realms/codestra/protocol/openid-connect/token",
+        )
+        self.assertIn("operations_dashboard_staging", compose["services"]["prometheus"]["networks"])
+        self.assertIn(
+            "/etc/codestra/secrets/monitoring-runtime/staging_metrics_client_secret:/run/secrets/staging_metrics_client_secret:ro",
+            compose["services"]["prometheus"]["volumes"],
+        )
+        projection = (MONITORING / "sync-staging-metrics-secret.sh").read_text()
+        self.assertIn("/opt/codestra/secrets/identity-staging/monitoring-readonly-client-secret", projection)
+        self.assertIn("install -o root -g 65534 -m 0640", projection)
+        self.assertIn('cmp -s "$source_file" "$temporary"', projection)
+        installer = (MONITORING / "install-monitoring.sh").read_text()
+        self.assertIn('bash "$ROOT/sync-staging-metrics-secret.sh"', installer)
+        self.assertIn('[[ -s "$staging_metrics_secret" && -r "$staging_metrics_secret" ]]', installer)
+        self.assertEqual(
+            compose["networks"]["operations_dashboard_staging"],
+            {
+                "external": True,
+                "name": "codestra-operations-dashboard-staging_private",
+            },
         )
 
     def test_middleware_database_recovery_metrics_are_fail_closed(self) -> None:

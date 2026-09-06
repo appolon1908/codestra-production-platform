@@ -1,0 +1,41 @@
+name: Codestra Orbit adoption authority
+
+on:
+  pull_request:
+    paths:
+      - "orbit/**"
+      - "tools/validate_orbit_adoption.py"
+      - "tests/test_orbit_adoption.py"
+      - ".github/workflows/orbit-adoption.yml"
+      - ".github/workflows/platform-source-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-orbit-adoption:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact pull-request head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pinned validation dependencies
+        run: python -m pip install "jsonschema==4.26.0" "pytest==9.1.1"
+
+      - name: Validate fail-closed adoption contract
+        run: python tools/validate_orbit_adoption.py
+
+      - name: Run contract regression tests
+        run: python -m pytest -q tests/test_orbit_adoption.py
+
+      - name: Validate Git whitespace
+        run: git diff --check "${{ github.event.pull_request.base.sha }}..HEAD"

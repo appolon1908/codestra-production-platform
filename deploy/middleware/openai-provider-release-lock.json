@@ -1,0 +1,58 @@
+{
+  "activation": {
+    "activation_overlay_committed": false,
+    "base_orchestration_enabled": false,
+    "base_provider_enabled": false,
+    "base_submissions_enabled": false,
+    "base_worker_claims_enabled": false,
+    "production_effect_on_merge": false,
+    "required_evidence": [
+      "exact source SHA and image digest readback",
+      "required database migration head",
+      "protected secret metadata without values",
+      "enabled exact worker registration with concurrency one",
+      "provider model-access probe without prompt or response retention",
+      "TLS egress restricted to api.openai.com:443",
+      "authenticated chat and coding canary",
+      "streaming, cancellation, timeout, tenant-denial, project-denial, quota, and provider-failure tests",
+      "zero calls, zero emails, and zero SMS",
+      "rollback to the previously certified Qwen worker",
+      "independent approval on the exact deployment head"
+    ],
+    "status": "BLOCKED_PENDING_PROTECTED_SECRETS_REGISTRATION_AND_STAGING_CANARY"
+  },
+  "component": "middleware-openai-provider-worker",
+  "compose_file": "deploy/middleware/compose.openai-provider.yaml",
+  "compose_profile": "openai-provider",
+  "container_user": "10001:10001",
+  "image": "ghcr.io/appolon1908-hue/codestra-middleware@sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a",
+  "protected_secret_mounts": {
+    "api_key_container_path": "/run/secrets/openai/api-key",
+    "api_key_host_path": "/etc/codestra/secrets/openai-provider/api-key",
+    "database_url_container_path": "/run/secrets/database_url",
+    "database_url_host_path": "/etc/codestra/secrets/middleware-runtime/middleware-integration-api-database-url",
+    "required_mode": "0400",
+    "required_owner": "10001:10001",
+    "safety_salt_container_path": "/run/secrets/openai/safety-salt",
+    "safety_salt_host_path": "/etc/codestra/secrets/openai-provider/safety-salt"
+  },
+  "repository": "https://github.com/appolon1908-hue/Middleware-",
+  "required_database_head": "0056_klyrow_delivery_events",
+  "rollback": {
+    "active_lease_must_be_zero": true,
+    "openai_new_claims_disabled_first": true,
+    "provider": "qwen",
+    "qwen_credentials_removed": false
+  },
+  "schema_version": 1,
+  "service": "middleware-openai-provider-worker",
+  "source_revision": "63b6c0c8bca5168a1178895bd12858d0b1e8086e",
+  "worker_identity": {
+    "max_concurrency": 1,
+    "project_allowlist": [
+      "codestra-ai-console"
+    ],
+    "service_id": "openai-responses-provider",
+    "worker_id": "codestra-openai-01"
+  }
+}

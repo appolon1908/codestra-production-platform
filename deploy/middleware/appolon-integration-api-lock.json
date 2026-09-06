@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "source": "https://github.com/appolon1908-hue/Middleware-",
+  "revision": "f3437709c06747249586598590145234ea2c7327",
+  "image": "ghcr.io/appolon1908-hue/codestra-middleware@sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484",
+  "release_run": 33617485810,
+  "runtime_profile": "codestra-middleware-production-compose-v1",
+  "database_name": "codestra_middleware_appolon",
+  "database_role": "appolon_middleware_api",
+  "service": "appolon-middleware-integration-api",
+  "internal_alias": "middleware-integration-api",
+  "internal_port": 8080,
+  "entrypoint": "image-default-app.main:create_app",
+  "deployment_state": "ISOLATED_DATABASE_REVIEW_REQUIRED",
+  "production_writes_enabled": false,
+  "rollback": {
+    "action": "restore_database_then_redeploy_previous_appolon_image_digest",
+    "previous_image_digest": "sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820",
+    "previous_entrypoint": "image-default-app.main:create_app",
+    "database_name": "codestra_middleware_appolon",
+    "pre_migration_head": "0003_immutable_event_ledger",
+    "candidate_migration_head": "0006_outbox_attempt_events",
+    "requires_pre_migration_database_backup": true,
+    "rollback_compose_override": "deploy/middleware/compose.appolon-integration-api.rollback.yaml",
+    "previous_source_revision": "f6748a58f8d2590520a4f28776770957061cdea1",
+    "previous_build_time": "2026-08-30T13:24:37Z",
+    "restore_order": [
+      "stop_candidate",
+      "restore_verified_pre_migration_database_backup",
+      "verify_pre_migration_head",
+      "redeploy_previous_image_digest_with_pinned_runtime_metadata",
+      "verify_health_readiness_and_runtime_version"
+    ],
+    "requires_separate_protected_apply": true
+  }
+}

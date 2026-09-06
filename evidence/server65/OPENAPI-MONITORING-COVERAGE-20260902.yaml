@@ -1,0 +1,128 @@
+schema_version: "1.0"
+server: 65.109.65.169
+captured_at: "2026-09-02"
+source_inventory: server-65.109.65.169-api-inventory.md
+source_inventory_sha256: 819eb3d29158e8ea05a1200ccb0fb55fdaa38c6645fa0393289ee60f111f21d0
+source_completion_matrix: SERVER-65-API-COMPLETION-MATRIX.yaml
+source_completion_matrix_sha256: 2115fbff00a3bb6dc145b572b1a7b4aa1547c22ed16542021b8acc1f1706e8d2
+
+derivation:
+  openapi_evidence_groups: 29
+  excluded_staging_containers: 8
+  excluded_proxy_observations: 1
+  production_or_unclassified_runtime_applications: 20
+  required_contract: [health, readiness, metrics]
+  note: >-
+    codestra-caddy-upstream-gateway is a proxy observation of the websocket
+    gateway schema, not a running application container. Explicit STAGING
+    containers are not counted as production coverage.
+
+covered:
+  - container: codestra-appolon-middleware-integration-api-1
+    software: appolon-middleware-integration-api
+    health: /health
+    readiness: /ready
+    metrics: /metrics
+  - container: codestra-websocket-gateway-gateway-1
+    software: gateway
+    health: /healthz
+    readiness: /readyz
+    metrics: /metrics
+
+uncovered:
+  - container: codestra-mail-api-mail-api-1
+    software: mail-api
+    missing: [health, readiness, metrics]
+  - container: codestra-middleware-1
+    software: middleware
+    missing: [metrics]
+  - container: codestra-middleware-breero-odoo-worker-1
+    software: middleware-breero-odoo-worker
+    missing: [metrics]
+  - container: codestra-middleware-event-gateway-1
+    software: middleware-event-gateway
+    missing: [metrics]
+  - container: codestra-middleware-evidence-runner-1
+    software: middleware-evidence-runner
+    missing: [metrics]
+  - container: codestra-middleware-extension-allocator-1
+    software: middleware-extension-allocator
+    missing: [metrics]
+  - container: codestra-middleware-integration-api-1
+    software: middleware-integration-api
+    missing: [metrics]
+  - container: codestra-middleware-notification-worker-1
+    software: middleware-notification-worker
+    missing: [metrics]
+  - container: codestra-middleware-odoo-result-worker-1
+    software: middleware-odoo-result-worker
+    missing: [metrics]
+  - container: codestra-middleware-pjsip-adapter-1
+    software: middleware-pjsip-adapter
+    missing: [metrics]
+  - container: codestra-middleware-policy-engine-1
+    software: middleware-policy-engine
+    missing: [metrics]
+  - container: codestra-middleware-reconciliation-worker-1
+    software: middleware-reconciliation-worker
+    missing: [metrics]
+  - container: codestra-middleware-scheduler-1
+    software: middleware-scheduler
+    missing: [metrics]
+  - container: codestra-middleware-sync-worker-1
+    software: middleware-sync-worker
+    missing: [metrics]
+  - container: codestra-middleware-telephony-provisioning-1
+    software: middleware-telephony-provisioning
+    missing: [metrics]
+  - container: codestra-middleware-vicidial-adapter-1
+    software: middleware-vicidial-adapter
+    missing: [metrics]
+  - container: codestra-middleware-webphone-session-issuer-1
+    software: middleware-webphone-session-issuer
+    missing: [metrics]
+  - container: codestra-reseller-portal-portal-1
+    software: portal
+    missing: [health, metrics]
+
+excluded_staging:
+  - codestra-operations-dashboard-staging-v2-middleware-1
+  - codestra-middleware-staging-middleware-staging-1
+  - codestra-middleware-staging-notification-worker-staging-1
+  - codestra-middleware-staging-odoo-result-worker-staging-1
+  - codestra-middleware-staging-scheduler-staging-1
+  - codestra-middleware-staging-social-dead-letter-worker-staging-1
+  - codestra-middleware-staging-social-delivery-worker-staging-1
+  - codestra-middleware-staging-social-reconciliation-worker-staging-1
+
+excluded_proxy_observations:
+  - codestra-caddy-upstream-gateway
+
+result:
+  application_monitoring: 2/20
+  missing_application_monitoring: 18
+  observability: FAIL
+  production_changed: false
+
+source_reconciliation:
+  canonical_middleware:
+    repository: Codestra-SRL/codestra-middleware
+    candidate_pr: 283
+    runtime_applications: 16
+    result: SOURCE_IMPLEMENTED_NOT_DEPLOYED
+    evidence: >-
+      The canonical main FastAPI application mounts /metrics. API entrypoints
+      call add_api_runtime, and worker entrypoints use worker_app; both runtime
+      factories mount real prometheus_client metrics and expose liveness and
+      readiness. Runtime coverage remains unchanged until an exact protected
+      image is promoted and scraped successfully.
+  platform_mail_api:
+    repository: appolon1908-hue/codestra-production-platform
+    result: SOURCE_CANDIDATE_NOT_DEPLOYED
+    candidate_contract: [/healthz, /healthz/ready, /metrics]
+  platform_reseller_portal:
+    repository: appolon1908-hue/codestra-production-platform
+    result: SOURCE_CANDIDATE_NOT_DEPLOYED
+    candidate_contract: [/healthz, /readyz, /metrics]
+  candidate_after_exact_digest_promotion: 20/20
+  runtime_certification_unchanged: 2/20

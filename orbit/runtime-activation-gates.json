@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "1.0.0",
+  "contractId": "codestra-orbit-v2.0.0",
+  "authorityRepository": "appolon1908-hue/codestra-production-platform",
+  "changeClass": "source-only",
+  "overallStatus": "BLOCKED",
+  "runtimeMutationsInThisChange": false,
+  "gates": [
+    {
+      "id": "sdk_protected_release",
+      "description": "Protected SDK release and final source SHA",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "package_artifact_digests",
+      "description": "Installable package names, versions, and SHA-256 values",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "consumer_adoption_ledger",
+      "description": "Every adopting repository and protected pull request",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "domain_registry",
+      "description": "Canonical domains and ownership",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "identity_clients",
+      "description": "Identity clients and exact redirect allowlists",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "immutable_application_artifacts",
+      "description": "Immutable consumer application artifacts",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "edge_source_locks",
+      "description": "Caddy and Kong source locks",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "staging_visual_evidence",
+      "description": "Desktop and mobile staging evidence",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "accessibility_certification",
+      "description": "Accessibility certification",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "auth_session_certification",
+      "description": "Login, logout, logout-all, and protected-session evidence",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "observability_certification",
+      "description": "Metrics, logs, traces, alerts, and dashboards",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "rollback_rehearsal",
+      "description": "Tested rollback from exact artifacts",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "production_environment_gate",
+      "description": "Separate production deployment gate",
+      "status": "PENDING",
+      "evidence": null
+    },
+    {
+      "id": "production_readback",
+      "description": "Exact production source, artifact, route, and safety readback",
+      "status": "PENDING",
+      "evidence": null
+    }
+  ],
+  "blockedCapabilities": [
+    "production-ui-cutover",
+    "public-route-change",
+    "identity-client-change",
+    "live-email",
+    "live-sms",
+    "live-pstn",
+    "social-publishing",
+    "advertising",
+    "external-provider-write",
+    "trading",
+    "deposits",
+    "withdrawals"
+  ]
+}

@@ -6,14 +6,23 @@ api.codestra.co {
 	request_body {
 		max_size 10MB
 	}
-	@realtime path /ws/agent /api/v1/realtime/sessions /healthz /readyz /version
+	# The public listener rejects the complete private namespace before the
+	# catch-all proxy. The inline deny matcher is intentionally not an exposed
+	# endpoint and therefore must not be registered as a public API route.
+	handle /internal* {
+		respond 404
+	}
+	# The realtime gateway owns only WebSocket transport and its own read-only
+	# health/version endpoints. Realtime ticket creation remains a POST owned by
+	# Middleware and therefore falls through to the canonical API backend below.
+	@realtime path /ws/agent /healthz /readyz /version
 	handle @realtime {
-		reverse_proxy codestra-websocket-gateway-gateway-1:8080 {
+		reverse_proxy 127.0.0.1:18102 {
 			header_up X-Real-IP {remote_host}
 		}
 	}
 	handle {
-		reverse_proxy codestra-kong-kong-gateway-1:8000 {
+		reverse_proxy 127.0.0.1:18101 {
 			header_up X-Real-IP {remote_host}
 		}
 	}

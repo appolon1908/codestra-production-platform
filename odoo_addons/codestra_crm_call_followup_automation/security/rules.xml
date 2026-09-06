@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="rule_codestra_call_followup_outbox_company"
+            model="ir.rule">
+        <field name="name">Call automation outbox by allowed company</field>
+        <field name="model_id"
+               ref="model_codestra_crm_call_followup_outbox"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+        <field name="groups"
+               eval="[(4, ref('codestra_crm_call_followup.group_call_followup_manager'))]"/>
+    </record>
+</odoo>
