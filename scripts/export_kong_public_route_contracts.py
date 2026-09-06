@@ -70,6 +70,8 @@ SENSITIVE_ASSIGNMENT = re.compile(
 )
 BEARER_VALUE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
 PRIVATE_KEY_MARKER = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")
+SECRET_PATH_MARKERS = {"callback", "callbacks", "hook", "hooks", "webhook", "webhooks"}
+HIGH_ENTROPY_PATH_SEGMENT = re.compile(r"^[A-Za-z0-9._~+/=-]{24,}$")
 
 
 def request(base: str, path: str) -> dict:
@@ -168,6 +170,21 @@ def sanitize(value, key: str = ""):
     return value
 
 
+def sanitize_route_path(value: str) -> str:
+    """Redact credential-like route segments while retaining useful topology."""
+
+    segments = value.split("/")
+    for index, segment in enumerate(segments):
+        previous = segments[index - 1].lower() if index else ""
+        marked_secret = previous in SECRET_PATH_MARKERS and segment not in {
+            "", "v1", "v2", "v3"
+        }
+        if marked_secret or HIGH_ENTROPY_PATH_SEGMENT.fullmatch(segment):
+            digest = hashlib.sha256(segment.encode()).hexdigest()
+            segments[index] = f"<redacted:sha256:{digest}>"
+    return "/".join(segments)
+
+
 def canonical_sha256(value) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(payload).hexdigest()
@@ -209,7 +226,7 @@ def route_record(
     return {
         "name": route.get("name"),
         "hosts": sorted(route.get("hosts") or []),
-        "paths": sorted(route.get("paths") or []),
+        "paths": sorted(sanitize_route_path(path) for path in (route.get("paths") or [])),
         "methods": sorted(route.get("methods") or []),
         "protocols": sorted(route.get("protocols") or []),
         "strip_path": route.get("strip_path"),

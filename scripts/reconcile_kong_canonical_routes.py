@@ -138,6 +138,8 @@ def verify_security_plugins(
             "key_claim_name": "azp",
             "claims_to_verify": ["exp"],
             "header_names": ["authorization"],
+            "uri_param_names": [],
+            "cookie_names": [],
             "run_on_preflight": True,
         },
         f"{expected['name']}.jwt",

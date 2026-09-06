@@ -132,6 +132,8 @@ def test_campaign_contract_rejects_scope_guard_drift():
                 "key_claim_name": "azp",
                 "claims_to_verify": ["exp"],
                 "header_names": ["authorization"],
+                "uri_param_names": [],
+                "cookie_names": [],
                 "run_on_preflight": True,
             },
         },
@@ -161,6 +163,14 @@ def test_campaign_contract_rejects_scope_guard_drift():
         },
     }
     module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+    plugins["jwt"]["config"]["uri_param_names"] = ["jwt"]
+    with pytest.raises(RuntimeError, match="uri_param_names"):
+        module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+    plugins["jwt"]["config"]["uri_param_names"] = []
+    plugins["jwt"]["config"]["cookie_names"] = ["jwt"]
+    with pytest.raises(RuntimeError, match="cookie_names"):
+        module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+    plugins["jwt"]["config"]["cookie_names"] = []
     plugins["post-function"]["config"]["access"] = ["return true"]
     with pytest.raises(RuntimeError, match="claim_guard"):
         module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
@@ -264,6 +274,16 @@ def test_exporter_admin_origin_strips_basic_auth_credentials():
         module.sanitized_origin("http://admin:password@127.0.0.1:8001/routes?q=1")
         == "http://127.0.0.1:8001"
     )
+
+
+def test_exporter_redacts_credentials_embedded_in_route_paths():
+    module = _exporter()
+    secret = "company-signing-token-0123456789"
+    sanitized = module.sanitize_route_path(f"/webhook/{secret}/events")
+    assert secret not in sanitized
+    assert sanitized.startswith("/webhook/<redacted:sha256:")
+    assert sanitized.endswith(">/events")
+    assert module.sanitize_route_path("/api/v1/events") == "/api/v1/events"
 
 
 def test_inline_and_standalone_control_plane_scope_policies_are_identical():
