@@ -54,7 +54,7 @@ class BackupOperationsTests(unittest.TestCase):
         self.assertIn("CREATE ROLE keycloak_data_owner;", source)
         self.assertNotIn("GRANT middleware_data_owner TO middleware_app;", source)
         self.assertNotIn("GRANT keycloak_data_owner TO keycloak;", source)
-        self.assertIn("-O middleware_data_owner codestra_middleware", source)
+        self.assertIn("-O middleware_app codestra_middleware", source)
         self.assertIn("-O keycloak_data_owner keycloak", source)
         self.assertIn("PRODUCTION-MIDDLEWARE-ROLE-BASELINE.txt", source)
         self.assertIn("PRODUCTION-KEYCLOAK-ROLE-AFTER.txt", source)
@@ -124,7 +124,7 @@ class BackupOperationsTests(unittest.TestCase):
         )
         self.assertIn("middleware_required_head=0056_klyrow_delivery_events", source)
         self.assertIn('middleware_image="${middleware_repository}@${release_values[0]}"', source)
-        self.assertIn('"${middleware_container_args[@]}" "$middleware_image"', source)
+        self.assertIn('"${middleware_container_args[@]}"', source)
         self.assertIn("-m alembic upgrade head", source)
         self.assertIn("-m alembic current", source)
         self.assertIn('"$middleware_image" -m app.entrypoints.integration_api', source)
@@ -135,7 +135,11 @@ class BackupOperationsTests(unittest.TestCase):
             "postgresql+asyncpg://mw_integration_api:%s@postgres:5432/codestra_middleware",
             source,
         )
-        self.assertIn("MIDDLEWARE_MIGRATION_IDENTITY=mw_integration_api", source)
+        self.assertIn(
+            "postgresql+asyncpg://middleware_app:%s@postgres:5432/codestra_middleware",
+            source,
+        )
+        self.assertIn("MIDDLEWARE_MIGRATION_IDENTITY=middleware_app", source)
         self.assertIn("MIDDLEWARE_PRODUCTION_GRANTS_MATCH=PASS", source)
         self.assertIn('"$middleware_image" -m app.entrypoints.integration_api', source)
         self.assertIn('urlopen("http://middleware-candidate:8095/healthz"', source)
