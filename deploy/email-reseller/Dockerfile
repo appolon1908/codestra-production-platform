@@ -21,4 +21,5 @@ COPY --chown=10001:10001 email_reseller_service /app/email_reseller_service
 ENV PATH=/opt/venv/bin:$PATH PYTHONPATH=/app PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     CODESTRA_GIT_SHA=$VCS_REF CODESTRA_APPLICATION_VERSION=$VERSION
 USER 10001:10001
-CMD ["/opt/venv/bin/python", "-m", "email_reseller_service.server"]
+ENTRYPOINT ["/opt/venv/bin/python"]
+CMD ["-m", "email_reseller_service.server"]
