@@ -1,0 +1,5 @@
+# Gateway/application alignment — 2026-09-02
+
+KONG_APPLICATION_ROUTE_ALIGNMENT=NOT_YET_PROVEN
+CADDY_APPLICATION_ROUTE_ALIGNMENT=NOT_YET_PROVEN
+No route broadening was performed.

@@ -210,11 +210,17 @@ def test_validator_template_and_inactive_window_fail_closed(tmp_path):
 
 def test_wal_worker_has_verified_bounded_retention_and_metrics():
     worker = (PACKAGE / "codestra-shared-postgres-archive-wal.sh").read_text()
+    assert "--no-options --lock-never" in worker
+    assert "--no-auto-check-trustdb" in worker
     rules = (PACKAGE / "shared-postgres.rules.yml").read_text()
     assert "restic dump" in worker and "OFFHOST_STATUS=PASS" not in worker
     assert "STATUS=PASS" in worker and "wal-retention-days" in worker and "-mtime" in worker
-    assert "recorded_artifact" in worker and "continue" in worker
+    assert "recorded_snapshot" in worker and "continue" in worker
     assert "wal_spool_disk_critical" in worker and "critical WAL spool filesystem usage" in worker
+    assert "CODESTRA_SHARED_WAL_MAX_FILES_PER_RUN" in worker
+    assert "processed < max_files" in worker
+    assert 'df -P "$spool"' in worker
+    assert 'find "$artifact" "$artifact.sha256" -delete' in worker
     assert "exit 1" not in worker
     assert "SharedPostgresWALSpoolCleanupFailure" in rules
 
@@ -237,8 +243,9 @@ def test_spool_cleanup_removes_only_verified_expired_wal(tmp_path):
     failed = stage / "000000010000000000000002"; failed.write_text("wal")
     failed_marker = Path(str(failed) + ".offhost")
     failed_marker.write_text("EVIDENCE_TYPE=WAL_OFFHOST\nSTATUS=FAIL\n")
-    old = (datetime.now().timestamp() - 9 * 86400)
-    os.utime(verified_marker, (old, old)); os.utime(failed_marker, (old, old))
+    old = (datetime.now().timestamp() - 7 * 86400 - 5 * 60)
+    # A delayed off-host upload must not restart the WAL retention clock.
+    os.utime(verified, (old, old)); os.utime(failed, (old, old))
     env = {**os.environ, "CODESTRA_SHARED_WAL_STAGE": str(stage), "CODESTRA_SHARED_POSTGRES_STATE": str(state)}
     subprocess.run(["bash", str(PACKAGE / "codestra-shared-postgres-prune-wal.sh"), "7"], env=env, check=True)
     assert not verified.exists() and not verified_marker.exists()

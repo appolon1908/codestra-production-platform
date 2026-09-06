@@ -1,0 +1,52 @@
+name: Repository Name Authority
+
+on:
+  pull_request:
+    branches:
+      - release/production-activation
+    paths:
+      - 'config/repository-name-aliases.v1.json'
+      - 'scripts/capture_repository_review.py'
+      - 'scripts/capture_repository_review_core.py'
+      - 'scripts/validate_repository_name_authority.py'
+      - 'tests/test_capture_repository_review.py'
+      - '.github/workflows/repository-name-authority.yml'
+  push:
+    branches:
+      - release/production-activation
+    paths:
+      - 'config/repository-name-aliases.v1.json'
+      - 'scripts/capture_repository_review.py'
+      - 'scripts/capture_repository_review_core.py'
+      - 'scripts/validate_repository_name_authority.py'
+      - 'tests/test_capture_repository_review.py'
+      - '.github/workflows/repository-name-authority.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: repository-name-authority
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install pinned capture and test dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check --no-input
+          PyYAML==6.0.3 pytest==8.4.2
+      - name: Compile repository review capture
+        run: >-
+          python -m py_compile
+          scripts/capture_repository_review.py
+          scripts/capture_repository_review_core.py
+      - name: Validate stable repository identities
+        run: python scripts/validate_repository_name_authority.py
+      - name: Run repository capture regression tests
+        run: python -m pytest -q tests/test_capture_repository_review.py

@@ -106,8 +106,10 @@ class TestCodestraCrmCallFollowup(TransactionCase):
             ].register_completed_call(self._payload("unauthorized-event"))
 
     def test_completed_call_registration_is_idempotent(self):
-        first = self._register("idempotent-event")
-        second = self._register("idempotent-event")
+        payload = self._payload("idempotent-event")
+        service = self.env(user=self.service_user)["codestra.crm.call.followup"]
+        first = service.register_completed_call(payload)
+        second = service.register_completed_call(dict(payload))
 
         self.assertEqual(first["followup_id"], second["followup_id"])
         self.assertFalse(first["replayed"])

@@ -1,0 +1,110 @@
+#!/usr/bin/python3
+"""Rollback or remove the validator without touching Klyrow application state."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+from pathlib import Path
+
+from install_klyrow_production_validator_compat import (
+    InstallError,
+    mapped,
+    preflight_backups,
+    remove_validator_key,
+    restore_backups,
+    validate_directory_chain,
+    validator_key_plan,
+)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--expected-source-sha", required=True)
+    parser.add_argument("--simulator-root", type=Path)
+    args = parser.parse_args()
+    os.umask(0o077)
+    if not re.fullmatch(r"[0-9a-f]{40}", args.expected_source_sha):
+        print("ROLLBACK_RESULT=FAIL")
+        return 2
+    simulator = args.simulator_root.resolve() if args.simulator_root else None
+    if simulator is not None:
+        marker = simulator / ".kpv-disposable-simulator"
+        if not str(simulator).startswith("/tmp/kpv-simulator-") or not marker.is_file() or marker.is_symlink():
+            print("ROLLBACK_RESULT=FAIL")
+            return 2
+    elif os.geteuid() != 0:
+        print("ROLLBACK_RESULT=FAIL")
+        return 2
+    try:
+        installation_path = mapped(simulator, "/etc/codestra/klyrow-production-validator/installation.json")
+        validate_directory_chain(installation_path.parent)
+        if installation_path.is_symlink() or not installation_path.is_file():
+            raise ValueError("installation evidence missing")
+        installation = json.loads(installation_path.read_text(encoding="utf-8"))
+        if not isinstance(installation, dict):
+            raise ValueError("installation evidence invalid")
+        if installation.get("source_sha") != args.expected_source_sha:
+            raise ValueError("source SHA mismatch")
+        backup = Path(str(installation["backup_directory"]))
+        state = mapped(simulator, "/var/lib/codestra/klyrow-production-validator/install-backups")
+        if backup.parent != state or backup.is_symlink() or not backup.is_dir():
+            raise ValueError("backup directory rejected")
+        validate_directory_chain(backup)
+        records = installation.get("backups")
+        if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
+            raise ValueError("rollback manifest rejected")
+        labels = [record.get("label") for record in records]
+        if not all(isinstance(label, str) for label in labels) or set(labels) != {
+            "dispatcher",
+            "root-helper",
+            "actions",
+            "core",
+            "contract",
+            "sudoers",
+            "identity",
+            "authorized_keys",
+            "installation",
+            "probe-core",
+            "probe-authorization",
+            "probe-no-effect",
+            "probe-callback",
+            "probe-smtp",
+            "probe-manifest",
+        }:
+            raise ValueError("rollback manifest labels rejected")
+        authorized_records = [
+            record
+            for record in records
+            if isinstance(record, dict) and record.get("label") == "authorized_keys"
+        ]
+        if len(authorized_records) != 1:
+            raise ValueError("authorized key rollback record rejected")
+        authorized = mapped(simulator, "/home/codestra-admin/.ssh/authorized_keys")
+        fingerprint = str(installation.get("key_fingerprint", ""))
+        non_authorized_records = [
+            record for record in records if record.get("label") != "authorized_keys"
+        ]
+        preflight_backups(non_authorized_records, backup)
+        validator_key_plan(authorized, fingerprint)
+        version = mapped(simulator, f"/opt/codestra/operators/klyrow-production-validator/{args.expected_source_sha}")
+        validate_directory_chain(version.parent)
+        if version.is_symlink() or not version.is_dir():
+            raise ValueError("version path rejected")
+        remove_validator_key(authorized, fingerprint)
+        restore_backups(non_authorized_records, backup)
+        shutil.rmtree(version)
+        print("ROLLBACK_RESULT=PASS")
+        print("APPLICATION_RUNTIME_CHANGED=NO")
+        return 0
+    except (InstallError, OSError, ValueError, KeyError, json.JSONDecodeError):
+        print("ROLLBACK_RESULT=FAIL")
+        print("APPLICATION_RUNTIME_CHANGED=NO")
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

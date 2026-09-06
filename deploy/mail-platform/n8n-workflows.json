@@ -1,0 +1,15 @@
+{
+  "schema_version": "codestra.mail.workflows.v1",
+  "authority": "middleware",
+  "credentials_embedded": false,
+  "active_by_default": false,
+  "workflows": [
+    "MailUserProvisionedV1",
+    "InboundMailReceivedV1",
+    "MailDeliveryStatusV1",
+    "MailBounceV1",
+    "MailComplaintV1",
+    "MailReconciliationV1"
+  ],
+  "required_fields": ["event_id", "message_uuid", "correlation_id", "idempotency_key", "tenant", "campaign"]
+}

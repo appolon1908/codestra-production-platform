@@ -1,0 +1,30 @@
+schema_version: codestra.unpinned-runtime.v1
+captured_at: "2026-09-02T10:30:00Z"
+server: 65.109.65.169
+collection: read-only Docker inspect through the existing codestra-admin access path
+count: 24
+deployments:
+  - {container: codestra-middleware-external-webhook-worker-1, image: "codestra/middleware:webhook-cert-pg-20260816", image_id: "sha256:93cbb4a11765ad92e9bbf1a1bb9601f15a540164b4e7d6647cb0f16d588ab6e0", classification: RUNTIME_CONFIG}
+  - {container: codestra-middleware-breero-odoo-worker-1, image: "codestra/middleware:breero-51416422", image_id: "sha256:961c0569a5033cdb494d211fd32cfe20d7efd42d3900f02c2d3f0ac7bfdcfa63", classification: RUNTIME_CONFIG}
+  - {container: codestra-sms-api-event-worker-1, image: codestra-sms-api-event-worker, image_id: "sha256:65222db1296663c33f1bdac9ef5c8c305d2d4388ddca26e3306776821d2dbee9", classification: UNKNOWN}
+  - {container: codestra-middleware-staging-odoo-result-worker-staging-1, image: "codestra/middleware:staging-b29db772", image_id: "sha256:b81c125296effc17a33258212d9a71a3c427a972fa9783ec2c060109d167408f", classification: UNKNOWN}
+  - {container: codestra-middleware-staging-middleware-staging-1, image: "codestra/middleware:staging-b29db772", image_id: "sha256:b81c125296effc17a33258212d9a71a3c427a972fa9783ec2c060109d167408f", classification: UNKNOWN}
+  - {container: codestra-middleware-staging-social-reconciliation-worker-staging-1, image: "codestra/middleware:social-staging-12cd5fc", image_id: "sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6", classification: UNKNOWN}
+  - {container: codestra-middleware-staging-social-delivery-worker-staging-1, image: "codestra/middleware:social-staging-12cd5fc", image_id: "sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6", classification: UNKNOWN}
+  - {container: codestra-middleware-staging-social-dead-letter-worker-staging-1, image: "codestra/middleware:social-staging-12cd5fc", image_id: "sha256:8e4a1afa8ca70a6c9136530074f6f8f1257e9f9a895f705fa50acb6f64b18fe6", classification: UNKNOWN}
+  - {container: codestra-middleware-staging-notification-worker-staging-1, image: "codestra/middleware:staging-preflight-n8n-auth-20260801", image_id: "sha256:ed7accf6d1f9ad7d84f43deba8caa0d58f8c40709c7b54d622d70df56b1f2386", classification: UNKNOWN}
+  - {container: codestra-middleware-staging-scheduler-staging-1, image: "codestra/middleware:staging-preflight-n8n-auth-20260801", image_id: "sha256:ed7accf6d1f9ad7d84f43deba8caa0d58f8c40709c7b54d622d70df56b1f2386", classification: UNKNOWN}
+  - {container: codestra-middleware-staging-callback-staging-1, image: "codestra/middleware:current-hardened-20260723", image_id: "sha256:57a4a3a22278aa61bc443910927a308d594db287b8e2cd500ee12293e8a93f4d", classification: RUNTIME_CONFIG}
+  - {container: codestra-odoo19-module-staging-callback-tls-1, image: "codestra/caddy:2.11.4-hardened-20260723", image_id: "sha256:269c6bd9b2713a27f8dc34a19a904bb0ba9d8f0f1564913576becd24779674d5", classification: UNKNOWN}
+  - {container: codestra-middleware-1, image: "codestra/middleware:health-contract-b3ca9aa", image_id: "sha256:5dd751a9da60e2417c9ee553ddea68f54e76981dcc896eb3676b27617d121f38", classification: RUNTIME_CONFIG}
+  - {container: codestra-email-reseller-api-1, image: codestra-email-reseller-api, image_id: "sha256:8d7bb50e8787c110a7930fadb0c69a44ba075c70cb5e035118d9f334b1211e08", classification: UNKNOWN}
+  - {container: codestra-sms-api-api-1, image: codestra-sms-api-api, image_id: "sha256:49790449a1871a585456fe41bcb52dd614fb56f432907b9f5e7271e54306d6d7", classification: UNKNOWN}
+  - {container: codestra-mail-api-mail-api-1, image: "codestra/mail-api:20260822", image_id: "sha256:7495d5f0d79f027456ed61b7c3c2ea9331c228f3d2e10bceef3178eef5a62594", classification: UNKNOWN}
+  - {container: codestra-mail-isolated-stalwart-1, image: "stalwartlabs/stalwart:v0.16", image_id: "sha256:9ed1d343243b7aa72969e372a7240b7ddea07730781d4b68a0dc3d8d51c418bb", classification: RUNTIME_CONFIG}
+  - {container: kong-production-standby-kong-standby-auth-1, image: "codestra/kong-standby-auth:20260820", image_id: "sha256:48b52b06eae0c92b1d4ae45bdee6f3974c684e650933de2391c7a3456602d01f", classification: UNKNOWN}
+  - {container: codestra-kong-identity-certification-1, image: "codestra/identity-certification:canonical-co-20260820", image_id: "sha256:ffceaad23a8daf61bed7a069499c341ae2495b48dd77ca492ee965b761ff55af", classification: UNKNOWN}
+  - {container: codestra-beyvra-email-api-1, image: "codestra/beyvra-email:canonical-co-20260820", image_id: "sha256:a226db03c6fce98f81c02e78bab96a2beb452a27dd79308c921e85bfa664aa52", classification: UNKNOWN}
+  - {container: codestra-reseller-portal-portal-1, image: "codestra-reseller-portal:oidc-tenant-authority-20260816", image_id: "sha256:7d7cf6318ac122f7e39ab679dec499dc1f6116129765903d44e42c74541ca12e", classification: UNKNOWN}
+  - {container: codestra-private-vicidial-ingress-1, image: "codestra/caddy:2.11.4-hardened-20260723", image_id: "sha256:269c6bd9b2713a27f8dc34a19a904bb0ba9d8f0f1564913576becd24779674d5", classification: UNKNOWN}
+  - {container: codestra-middleware-staging-scraper-odoo-delivery-worker-1, image: "codestra/middleware:scraper-protected-main-4780bd72", image_id: "sha256:dc97c48f3a29690635bf28de9f3d2562fac2dadb74b8744ea6e99c1bd4ffcda1", classification: RUNTIME_CONFIG}
+  - {container: codestra-agent-desktop-preview, image: "codestra/agent-desktop:preview-6101", image_id: "sha256:9d01eff55f0f823d9faae1c51ffe71685663c24bc0bbdbb9da49bfe39f22e791", classification: UNKNOWN}

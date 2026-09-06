@@ -1,0 +1,93 @@
+name: Quarantined release recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Fixed recovery-only operator action
+        required: true
+        type: choice
+        options: [status, collect-evidence, disable-production-web-traffic, disable-klyrow-email-delivery]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codestra-production-activation
+  cancel-in-progress: false
+
+jobs:
+  verify-current-recovery-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      action: ${{ steps.policy.outputs.action }}
+      protected_sha: ${{ steps.policy.outputs.protected_sha }}
+      image_digest: ${{ steps.policy.outputs.image_digest }}
+      change_id: ${{ steps.policy.outputs.change_id }}
+      maintenance_date: ${{ steps.policy.outputs.maintenance_date }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require current protected policy and fixed quarantined tuple
+        id: policy
+        env:
+          ACTION: ${{ inputs.action }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = refs/heads/release/production-activation
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/release%2Fproduction-activation" --jq .commit.sha)" = "${GITHUB_SHA}"
+          python tools/validate_quarantined_recovery.py --action "${ACTION}" --github-output "${GITHUB_OUTPUT}"
+      - name: Preserve fail-closed result
+        run: printf '%s\n' EMAIL_DELIVERY=DISABLED SMS_DELIVERY=DISABLED PSTN_DELIVERY=DISABLED CUSTOMER_MESSAGES_SENT=0
+
+  recovery-operation:
+    needs: verify-current-recovery-policy
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Configure pinned restricted operator transport
+        env:
+          OPERATOR_KEY: ${{ secrets.CODESTRA_PRODUCTION_OPERATOR_SSH_KEY }}
+          OPERATOR_KNOWN_HOSTS: ${{ secrets.CODESTRA_PRODUCTION_OPERATOR_KNOWN_HOSTS }}
+          OPERATOR_HOST: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_HOST }}
+          OPERATOR_USER: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_USER }}
+        run: |
+          set -euo pipefail
+          test -n "${OPERATOR_KEY}"
+          test -n "${OPERATOR_KNOWN_HOSTS}"
+          test "${OPERATOR_HOST}" = 65.109.65.169
+          test "${OPERATOR_USER}" = codestra-production-operator
+          install -m 0700 -d "${RUNNER_TEMP}/operator-ssh"
+          printf '%s\n' "${OPERATOR_KEY}" > "${RUNNER_TEMP}/operator-ssh/id_ed25519"
+          printf '%s\n' "${OPERATOR_KNOWN_HOSTS}" > "${RUNNER_TEMP}/operator-ssh/known_hosts"
+          chmod 0600 "${RUNNER_TEMP}/operator-ssh/id_ed25519" "${RUNNER_TEMP}/operator-ssh/known_hosts"
+          ssh-keygen -y -f "${RUNNER_TEMP}/operator-ssh/id_ed25519" >/dev/null
+          ssh-keygen -F "${OPERATOR_HOST}" -f "${RUNNER_TEMP}/operator-ssh/known_hosts" >/dev/null
+      - name: Invoke recovery-only operator action
+        env:
+          ACTION: ${{ needs.verify-current-recovery-policy.outputs.action }}
+          PROTECTED_SHA: ${{ needs.verify-current-recovery-policy.outputs.protected_sha }}
+          IMAGE_DIGEST: ${{ needs.verify-current-recovery-policy.outputs.image_digest }}
+          CHANGE_ID: ${{ needs.verify-current-recovery-policy.outputs.change_id }}
+          MAINTENANCE_DATE: ${{ needs.verify-current-recovery-policy.outputs.maintenance_date }}
+          OPERATOR_HOST: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_HOST }}
+          OPERATOR_USER: ${{ vars.CODESTRA_PRODUCTION_OPERATOR_USER }}
+        run: |
+          set -euo pipefail
+          case "${ACTION}" in
+            status|collect-evidence|disable-production-web-traffic|disable-klyrow-email-delivery) ;;
+            *) exit 2 ;;
+          esac
+          ssh -F /dev/null -T -i "${RUNNER_TEMP}/operator-ssh/id_ed25519" \
+            -o BatchMode=yes -o ClearAllForwardings=yes -o ConnectTimeout=15 \
+            -o IdentitiesOnly=yes -o LogLevel=ERROR -o PasswordAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="${RUNNER_TEMP}/operator-ssh/known_hosts" \
+            "${OPERATOR_USER}@${OPERATOR_HOST}" \
+            "${ACTION} ${PROTECTED_SHA} ${IMAGE_DIGEST} ${CHANGE_ID} ${MAINTENANCE_DATE}" </dev/null
