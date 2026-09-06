@@ -156,7 +156,7 @@ jobs:
           test "$(docker image inspect "$MIDDLEWARE_IMAGE_REFERENCE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$MIDDLEWARE_PROTECTED_SHA"
           mapfile -t migration_heads < <(
             docker run --rm --network none --entrypoint python "$MIDDLEWARE_IMAGE_REFERENCE" \
-              -c 'import ast; from pathlib import Path; files=list(Path("/app/migrations/versions").glob("*.py")); trees=[ast.parse(p.read_text()) for p in files]; values=lambda name: [n.value.value for tree in trees for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets) and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)]; revisions=set(values("revision")); parents=set(values("down_revision")); heads=sorted(revisions-parents); assert len(heads) == 1, heads; print(heads[0])'
+              -m alembic heads | awk '{print $1}'
           )
           test "${#migration_heads[@]}" -eq 1
           test "${migration_heads[0]}" = "$EXPECTED_MIGRATION_REVISION"

@@ -70,7 +70,7 @@ def test_protected_release_gate_requires_current_signed_middleware_tuple() -> No
         assert argument in workflow
     assert "docker image inspect" in workflow
     assert "org.opencontainers.image.revision" in workflow
-    assert 'Path("/app/migrations/versions").glob' in workflow
+    assert '-m alembic heads' in workflow
     assert 'test "${#migration_heads[@]}" -eq 1' in workflow
     assert "EXPECTED_MIGRATION_REVISION: 0056_klyrow_delivery_events" in workflow
     assert 'test "$MIDDLEWARE_MIGRATION_REVISION" = "$EXPECTED_MIGRATION_REVISION"' in workflow
