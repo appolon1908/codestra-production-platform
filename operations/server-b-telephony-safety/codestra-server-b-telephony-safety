@@ -1,0 +1,52 @@
+#!/usr/bin/python3
+"""Fail-closed forced command for Server A's two telephony safety probes."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+
+CHANNELS_REQUEST = "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'core show channels count'"
+REGISTRATIONS_REQUEST = (
+    "/usr/bin/sudo -n /usr/sbin/asterisk -rx 'pjsip show registrations'"
+)
+COMMANDS = {
+    CHANNELS_REQUEST: ["/usr/sbin/asterisk", "-rx", "core show channels count"],
+    REGISTRATIONS_REQUEST: ["/usr/sbin/asterisk", "-rx", "pjsip show registrations"],
+}
+
+
+def run_fixed(argv: list[str]) -> str:
+    result = subprocess.run(
+        argv,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        timeout=10,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"},
+    )
+    if result.returncode != 0:
+        raise RuntimeError("fixed Asterisk readback failed")
+    return result.stdout
+
+
+def main() -> int:
+    if os.geteuid() != 0 or len(sys.argv) != 1:
+        return 64
+    request = os.environ.get("SSH_ORIGINAL_COMMAND", "")
+    argv = COMMANDS.get(request)
+    if argv is None:
+        return 64
+    try:
+        output = run_fixed(argv)
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return 1
+    sys.stdout.write(output)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
