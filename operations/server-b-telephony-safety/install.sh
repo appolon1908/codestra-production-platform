@@ -12,6 +12,20 @@ repo=$(git -C "$base" rev-parse --show-toplevel 2>/dev/null) || die GIT_SOURCE_R
 [[ $(git -C "$repo" rev-parse HEAD) == "$revision" ]] || die REVISION_MISMATCH
 git -C "$repo" merge-base --is-ancestor "$revision" origin/release/production-activation || die UNPROTECTED_SOURCE_REJECTED
 
+lock_parent=/root/vicidial-sync-remediation
+lock_root=$lock_parent/.locks
+for directory in "$lock_parent" "$lock_root"; do
+  if [[ ! -e $directory ]]; then install -d -o root -g root -m 0700 "$directory"; fi
+  [[ -d $directory && ! -L $directory && $(stat -c '%U:%G %a' "$directory") == 'root:root 700' ]] || die UNSAFE_INSTALLER_LOCK_ROOT
+done
+lock_path=$lock_root/server-b-telephony-safety-install.lock
+if [[ ! -e $lock_path ]]; then
+  (umask 077; set -o noclobber; : >"$lock_path") 2>/dev/null || true
+fi
+[[ -f $lock_path && ! -L $lock_path && $(stat -c '%U:%G %a' "$lock_path") == 'root:root 600' ]] || die UNSAFE_INSTALLER_LOCK
+exec {installer_lock}<>"$lock_path"
+flock -n "$installer_lock" || die INSTALLER_ALREADY_RUNNING
+
 payload=$base/codestra-server-b-telephony-safety
 sudoers_source=$base/codestra-server-b-telephony-safety.sudoers
 sshd_source=$base/sshd-match.conf
@@ -19,9 +33,9 @@ python3 -m py_compile "$payload"
 visudo -cf "$sudoers_source" >/dev/null
 sshd -t -f /etc/ssh/sshd_config
 
-stamp=$(date -u +%Y%m%dT%H%M%SZ)
-backup=/root/codestra-server-b-telephony-safety-backup-$stamp
-install -d -o root -g root -m 0700 "$backup"
+backup=$(mktemp -d /root/codestra-server-b-telephony-safety-backup-XXXXXXXXXXXX)
+chown root:root "$backup"
+chmod 0700 "$backup"
 declare -A existing=(
   [operator]=/usr/local/sbin/codestra-server-b-telephony-safety
   [sudoers]=/etc/sudoers.d/codestra-server-b-telephony-safety
@@ -40,9 +54,31 @@ for name in operator sudoers sshd REVISION SHA256SUMS; do
   fi
 done
 chmod 0600 "$backup/state.tsv"
+(
+  cd "$backup"
+  manifest_files=(state.tsv)
+  for name in operator sudoers sshd REVISION SHA256SUMS; do
+    [[ -f $name ]] && manifest_files+=("$name")
+  done
+  sha256sum "${manifest_files[@]}" >BACKUP-SHA256SUMS
+)
+chmod 0600 "$backup/BACKUP-SHA256SUMS"
+printf 'BACKUP_FORMAT=server-b-telephony-safety-v2\n' >"$backup/COMPLETE"
+chmod 0400 "$backup/COMPLETE"
 
 stage=$(mktemp -d /root/codestra-server-b-telephony-safety-stage.XXXXXX)
-trap 'chmod -R u+rwX "$stage" 2>/dev/null || true; rm -rf -- "$stage"' EXIT
+install -d -o root -g root -m 0755 /etc/codestra/server-b-telephony-safety
+operator_tmp=$(mktemp /usr/local/sbin/.codestra-server-b-telephony-safety.XXXXXXXXXXXX)
+sudoers_tmp=$(mktemp /etc/sudoers.d/.codestra-server-b-telephony-safety.XXXXXXXXXXXX)
+sshd_tmp=$(mktemp /etc/ssh/sshd_config.d/.61-codestra-server-b-telephony-safety.XXXXXXXXXXXX)
+revision_tmp=$(mktemp /etc/codestra/server-b-telephony-safety/.REVISION.XXXXXXXXXXXX)
+checksums_tmp=$(mktemp /etc/codestra/server-b-telephony-safety/.SHA256SUMS.XXXXXXXXXXXX)
+cleanup() {
+  chmod -R u+rwX "$stage" 2>/dev/null || true
+  rm -rf -- "$stage"
+  rm -f -- "$operator_tmp" "$sudoers_tmp" "$sshd_tmp" "$revision_tmp" "$checksums_tmp"
+}
+trap cleanup EXIT
 install -o root -g root -m 0750 "$payload" "$stage/operator"
 install -o root -g root -m 0440 "$sudoers_source" "$stage/sudoers"
 install -o root -g root -m 0644 "$sshd_source" "$stage/sshd"
@@ -57,17 +93,16 @@ chmod 0444 "$stage/REVISION"
 chmod 0444 "$stage/SHA256SUMS"
 visudo -cf "$stage/sudoers" >/dev/null
 
-install -d -o root -g root -m 0755 /etc/codestra/server-b-telephony-safety
-install -o root -g root -m 0750 "$stage/operator" /usr/local/sbin/.codestra-server-b-telephony-safety.new
-install -o root -g root -m 0440 "$stage/sudoers" /etc/sudoers.d/.codestra-server-b-telephony-safety.new
-install -o root -g root -m 0644 "$stage/sshd" /etc/ssh/sshd_config.d/.61-codestra-server-b-telephony-safety.conf.new
-install -o root -g root -m 0444 "$stage/REVISION" /etc/codestra/server-b-telephony-safety/.REVISION.new
-install -o root -g root -m 0444 "$stage/SHA256SUMS" /etc/codestra/server-b-telephony-safety/.SHA256SUMS.new
-mv -f /usr/local/sbin/.codestra-server-b-telephony-safety.new /usr/local/sbin/codestra-server-b-telephony-safety
-mv -f /etc/sudoers.d/.codestra-server-b-telephony-safety.new /etc/sudoers.d/codestra-server-b-telephony-safety
-mv -f /etc/ssh/sshd_config.d/.61-codestra-server-b-telephony-safety.conf.new /etc/ssh/sshd_config.d/61-codestra-server-b-telephony-safety.conf
-mv -f /etc/codestra/server-b-telephony-safety/.REVISION.new /etc/codestra/server-b-telephony-safety/REVISION
-mv -f /etc/codestra/server-b-telephony-safety/.SHA256SUMS.new /etc/codestra/server-b-telephony-safety/SHA256SUMS
+install -o root -g root -m 0750 "$stage/operator" "$operator_tmp"
+install -o root -g root -m 0440 "$stage/sudoers" "$sudoers_tmp"
+install -o root -g root -m 0644 "$stage/sshd" "$sshd_tmp"
+install -o root -g root -m 0444 "$stage/REVISION" "$revision_tmp"
+install -o root -g root -m 0444 "$stage/SHA256SUMS" "$checksums_tmp"
+mv -f "$operator_tmp" /usr/local/sbin/codestra-server-b-telephony-safety
+mv -f "$sudoers_tmp" /etc/sudoers.d/codestra-server-b-telephony-safety
+mv -f "$sshd_tmp" /etc/ssh/sshd_config.d/61-codestra-server-b-telephony-safety.conf
+mv -f "$revision_tmp" /etc/codestra/server-b-telephony-safety/REVISION
+mv -f "$checksums_tmp" /etc/codestra/server-b-telephony-safety/SHA256SUMS
 visudo -cf /etc/sudoers >/dev/null
 sshd -t
 sha256sum -c /etc/codestra/server-b-telephony-safety/SHA256SUMS >/dev/null
