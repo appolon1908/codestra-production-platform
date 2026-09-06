@@ -4,7 +4,5 @@ services:
       LIVE_SMS_DELIVERY: "false"
       LIVE_EMAIL_DELIVERY: "false"
       LIVE_PSTN_DIALING: "false"
-    volumes:
-      - /opt/codestra/safety/live-delivery-admission.sh:/usr/local/bin/live-delivery-admission:ro
-    entrypoint: ["/usr/local/bin/live-delivery-admission"]
-    command: ["python", "-m", "email_reseller_service.server"]
+    entrypoint: ["/opt/venv/bin/python", "-m", "email_reseller_service.admission"]
+    command: ["/opt/venv/bin/python", "-m", "email_reseller_service.server"]

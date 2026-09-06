@@ -12,16 +12,23 @@ on:
       - deploy/mail-platform/**
       - deploy/reseller-portal/**
       - .github/workflows/immutable-candidate-build.yml
+      - tests/test_immutable_candidate_supply_chain.py
   push:
     branches: [release/production-activation]
 
 permissions:
   contents: read
   packages: write
+  id-token: write
+
+concurrency:
+  group: immutable-candidate-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -35,8 +42,26 @@ jobs:
           - component: reseller-portal
             dockerfile: deploy/reseller-portal/Dockerfile
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Check out exact workflow source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove source identity and derive deterministic metadata
+        id: source
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          created="$(git show -s --format=%cI HEAD)"
+          test -n "$created"
+          echo "created=$created" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
       - name: Build local security candidate
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
@@ -49,22 +74,34 @@ jobs:
             VCS_REF=${{ github.sha }}
             SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
             VERSION=${{ github.sha }}
-            BUILD_CREATED=${{ github.event.head_commit.timestamp }}
+            BUILD_CREATED=${{ steps.source.outputs.created }}
           provenance: false
           sbom: false
-      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+
+      - name: Reject fixable HIGH or CRITICAL findings before publication
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: local/${{ matrix.component }}:${{ github.sha }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+
+      - name: Log in to GHCR
         if: github.event_name == 'push'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: build
+
+      - name: Install checksum-verified Cosign
+        if: github.event_name == 'push'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v3.0.6
+
+      - name: Publish exact-source image with SBOM and provenance
+        id: build
         if: github.event_name == 'push'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
@@ -76,32 +113,117 @@ jobs:
             VCS_REF=${{ github.sha }}
             SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
             VERSION=${{ github.sha }}
-            BUILD_CREATED=${{ github.event.head_commit.timestamp }}
+            BUILD_CREATED=${{ steps.source.outputs.created }}
           provenance: mode=max
           sbom: true
-      - name: Verify immutable candidate evidence
+
+      - name: Sign and verify the exact registry digest
         if: github.event_name == 'push'
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.component }}@${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          COMPONENT: ${{ matrix.component }}
         run: |
-          set -euo pipefail
-          docker buildx imagetools inspect "$IMAGE" --format '{{ json .SBOM }}' > sbom.json
-          docker buildx imagetools inspect "$IMAGE" --format '{{ json .Provenance }}' > provenance.json
-          jq -e 'type == "object" and length > 0' sbom.json >/dev/null
-          jq -e 'type == "object" and length > 0' provenance.json >/dev/null
-          docker pull "$IMAGE"
-          docker image inspect "$IMAGE" --format '{{ json .Config.Labels }}' > labels.json
-          jq -e --arg source "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" --arg sha "${GITHUB_SHA}" '
-            .["org.opencontainers.image.source"] == $source and
-            .["org.opencontainers.image.revision"] == $sha and
-            .["org.opencontainers.image.version"] == $sha
-          ' labels.json >/dev/null
-          printf '%s\n' "SOURCE_SHA=${GITHUB_SHA}" "IMAGE_DIGEST=${{ steps.build.outputs.digest }}" \
-            "SBOM=PASS" "PROVENANCE=PASS" "VULNERABILITY_GATE=PASS" \
-            "OCI_SOURCE=PASS" "OCI_REVISION=PASS" "OCI_VERSION=PASS" \
-            > candidate-${{ matrix.component }}.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          set -Eeuo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          image_repository="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${COMPONENT}"
+          image="${image_repository}@${DIGEST}"
+          workflow_identity="${GITHUB_SERVER_URL}/${GITHUB_WORKFLOW_REF}"
+          issuer="https://token.actions.githubusercontent.com"
+          evidence="candidate-evidence/${COMPONENT}"
+          install -m 0700 -d "$evidence"
+
+          cosign sign --yes "$image"
+          cosign verify \
+            --output=json \
+            --certificate-identity "$workflow_identity" \
+            --certificate-oidc-issuer "$issuer" \
+            "$image" > "$evidence/signature-verification.json"
+          jq -e 'type == "array" and length > 0' "$evidence/signature-verification.json" >/dev/null
+
+          docker buildx imagetools inspect "$image" --format '{{ json .SBOM }}' > "$evidence/sbom.json"
+          docker buildx imagetools inspect "$image" --format '{{ json .Provenance }}' > "$evidence/provenance.json"
+          jq -e 'type == "object" and length > 0' "$evidence/sbom.json" >/dev/null
+          jq -e 'type == "object" and length > 0' "$evidence/provenance.json" >/dev/null
+
+          docker pull "$image"
+          docker image inspect "$image" --format '{{ json .Config.Labels }}' > "$evidence/labels.json"
+          jq -e \
+            --arg source "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --arg sha "$GITHUB_SHA" '
+              .["org.opencontainers.image.source"] == $source and
+              .["org.opencontainers.image.revision"] == $sha and
+              .["org.opencontainers.image.version"] == $sha
+            ' "$evidence/labels.json" >/dev/null
+
+          export IMAGE_REPOSITORY="$image_repository" IMAGE="$image" WORKFLOW_IDENTITY="$workflow_identity" OIDC_ISSUER="$issuer"
+          python3 - "$evidence/candidate.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          output = sys.argv[1]
+          record = {
+              "schema_version": "codestra.immutable-candidate-evidence.v2",
+              "component": os.environ["COMPONENT"],
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "source_sha": os.environ["GITHUB_SHA"],
+              "image_repository": os.environ["IMAGE_REPOSITORY"],
+              "image_digest": os.environ["DIGEST"],
+              "image": os.environ["IMAGE"],
+              "workflow": os.environ["GITHUB_WORKFLOW_REF"],
+              "workflow_identity": os.environ["WORKFLOW_IDENTITY"],
+              "oidc_issuer": os.environ["OIDC_ISSUER"],
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "evidence": {
+                  "signature": "PASS",
+                  "sbom": "PASS",
+                  "provenance": "PASS",
+                  "vulnerability_gate": "PASS",
+                  "oci_source": "PASS",
+                  "oci_revision": "PASS",
+                  "oci_version": "PASS",
+              },
+              "deployment_authorized": False,
+              "production_certified": False,
+          }
+          with open(output, "w", encoding="utf-8") as handle:
+              json.dump(record, handle, indent=2, sort_keys=True)
+              handle.write("\n")
+          PY
+          python3 -m json.tool "$evidence/candidate.json" >/dev/null
+          printf '%s\n' \
+            "SOURCE_SHA=${GITHUB_SHA}" \
+            "IMAGE=${image}" \
+            "IMAGE_DIGEST=${DIGEST}" \
+            "SIGNATURE=PASS" \
+            "SBOM=PASS" \
+            "PROVENANCE=PASS" \
+            "VULNERABILITY_GATE=PASS" \
+            "OCI_SOURCE=PASS" \
+            "OCI_REVISION=PASS" \
+            "OCI_VERSION=PASS" \
+            "DEPLOYMENT_AUTHORIZED=NO" \
+            "PRODUCTION_CERTIFIED=NO" \
+            > "$evidence/candidate-${COMPONENT}.txt"
+          (
+            cd "$evidence"
+            sha256sum \
+              candidate.json \
+              candidate-${COMPONENT}.txt \
+              labels.json \
+              provenance.json \
+              sbom.json \
+              signature-verification.json \
+              > SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+
+      - name: Upload immutable candidate evidence
         if: github.event_name == 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: candidate-${{ matrix.component }}
-          path: candidate-${{ matrix.component }}.txt
+          name: candidate-${{ matrix.component }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate-evidence/${{ matrix.component }}/
+          if-no-files-found: error
+          retention-days: 90
