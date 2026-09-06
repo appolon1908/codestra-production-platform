@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import hashlib
 import io
 import json
@@ -27,6 +28,7 @@ RULE_TARGET = Path("/etc/audit/rules.d") / RULE_NAME
 AGGREGATE_TARGET = Path("/etc/audit/audit.rules")
 STATE_ROOT = Path("/var/lib/codestra/host-auditd")
 INSTALLATION_RECORD = STATE_ROOT / "installation.json"
+MUTATION_LOCK = Path("/run/lock/codestra-provider-host-auditd.lock")
 BACKUP_ROOT = Path("/var/backups/codestra-operations/host-auditd")
 VALIDATOR_TARGET = Path("/usr/local/sbin/validate-codestra-provider-host-auditd")
 VALIDATOR_LAUNCHER_TARGET = Path(
@@ -92,6 +94,30 @@ ROLLBACK_MUTATION_SCOPE = (
 
 class InstallError(RuntimeError):
     pass
+
+
+class mutation_lock:
+    """Serialize the complete install or rollback transaction on this host."""
+
+    def __enter__(self) -> "mutation_lock":
+        flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        self.fd = os.open(MUTATION_LOCK, flags, 0o600)
+        info = os.fstat(self.fd)
+        if not stat.S_ISREG(info.st_mode):
+            os.close(self.fd)
+            raise InstallError("host-auditd mutation lock type rejected")
+        if info.st_uid != 0 or info.st_gid != 0:
+            os.close(self.fd)
+            raise InstallError("host-auditd mutation lock ownership rejected")
+        os.fchmod(self.fd, 0o600)
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        fcntl.flock(self.fd, fcntl.LOCK_UN)
+        os.close(self.fd)
 
 
 def utc_now() -> dt.datetime:
@@ -1325,6 +1351,14 @@ def restore_checkpoint(
             raise InstallError("rollback manifest file entry rejected")
         restore_file(item, checkpoint)
     run_checked([str(COMMANDS["augenrules"]), "--load"])
+    # augenrules materializes the aggregate even when it was absent before the
+    # transaction. Preserve the authenticated checkpoint's absent-state contract
+    # after loading the restored rules into the kernel.
+    aggregate_record = next(
+        item for item in items if item.get("path") == str(AGGREGATE_TARGET)
+    )
+    if aggregate_record.get("present") is False:
+        restore_file(aggregate_record, checkpoint)
     before = record["service_before"]
     if not isinstance(before, dict):
         raise InstallError("rollback service state rejected")
@@ -1403,7 +1437,7 @@ def validate_installation_record(
     return record
 
 
-def install(args: argparse.Namespace) -> dict[str, object]:
+def _install_locked(args: argparse.Namespace) -> dict[str, object]:
     require_prerequisites()
     if not SHA_RE.fullmatch(args.source_sha):
         raise InstallError("source SHA rejected")
@@ -1434,9 +1468,14 @@ def install(args: argparse.Namespace) -> dict[str, object]:
                 and checked_regular(VALIDATOR_LAUNCHER_TARGET) == launcher_bytes
             ):
                 live = validate_live(rule_bytes, validator_bytes, launcher_bytes)
-                return validate_installation_record(
+                validated = validate_installation_record(
                     existing_record, args, release_binding, live
                 )
+                rollback_stamp = str(validated["rollback_stamp"])
+                validate_rollback_checkpoint(
+                    BACKUP_ROOT / rollback_stamp, args.source_sha, rollback_stamp
+                )
+                return validated
         if status_before["enabled"] == 2:
             raise InstallError("immutable kernel audit policy blocks this exact change")
         before = service_state()
@@ -1476,7 +1515,12 @@ def install(args: argparse.Namespace) -> dict[str, object]:
         shutil.rmtree(stage)
 
 
-def rollback(args: argparse.Namespace) -> dict[str, object]:
+def install(args: argparse.Namespace) -> dict[str, object]:
+    with mutation_lock():
+        return _install_locked(args)
+
+
+def _rollback_locked(args: argparse.Namespace) -> dict[str, object]:
     require_prerequisites()
     if not SHA_RE.fullmatch(args.expected_source_sha) or not STAMP_RE.fullmatch(args.backup_stamp):
         raise InstallError("rollback identity rejected")
@@ -1505,6 +1549,11 @@ def rollback(args: argparse.Namespace) -> dict[str, object]:
     if persisted is None or persisted != result:
         raise InstallError("rollback completion durable read-back mismatch")
     return persisted
+
+
+def rollback(args: argparse.Namespace) -> dict[str, object]:
+    with mutation_lock():
+        return _rollback_locked(args)
 
 
 def parser() -> argparse.ArgumentParser:

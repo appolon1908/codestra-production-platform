@@ -314,6 +314,28 @@ def operator_cannot_modify(paths: list[Path]) -> bool:
     return True
 
 
+def require_root_release_trust() -> None:
+    """Require the independently provisioned release trust to remain root-owned."""
+
+    for path, expected_kind, expected_mode in (
+        (RELEASE_TRUST_ROOT, stat.S_ISDIR, 0o755),
+        (ALLOWED_SIGNERS_AUTHORITY, stat.S_ISREG, 0o600),
+        (SIGNER_FINGERPRINT_AUTHORITY, stat.S_ISREG, 0o600),
+    ):
+        try:
+            info = path.lstat()
+        except OSError as exc:
+            raise ValidationError("release trust authority unavailable") from exc
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not expected_kind(info.st_mode)
+            or info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) != expected_mode
+        ):
+            raise ValidationError("release trust authority metadata rejected")
+
+
 def path_authority_chain(paths: list[Path]) -> list[Path]:
     authorities: set[Path] = set()
     for path in paths:
@@ -410,6 +432,7 @@ def validate(expected_source_sha: str) -> dict[str, object]:
         raise ValidationError("validator must run as root")
     if not SHA_RE.fullmatch(expected_source_sha):
         raise ValidationError("expected source SHA rejected")
+    require_root_release_trust()
     command_identities = command_runtime_identities()
     installed, rule_sha, validator_sha, launcher_sha = installed_release_binding(
         expected_source_sha

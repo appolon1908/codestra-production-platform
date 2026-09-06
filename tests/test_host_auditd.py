@@ -780,6 +780,64 @@ def test_idempotent_install_requires_complete_canonical_record() -> None:
         INSTALLER.validate_installation_record(missing, args, release, live)
 
 
+def test_install_and_rollback_hold_one_host_wide_mutation_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class FakeLock:
+        def __enter__(self):
+            events.append("locked")
+
+        def __exit__(self, *args):
+            events.append("unlocked")
+
+    monkeypatch.setattr(INSTALLER, "mutation_lock", FakeLock)
+    monkeypatch.setattr(
+        INSTALLER, "_install_locked", lambda args: events.append("install") or {}
+    )
+    monkeypatch.setattr(
+        INSTALLER, "_rollback_locked", lambda args: events.append("rollback") or {}
+    )
+    INSTALLER.install(argparse.Namespace())
+    INSTALLER.rollback(argparse.Namespace())
+    assert events == [
+        "locked",
+        "install",
+        "unlocked",
+        "locked",
+        "rollback",
+        "unlocked",
+    ]
+
+
+def test_idempotent_install_authenticates_recorded_checkpoint() -> None:
+    source = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    idempotent = source.index("validated = validate_installation_record(")
+    authenticate = source.index("validate_rollback_checkpoint(", idempotent)
+    returned = source.index("return validated", authenticate)
+    assert idempotent < authenticate < returned
+
+
+def test_absent_aggregate_is_removed_after_augenrules_load() -> None:
+    source = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    restore = source.index("def restore_checkpoint(")
+    load = source.index('run_checked([str(COMMANDS["augenrules"]), "--load"])', restore)
+    absent = source.index('aggregate_record.get("present") is False', load)
+    remove_generated = source.index("restore_file(aggregate_record, checkpoint)", absent)
+    assert restore < load < absent < remove_generated
+
+
+def test_validator_requires_exact_root_owned_release_trust() -> None:
+    source = (PACKAGE / "validate-provider-host-auditd.py").read_text()
+    trust = source.index("def require_root_release_trust()")
+    validation = source.index("def validate(expected_source_sha", trust)
+    assert "info.st_uid != 0" in source[trust:validation]
+    assert "info.st_gid != 0" in source[trust:validation]
+    assert "stat.S_IMODE(info.st_mode) != expected_mode" in source[trust:validation]
+    assert "require_root_release_trust()" in source[validation:]
+
+
 def test_rollback_revalidates_restored_files_and_service_before_completion(
     tmp_path,
 ) -> None:
