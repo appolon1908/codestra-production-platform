@@ -1,0 +1,13 @@
+{
+  "assessment_path": "/home/codestra-admin/artifacts/server-a-to-server-b-safety-20260906T104700Z/ASSESSMENT.md",
+  "assessment_sha256": "09faa2857018a371caaed21b9be0a08a595d74f9b789c72095e688b191ae8f87",
+  "assessment_sha256_source": "locally-computed",
+  "ssh_public_key_fingerprint": "SHA256:FRFAFnBFu0byTW5WEx5n98xT4fpl/VkDjI/obQ6fygU",
+  "ssh_public_key_fingerprint_source": "local-assessment-and-independent-key-derivation",
+  "candidate_reviewed": "404dca3262ef1d4359bb0f23aab95ba061ffe407",
+  "protected_base": "d1766e6d61ba26793313059f9017fdbe56ab4d24",
+  "production_changed": false,
+  "server_b_changed": false,
+  "calling_enabled": false,
+  "external_delivery_enabled": false
+}

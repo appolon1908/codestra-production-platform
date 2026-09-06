@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <record id="rule_call_followup_agent" model="ir.rule">
+            <field name="name">Call follow-up: assigned agent only</field>
+            <field name="model_id" ref="model_codestra_crm_call_followup"/>
+            <field name="groups" eval="[(4, ref('group_call_followup_user'))]"/>
+            <field name="domain_force">['&amp;', ('company_id', 'in', company_ids), ('agent_id', '=', user.id)]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <record id="rule_call_followup_manager" model="ir.rule">
+            <field name="name">Call follow-up: manager company scope</field>
+            <field name="model_id" ref="model_codestra_crm_call_followup"/>
+            <field name="groups" eval="[(4, ref('group_call_followup_manager'))]"/>
+            <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+    </data>
+</odoo>

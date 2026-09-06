@@ -40,7 +40,7 @@ systems:
     interfaces: [rest, webhook, event_bus, admin_api]
     database_owner: middleware-db
     allowed_callers: [kong, odoo, n8n, klyrow, telnexa, vicidial]
-    allowed_targets: [middleware-db, keycloak, odoo, n8n, klyrow, telnexa, vicidial, nats, redis]
+    allowed_targets: [middleware-db, keycloak, odoo, n8n, klyrow, telnexa, vicidial, websocket, nats, redis]
   odoo:
     class: business_system_of_record
     owner: business-applications
@@ -132,6 +132,19 @@ systems:
     allowed_callers: [middleware]
     allowed_targets: [middleware, vicidial-db]
     forbidden_targets: [odoo, odoo-db]
+  websocket:
+    class: realtime_gateway
+    owner: realtime-platform
+    host: server-a
+    private_address: codestra-agent-realtime:8080
+    public_address: https://api.codestra.co/ws/agent
+    business_role: authorized_agent_event_transport
+    data_owner: realtime-platform
+    interfaces: [websocket, health, metrics, nats_jetstream]
+    database_owner: none
+    allowed_callers: [middleware]
+    allowed_targets: [middleware, nats]
+    forbidden_targets: [odoo-db, middleware-db, vicidial, vicidial-db]
   nats:
     class: event_bus
     owner: middleware-platform
@@ -142,7 +155,7 @@ systems:
     data_owner: middleware-platform
     interfaces: [nats]
     database_owner: none
-    allowed_callers: [middleware]
+    allowed_callers: [middleware, websocket]
     allowed_targets: []
   redis:
     class: ephemeral_state
@@ -163,6 +176,7 @@ service_accounts:
   klyrow-provider-service: {system: klyrow, scopes: [email.event.submit]}
   telnexa-provider-service: {system: telnexa, scopes: [sms.event.submit]}
   vicidial-event-service: {system: vicidial, scopes: [voice.event.submit]}
+  websocket-event-subscriber: {system: websocket, scopes: [realtime.events.read, realtime.ticket.consume]}
   webhook-dispatch-service: {system: middleware, scopes: [webhook.dispatch]}
 
 source_scan:

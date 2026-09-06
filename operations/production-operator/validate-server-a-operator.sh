@@ -9,6 +9,13 @@ test "$(stat -c '%U:%G %a' /etc/sudoers.d/codestra-production-operator)" = 'root
 test "$(stat -c '%U:%G %a' /etc/ssh/sshd_config.d/60-codestra-production-operator.conf)" = 'root:root 644'
 test "$(stat -c '%U:%G %a' /etc/codestra/production-operator/release.json)" = 'root:root 644'
 test "$(stat -c '%U:%G %a' /etc/codestra/production-operator/maintenance-date)" = 'root:root 600'
+test "$(stat -c '%U:%G %a' /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh)" = 'root:root 755'
+test "$(stat -c '%U:%G %a' /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf)" = 'root:root 644'
+effective_restore_exec=$(systemctl show codestra-readiness-restore.service -p ExecStart --value)
+test "$(printf '%s\n' "$effective_restore_exec" | wc -l)" -eq 1
+printf '%s\n' "$effective_restore_exec" | grep -F \
+  'path=/opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh ; argv[]=/opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh ;' \
+  >/dev/null
 test "$(stat -c '%U:%G %a' /var/lib/codestra-production-operator)" = \
   'root:codestra-production-operator 710'
 test "$(stat -c '%U:%G %a' /var/lib/codestra-production-operator/.ssh)" = \
@@ -21,6 +28,7 @@ sha256sum --check --strict /etc/codestra/production-operator/installed.sha256 >/
 visudo -cf /etc/sudoers.d/codestra-production-operator >/dev/null
 sshd -t
 sh -n /usr/local/libexec/codestra-production-forced-command
+bash -n /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh
 python3 -c 'compile(open("/usr/local/sbin/codestra-production-operator", encoding="utf-8").read(), "/usr/local/sbin/codestra-production-operator", "exec")'
 if grep -Eq 'NOPASSWD:[[:space:]]*ALL|ALL[[:space:]]*=[[:space:]]*\(ALL' \
   /etc/sudoers.d/codestra-production-operator; then

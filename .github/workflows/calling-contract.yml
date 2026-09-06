@@ -1,0 +1,91 @@
+name: Calling contract validation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/calling-contract.yml"
+      - "contracts/telephony/**"
+      - "schemas/integration-event-envelope-v1.schema.json"
+      - "evidence/calling/CALLING-CONTRACT-DIGESTS.json"
+      - "config/integration-policy.yaml"
+      - "config/integration-registries.yaml"
+      - "operations/caddy/api.codestra.co.caddy"
+      - "scripts/telephony-contract-digest.sh"
+      - "tests/test_calling_contract_digest.py"
+      - "tests/test_canonical_caddy_api_contract.py"
+  push:
+    branches: ["release/production-activation"]
+    paths:
+      - ".github/workflows/calling-contract.yml"
+      - "contracts/telephony/**"
+      - "schemas/integration-event-envelope-v1.schema.json"
+      - "evidence/calling/CALLING-CONTRACT-DIGESTS.json"
+      - "config/integration-policy.yaml"
+      - "config/integration-registries.yaml"
+      - "operations/caddy/api.codestra.co.caddy"
+      - "scripts/telephony-contract-digest.sh"
+      - "tests/test_calling_contract_digest.py"
+      - "tests/test_canonical_caddy_api_contract.py"
+
+permissions:
+  contents: read
+
+jobs:
+  calling-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Install contract validation dependencies
+        run: python -m pip install --disable-pip-version-check "PyYAML==6.0.2" "pytest==8.4.1"
+
+      - name: Verify canonical digest and fail-closed type
+        run: |
+          set -Eeuo pipefail
+          actual="$(scripts/telephony-contract-digest.sh)"
+          expected="$(jq -er '.canonical_digest | select(type == "string" and test("^[a-f0-9]{64}$"))' evidence/calling/CALLING-CONTRACT-DIGESTS.json)"
+          jq -e '.external_effects_enabled == false and (.external_effects_enabled | type) == "boolean"' evidence/calling/CALLING-CONTRACT-DIGESTS.json >/dev/null
+          printf 'canonical_digest=%s\n' "$actual"
+          test "$actual" = "$expected"
+
+      - name: Validate cross-contract semantics
+        run: python -m pytest -q tests/test_calling_contract_digest.py
+
+      - name: Validate Git whitespace
+        run: git diff --check
+
+      - name: Upload exact secret-free contract source bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: calling-contract-source-${{ env.EXPECTED_SHA }}
+          path: |
+            .github/workflows/calling-contract.yml
+            .github/workflows/platform-source-gate.yml
+            .gitleaksignore
+            contracts/telephony/codestra-calling-api.v1.openapi.yaml
+            contracts/telephony/codestra-calling-ecosystem.v1.yaml
+            contracts/telephony/codestra-calling-events.v1.asyncapi.yaml
+            schemas/integration-event-envelope-v1.schema.json
+            evidence/calling/CALLING-CONTRACT-DIGESTS.json
+            config/integration-policy.yaml
+            config/integration-registries.yaml
+            operations/caddy/api.codestra.co.caddy
+            scripts/telephony-contract-digest.sh
+            tests/test_calling_contract_digest.py
+            tests/test_canonical_caddy_api_contract.py
+          if-no-files-found: error
+          retention-days: 30

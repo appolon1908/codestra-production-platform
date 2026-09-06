@@ -43,6 +43,16 @@ def test_outbound_safe_mode_requires_every_production_gate(monkeypatch):
     assert server.production_delivery_enabled() is True
 
 
+def test_email_delivery_is_reported_independently(monkeypatch):
+    monkeypatch.setenv("CONTROL_PLANE_OUTBOUND_ENABLED", "true")
+    monkeypatch.setenv("CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED", "true")
+    monkeypatch.setenv("LIVE_EMAIL_DELIVERY", "true")
+    monkeypatch.setenv("TELNEXA_MODE", "simulator")
+    monkeypatch.setenv("KLYROW_MODE", "production")
+    assert server.production_delivery_enabled() is False
+    assert server.email_delivery_enabled() is True
+
+
 def test_admin_system_routes_are_platform_admin_only():
     source = open(server.__file__, encoding="utf-8").read()
     for path in (

@@ -3,6 +3,8 @@ set -euo pipefail
 umask 077
 
 backup_root=/opt/codestra/backups/production-readiness-local
+retention_count=${CODESTRA_READINESS_BACKUP_RETENTION_COUNT:-7}
+[[ "$retention_count" =~ ^[0-9]+$ ]] && (( retention_count >= 3 ))
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 work_dir="${backup_root}/.work-${stamp}"
 final_dir="${backup_root}/${stamp}"
@@ -233,4 +235,22 @@ printf 'BACKUP_STATUS=PASS\nBACKUP_TIMESTAMP=%s\nBACKUP_DIRECTORY=%s\nPRODUCTION
 (cd "$final_dir" && sha256sum "codestra-${stamp}.tar.gz.gpg" SHA256SUMS STATUS.txt > EVIDENCE-SHA256SUMS && sha256sum -c EVIDENCE-SHA256SUMS)
 printf '%s\n' "$stamp" > "$backup_root/.LAST_SUCCESS-${stamp}"
 mv "$backup_root/.LAST_SUCCESS-${stamp}" "$backup_root/LAST_SUCCESS"
+
+# Retain only verified successful snapshots. Incomplete attempts and the active
+# snapshot are never selected by this cleanup.
+mapfile -t successful_backups < <(
+    find "$backup_root" -mindepth 1 -maxdepth 1 -type d -name '20*T*Z' -print |
+        sort |
+        while IFS= read -r directory; do
+            grep -qx 'BACKUP_STATUS=PASS' "$directory/STATUS.txt" 2>/dev/null &&
+                (cd "$directory" && sha256sum -c EVIDENCE-SHA256SUMS >/dev/null 2>&1) &&
+                printf '%s\n' "$directory"
+        done
+)
+while (( ${#successful_backups[@]} > retention_count )); do
+    oldest=${successful_backups[0]}
+    [[ "$oldest" != "$final_dir" && "$oldest" == "$backup_root"/20*T*Z ]]
+    find "$oldest" -depth -delete
+    successful_backups=("${successful_backups[@]:1}")
+done
 printf '%s\n' "$final_dir"

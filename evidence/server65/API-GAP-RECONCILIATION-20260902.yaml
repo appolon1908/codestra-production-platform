@@ -1,0 +1,116 @@
+schema_version: "1.0"
+server: 65.109.65.169
+captured_at: "2026-09-02"
+change_scope: READ_ONLY_EVIDENCE
+production_changed: false
+
+baseline:
+  inventory_file: server-65.109.65.169-api-inventory.md
+  inventory_sha256: 819eb3d29158e8ea05a1200ccb0fb55fdaa38c6645fa0393289ee60f111f21d0
+  completion_matrix_file: SERVER-65-API-COMPLETION-MATRIX.yaml
+  completion_matrix_sha256: 2115fbff00a3bb6dc145b572b1a7b4aa1547c22ed16542021b8acc1f1706e8d2
+  endpoint_records: 641
+  record_classification_counts:
+    REQUIRED_LIVE: 79
+    IMPLEMENTED_NOT_DEPLOYED: 0
+    DOCUMENTED_MISSING: 0
+    BROKEN: 1
+    LEGACY_COMPATIBILITY: 4
+    INTERNAL_ONLY: 557
+    N/A: 0
+  note: >-
+    The two absent required contracts are kept in the matrix required-gap
+    register rather than counted among the 641 runtime-derived records. The
+    third gap is the BROKEN live Kong record ep-0577.
+
+required_gaps:
+  - method: GET
+    path: /v1/integrations/n8n/operations
+    source_record: ep-0577
+    current_state: BROKEN
+    runtime_evidence: >-
+      The live Kong route exists, but its deployed upstream OpenAPI exposes
+      only the item lookup contract.
+    candidate_state: IMPLEMENTED_NOT_DEPLOYED
+  - method: POST
+    path: /v1/integrations/n8n/operations/{id}/cancel
+    source_record: REQUIRED_GAP_REGISTER
+    current_state: IMPLEMENTED_NOT_DEPLOYED
+    runtime_evidence: absent from deployed runtime OpenAPI
+    candidate_state: IMPLEMENTED_NOT_DEPLOYED
+  - method: POST
+    path: /v1/integrations/n8n/operations/{id}/reconcile
+    source_record: REQUIRED_GAP_REGISTER
+    current_state: IMPLEMENTED_NOT_DEPLOYED
+    runtime_evidence: absent from deployed runtime OpenAPI
+    candidate_state: IMPLEMENTED_NOT_DEPLOYED
+
+candidate:
+  source_repository: https://github.com/appolon1908-hue/Middleware-
+  source_sha: f3437709c06747249586598590145234ea2c7327
+  image: ghcr.io/appolon1908-hue/codestra-middleware@sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484
+  migration_head: 0006_outbox_attempt_events
+  runtime_profile: codestra-middleware-production-compose-v1
+  database: codestra_middleware_appolon
+  database_role: appolon_middleware_api
+  deployment_state: ISOLATED_DATABASE_REVIEW_REQUIRED
+  external_effects_enabled: false
+  authority_classification: TRANSITIONAL_RUNTIME_NOT_CONTROL_PLANE_AUTHORITY
+  promotion_decision: DO_NOT_PROMOTE_AS_CANONICAL_MIDDLEWARE
+
+canonical_convergence:
+  source_repository: https://github.com/Codestra-SRL/codestra-middleware
+  pull_request: https://github.com/Codestra-SRL/codestra-middleware/pull/283
+  signed_head_sha: e48ec614a2da680802ee106e271b52f3006e72dc
+  source_state: IMPLEMENTED_PENDING_EXACT_HEAD_CI
+  routes:
+    - GET /v1/integrations/n8n/operations
+    - POST /v1/integrations/n8n/operations/{operation_id}/cancel
+    - POST /v1/integrations/n8n/operations/{operation_id}/reconcile
+  implementation_basis: existing durable N8nRuntimeExecution engine
+  local_validation:
+    ruff: PASS
+    mypy: PASS
+    pytest_passed: 1261
+    pytest_skipped: 33
+  controls:
+    keycloak_service_jwt: true
+    scope_enforcement: true
+    token_bound_tenant: true
+    idempotency_key_for_mutations: true
+    correlation_id: true
+    durable_control_evidence: true
+    audit: true
+    existing_worker_retry_timeout_policy_reused: true
+    ambiguous_downstream_state_fails_closed: true
+  exact_head_ci: BLOCKED
+  blocker: >-
+    Codestra-SRL organization Actions budget is zero with
+    prevent_further_usage enabled; push and pull_request events create only
+    zero-job BuildFailed startup_failure records.
+
+rollback:
+  previous_source_sha: f6748a58f8d2590520a4f28776770957061cdea1
+  previous_image_digest: sha256:695fa3ce3f50ba4d0ae0784976b946a0a683ca731155e4bd3bd9e90a4670b820
+  pre_migration_head: 0003_immutable_event_ledger
+  requires_verified_pre_migration_backup: true
+  requires_database_restore_before_image_rollback: true
+
+required_validation_after_protected_apply:
+  - exact_source_and_image_digest_readback
+  - isolated_backup_restore_and_one_shot_migration
+  - health_and_readiness
+  - runtime_openapi_contains_all_three_contracts
+  - authentication_tenant_and_scope_enforcement
+  - mutation_idempotency_and_correlation_id
+  - durable_operation_outbox_audit_and_reconciliation
+  - duplicate_command_has_no_duplicate_effect
+  - kong_route_upstream_and_contract_alignment
+  - rollback_rehearsal
+
+current_result:
+  missing_required_endpoints: 3
+  n8n_api_contract: IMPLEMENTED_NOT_DEPLOYED
+  openapi_parity: FAIL
+  kong_api_alignment: FAIL
+  production_apply_authorized: false

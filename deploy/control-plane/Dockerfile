@@ -13,8 +13,10 @@ RUN python -m venv /opt/venv \
 FROM ${CHAINGUARD_PYTHON_RUNTIME}
 ARG VCS_REF=unknown
 ARG BUILD_CREATED=unknown
+ARG VERSION=unknown
 LABEL org.opencontainers.image.source="https://github.com/appolon1908-hue/codestra-production-platform" \
       org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_CREATED}" \
       io.codestra.python.base.repository="cgr.dev/chainguard/python" \
       io.codestra.python.base.digest="sha256:1f6779775c9f466890da563e411cb677045a6c20b6a65160eefad1deffb5012c"

@@ -11,7 +11,7 @@ suffix="$(date -u +%Y%m%d%H%M%S)-$$"
 db_name="kong-restore-db-$suffix"
 gateway_name="kong-restore-gateway-$suffix"
 network_name="kong-restore-net-$suffix"
-network_subnet=10.254.45.0/28
+network_subnet=10.253.126.0/28
 volume_name="kong-restore-data-$suffix"
 mkdir -p /var/lib/codestra-kong-database "$evidence_root"
 chmod 0700 /var/lib/codestra-kong-database "$evidence_root"

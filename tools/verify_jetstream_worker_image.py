@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 IMAGE_RE = re.compile(
-    r"^ghcr[.]io/codestra-srl/codestra-middleware@sha256:[0-9a-f]{64}$"
+    r"^ghcr[.]io/appolon1908-hue/codestra-middleware@sha256:[0-9a-f]{64}$"
 )
 
 

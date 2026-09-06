@@ -1,0 +1,544 @@
+name: Klyrow production validator
+
+on:
+  pull_request:
+    branches: ["release/production-activation"]
+    paths:
+      - "operations/klyrow-production-validator/**"
+      - "tests/test_klyrow_production_validator.py"
+      - ".github/workflows/klyrow-production-validator.yml"
+  push:
+    branches: ["release/production-activation"]
+    paths:
+      - "operations/klyrow-production-validator/**"
+      - "tests/test_klyrow_production_validator.py"
+      - ".github/workflows/klyrow-production-validator.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPERATOR_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+concurrency:
+  group: klyrow-production-validator-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-operator:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ env.OPERATOR_SOURCE_SHA }}
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+
+      - name: Install fixed test tooling
+        run: python -m pip install "pytest==8.3.5" "pip-audit==2.9.0" "bandit==1.9.4"
+
+      - name: Compile and validate static contracts
+        run: |
+          test "$(git rev-parse HEAD)" = "${OPERATOR_SOURCE_SHA}"
+          python -m py_compile operations/klyrow-production-validator/*.py \
+            operations/klyrow-production-validator/klyrow-production-validator \
+            operations/klyrow-production-validator/klyrow-production-validator-root \
+            operations/klyrow-production-validator/klyrow-production-validator-actions \
+            operations/klyrow-production-validator/probe-*
+          python -m json.tool operations/klyrow-production-validator/command-contract.json >/dev/null
+          sudo visudo -cf operations/klyrow-production-validator/klyrow-production-validator.sudoers
+
+      - name: Run bounded-operator tests
+        run: python -m pytest -q tests/test_klyrow_production_validator.py
+
+      - name: Dependency vulnerability gate
+        run: python -m pip_audit --disable-pip --no-deps -r operations/klyrow-production-validator/requirements.lock
+
+      - name: Build deterministic candidate twice
+        run: |
+          python -I operations/klyrow-production-validator/build-operator-artifact.py \
+            --source-sha "${OPERATOR_SOURCE_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist-a
+          python -I operations/klyrow-production-validator/build-operator-artifact.py \
+            --source-sha "${OPERATOR_SOURCE_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist-b
+          cmp "dist-a/klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz" \
+            "dist-b/klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz"
+          cmp dist-a/SHA256SUMS dist-b/SHA256SUMS
+          (cd dist-a && sha256sum --check --strict SHA256SUMS)
+          test "$(python -c 'import json; print(json.load(open("dist-a/vulnerability-report.json"))["gate"])')" = PASS
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: klyrow-validator-candidate-${{ env.OPERATOR_SOURCE_SHA }}
+          path: dist-a/
+          if-no-files-found: error
+          retention-days: 30
+
+  build-protected-artifact:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release/production-activation'
+    needs: validate-operator
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          ref: ${{ env.OPERATOR_SOURCE_SHA }}
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+
+      - name: Install fixed source-security tooling
+        run: python -m pip install "bandit==1.9.4"
+
+      - name: Require protected exact SHA
+        run: test "$(git rev-parse HEAD)" = "${OPERATOR_SOURCE_SHA}"
+
+      - name: Build protected artifact
+        run: |
+          python -I operations/klyrow-production-validator/build-operator-artifact.py \
+            --source-sha "${OPERATOR_SOURCE_SHA}" --workflow-run "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" --output dist
+          (cd dist && sha256sum --check --strict SHA256SUMS)
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: klyrow-validator-unsigned-${{ env.OPERATOR_SOURCE_SHA }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-protected-artifact:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release/production-activation'
+    needs: build-protected-artifact
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: klyrow-validator-unsigned-${{ env.OPERATOR_SOURCE_SHA }}
+          path: dist
+
+      - name: Validate isolated signing payload
+        run: |
+          set -Eeuo pipefail
+          expected_files="$(printf '%s\n' \
+            "SHA256SUMS" \
+            "installation-manifest.json" \
+            "klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz" \
+            "provenance.json" \
+            "sbom.spdx.json" \
+            "vulnerability-report.json" | /usr/bin/sort)"
+          actual_files="$(/usr/bin/find dist -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | /usr/bin/sort)"
+          test "${actual_files}" = "${expected_files}"
+          test -z "$(/usr/bin/find dist -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          /usr/bin/python3 -I - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          root = Path("dist")
+          source_sha = os.environ["OPERATOR_SOURCE_SHA"]
+          archive_name = f"klyrow-production-validator-{source_sha}.tar.gz"
+          checksummed = {
+              archive_name,
+              "installation-manifest.json",
+              "provenance.json",
+              "sbom.spdx.json",
+              "vulnerability-report.json",
+          }
+          limits = {name: 2 * 1024 * 1024 for name in checksummed}
+          limits[archive_name] = 32 * 1024 * 1024
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          def digest_file(path):
+              value = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      value.update(chunk)
+              return value.hexdigest()
+
+          parsed = {}
+          for line in (root / "SHA256SUMS").read_text(encoding="ascii").splitlines():
+              match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9._-]+)", line)
+              require(match is not None, "checksum manifest syntax rejected")
+              require(match.group(2) not in parsed, "duplicate checksum member")
+              parsed[match.group(2)] = match.group(1)
+          require(set(parsed) == checksummed, "checksum manifest members rejected")
+          for name, expected in parsed.items():
+              path = root / name
+              require(path.stat().st_size <= limits[name], "signing payload too large")
+              require(digest_file(path) == expected, "signing payload checksum mismatch")
+
+          digest = parsed[archive_name]
+          manifest = json.loads((root / "installation-manifest.json").read_text())
+          provenance = json.loads((root / "provenance.json").read_text())
+          sbom = json.loads((root / "sbom.spdx.json").read_text())
+          vulnerability = json.loads((root / "vulnerability-report.json").read_text())
+          require(manifest["source_repository"] == "appolon1908-hue/codestra-production-platform", "repository mismatch")
+          require(manifest["source_sha"] == source_sha, "source SHA mismatch")
+          require(manifest["artifact"] == archive_name, "artifact name mismatch")
+          require(manifest["artifact_sha256"] == digest, "artifact digest mismatch")
+          require(manifest["application_runtime_mutations"] == 0, "runtime mutation declaration rejected")
+          require(provenance["subject"] == [{"name": archive_name, "digest": {"sha256": digest}}], "provenance subject mismatch")
+          definition = provenance["predicate"]["buildDefinition"]
+          require(definition["externalParameters"] == {"source_sha": source_sha}, "provenance parameter mismatch")
+          require(definition["resolvedDependencies"] == [{
+              "uri": "git+https://github.com/appolon1908-hue/codestra-production-platform",
+              "digest": {"gitCommit": source_sha},
+          }], "provenance dependency mismatch")
+          package = sbom["packages"]
+          require(len(package) == 1, "SBOM package count mismatch")
+          require(package[0]["versionInfo"] == source_sha, "SBOM source SHA mismatch")
+          require(package[0]["checksums"] == [{"algorithm": "SHA256", "checksumValue": digest}], "SBOM digest mismatch")
+          require(vulnerability["source_sha"] == source_sha, "scan source SHA mismatch")
+          require(vulnerability["gate"] == "PASS", "vulnerability gate failed")
+          require(vulnerability["high"] == 0, "high-severity finding present")
+          require(vulnerability["source_scan"]["scanner"] == "bandit", "scanner mismatch")
+          require(vulnerability["source_scan"]["scanner_version"] == "1.9.4", "scanner version mismatch")
+          require(vulnerability["source_scan"]["errors"] == 0, "scanner error present")
+          PY
+
+      - name: Sign and verify checksum authority
+        env:
+          SIGNING_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_KEY }}
+          SIGNING_PUBLIC_KEY: ${{ secrets.CODESTRA_RELEASE_SIGNING_PUBLIC_KEY }}
+        run: |
+          set -Eeuo pipefail
+          test -n "${SIGNING_KEY}"
+          test -n "${SIGNING_PUBLIC_KEY}"
+          /usr/bin/install -m 0700 -d "${RUNNER_TEMP}/kpv-signing"
+          cleanup_signing_key() {
+            /usr/bin/shred -u "${RUNNER_TEMP}/kpv-signing/key" 2>/dev/null ||
+              /usr/bin/rm -f "${RUNNER_TEMP}/kpv-signing/key"
+          }
+          trap cleanup_signing_key EXIT
+          /usr/bin/printf '%s\n' "${SIGNING_KEY}" > "${RUNNER_TEMP}/kpv-signing/key"
+          /usr/bin/chmod 0600 "${RUNNER_TEMP}/kpv-signing/key"
+          /usr/bin/printf 'codestra-release %s\n' "${SIGNING_PUBLIC_KEY}" > "${RUNNER_TEMP}/kpv-signing/allowed_signers"
+          /usr/bin/ssh-keygen -Y sign -q -f "${RUNNER_TEMP}/kpv-signing/key" \
+            -n codestra-klyrow-validator dist/SHA256SUMS
+          /usr/bin/ssh-keygen -Y verify -q -f "${RUNNER_TEMP}/kpv-signing/allowed_signers" \
+            -I codestra-release -n codestra-klyrow-validator \
+            -s dist/SHA256SUMS.sig < dist/SHA256SUMS
+          cleanup_signing_key
+          trap - EXIT
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: klyrow-validator-protected-${{ env.OPERATOR_SOURCE_SHA }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -Eeuo pipefail
+          tag="klyrow-validator-${OPERATOR_SOURCE_SHA}"
+          title="Klyrow production validator ${OPERATOR_SOURCE_SHA}"
+          body="Checksum- and signature-gated bounded operator. No deployment action."
+          assets=(
+            "dist/klyrow-production-validator-${OPERATOR_SOURCE_SHA}.tar.gz"
+            "dist/installation-manifest.json"
+            "dist/provenance.json"
+            "dist/sbom.spdx.json"
+            "dist/vulnerability-report.json"
+            "dist/SHA256SUMS"
+            "dist/SHA256SUMS.sig"
+          )
+          for asset in "${assets[@]}"; do
+            test -f "${asset}"
+          done
+          (cd dist && /usr/bin/sha256sum --check --strict SHA256SUMS)
+          test -f "${RUNNER_TEMP}/kpv-signing/allowed_signers"
+          /usr/bin/ssh-keygen -Y verify -q \
+            -f "${RUNNER_TEMP}/kpv-signing/allowed_signers" \
+            -I codestra-release -n codestra-klyrow-validator \
+            -s dist/SHA256SUMS.sig < dist/SHA256SUMS
+
+          release_inventory="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | [.id, .tag_name] | @tsv')"
+          release_ids=()
+          if test -n "${release_inventory}"; then
+            while IFS=$'\t' read -r candidate_id candidate_tag; do
+              if test "${candidate_tag}" = "${tag}"; then
+                test "${candidate_id}" -gt 0
+                release_ids+=("${candidate_id}")
+              fi
+            done <<< "${release_inventory}"
+          fi
+          if test "${#release_ids[@]}" -gt 1; then
+            echo "duplicate release identity rejected" >&2
+            exit 1
+          fi
+
+          if test "${#release_ids[@]}" -eq 0; then
+            for confirmation_delay in 1 2 4; do
+              /usr/bin/sleep "${confirmation_delay}"
+              confirmation_inventory="$(gh api --paginate \
+                "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+                --jq '.[] | [.id, .tag_name] | @tsv')"
+              confirmation_ids=()
+              if test -n "${confirmation_inventory}"; then
+                while IFS=$'\t' read -r candidate_id candidate_tag; do
+                  if test "${candidate_tag}" = "${tag}"; then
+                    test "${candidate_id}" -gt 0
+                    confirmation_ids+=("${candidate_id}")
+                  fi
+                done <<< "${confirmation_inventory}"
+              fi
+              if test "${#confirmation_ids[@]}" -gt 1; then
+                echo "duplicate release identity rejected" >&2
+                exit 1
+              fi
+              if test "${#confirmation_ids[@]}" -eq 1; then
+                release_ids=("${confirmation_ids[0]}")
+                break
+              fi
+            done
+          fi
+
+          expected_tag_binding="$(printf 'commit\t%s' "${OPERATOR_SOURCE_SHA}")"
+          if tag_binding="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '[.object.type, .object.sha] | @tsv' 2>/dev/null)"; then
+            test "${tag_binding}" = "${expected_tag_binding}"
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${tag}" -f sha="${OPERATOR_SOURCE_SHA}" --jq .ref >/dev/null
+          fi
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '[.object.type, .object.sha] | @tsv')" = "${expected_tag_binding}"
+
+          if test "${#release_ids[@]}" -eq 0; then
+            release_id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="${tag}" \
+              -f target_commitish="${OPERATOR_SOURCE_SHA}" \
+              -f name="${title}" \
+              -f body="${body}" \
+              -F draft=true \
+              -F prerelease=false \
+              --jq .id)"
+          else
+            release_id="${release_ids[0]}"
+          fi
+          test "${release_id}" -gt 0
+
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .id)" = "${release_id}"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .tag_name)" = "${tag}"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .target_commitish)" = "${OPERATOR_SOURCE_SHA}"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .name)" = "${title}"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .body)" = "${body}"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .prerelease)" = "false"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .author.login)" = "github-actions[bot]"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .author.id)" = "41898282"
+          test "$(printf '%s' "${release_json}" | /usr/bin/jq -r .author.type)" = "Bot"
+          release_draft="$(printf '%s' "${release_json}" | /usr/bin/jq -r .draft)"
+          test "${release_draft}" = "true" || test "${release_draft}" = "false"
+          upload_url="$(printf '%s' "${release_json}" | /usr/bin/jq -r .upload_url)"
+          expected_upload_url="https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets{?name,label}"
+          test "${upload_url}" = "${expected_upload_url}"
+          upload_endpoint="${upload_url%%\{*}"
+
+          require_draft() {
+            test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" --jq .draft)" = "true"
+          }
+
+          verification_root="$(mktemp -d)"
+          trap 'rm -rf -- "${verification_root}"' EXIT
+          verify_uploaded_asset() {
+            local local_asset="$1"
+            local remote_id="$2"
+            local remote_name="$3"
+            local remote_size="$4"
+            local remote_digest="$5"
+            local local_size local_digest downloaded
+            local_size="$(/usr/bin/stat -c %s "${local_asset}")"
+            local_digest="$(/usr/bin/sha256sum "${local_asset}" | /usr/bin/cut -d' ' -f1)"
+            test "${remote_id}" -gt 0
+            test "${remote_name}" = "$(/usr/bin/basename "${local_asset}")"
+            test "${remote_size}" = "${local_size}"
+            if test -n "${remote_digest}"; then
+              test "${remote_digest}" = "sha256:${local_digest}"
+            fi
+            downloaded="${verification_root}/${remote_id}"
+            gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${remote_id}" \
+              --header "Accept: application/octet-stream" > "${downloaded}"
+            /usr/bin/cmp "${local_asset}" "${downloaded}"
+          }
+
+          declare -A remote_ids=()
+          declare -A remote_states=()
+          declare -A remote_sizes=()
+          declare -A remote_digests=()
+          remote_asset_inventory="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+            --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv')"
+          if test -n "${remote_asset_inventory}"; then
+            while IFS=$'\t' read -r remote_id remote_name remote_state remote_size remote_digest; do
+              test "${remote_id}" -gt 0
+              expected=false
+              for asset in "${assets[@]}"; do
+                if test "${remote_name}" = "$(/usr/bin/basename "${asset}")"; then
+                  expected=true
+                fi
+              done
+              test "${expected}" = "true"
+              test -z "${remote_ids[${remote_name}]+x}"
+              remote_ids["${remote_name}"]="${remote_id}"
+              remote_states["${remote_name}"]="${remote_state}"
+              remote_sizes["${remote_name}"]="${remote_size}"
+              remote_digests["${remote_name}"]="${remote_digest}"
+            done <<< "${remote_asset_inventory}"
+          fi
+
+          for asset in "${assets[@]}"; do
+            name="$(/usr/bin/basename "${asset}")"
+            if test -n "${remote_ids[${name}]+x}"; then
+              if test "${remote_states[${name}]}" = "uploaded"; then
+                verify_uploaded_asset "${asset}" "${remote_ids[${name}]}" "${name}" \
+                  "${remote_sizes[${name}]}" "${remote_digests[${name}]}"
+              else
+                require_draft
+                gh api --method DELETE \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${remote_ids[${name}]}" \
+                  --silent
+                unset "remote_ids[${name}]"
+                unset "remote_states[${name}]"
+                unset "remote_sizes[${name}]"
+                unset "remote_digests[${name}]"
+              fi
+            fi
+            if test -z "${remote_ids[${name}]+x}"; then
+              require_draft
+              case "${name}" in
+                *.tar.gz) content_type="application/gzip" ;;
+                *.json) content_type="application/json" ;;
+                SHA256SUMS) content_type="text/plain" ;;
+                *) content_type="application/octet-stream" ;;
+              esac
+              upload_record="$(gh api --method POST "${upload_endpoint}" \
+                -f name="${name}" \
+                --header "Content-Type: ${content_type}" \
+                --header "X-GitHub-Api-Version: 2022-11-28" \
+                --input "${asset}" \
+                --jq '[.id, .name, .state, .size, (.digest // "")] | @tsv')"
+              IFS=$'\t' read -r uploaded_id uploaded_name uploaded_state uploaded_size uploaded_digest \
+                <<< "${upload_record}"
+              test "${uploaded_id}" -gt 0
+              test "${uploaded_name}" = "${name}"
+              test "${uploaded_state}" = "uploaded"
+              verify_uploaded_asset "${asset}" "${uploaded_id}" "${uploaded_name}" \
+                "${uploaded_size}" "${uploaded_digest}"
+            fi
+          done
+
+          final_count=0
+          declare -A final_names=()
+          final_asset_inventory="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+            --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv')"
+          while IFS=$'\t' read -r remote_id remote_name remote_state remote_size remote_digest; do
+            final_count="$((final_count + 1))"
+            expected_asset=""
+            for asset in "${assets[@]}"; do
+              if test "${remote_name}" = "$(/usr/bin/basename "${asset}")"; then
+                expected_asset="${asset}"
+              fi
+            done
+            test -n "${expected_asset}"
+            test -z "${final_names[${remote_name}]+x}"
+            final_names["${remote_name}"]=true
+            test "${remote_state}" = "uploaded"
+            verify_uploaded_asset "${expected_asset}" "${remote_id}" "${remote_name}" \
+              "${remote_size}" "${remote_digest}"
+          done <<< "${final_asset_inventory}"
+          test "${final_count}" -eq "${#assets[@]}"
+          for asset in "${assets[@]}"; do
+            name="$(/usr/bin/basename "${asset}")"
+            test -n "${final_names[${name}]+x}"
+          done
+
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '[.object.type, .object.sha] | @tsv')" = "${expected_tag_binding}"
+          (cd dist && /usr/bin/sha256sum --check --strict SHA256SUMS)
+          /usr/bin/ssh-keygen -Y verify -q \
+            -f "${RUNNER_TEMP}/kpv-signing/allowed_signers" \
+            -I codestra-release -n codestra-klyrow-validator \
+            -s dist/SHA256SUMS.sig < dist/SHA256SUMS
+
+          if test "${release_draft}" = "true"; then
+            require_draft
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              -F draft=false --jq .id >/dev/null
+          fi
+
+          published_by_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .draft)" = "false"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .published_at)" != "null"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .tag_name)" = "${tag}"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .target_commitish)" = "${OPERATOR_SOURCE_SHA}"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .name)" = "${title}"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .body)" = "${body}"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .prerelease)" = "false"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .author.login)" = "github-actions[bot]"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .author.id)" = "41898282"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r .author.type)" = "Bot"
+          test "$(printf '%s' "${published_by_id}" | /usr/bin/jq -r '.assets | length')" -eq "${#assets[@]}"
+
+          published_by_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .id)" = "${release_id}"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .draft)" = "false"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .tag_name)" = "${tag}"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .target_commitish)" = "${OPERATOR_SOURCE_SHA}"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .name)" = "${title}"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .body)" = "${body}"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r .prerelease)" = "false"
+          test "$(printf '%s' "${published_by_tag}" | /usr/bin/jq -r '.assets | length')" -eq "${#assets[@]}"
+
+          published_count=0
+          declare -A published_names=()
+          published_asset_inventory="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+            --paginate --jq '.[] | [.id, .name, .state, .size, (.digest // "")] | @tsv')"
+          while IFS=$'\t' read -r remote_id remote_name remote_state remote_size remote_digest; do
+            published_count="$((published_count + 1))"
+            expected_asset=""
+            for asset in "${assets[@]}"; do
+              if test "${remote_name}" = "$(/usr/bin/basename "${asset}")"; then
+                expected_asset="${asset}"
+              fi
+            done
+            test -n "${expected_asset}"
+            test -z "${published_names[${remote_name}]+x}"
+            published_names["${remote_name}"]=true
+            test "${remote_state}" = "uploaded"
+            verify_uploaded_asset "${expected_asset}" "${remote_id}" "${remote_name}" \
+              "${remote_size}" "${remote_digest}"
+          done <<< "${published_asset_inventory}"
+          test "${published_count}" -eq "${#assets[@]}"
+          for asset in "${assets[@]}"; do
+            name="$(/usr/bin/basename "${asset}")"
+            test -n "${published_names[${name}]+x}"
+          done
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '[.object.type, .object.sha] | @tsv')" = "${expected_tag_binding}"

@@ -32,7 +32,8 @@ def test_route_contract_is_consistent_across_boundaries():
 
 def test_provider_examples_use_provider_server_and_delivery_stays_off():
     example = text("config/control-plane.env.example")
-    assert "TELNEXA_URL=https://10.40.0.4:8443/v1/sms/" in example
+    assert "TELNEXA_URL=https://telnexa.internal.codestra.agency:8443/v1/messages" in example
+    assert "TELNEXA_OUTBOUND_API_KEY_FILE=/run/secrets/telnexa_outbound_api_key" in example
     assert "KLYROW_URL=https://10.40.0.4:18000/v1/email/" in example
     assert "KYQRA_URL=http://10.40.0.4:3100/v1/jobs" in example
     assert "CONTROL_PLANE_OUTBOUND_ENABLED=false" in example

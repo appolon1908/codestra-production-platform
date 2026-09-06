@@ -1,0 +1,147 @@
+{
+  "$schema": "./contracts/adoption-manifest.schema.json",
+  "schemaVersion": "2.0.0",
+  "contractId": "codestra-orbit-v2.0.0",
+  "repository": "appolon1908-hue/codestra-production-platform",
+  "classification": "runtime-infrastructure",
+  "targetBranch": "release/production-activation",
+  "adoptionMode": "contract-only",
+  "domain": null,
+  "domainStatus": "not-applicable",
+  "sourceAuthority": {
+    "repository": "appolon1908-hue/SDK-repository",
+    "pullRequest": 75,
+    "candidateHeadSha": "47695963643edbbf63d2d480744bd2935228f4f2",
+    "candidateChecks": [
+      {
+        "name": "Codestra Orbit authority",
+        "runId": 33686821435,
+        "status": "PASS"
+      },
+      {
+        "name": "Contract validation",
+        "runId": 33686821398,
+        "status": "PASS"
+      },
+      {
+        "name": "Generated SDKs",
+        "runId": 33686821498,
+        "status": "PASS"
+      },
+      {
+        "name": "Compatibility gates",
+        "runId": 33686821368,
+        "status": "PASS"
+      },
+      {
+        "name": "Workspace CI",
+        "runId": 33686821426,
+        "status": "PASS"
+      }
+    ],
+    "protectedReleaseSha": null,
+    "releaseTag": null,
+    "releaseManifestPath": "orbit/release/orbit-v2.0.0.json"
+  },
+  "packages": [
+    {
+      "name": "@corporate/auth-ui",
+      "version": "2.0.0",
+      "sha256": null,
+      "installAllowed": false
+    },
+    {
+      "name": "@corporate/brand-registry",
+      "version": "2.0.0",
+      "sha256": null,
+      "installAllowed": false
+    },
+    {
+      "name": "@corporate/content-sdk",
+      "version": "2.0.0",
+      "sha256": null,
+      "installAllowed": false
+    },
+    {
+      "name": "@corporate/design-tokens",
+      "version": "2.0.0",
+      "sha256": null,
+      "installAllowed": false
+    },
+    {
+      "name": "@corporate/eslint-config",
+      "version": "2.0.0",
+      "sha256": null,
+      "installAllowed": false
+    },
+    {
+      "name": "@corporate/icons",
+      "version": "2.0.0",
+      "sha256": null,
+      "installAllowed": false
+    },
+    {
+      "name": "@corporate/stylelint-config",
+      "version": "2.0.0",
+      "sha256": null,
+      "installAllowed": false
+    },
+    {
+      "name": "@corporate/testing",
+      "version": "2.0.0",
+      "sha256": null,
+      "installAllowed": false
+    },
+    {
+      "name": "@corporate/ui",
+      "version": "2.0.0",
+      "sha256": null,
+      "installAllowed": false
+    }
+  ],
+  "requirements": {
+    "noCompetingUiSource": true,
+    "adoptionLedger": true,
+    "domainRegistry": true,
+    "identityEvidence": true,
+    "immutableArtifacts": true,
+    "edgeSourceLocks": true,
+    "stagingEvidence": true,
+    "accessibilityEvidence": true,
+    "authSessionEvidence": true,
+    "observability": true,
+    "rollback": true,
+    "separateProductionApproval": true
+  },
+  "evidence": {
+    "consumerAdoptionLedger": "orbit/adoption-ledger.json",
+    "runtimeActivationGates": "orbit/runtime-activation-gates.json",
+    "domainRegistry": null,
+    "identityClientRegistry": null,
+    "immutableApplicationArtifacts": null,
+    "edgeSourceLocks": null,
+    "stagingScreenshots": null,
+    "accessibilityReport": null,
+    "authSessionReport": null,
+    "observabilityReport": null,
+    "rollbackRehearsal": null,
+    "productionReadback": null
+  },
+  "status": "PREPARED_PENDING_SDK_PROTECTED_RELEASE",
+  "productionReady": false,
+  "runtimeActivated": false,
+  "blockers": [
+    {
+      "code": "SDK_PROTECTED_RELEASE_PENDING",
+      "description": "SDK pull request 75 has not produced an installable protected release."
+    },
+    {
+      "code": "CONSUMER_EVIDENCE_PENDING",
+      "description": "Consumer records and immutable application artifacts are not yet certified."
+    },
+    {
+      "code": "RUNTIME_GATE_PENDING",
+      "description": "The separate production deployment gate has not passed."
+    }
+  ]
+}
