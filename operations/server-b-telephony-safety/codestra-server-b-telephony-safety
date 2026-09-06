@@ -1,8 +1,6 @@
 #!/usr/bin/python3
 """Fail-closed forced command for Server A's two telephony safety probes."""
 
-from __future__ import annotations
-
 import os
 import subprocess
 import sys
@@ -17,14 +15,14 @@ COMMANDS = {
 }
 
 
-def run_fixed(argv: list[str]) -> str:
+def run_fixed(argv) -> str:
     result = subprocess.run(
         argv,
         check=False,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
-        text=True,
+        universal_newlines=True,
         timeout=10,
         env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"},
     )
