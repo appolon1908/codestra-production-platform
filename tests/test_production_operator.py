@@ -2107,7 +2107,7 @@ def test_diagnostics_and_rollback_remain_available_when_unsafe(monkeypatch, acti
 
 def test_kong_runtime_readback_is_sanitized_and_reports_traffic_gate(monkeypatch) -> None:
     responses = {
-        "/routes?size=1000": {"data": [{"id": "r1", "name": "health",
+        "/routes?size=1000": {"data": [{"id": "r1", "name": OPERATOR.KONG_TRAFFIC_GATE_ROUTE,
             "service": {"id": "s1"}, "protocols": ["https"], "methods": ["GET"],
             "hosts": ["api.example.invalid"], "paths": ["/health"],
             "headers": {"x-api-key": ["secret"]}}]},
@@ -2124,7 +2124,7 @@ def test_kong_runtime_readback_is_sanitized_and_reports_traffic_gate(monkeypatch
         "/plugins?size=1000": {"data": [{"id": "p1",
             "name": "request-termination",
             "instance_name": OPERATOR.KONG_TRAFFIC_GATE_INSTANCE, "enabled": True,
-            "route": None, "service": None, "consumer": None,
+            "route": {"id": "r1"}, "service": None, "consumer": None,
             "config": {"message": "secret"}}]},
     }
     monkeypatch.setattr(OPERATOR, "kong_json", lambda method, path: responses[path])
@@ -2137,6 +2137,63 @@ def test_kong_runtime_readback_is_sanitized_and_reports_traffic_gate(monkeypatch
     assert "certificate" not in serialized
     assert '"config"' not in serialized
     assert len(result["sanitized_configuration_sha256"]) == 64
+
+
+def test_kong_traffic_gate_is_scoped_to_callback_route(monkeypatch) -> None:
+    plugins = []
+
+    def fake_kong_json(method, path, payload=None):
+        if method == "GET" and path == f"/routes/{OPERATOR.KONG_TRAFFIC_GATE_ROUTE}":
+            return {"id": "callback-route-id"}
+        if method == "GET" and path == "/plugins?size=1000":
+            return {"data": list(plugins)}
+        if method == "POST" and path == "/plugins":
+            created = {
+                "id": "gate-id",
+                **payload,
+                "service": None,
+                "consumer": None,
+            }
+            plugins.append(created)
+            return created
+        raise AssertionError((method, path, payload))
+
+    monkeypatch.setattr(OPERATOR, "kong_json", fake_kong_json)
+    OPERATOR.kong_traffic_gate(True)
+    assert plugins[0]["route"] == {"id": "callback-route-id"}
+    assert plugins[0]["service"] is None
+    assert plugins[0]["consumer"] is None
+
+
+def test_kong_traffic_gate_migrates_global_gate_in_place(monkeypatch) -> None:
+    plugins = [{
+        "id": "gate-id",
+        "name": "request-termination",
+        "instance_name": OPERATOR.KONG_TRAFFIC_GATE_INSTANCE,
+        "enabled": True,
+        "route": None,
+        "service": None,
+        "consumer": None,
+        "config": {"status_code": 503},
+    }]
+    calls = []
+
+    def fake_kong_json(method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET" and path == f"/routes/{OPERATOR.KONG_TRAFFIC_GATE_ROUTE}":
+            return {"id": "callback-route-id"}
+        if method == "GET" and path == "/plugins?size=1000":
+            return {"data": list(plugins)}
+        if method == "PATCH" and path == "/plugins/gate-id":
+            plugins[0].update(payload)
+            return dict(plugins[0])
+        raise AssertionError((method, path, payload))
+
+    monkeypatch.setattr(OPERATOR, "kong_json", fake_kong_json)
+    OPERATOR.kong_traffic_gate(True)
+    assert plugins[0]["route"] == {"id": "callback-route-id"}
+    assert any(method == "PATCH" for method, _, _ in calls)
+    assert not any(method == "POST" for method, _, _ in calls)
 
 
 def test_rollback_remains_available_when_unsafe(monkeypatch) -> None:
