@@ -483,7 +483,7 @@ def test_restore_test_records_one_stable_backup_stamp(monkeypatch):
             "tested_backup_stamp": stamp,
             "tested_backup_evidence_integrity": "PASS",
             "isolated_middleware_migration": "PASS",
-            "tested_middleware_database_head": "0010_realtime_gateway",
+            "tested_middleware_database_head": "0056_klyrow_delivery_events",
         },
     )
     monkeypatch.setattr(
@@ -556,7 +556,7 @@ def test_restore_result_binds_exact_backup_image_source_and_schema(monkeypatch, 
 
     assert validated["restore_evidence_stamp"] == stamp
     assert validated["isolated_middleware_migration"] == "PASS"
-    assert validated["tested_middleware_database_head"] == "0010_realtime_gateway"
+    assert validated["tested_middleware_database_head"] == "0056_klyrow_delivery_events"
 
 
 def test_restore_result_rejects_unadvertised_backup(monkeypatch, tmp_path):
@@ -676,7 +676,7 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
 
     def run(command, **kwargs):
         calls.append(command)
-        return subprocess.CompletedProcess(command, 0, b"0010_realtime_gateway (head)\n")
+        return subprocess.CompletedProcess(command, 0, b"0056_klyrow_delivery_events (head)\n")
 
     monkeypatch.setattr(OPERATOR, "run_bytes", run)
     result = OPERATOR.rollout_middleware(config)
@@ -692,11 +692,11 @@ def test_middleware_rollout_requires_recovery_evidence_and_reads_schema(monkeypa
         (
             Path("/restore-test.json"),
             "tested_middleware_database_head",
-            "0010_realtime_gateway",
+            "0056_klyrow_delivery_events",
         ),
     ]
     assert result["middleware_rollout"] == "PASS"
-    assert result["middleware_database_head"] == "0010_realtime_gateway"
+    assert result["middleware_database_head"] == "0056_klyrow_delivery_events"
     assert calls[0][-6:] == [
         "--rm",
         "--no-deps",
@@ -791,7 +791,7 @@ def test_middleware_rollout_retry_preserves_original_rollback(monkeypatch):
     monkeypatch.setattr(
         OPERATOR,
         "middleware_database_revision",
-        lambda: "0010_realtime_gateway",
+        lambda: "0056_klyrow_delivery_events",
     )
     monkeypatch.setattr(OPERATOR, "middleware_quiescence_stamp", lambda: None)
     result = OPERATOR.rollout_middleware(config)
@@ -870,7 +870,7 @@ def test_middleware_rollout_resumes_fresh_snapshot_before_health(monkeypatch):
     monkeypatch.setattr(
         OPERATOR,
         "middleware_database_revision",
-        lambda: "0010_realtime_gateway",
+        lambda: "0056_klyrow_delivery_events",
     )
     result = OPERATOR.rollout_middleware(config)
     assert result["middleware_already_current"] is True

@@ -37,5 +37,5 @@ def test_release_cannot_deploy_before_required_database_head() -> None:
     lock = json.loads(
         (ROOT / "deploy/middleware/approved-release-lock.json").read_text()
     )
-    assert lock["required_database_head"] == "0010_realtime_gateway"
+    assert lock["required_database_head"] == "0056_klyrow_delivery_events"
     assert lock["deployment_state"].startswith("BLOCKED_PENDING_")

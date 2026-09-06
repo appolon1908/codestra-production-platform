@@ -19,6 +19,8 @@ jobs:
     if: github.ref == 'refs/heads/release/production-activation'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      EXPECTED_MIGRATION_REVISION: 0056_klyrow_delivery_events
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -91,7 +93,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN }}
           MIDDLEWARE_REPOSITORY: appolon1908-hue/Middleware-
-          EXPECTED_ARTIFACT_DIGEST: sha256:e04928d95ec12a429096af180f3bbd40891af324eff0f4868f5a7d638e74c5b6
+          EXPECTED_ARTIFACT_DIGEST: sha256:e3af11436039c9812d0e0af4e82a5b3efdfd1736c300f6a6c6f1cfb7ff103e9f
         run: |
           set -Eeuo pipefail
           test -n "${GH_TOKEN}"
@@ -120,6 +122,7 @@ jobs:
           source middleware-release-verified.env
           test "$MIDDLEWARE_PROTECTED_SHA" = "$MIDDLEWARE_EXPECTED_SOURCE_SHA"
           test "$MIDDLEWARE_IMAGE_DIGEST" = "$MIDDLEWARE_EXPECTED_IMAGE_DIGEST"
+          test "$MIDDLEWARE_MIGRATION_REVISION" = "$EXPECTED_MIGRATION_REVISION"
 
       - name: Verify image signer, provenance, SBOM, source label, and migration head
         env:
@@ -153,9 +156,10 @@ jobs:
           test "$(docker image inspect "$MIDDLEWARE_IMAGE_REFERENCE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$MIDDLEWARE_PROTECTED_SHA"
           mapfile -t migration_heads < <(
             docker run --rm --network none --entrypoint python "$MIDDLEWARE_IMAGE_REFERENCE" \
-              -c 'from pathlib import Path; print(sorted(p.stem for p in Path("/app/migrations").glob("[0-9][0-9][0-9][0-9]_*.sql"))[-1])'
+              -c 'import ast; from pathlib import Path; files=list(Path("/app/migrations/versions").glob("*.py")); trees=[ast.parse(p.read_text()) for p in files]; values=lambda name: [n.value.value for tree in trees for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets) and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)]; revisions=set(values("revision")); parents=set(values("down_revision")); heads=sorted(revisions-parents); assert len(heads) == 1, heads; print(heads[0])'
           )
           test "${#migration_heads[@]}" -eq 1
+          test "${migration_heads[0]}" = "$EXPECTED_MIGRATION_REVISION"
           test "${migration_heads[0]}" = "$MIDDLEWARE_MIGRATION_REVISION"
           printf 'MIDDLEWARE_MIGRATION_REVISION=%s\n' "${migration_heads[0]}" >> "$GITHUB_ENV"
 
