@@ -72,11 +72,19 @@ class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
         return " AND ".join(clauses), params
 
     @api.model
+    def _flush_report_sources(self):
+        # The report is a SQL view, so Odoo cannot infer the source models that
+        # must be flushed before a raw aggregate query in the same transaction.
+        self.env["codestra.crm.call.followup"].flush_model()
+        self.env["mail.mail"].flush_model()
+
+    @api.model
     def summary_v1(self, date_from=None, date_to=None, company_ids=None, agent_ids=None):
         date_from, date_to, companies, agents = self._scope(
             date_from, date_to, company_ids, agent_ids
         )
         where, params = self._where(date_from, date_to, companies, agents)
+        self._flush_report_sources()
         self.env.cr.execute(
             f"""
                 SELECT
@@ -144,6 +152,7 @@ class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
         except (TypeError, ValueError):
             limit = 100
         where, params = self._where(date_from, date_to, companies, agents)
+        self._flush_report_sources()
         self.env.cr.execute(
             f"""
                 SELECT

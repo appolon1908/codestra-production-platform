@@ -96,6 +96,7 @@ class TestCodestraCallFollowupAnalytics(TransactionCase):
                 "popup_completed_at": fields.Datetime.now(),
             }
         )
+        self.env["codestra.crm.call.followup"].flush_model()
 
         reports = self.env(user=self.manager)[
             "codestra.crm.call.followup.report"
