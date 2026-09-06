@@ -145,3 +145,18 @@ class TestCodestraCallFollowupAnalytics(TransactionCase):
         ].search([("followup_id", "=", followup.id)], limit=1)
         with self.assertRaises(AccessError):
             report.write({"name": "mutated"})
+
+    def test_summary_date_window_uses_manager_timezone(self):
+        self.manager.tz = "America/Santo_Domingo"
+        call = self._register(
+            "analytics-local-day",
+            ended_at=fields.Datetime.to_datetime("2026-08-27 00:30:00"),
+        )
+        result = self.env(user=self.manager)[
+            "codestra.crm.call.followup.analytics.api"
+        ].summary_v1(date_from="2026-08-26", date_to="2026-08-26")
+        self.assertGreaterEqual(result["metrics"]["total_calls"], 1)
+        report = self.env["codestra.crm.call.followup.report"].search([
+            ("followup_id", "=", call.id)
+        ])
+        self.assertTrue(report)

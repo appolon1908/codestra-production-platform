@@ -5,6 +5,7 @@ on:
     paths:
       - "odoo_addons/codestra_crm_call_followup_analytics/**"
       - "scripts/validate_odoo_crm_call_followup_analytics.py"
+      - "scripts/test_odoo_crm_call_followup_analytics_disposable.sh"
       - ".github/workflows/odoo-crm-call-followup-analytics.yml"
   push:
     branches:
@@ -12,6 +13,7 @@ on:
     paths:
       - "odoo_addons/codestra_crm_call_followup_analytics/**"
       - "scripts/validate_odoo_crm_call_followup_analytics.py"
+      - "scripts/test_odoo_crm_call_followup_analytics_disposable.sh"
       - ".github/workflows/odoo-crm-call-followup-analytics.yml"
   workflow_dispatch:
 
@@ -39,3 +41,5 @@ jobs:
         run: python -m compileall -q odoo_addons/codestra_crm_call_followup_analytics scripts/validate_odoo_crm_call_followup_analytics.py
       - name: Validate analytics invariants
         run: python scripts/validate_odoo_crm_call_followup_analytics.py
+      - name: Install, test, upgrade, and uninstall in disposable Odoo 19
+        run: bash scripts/test_odoo_crm_call_followup_analytics_disposable.sh

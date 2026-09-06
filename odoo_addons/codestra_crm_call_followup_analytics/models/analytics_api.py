@@ -1,4 +1,6 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
+
+import pytz
 
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, ValidationError
@@ -55,8 +57,15 @@ class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
 
     @api.model
     def _where(self, date_from, date_to, company_ids, agent_ids):
-        clauses = ["company_id = ANY(%s)", "call_day >= %s", "call_day <= %s"]
-        params = [company_ids, date_from, date_to]
+        user_timezone = pytz.timezone(self.env.user.tz or "UTC")
+        local_start = user_timezone.localize(datetime.combine(date_from, time.min))
+        local_end = user_timezone.localize(
+            datetime.combine(date_to + timedelta(days=1), time.min)
+        )
+        utc_start = local_start.astimezone(pytz.UTC).replace(tzinfo=None)
+        utc_end = local_end.astimezone(pytz.UTC).replace(tzinfo=None)
+        clauses = ["company_id = ANY(%s)", "ended_at >= %s", "ended_at < %s"]
+        params = [company_ids, utc_start, utc_end]
         if agent_ids:
             clauses.append("agent_id = ANY(%s)")
             params.append(agent_ids)
