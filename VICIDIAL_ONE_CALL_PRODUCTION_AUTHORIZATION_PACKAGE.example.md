@@ -283,9 +283,14 @@ ROLLBACK_REHEARSAL_REFERENCE=
 
 ## 12. Required named approvals
 
-Each approver must approve this exact package version and the final canonical
-manifest hash. One person may hold multiple roles only if company policy permits
-it; record every role separately.
+First freeze and hash the immutable authorization payload defined in section 13.
+Approval records are detached attestations and are never included in that
+payload. Each approver must approve the exact precomputed
+`APPROVAL_MANIFEST_SHA256`; record the hash in the external approval reference.
+One person may hold multiple roles only if company policy permits it; record
+every role separately. Changing an approval name, reference, or timestamp does
+not change the payload hash, but an approval is valid only when it explicitly
+names that hash.
 
 ```text
 BUSINESS_APPROVER_NAME=
@@ -327,12 +332,24 @@ ROLLBACK_APPROVAL_TIMESTAMP_UTC=
 
 ## 13. Canonical approval manifest
 
-After all fields and approvals are complete:
+Before collecting any approval, complete sections 1 through 11, freeze them as
+the immutable authorization payload, and compute its hash. The canonical
+payload contains only:
+
+1. `PACKAGE_VERSION`;
+2. the normalized key/value fields and disposition table from sections 1–11;
+3. no approval names, references, timestamps, signatures, preflight results,
+   execution evidence, or post-call evidence.
+
+Canonicalize the payload as UTF-8 with LF line endings and keys sorted by their
+literal field name (or another versioned, deterministic method approved in the
+change record). Store the canonical payload separately from the detached
+approval and runtime-evidence records.
 
 ```text
 PACKAGE_VERSION=
-PACKAGE_FINALIZED_AT_UTC=
-PACKAGE_CANONICALIZATION_METHOD=UTF8_LF_SORTED_KEYS_OR_APPROVED_EQUIVALENT
+PACKAGE_PAYLOAD_FROZEN_AT_UTC=
+PACKAGE_CANONICALIZATION_METHOD=UTF8_LF_SORTED_KEYS_V1
 APPROVAL_MANIFEST_SHA256=
 SERVER_A_MANIFEST_SHA256_VERIFIED=NOT_TESTED
 SERVER_B_MANIFEST_SHA256_VERIFIED=NOT_TESTED
@@ -341,9 +358,13 @@ ALL_REQUIRED_APPROVALS_VALID=NO
 AUTHORIZATION_DECISION=BLOCKED
 ```
 
-Any change to campaign, list, operator, extension, destination, caller ID,
-trunk, country/class, window, policy, Odoo mapping, n8n workflow, artifact target,
-or approver invalidates the hash and requires a new approval.
+Compute `APPROVAL_MANIFEST_SHA256` once, then collect section 12 approvals
+against that exact value. Section 12 and sections 14–17 are detached records and
+must not be hashed back into the payload. Any change to a payload field—campaign,
+list, operator, extension, destination, caller ID, trunk, country/class, window,
+policy, Odoo mapping, n8n workflow, or artifact target—creates a new payload hash
+and requires new approvals. Updating an approval or runtime-evidence field does
+not mutate the frozen payload.
 
 ## 14. Final pre-call signoff
 
