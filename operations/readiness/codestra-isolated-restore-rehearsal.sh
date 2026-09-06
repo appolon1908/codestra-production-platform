@@ -318,10 +318,10 @@ middleware_container_args=(
 )
 docker run --rm --name "$middleware_migrate_container" \
     "${middleware_container_args[@]}" "$middleware_image" \
-    alembic upgrade head > "$work_dir/middleware-alembic-upgrade.txt"
+    -m alembic upgrade head > "$work_dir/middleware-alembic-upgrade.txt"
 docker run --rm --name "$middleware_current_container" \
     "${middleware_container_args[@]}" "$middleware_image" \
-    alembic current > "$work_dir/middleware-alembic-current.txt"
+    -m alembic current > "$work_dir/middleware-alembic-current.txt"
 middleware_database_head=$(awk 'NF {value=$1} END {print value}' "$work_dir/middleware-alembic-current.txt")
 test "$middleware_database_head" = "$middleware_required_head"
 middleware_schema_table_count=$(docker exec "$container" psql -U postgres -d codestra_middleware -At -v ON_ERROR_STOP=1 \
@@ -359,10 +359,10 @@ docker run -d --name "$middleware_candidate_container" \
     -v "$quarantine_encryption_file:/run/secrets/quarantine_encryption_key:ro" \
     -v "$quarantine_fingerprint_file:/run/secrets/quarantine_fingerprint_key:ro" \
     -v "$quarantine_reviewer_file:/run/secrets/quarantine_reviewer_key:ro" \
-    "$middleware_image" python -m app.entrypoints.integration_api >/dev/null
+    "$middleware_image" -m app.entrypoints.integration_api >/dev/null
 middleware_candidate_health=failed
 for _ in $(seq 1 90); do
-    if docker run --rm --network "$network" "$middleware_image" python -c \
+    if docker run --rm --network "$network" "$middleware_image" -c \
         'import json,urllib.request; health=json.load(urllib.request.urlopen("http://middleware-candidate:8095/healthz",timeout=2)); ready=json.load(urllib.request.urlopen("http://middleware-candidate:8095/readyz",timeout=2)); assert health["status"]=="ok"; assert ready["status"]=="ready" and ready["database"]=="online" and ready["delivery"]=="disabled"' \
         >/dev/null 2>&1; then
         middleware_candidate_health=healthy
