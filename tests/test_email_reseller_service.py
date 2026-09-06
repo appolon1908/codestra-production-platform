@@ -83,6 +83,13 @@ class EmailResellerAdmissionTest(unittest.TestCase):
         self.assertNotIn("/opt/codestra/safety/live-delivery-admission.sh", safety)
         self.assertIn('"127.0.0.1:18181:8080"', base)
         self.assertIn("reverse_proxy 127.0.0.1:18181", caddy)
+        image = next(line.strip().split("@", 1)[1] for line in base.splitlines() if line.strip().startswith("image:"))
+        runtime_digest = next(
+            line.strip().split(": ", 1)[1]
+            for line in base.splitlines()
+            if line.strip().startswith("CODESTRA_IMAGE_DIGEST:")
+        )
+        self.assertEqual(image, runtime_digest)
 
 
 class EmailResellerTest(unittest.TestCase):

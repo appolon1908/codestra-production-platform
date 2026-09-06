@@ -4,7 +4,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/email-reseller/Dockerfile
-    image: ghcr.io/appolon1908-hue/email-reseller@sha256:d02ac0fffcfe98ab04f2e14cd49d009ca651db99a59c2d9ecc39fd8e708c26a2
+    image: ghcr.io/appolon1908-hue/email-reseller@sha256:fe7a85a9bf71ff6c343743db465681c111c23e44dc8997e67c03ba849ce19b8c
     restart: unless-stopped
     env_file:
       - /etc/codestra/secrets/kyqra-telnexa/middleware.env
@@ -14,8 +14,8 @@ services:
       EMAIL_MAX_REQUEST_BYTES: "262144"
       EMAIL_MAX_RECIPIENTS: "50"
       EMAIL_RATE_PER_MINUTE: "60"
-      CODESTRA_IMAGE_DIGEST: sha256:d02ac0fffcfe98ab04f2e14cd49d009ca651db99a59c2d9ecc39fd8e708c26a2
-      CODESTRA_BUILD_TIMESTAMP: "2026-09-06T19:09:20.443674871Z"
+      CODESTRA_IMAGE_DIGEST: sha256:fe7a85a9bf71ff6c343743db465681c111c23e44dc8997e67c03ba849ce19b8c
+      CODESTRA_BUILD_TIMESTAMP: "2026-09-06T19:45:17.763859543Z"
       CODESTRA_MIGRATION_REVISION: email-reseller-schema-v1
       CODESTRA_ENVIRONMENT: production
       KLYROW_HEALTH_URL: https://klyrow.internal.codestra.agency:18000/v1/health
