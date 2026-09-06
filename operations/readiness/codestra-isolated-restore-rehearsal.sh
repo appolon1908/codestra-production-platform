@@ -165,7 +165,7 @@ mkdir -p "$work_dir/restored-volumes" "$work_dir/restored-configuration"
 tar -xzf "$work_dir/application-volumes.tar.gz" -C "$work_dir/restored-volumes"
 tar -xzf "$work_dir/configuration.tar.gz" -C "$work_dir/restored-configuration"
 gzip -t "$work_dir/runtime-images.tar.gz"
-tar -tzf "$work_dir/runtime-images.tar.gz" | grep -qx 'manifest.json'
+tar -tzf "$work_dir/runtime-images.tar.gz" manifest.json >/dev/null
 test "$(wc -l < "$work_dir/BACKUP-MANIFEST.tsv")" -eq 8
 grep -q '^codestra-middleware-1[[:space:]]sha256:' "$work_dir/BACKUP-MANIFEST.tsv"
 test -d "$work_dir/restored-volumes/odoo"
