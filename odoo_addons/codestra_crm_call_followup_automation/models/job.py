@@ -105,7 +105,9 @@ class CodestraCrmCallFollowupJob(models.Model):
     @api.model
     def _cron_enqueue_due_jobs(self, company_ids=None, limit_per_policy=500):
         policy_domain = [("active", "=", True)]
-        if company_ids:
+        if company_ids is not None:
+            if not company_ids:
+                return 0
             policy_domain.append(("company_id", "in", company_ids))
         policies = self.env["codestra.crm.call.followup.policy"].sudo().search(policy_domain)
         Followup = self.env["codestra.crm.call.followup"].sudo()
@@ -144,6 +146,7 @@ class CodestraCrmCallFollowupJob(models.Model):
                         ("schedule_kind", "!=", "none"),
                         ("callback_at", "!=", False),
                         ("callback_at", "<=", callback_cutoff),
+                        ("callback_completed_at", "=", False),
                         ("automation_missed_callback_at", "=", False),
                     ],
                     order="callback_at, id",
@@ -197,23 +200,32 @@ class CodestraCrmCallFollowupJob(models.Model):
         return created_count
 
     @api.model
-    def _cron_process_jobs(self, limit=100):
+    def _cron_process_jobs(self, limit=100, company_ids=None):
         try:
             limit = max(1, min(int(limit), 500))
         except (TypeError, ValueError):
             limit = 100
         now = fields.Datetime.now()
+        if company_ids is not None and not company_ids:
+            return 0
+        company_clause = ""
+        params = [now]
+        if company_ids is not None:
+            company_clause = "AND company_id = ANY(%s)"
+            params.append(company_ids)
+        params.append(limit)
         self.env.cr.execute(
             f"""
                 SELECT id
                   FROM {self._table}
                  WHERE state IN ('pending', 'retry')
                    AND (next_attempt_at IS NULL OR next_attempt_at <= %s)
+                   {company_clause}
                  ORDER BY next_attempt_at, id
                  FOR UPDATE SKIP LOCKED
                  LIMIT %s
             """,
-            [now, limit],
+            params,
         )
         jobs = self.sudo().browse([row[0] for row in self.env.cr.fetchall()])
         processed = 0
@@ -317,6 +329,10 @@ class CodestraCrmCallFollowupJob(models.Model):
             followup.state != "completed"
             or followup.schedule_kind == "none"
             or not followup.callback_at
+            or followup.callback_completed_at
+            or followup.callback_at
+            > fields.Datetime.now()
+            - timedelta(minutes=self.policy_id.callback_grace_minutes)
         ):
             return
         self._create_activity_once(

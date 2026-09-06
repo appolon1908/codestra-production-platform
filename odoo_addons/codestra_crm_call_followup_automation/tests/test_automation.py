@@ -116,6 +116,45 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
         followup.invalidate_recordset()
         self.assertTrue(followup.automation_missed_callback_at)
 
+    def test_completed_callback_is_not_escalated(self):
+        followup = self._register("automation-completed-callback")
+        followup._write_from_workflow(
+            {
+                "state": "completed",
+                "schedule_kind": "callback",
+                "callback_at": fields.Datetime.now() - timedelta(minutes=30),
+            }
+        )
+        self.env(user=self.agent)["codestra.crm.call.followup"].browse(
+            followup.id
+        ).action_mark_callback_completed()
+
+        Job = self.env["codestra.crm.call.followup.job"]
+        self.assertEqual(Job._cron_enqueue_due_jobs(company_ids=[self.company.id]), 0)
+        self.assertFalse(Job.search([("followup_id", "=", followup.id)]))
+
+    def test_rescheduled_callback_job_does_not_escalate_early(self):
+        followup = self._register("automation-rescheduled-callback")
+        followup._write_from_workflow(
+            {
+                "state": "completed",
+                "schedule_kind": "callback",
+                "callback_at": fields.Datetime.now() - timedelta(minutes=30),
+            }
+        )
+        Job = self.env["codestra.crm.call.followup.job"]
+        self.assertEqual(Job._cron_enqueue_due_jobs(company_ids=[self.company.id]), 1)
+        followup._write_from_workflow(
+            {"callback_at": fields.Datetime.now() + timedelta(hours=1)}
+        )
+
+        self.assertEqual(Job._cron_process_jobs(), 1)
+        job = Job.search([("followup_id", "=", followup.id)], limit=1)
+        self.assertEqual(job.state, "done")
+        self.assertFalse(job.activity_id)
+        followup.invalidate_recordset()
+        self.assertFalse(followup.automation_missed_callback_at)
+
     def test_reminder_health_repairs_missing_alarms(self):
         followup = self._register("automation-reminder-health")
         callback_at = fields.Datetime.now() + timedelta(hours=3)

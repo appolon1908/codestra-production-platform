@@ -160,6 +160,9 @@
                 </button>
             </xpath>
             <xpath expr="//header/field[@name='state']" position="before">
+                <button name="action_mark_callback_completed" type="object"
+                        string="Mark Callback Completed" class="btn-primary"
+                        invisible="schedule_kind == 'none' or not callback_at or callback_completed_at"/>
                 <button name="action_retry_failed_automation" type="object"
                         string="Retry Automation" class="btn-secondary"
                         invisible="automation_exception_count == 0"
@@ -171,6 +174,7 @@
                 <field name="automation_policy_id" readonly="1"/>
                 <field name="automation_pending_sla_at" readonly="1"/>
                 <field name="automation_missed_callback_at" readonly="1"/>
+                <field name="callback_completed_at" readonly="1"/>
                 <field name="automation_reminders_repaired_at" readonly="1"/>
                 <field name="automation_last_job_at" readonly="1"/>
                 <field name="automation_exception_count" readonly="1"/>

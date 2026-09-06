@@ -52,7 +52,6 @@ def main() -> int:
         ADDON / "models" / "followup.py",
         ADDON / "models" / "job.py",
         ADDON / "models" / "automation_api.py",
-        ADDON / "security" / "sla_ir.model.access.csv",
         ADDON / "security" / "sla_rules.xml",
         ADDON / "data" / "cron.xml",
         ADDON / "views" / "automation_views.xml",
@@ -199,6 +198,9 @@ def main() -> int:
         '"missed_callback"',
         '"reminder_health"',
         "automation_exception_count",
+        "callback_completed_at",
+        "company_id = ANY(%s)",
+        "callback_grace_minutes",
     ):
         if token not in sla_source:
             errors.append(f"SLA automation is missing invariant: {token}")

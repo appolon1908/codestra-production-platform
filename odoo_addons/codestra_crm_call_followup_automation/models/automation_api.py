@@ -32,7 +32,11 @@ class CodestraCrmCallFollowupAutomationApi(models.AbstractModel):
     def health_v1(self, company_ids=None):
         self._require_manager()
         allowed = set(self.env.user.company_ids.ids)
-        requested = set(int(item) for item in (company_ids or allowed))
+        requested = (
+            allowed
+            if company_ids is None
+            else set(int(item) for item in company_ids)
+        )
         company_ids = sorted(allowed & requested)
         Job = self.env["codestra.crm.call.followup.job"]
         domain = [("company_id", "in", company_ids)]
@@ -51,11 +55,22 @@ class CodestraCrmCallFollowupAutomationApi(models.AbstractModel):
     def run_once_v1(self, company_ids=None, limit=100):
         self._require_manager()
         allowed = set(self.env.user.company_ids.ids)
-        requested = set(int(item) for item in (company_ids or allowed))
+        requested = (
+            allowed
+            if company_ids is None
+            else set(int(item) for item in company_ids)
+        )
         company_ids = sorted(allowed & requested)
+        if not company_ids:
+            return {
+                "api_version": "1.0",
+                "queued": 0,
+                "processed": 0,
+                "health": self.health_v1([]),
+            }
         Job = self.env["codestra.crm.call.followup.job"]
         created = Job._cron_enqueue_due_jobs(company_ids=company_ids)
-        processed = Job._cron_process_jobs(limit=limit)
+        processed = Job._cron_process_jobs(limit=limit, company_ids=company_ids)
         return {
             "api_version": "1.0",
             "queued": created,

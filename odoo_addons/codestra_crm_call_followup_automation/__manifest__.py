@@ -14,7 +14,6 @@
     "data": [
         "security/ir.model.access.csv",
         "security/rules.xml",
-        "security/sla_ir.model.access.csv",
         "security/sla_rules.xml",
         "data/ir_cron_data.xml",
         "data/cron.xml",

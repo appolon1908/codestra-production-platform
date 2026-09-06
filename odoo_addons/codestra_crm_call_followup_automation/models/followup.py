@@ -12,6 +12,7 @@ class CodestraCrmCallFollowupAutomation(models.Model):
     )
     automation_pending_sla_at = fields.Datetime(readonly=True, copy=False, index=True)
     automation_missed_callback_at = fields.Datetime(readonly=True, copy=False, index=True)
+    callback_completed_at = fields.Datetime(readonly=True, copy=False, index=True)
     automation_reminders_repaired_at = fields.Datetime(readonly=True, copy=False)
     automation_last_job_at = fields.Datetime(readonly=True, copy=False)
     automation_exception_count = fields.Integer(readonly=True, copy=False, default=0)
@@ -81,3 +82,17 @@ class CodestraCrmCallFollowupAutomation(models.Model):
                 "sticky": False,
             },
         }
+
+    def action_mark_callback_completed(self):
+        for record in self:
+            if not (
+                self.env.user.has_group(
+                    "codestra_crm_call_followup.group_call_followup_manager"
+                )
+                or record.agent_id == self.env.user
+            ):
+                raise AccessError(_("Only the assigned agent or a manager may complete callbacks."))
+            if record.schedule_kind == "none" or not record.callback_at:
+                raise AccessError(_("This follow-up has no scheduled callback to complete."))
+            record._write_from_workflow({"callback_completed_at": fields.Datetime.now()})
+        return True

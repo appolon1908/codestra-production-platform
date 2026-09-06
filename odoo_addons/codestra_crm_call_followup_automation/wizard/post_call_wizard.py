@@ -19,6 +19,7 @@ class CodestraCrmPostCallWizardAutomation(models.TransientModel):
             ]
         )
         if followup.exists() and followup.state == "completed":
+            followup._write_from_workflow({"callback_completed_at": False})
             self.env[
                 "codestra.crm.call.followup.outbox"
             ].enqueue_followup_events(followup)
