@@ -109,6 +109,7 @@ STANDBY_CONTAINER = "codestra-production-standby-approved"
 STANDBY_ENTRYPOINT = ["/usr/bin/python3.13"]
 STANDBY_COMMAND = ["-c", "import threading; threading.Event().wait()"]
 MIDDLEWARE_IMAGE = "ghcr.io/appolon1908-hue/codestra-middleware"
+MIDDLEWARE_MIGRATION_DATABASE_URL = Path("/etc/codestra/secrets/codestra-compose/database_url")
 CONTROL_PLANE_PROJECT = "codestra-integration-control-plane"
 CONTROL_PLANE_RELEASE_ROOT = Path("/opt/codestra/releases/control-plane")
 CONTROL_PLANE_ARCHIVE_ROOT = Path("/home/codestra-admin")
@@ -244,6 +245,34 @@ def checked_root_file(path: Path, *, expected_mode: int = 0o600) -> str:
         return checked_root_bytes(path, expected_mode=expected_mode).decode("ascii").strip()
     except UnicodeError as error:
         raise OperatorError(f"required root file unreadable: {path}") from error
+
+
+def middleware_migration_database_url() -> str:
+    """Read the fixed migration DSN using its deployed least-privilege contract."""
+    try:
+        descriptor = os.open(
+            MIDDLEWARE_MIGRATION_DATABASE_URL,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise OperatorError("unsafe Middleware migration credential type") from error
+        raise OperatorError("Middleware migration credential unavailable") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OperatorError("unsafe Middleware migration credential type")
+        if info.st_uid != 10001 or info.st_gid != 999:
+            raise OperatorError("unsafe Middleware migration credential ownership")
+        if stat.S_IMODE(info.st_mode) != 0o400:
+            raise OperatorError("unsafe Middleware migration credential mode")
+        try:
+            value = stream.read().decode("ascii").strip()
+        except UnicodeError as error:
+            raise OperatorError("Middleware migration credential is unreadable") from error
+    if re.match(r"^postgresql(?:\+asyncpg)?://middleware_app:", value) is None:
+        raise OperatorError("Middleware migration credential identity mismatch")
+    return value
 
 
 OWNER_WINDOW_WAIVER_STATEMENTS = {
@@ -450,7 +479,7 @@ def validate_restore_result(
         "MIDDLEWARE_MIGRATION_HEAD": MIDDLEWARE_REQUIRED_DATABASE_HEAD,
         "MIDDLEWARE_SCHEMA_TABLE_COUNT": "2",
         "MIDDLEWARE_ISOLATED_MIGRATION_GATE": "PASS",
-        "MIDDLEWARE_MIGRATION_IDENTITY": "mw_integration_api",
+        "MIDDLEWARE_MIGRATION_IDENTITY": "middleware_app",
         "MIDDLEWARE_PRODUCTION_GRANTS_MATCH": "PASS",
         "MIDDLEWARE_CANDIDATE_HEALTH_GATE": "PASS",
         "MIDDLEWARE_CANDIDATE_READINESS_GATE": "PASS",
@@ -2316,15 +2345,19 @@ def rollout_middleware(config: dict[str, str]) -> dict[str, object]:
         raise OperatorError("Middleware database clients are not quiesced for rollout")
     prepare_middleware_rollout(stamp)
     try:
+        middleware_migration_database_url()
         run_bytes([
             *compose,
             "run",
             "--rm",
             "--no-deps",
-            "middleware-integration-api",
+            "--volume",
+            f"{MIDDLEWARE_MIGRATION_DATABASE_URL}:/run/secrets/migration_database_url:ro",
             "--entrypoint",
-            "python",
-            "scripts/migrate_runtime.py",
+            "/usr/bin/python3.13",
+            "middleware-integration-api",
+            "-c",
+            "import os,pathlib,runpy;os.environ['DATABASE_URL']=pathlib.Path('/run/secrets/migration_database_url').read_text().strip();runpy.run_path('/app/scripts/migrate_runtime.py',run_name='__main__')",
         ], timeout=1800)
         run_bytes([
             *compose,
