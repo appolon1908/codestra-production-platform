@@ -66,7 +66,7 @@ validate_trusted_source() {
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
-6dd46114217da585227b2e18e23ad55dcf6a1d269415738e479701b2432bd5ba  codestra-production-operator
+0d3e47ffab7f9f64a745b1c631520de6231deda17a52026e1b61c0ab3bc3f64d  codestra-production-operator
 80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb  codestra-production-forced-command
 aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd

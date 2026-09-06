@@ -1,5 +1,5 @@
 schema_version: codestra.production-source-lock.v1
-generated_at: "2026-09-03T15:15:00Z"
+generated_at: "2026-09-06T13:12:00Z"
 status: FAIL
 target: 65.109.65.169
 protected_platform:
@@ -12,24 +12,24 @@ protected_platform:
 middleware_authorities:
   protected_production_tuple:
     repository: appolon1908-hue/Middleware-
-    source_sha: 29b25cba8302cd15ef4d87b68f501da6347f2f17
+    source_sha: 63b6c0c8bca5168a1178895bd12858d0b1e8086e
     image: ghcr.io/appolon1908-hue/codestra-middleware
-    image_digest: sha256:0f5a5b3b1c8166d6509b228541bee01533f5feb1dbef24ed2d241194ba610802
-    migration_head: 0010_realtime_gateway
+    image_digest: sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a
+    migration_head: 0056_klyrow_delivery_events
     authority_state: SELECTED_SIGNED_AUTHORITY_PENDING_STAGING_CERTIFICATION
   appolon_n8n_gap_candidate:
     repository: appolon1908-hue/Middleware-
-    source_sha: 29b25cba8302cd15ef4d87b68f501da6347f2f17
+    source_sha: 63b6c0c8bca5168a1178895bd12858d0b1e8086e
     image: ghcr.io/appolon1908-hue/codestra-middleware
-    image_digest: sha256:0f5a5b3b1c8166d6509b228541bee01533f5feb1dbef24ed2d241194ba610802
-    migration_head: 0010_realtime_gateway
-    release_id: 29b25cba8302-0f5a5b3b1c81
-    release_run: 33922375053
-    production_promotion_gate_run: 33767951234
-    release_artifact_digest: sha256:e04928d95ec12a429096af180f3bbd40891af324eff0f4868f5a7d638e74c5b6
-    sbom_sha256: sha256:ccb1de2a0ca913bcdac6a79280dc6a06490f3a24da3f658adfa70ef841333adc
-    contracts_sha256: sha256:c10c233d86a517215a4e0b8f419ca1d14fdb18abbd54103f73480c0090ecc7f0
-    migrations_sha256: sha256:baf1a9733b91e57ca8135190dd04eb33500708362ca46e7b52fe170045d2e7e6
+    image_digest: sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a
+    migration_head: 0056_klyrow_delivery_events
+    release_id: 63b6c0c8bca5-bca7a220b9ce
+    release_run: 34035226830
+    production_promotion_gate_run: null
+    release_artifact_digest: sha256:e3af11436039c9812d0e0af4e82a5b3efdfd1736c300f6a6c6f1cfb7ff103e9f
+    sbom_sha256: sha256:c870828a291e924cb0ca4604c37f95b9c93aee4bda9623f685eb679552f8bc9f
+    contracts_sha256: sha256:b72199383dccc19472bc8fbce76b3bb65fd3ba706a2fa6ac82d12cf74bad6a5d
+    migrations_sha256: sha256:ed3b8e7132c5501ce8f4ff7c15a7867903ea4a70e06960669e8b267d4834a844
     runtime_profiles_sha256: sha256:c46c2bf17e955de663c271b33b95e2256fbecea9607ee5fcb29422605a799b84
     vulnerability_matches: 0
     runtime_state: SIGNED_IMMUTABLE_CANDIDATE_NOT_DEPLOYED
