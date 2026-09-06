@@ -26,7 +26,8 @@ reports/private/
 config/*.secret.env
 !.env.example
 *.sql
-!identity/migrations/20260822_klyrow_canonical_issuer.sql
+!operations/database/
+!operations/database/retire_middleware_app.sql
 *.sql.gz
 *.dump
 *.backup
@@ -63,3 +64,7 @@ logs/
 .n8n-current-evidence
 .vicidial-mapping-evidence
 evidence/**/backup/
+
+# Private one-call authorization and its backup copies must never enter Git.
+VICIDIAL_ONE_CALL_PRODUCTION_AUTHORIZATION_PACKAGE.md
+VICIDIAL_ONE_CALL_PRODUCTION_AUTHORIZATION_PACKAGE.md.*

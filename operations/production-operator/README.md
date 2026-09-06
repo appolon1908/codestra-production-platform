@@ -45,12 +45,12 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `9ddaeb6df45514688f66db7ea9f8e86f93e6876b7eb90e6460f9ce251bad26a0` |
+| `codestra-production-operator` | `039be99ac394b619c8ee0b883ded13434f63ca349fa9c09b917d5d88af29f1e4` |
 | `codestra-production-forced-command` | `80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb` |
 | `codestra-production-operator.sudoers` | `aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `codestra-readiness-restore.override.conf` | `bbc8e4af977ae21b4faffd8c755ed1a0220aebb2796f10c90c94483be3eed06e` |
-| `codestra-isolated-restore-rehearsal.sh` | `1ef72012bc5ac4bc148fa4b727bbe8e6ac1c66def75e135c36fabd0418268767` |
+| `codestra-isolated-restore-rehearsal.sh` | `1e39b423c41f41b3a5784a4041500fbb6f8ae8d0dc2907aa35403b821cc67945` |
 | `install-server-a-operator.sh` | `PUBLISH_AFTER_PROTECTED_MERGE` |
 
 The installer contains the pinned digests and verifies them before
