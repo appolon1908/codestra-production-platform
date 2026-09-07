@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import gzip
+import hashlib
 import io
 import json
 import runpy
@@ -232,3 +232,56 @@ def test_verifier_rejects_layer_identity_failures(monkeypatch, tmp_path, mutatio
         "--metadata", str(metadata), "--source-sha", source_sha, "--output", str(output)])
     with pytest.raises(ValueError, match=match):
         runpy.run_path("vicidial/scripts/verify_oci_export.py", run_name="__main__")
+
+
+@pytest.mark.parametrize('kind',['manifest-labelled-index','index-labelled-manifest','hybrid-root','hybrid-child','conflicting-document-type'])
+def test_media_type_must_describe_the_actual_document(monkeypatch,tmp_path,kind):
+    output=_run_verifier(monkeypatch,tmp_path)
+    path=tmp_path/'image.oci.tar'
+    with tarfile.open(path,'r') as archive:
+        members={item.name:archive.extractfile(item).read() for item in archive if item.isfile()}
+    index=json.loads(members['index.json'])
+    original=index['manifests'][0]
+    manifest=json.loads(members['blobs/sha256/'+original['digest'].split(':')[1]])
+    def store(value,media):
+        raw=_json_bytes(value);descriptor=_descriptor(raw,media)
+        members['blobs/sha256/'+descriptor['digest'].split(':')[1]]=raw
+        return descriptor
+    image='application/vnd.oci.image.manifest.v1+json'
+    index_type='application/vnd.oci.image.index.v1+json'
+    if kind=='manifest-labelled-index':
+        index['manifests'][0]={**original,'mediaType':index_type}
+    elif kind=='conflicting-document-type':
+        manifest['mediaType']=index_type
+        index['manifests'][0]=store(manifest,image)
+    else:
+        if kind=='hybrid-child':
+            manifest['manifests']=[]
+            original=store(manifest,image)
+        nested={'schemaVersion':2,'manifests':[{**original,'platform':{'architecture':'amd64','os':'linux'}}]}
+        if kind=='hybrid-root':nested.update(config=manifest['config'],layers=manifest['layers'])
+        index['manifests'][0]=store(nested,image if kind=='index-labelled-manifest' else index_type)
+    members['index.json']=_json_bytes(index)
+    with tarfile.open(path,'w') as archive:
+        for name,raw in members.items():_write_member(archive,name,raw)
+    with pytest.raises(ValueError,match='media type|document shape'):
+        runpy.run_path('vicidial/scripts/verify_oci_export.py',run_name='__main__')
+    assert not output.exists()
+
+
+def test_media_type_accepts_real_index_containing_one_image(monkeypatch,tmp_path):
+    output=_run_verifier(monkeypatch,tmp_path)
+    path=tmp_path/'image.oci.tar'
+    with tarfile.open(path,'r') as archive:
+        members={item.name:archive.extractfile(item).read() for item in archive if item.isfile()}
+    index=json.loads(members['index.json'])
+    root=_json_bytes({'schemaVersion':2,'mediaType':'application/vnd.oci.image.index.v1+json',
+          'manifests':[{**index['manifests'][0],'platform':{'architecture':'amd64','os':'linux'}}]})
+    descriptor=_descriptor(root,'application/vnd.oci.image.index.v1+json')
+    members['blobs/sha256/'+descriptor['digest'].split(':')[1]]=root
+    members['index.json']=_json_bytes({'schemaVersion':2,'manifests':[descriptor]})
+    with tarfile.open(path,'w') as archive:
+        for name,raw in members.items():_write_member(archive,name,raw)
+    with pytest.raises(SystemExit,match='0'):
+        runpy.run_path('vicidial/scripts/verify_oci_export.py',run_name='__main__')
+    assert json.loads(output.read_text())['status']=='PASS'

@@ -60,8 +60,26 @@ IMAGE_CONFIG_MEDIA_TYPES = {
 
 
 def require_media_type(descriptor: dict, allowed: set[str], label: str) -> None:
-    if descriptor.get("mediaType") not in allowed:
+    if not isinstance(descriptor, dict) or descriptor.get("mediaType") not in allowed:
         raise ValueError(f"invalid {label} media type")
+
+
+def require_document_shape(document: dict, descriptor: dict) -> None:
+    """The authenticated descriptor chooses the shape, not attacker-controlled keys."""
+    media_type = descriptor["mediaType"]
+    if document.get("mediaType", media_type) != media_type:
+        raise ValueError("OCI document media type conflicts with its descriptor")
+    if media_type in IMAGE_INDEX_MEDIA_TYPES:
+        valid = (isinstance(document.get("manifests"), list)
+                 and all(isinstance(item, dict) for item in document["manifests"])
+                 and "config" not in document and "layers" not in document)
+    else:
+        valid = (isinstance(document.get("config"), dict)
+                 and isinstance(document.get("layers"), list)
+                 and all(isinstance(item, dict) for item in document["layers"])
+                 and "manifests" not in document)
+    if not valid:
+        raise ValueError("OCI document shape conflicts with descriptor media type")
 
 
 def layer_diff_id(raw: bytes, media_type: str) -> str:
@@ -111,7 +129,8 @@ def main() -> int:
         outer = blob_json(archive, root_descriptor)
         if not isinstance(outer, dict) or outer.get("schemaVersion") != 2:
             raise ValueError("OCI root manifest schema version is not 2")
-        if "manifests" in outer:
+        require_document_shape(outer, root_descriptor)
+        if root_descriptor["mediaType"] in IMAGE_INDEX_MEDIA_TYPES:
             candidates = [
                 item for item in outer["manifests"]
                 if item.get("platform") == {"architecture": "amd64", "os": "linux"}
@@ -122,13 +141,14 @@ def main() -> int:
             require_media_type(manifest_descriptor, IMAGE_MANIFEST_MEDIA_TYPES,
                                "image manifest descriptor")
             manifest = blob_json(archive, manifest_descriptor)
-        elif "config" in outer:
+        elif root_descriptor["mediaType"] in IMAGE_MANIFEST_MEDIA_TYPES:
             manifest_descriptor = root_descriptor
             manifest = outer
         else:
             raise ValueError("OCI root is neither an image manifest nor an image index")
         if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 2:
             raise ValueError("OCI image manifest schema version is not 2")
+        require_document_shape(manifest, manifest_descriptor)
         require_media_type(manifest["config"], IMAGE_CONFIG_MEDIA_TYPES,
                            "image config descriptor")
         if manifest["config"]["digest"] != expected_config:
