@@ -203,6 +203,16 @@ class TestCodestraCrmCallDeliveryOutbox(TransactionCase):
 
         delivery.invalidate_recordset()
         self.assertEqual(delivery.state, "sent")
+
+    def test_reconcile_updates_cancelled_delivery_after_racing_send(self):
+        _, delivery = self._complete_with_email("delivery-cancelled-send-race")
+        delivery._write_from_worker({"state": "cancelled"})
+        delivery.mail_id.write({"state": "sent"})
+
+        self.env["codestra.crm.call.delivery"]._cron_reconcile_mail_states()
+
+        delivery.invalidate_recordset()
+        self.assertEqual(delivery.state, "sent")
         self.assertTrue(delivery.sent_at)
 
     def test_exception_schedules_retry_and_cron_requeues_mail(self):
