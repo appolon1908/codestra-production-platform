@@ -181,6 +181,37 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
         self.assertFalse(job.activity_id)
         followup.invalidate_recordset()
         self.assertFalse(followup.automation_pending_sla_at)
+        self.policy.pending_sla_minutes = 5
+        self.assertEqual(Job._cron_enqueue_due_jobs(company_ids=[self.company.id]), 1)
+        self.assertEqual(
+            Job.search_count([
+                ("followup_id", "=", followup.id), ("job_type", "=", "pending_sla")
+            ]),
+            2,
+        )
+
+    def test_calendar_reschedule_resets_callback_completion_occurrence(self):
+        followup = self._register("automation-completed-then-rescheduled")
+        callback_at = fields.Datetime.now() + timedelta(hours=1)
+        wizard = self.env(user=self.agent)["codestra.crm.post.call.wizard"].create({
+            "followup_id": followup.id, "disposition": "callback",
+            "schedule_kind": "callback", "callback_at": callback_at,
+            "duration_minutes": 30, "reminder_email_enabled": False,
+            "send_post_call_email": False,
+        })
+        wizard.action_complete()
+        self.env(user=self.agent)["codestra.crm.call.followup"].browse(
+            followup.id
+        ).action_mark_callback_completed()
+        followup.invalidate_recordset()
+        self.assertTrue(followup.callback_completed_at)
+
+        followup.calendar_event_id.write({
+            "start": callback_at + timedelta(hours=1),
+            "stop": callback_at + timedelta(hours=1, minutes=30),
+        })
+        followup.invalidate_recordset()
+        self.assertFalse(followup.callback_completed_at)
 
     def test_reminder_health_repairs_missing_alarms(self):
         followup = self._register("automation-reminder-health")

@@ -129,11 +129,16 @@ class CodestraCrmCallFollowupJob(models.Model):
                     limit=limit_per_policy,
                 )
                 for followup in pending:
+                    deadline = followup.ended_at + timedelta(
+                        minutes=policy.pending_sla_minutes
+                    )
+                    occurrence = fields.Datetime.to_string(deadline)
                     _, created = self._enqueue(
                         policy,
                         followup,
                         "pending_sla",
-                        f"pending-sla:{policy.id}:{followup.id}",
+                        f"pending-sla:{policy.id}:{followup.id}:{occurrence}",
+                        {"effective_deadline": occurrence},
                     )
                     created_count += int(created)
 
