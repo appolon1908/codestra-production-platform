@@ -48,6 +48,14 @@ def main() -> int:
         ADDON / "views" / "outbox_views.xml",
         ADDON / "tests" / "test_outbox.py",
         ADDON / "tests" / "test_hardening.py",
+        ADDON / "models" / "policy.py",
+        ADDON / "models" / "followup.py",
+        ADDON / "models" / "job.py",
+        ADDON / "models" / "automation_api.py",
+        ADDON / "security" / "sla_rules.xml",
+        ADDON / "data" / "cron.xml",
+        ADDON / "views" / "automation_views.xml",
+        ADDON / "tests" / "test_automation.py",
         SCHEMA,
         MIDDLEWARE_PACKAGE,
         MIDDLEWARE_TEST,
@@ -176,6 +184,29 @@ def main() -> int:
         errors.append(
             "automation HMAC still signs tenant_id in the source slot"
         )
+
+    sla_source = "\n".join(
+        (ADDON / "models" / name).read_text(encoding="utf-8")
+        for name in ("policy.py", "followup.py", "job.py", "automation_api.py")
+    )
+    for token in (
+        "UNIQUE(idempotency_key)",
+        "FOR UPDATE SKIP LOCKED",
+        "_cron_enqueue_due_jobs",
+        "_cron_process_jobs",
+        '"pending_sla"',
+        '"missed_callback"',
+        '"reminder_health"',
+        "automation_exception_count",
+        "callback_completed_at",
+        "company_id = ANY(%s)",
+        "callback_grace_minutes",
+        "pending_sla_minutes",
+        'minutes=policy.callback_grace_minutes',
+        'SELECT id FROM codestra_crm_call_followup WHERE id = %s FOR UPDATE',
+    ):
+        if token not in sla_source:
+            errors.append(f"SLA automation is missing invariant: {token}")
 
     middleware_source = MIDDLEWARE_PACKAGE.read_text(
         encoding="utf-8"

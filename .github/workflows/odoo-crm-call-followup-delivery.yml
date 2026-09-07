@@ -1,0 +1,46 @@
+name: Odoo CRM Call Follow-up Delivery
+
+on:
+  pull_request:
+    paths:
+      - "odoo_addons/codestra_crm_call_followup_delivery/**"
+      - "scripts/validate_odoo_crm_call_followup_delivery.py"
+      - "scripts/test_odoo_crm_call_followup_extensions_disposable.sh"
+      - ".github/workflows/odoo-crm-call-followup-delivery.yml"
+  push:
+    branches:
+      - "feature/odoo19-crm-call-followup-delivery-outbox"
+    paths:
+      - "odoo_addons/codestra_crm_call_followup_delivery/**"
+      - "scripts/validate_odoo_crm_call_followup_delivery.py"
+      - "scripts/test_odoo_crm_call_followup_extensions_disposable.sh"
+      - ".github/workflows/odoo-crm-call-followup-delivery.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: odoo-crm-call-followup-delivery-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-gate:
+    name: Delivery outbox static gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Reject whitespace and conflict markers
+        run: |
+          git diff --check
+          ! git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- . ':!*.md'
+      - name: Compile Python
+        run: python -m compileall -q odoo_addons/codestra_crm_call_followup_delivery scripts/validate_odoo_crm_call_followup_delivery.py
+      - name: Validate delivery invariants
+        run: python scripts/validate_odoo_crm_call_followup_delivery.py
+      - name: Install, test, and upgrade in disposable Odoo 19
+        run: bash scripts/test_odoo_crm_call_followup_extensions_disposable.sh
