@@ -47,7 +47,9 @@ class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
             raise ValidationError(_("date_from and date_to must be valid dates.")) from exc
         if date_from > date_to:
             raise ValidationError(_("date_from cannot be after date_to."))
-        allowed = set(self.env.user.company_ids.ids)
+        # Respect the active company selector, not every company the user could
+        # activate in another session.
+        allowed = set(self.env.companies.ids)
         requested = set(int(item) for item in (company_ids or allowed))
         companies = sorted(allowed & requested)
         if not companies:

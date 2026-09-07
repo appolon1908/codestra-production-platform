@@ -162,6 +162,17 @@ class TestCodestraCallFollowupAnalytics(TransactionCase):
         ])
         self.assertTrue(report)
 
+    def test_summary_defaults_to_active_company_scope(self):
+        other_company = self.env["res.company"].create({"name": "Inactive Analytics Company"})
+        self.manager.company_ids = [Command.link(other_company.id)]
+        api = self.env(user=self.manager).with_context(
+            allowed_company_ids=[self.company.id]
+        )["codestra.crm.call.followup.analytics.api"]
+
+        result = api.summary_v1()
+
+        self.assertEqual(result["company_ids"], [self.company.id])
+
     def test_summary_counts_only_outgoing_mail_as_queued(self):
         call = self._register("analytics-sent-mail")
         mail = self.env["mail.mail"].create(
