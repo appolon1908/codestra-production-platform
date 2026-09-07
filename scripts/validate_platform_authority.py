@@ -145,10 +145,7 @@ def validate_release_manifest(manifest: dict) -> None:
     except ValidationError as exc:
         raise ValueError('platform release manifest schema rejected') from exc
     promotion = manifest['promotion']
-    if promotion['production']['status'] != 'accepted':
-        return
     staging = promotion['staging']['evidence']
-    production = promotion['production']['evidence']
     staging_paths: set[str] = set()
     staging_digests: set[str] = set()
     for evidence in staging.values():
@@ -157,6 +154,9 @@ def validate_release_manifest(manifest: dict) -> None:
                 'staging evidence path rejected')
         staging_paths.add(str(path))
         staging_digests.add(evidence['sha256'])
+    if promotion['production']['status'] != 'accepted':
+        return
+    production = promotion['production']['evidence']
     for evidence in production.values():
         path = PurePosixPath(evidence['path'])
         require(not path.is_absolute() and '..' not in path.parts,

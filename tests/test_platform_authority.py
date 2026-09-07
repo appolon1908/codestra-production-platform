@@ -362,6 +362,17 @@ def test_semantic_release_gate_accepts_distinct_production_artifacts():
     validate_release_manifest(_accepted_production_candidate())
 
 
+def test_staging_evidence_traversal_rejected_before_production_acceptance():
+    from scripts.validate_platform_authority import validate_release_manifest
+    manifest = _release_manifest()
+    assert manifest["promotion"]["production"]["status"] != "accepted"
+    manifest["promotion"]["staging"]["evidence"]["integration"]["path"] = (
+        "evidence/staging/../../../etc/integration.json"
+    )
+    with pytest.raises(ValueError, match="staging evidence path rejected"):
+        validate_release_manifest(manifest)
+
+
 @pytest.mark.parametrize('kind', ['integration', 'backup', 'restore', 'monitoring', 'rollback', 'approval'])
 @pytest.mark.parametrize('reuse', ['path', 'sha256'])
 def test_production_cannot_relabel_any_staging_evidence(kind, reuse):
