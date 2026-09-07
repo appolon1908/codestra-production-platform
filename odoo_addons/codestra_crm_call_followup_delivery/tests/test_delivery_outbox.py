@@ -194,6 +194,17 @@ class TestCodestraCrmCallDeliveryOutbox(TransactionCase):
         self.assertEqual(delivery.state, "cancelled")
         self.assertFalse(delivery.next_attempt_at)
 
+    def test_reconcile_updates_dead_letter_after_native_send(self):
+        _, delivery = self._complete_with_email("delivery-dead-then-sent")
+        delivery._write_from_worker({"state": "dead", "attempt_count": 3})
+        delivery.mail_id.sudo().write({"state": "sent"})
+
+        self.env["codestra.crm.call.delivery"]._cron_reconcile_mail_states()
+
+        delivery.invalidate_recordset()
+        self.assertEqual(delivery.state, "sent")
+        self.assertTrue(delivery.sent_at)
+
     def test_exception_schedules_retry_and_cron_requeues_mail(self):
         _, delivery = self._complete_with_email("delivery-retry")
         delivery.mail_id.sudo().write(

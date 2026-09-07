@@ -313,7 +313,7 @@ class CodestraCrmCallDelivery(models.Model):
          LEFT JOIN mail_mail m ON m.id = d.mail_id
              WHERE (d.state = 'queued'
                     AND (m.id IS NULL OR m.state IN ('sent', 'exception', 'cancel')))
-                OR (d.state = 'failed' AND m.state IN ('sent', 'cancel'))
+                OR (d.state IN ('failed', 'dead') AND m.state IN ('sent', 'cancel'))
              ORDER BY d.id
              LIMIT %s
              FOR UPDATE OF d SKIP LOCKED
