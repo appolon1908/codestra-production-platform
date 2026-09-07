@@ -13,7 +13,7 @@ from typing import Any
 
 from .database import Connection, IntegrityError, is_postgres
 
-SOURCES = {"kyqra", "telnexa", "klyrow", "n8n", "odoo", "crm"}
+SOURCES = {"kyqra", "telnexa", "klyrow", "n8n", "odoo", "crm", "vicidial"}
 EVENT_PREFIXES = {
     "kyqra": ("kyqra.",),
     "telnexa": ("telnexa.",),
@@ -21,6 +21,7 @@ EVENT_PREFIXES = {
     "n8n": ("workflow.",),
     "odoo": ("customer.", "campaign."),
     "crm": ("crm.",),
+    "vicidial": ("telephony.call.", "telephony.agent."),
 }
 CHANNEL_EVENTS = {
     "telnexa.sms.received": "sms",
@@ -354,6 +355,8 @@ class Store:
             with self.connect() as db:
                 db.execute("INSERT INTO events(event_id,tenant_id,source,event_type,idempotency_key,correlation_id,envelope,created_at) VALUES(?,?,?,?,?,?,?,?)", (envelope["event_id"], envelope["tenant_id"], envelope["source"], envelope["event_type"], envelope["idempotency_key"], envelope["correlation_id"], raw, time.time()))
                 targets=("n8n",) if envelope["source"] in {"odoo", "crm"} else ("odoo",) if envelope["source"]=="n8n" else ("odoo","n8n")
+                if envelope["event_type"].startswith(("telephony.call.", "telephony.agent.")):
+                    targets = (*targets, "calling")
                 db.executemany("INSERT INTO event_deliveries(event_id,target) VALUES(?,?)",((envelope["event_id"],target) for target in targets))
             return IngestResult(envelope["event_id"], envelope["correlation_id"], False, "queued")
         except IntegrityError:

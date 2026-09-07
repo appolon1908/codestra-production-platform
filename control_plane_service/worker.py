@@ -5,10 +5,13 @@ import hashlib
 import hmac
 import os
 import random
+import re
 import time
 import urllib.request
+import asyncio
 import urllib.parse
 from pathlib import Path
+import nats
 
 from .core import Store
 from .providers import submit
@@ -55,6 +58,47 @@ def retry_delay(attempts: int) -> float:
     return base + random.uniform(0.0, min(30.0, base * 0.25))
 
 
+async def _publish_calling_event(envelope: dict) -> None:
+    credentials = os.getenv("REALTIME_NATS_PUBLISH_CREDENTIALS_FILE", "")
+    digest = os.getenv("CALLING_CONTRACT_DIGEST", "")
+    payload = envelope.get("payload") or {}
+    required = {"event_id", "schema_version", "type", "tenant_id", "business_unit_id", "campaign_id",
+                "agent_id", "operation_id", "correlation_id", "occurred_at", "sequence"}
+    allowed_types = {
+        "telephony.call.ringing.v1", "telephony.call.answered.v1",
+        "telephony.call.connected.v1", "telephony.call.transferred.v1",
+        "telephony.call.completed.v1", "telephony.call.missed.v1",
+        "telephony.call.dispositioned.v1", "telephony.agent.status-changed.v1",
+    }
+    if (not credentials or len(digest) != 64 or not isinstance(payload, dict)
+            or required - set(payload)):
+        raise RuntimeError("calling_publication_contract_missing")
+    if (payload["type"] not in allowed_types or payload["schema_version"] != 1
+            or not isinstance(payload["sequence"], int) or payload["sequence"] < 1
+            or str(payload["event_id"]) != str(envelope.get("event_id"))
+            or str(payload["type"]) != str(envelope.get("event_type"))
+            or str(payload["tenant_id"]) != str(envelope.get("tenant_id"))
+            or str(payload["correlation_id"]) != str(envelope.get("correlation_id"))
+            or str(payload["occurred_at"]) != str(envelope.get("occurred_at"))):
+        raise RuntimeError("calling_publication_contract_mismatch")
+    tokens = [str(payload[key]) for key in ("tenant_id", "campaign_id", "agent_id")]
+    if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", token) for token in tokens):
+        raise RuntimeError("calling_publication_subject_rejected")
+    subject = "telephony.agent." + ".".join(tokens)
+    client = await nats.connect(
+        servers=[os.getenv("REALTIME_NATS_URL", "tls://codestra-nats:4222")],
+        user_credentials=credentials, connect_timeout=3, max_reconnect_attempts=3,
+    )
+    try:
+        await client.jetstream().publish(
+            subject, json.dumps(payload, separators=(",", ":")).encode(),
+            headers={"Nats-Msg-Id": str(payload["event_id"]),
+                     "Codestra-Contract-Digest": digest},
+        )
+    finally:
+        await client.close()
+
+
 def release_message_lease(current: Store, message: dict, status: str, *,
                           attempts: int | None = None, error: str | None = None,
                           next_attempt: float = 0) -> bool:
@@ -93,6 +137,50 @@ def once() -> int:
         delivery_row = dict(row)
         delivery_row["envelope"] = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
         target_name = row["target"]
+        if target_name == "calling":
+            if os.getenv("REALTIME_EVENT_DELIVERY_ENABLED", "false") != "true":
+                with current.connect() as db:
+                    db.execute("""UPDATE event_deliveries SET state='queued',lease_owner=NULL,
+                        lease_token=NULL,lease_expires_at=NULL
+                        WHERE event_id=? AND target=? AND lease_owner=? AND lease_token=?""",
+                        (row["event_id"], target_name, WORKER_ID, row["lease_token"]))
+                continue
+            try:
+                asyncio.run(_publish_calling_event(envelope))
+                with current.connect() as db:
+                    changed = db.execute("""UPDATE event_deliveries SET state='delivered',last_error=NULL,
+                        lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL
+                        WHERE event_id=? AND target=? AND lease_owner=? AND lease_token=?""",
+                        (row["event_id"], target_name, WORKER_ID, row["lease_token"])).rowcount
+                    if changed != 1:
+                        raise RuntimeError("delivery_lease_lost")
+                    pending = db.execute(
+                        "SELECT count(*) AS n FROM event_deliveries WHERE event_id=? AND state!='delivered'",
+                        (row["event_id"],),
+                    ).fetchone()["n"]
+                    if pending == 0:
+                        db.execute("UPDATE events SET state='delivered',last_error=NULL WHERE event_id=?",
+                                   (row["event_id"],))
+                processed += 1
+                continue
+            except Exception as exc:
+                attempts = row["delivery_attempts"] + 1
+                state = "dead_letter" if attempts >= MAX_ATTEMPTS else "retrying"
+                delay = retry_delay(attempts)
+                with current.connect() as db:
+                    changed = db.execute("""UPDATE event_deliveries SET state=?,attempts=?,next_attempt=?,last_error=?,
+                        lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL
+                        WHERE event_id=? AND target=? AND lease_owner=? AND lease_token=?""",
+                        (state, attempts, time.time() + delay, type(exc).__name__, row["event_id"],
+                         target_name, WORKER_ID, row["lease_token"])).rowcount
+                    if changed == 1:
+                        db.execute("""UPDATE events SET state=?,
+                            attempts=CASE WHEN attempts>? THEN attempts ELSE ? END,
+                            next_attempt=?,last_error=? WHERE event_id=?""",
+                            (state, attempts, attempts, time.time() + delay,
+                             type(exc).__name__, row["event_id"]))
+                processed += 1
+                continue
         if target_name == "odoo":
             with current.connect() as db:
                 n8n_state = db.execute("SELECT state FROM event_deliveries WHERE event_id=? AND target='n8n'", (row["event_id"],)).fetchone()
