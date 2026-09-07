@@ -1,0 +1,50 @@
+{
+  "schema_version": "codestra.server-a-operator-installation-record.v1",
+  "status": "incomplete",
+  "mode": "preserve-existing-sudoers",
+  "reference_release": "462c12e9957c3e6a9d92fe94a5019cd29d09d777",
+  "target_release": {
+    "protected_commit": null,
+    "release_archive_sha256": null,
+    "release_manifest_sha256": null,
+    "installer_sha256": null,
+    "approval": null
+  },
+  "operator_public_key_fingerprint": {
+    "value": null,
+    "source": "owner read-back of the root-owned approved public-key file using ssh-keygen -lf",
+    "approval": null
+  },
+  "arguments": {
+    "operator_public_key": {
+      "value": "/home/codestra-admin/operator-current.tR55n3.pub",
+      "source": "Server A read-only inventory; fingerprint remains owner-controlled because the root-owned 0600 key was not readable",
+      "approval": null
+    },
+    "protected_commit": {
+      "value": null,
+      "source": "new protected release produced after this change merges",
+      "approval": null
+    },
+    "image_digest": {
+      "value": "sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a",
+      "source": "reference release deployment-manifest.json; must be reconciled against the new protected release",
+      "approval": "PR #312 and protected release 462c12e9957c3e6a9d92fe94a5019cd29d09d777"
+    },
+    "change_id": {
+      "value": "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01",
+      "source": "reference release deployment-manifest.json; must be reconciled against the new protected release",
+      "approval": "PR #312 and protected release 462c12e9957c3e6a9d92fe94a5019cd29d09d777"
+    },
+    "maintenance_date": {
+      "value": null,
+      "source": "owner-approved execution window record required",
+      "approval": null
+    },
+    "control_plane_archive_sha256": {
+      "value": null,
+      "source": "approved control-plane archive evidence required; must not use an operator or release-package checksum",
+      "approval": null
+    }
+  }
+}
