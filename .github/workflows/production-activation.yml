@@ -8,7 +8,7 @@ on:
         required: true
         type: choice
         default: preflight
-        options: [preflight, backup, validate-backup, restore-test, stage, canary, status, rollback, collect-evidence, stage-control-plane, validate-control-plane, rollback-control-plane, rollout-middleware, rollback-middleware, activate-control-plane, enable-production-web-traffic, disable-production-web-traffic, enable-klyrow-email-delivery, disable-klyrow-email-delivery]
+        options: [preflight, backup, validate-backup, restore-test, stage, canary, status, rollback, collect-evidence, stage-control-plane, validate-control-plane, rollback-control-plane, rollout-middleware, rollback-middleware, status-email-reseller, rollout-email-reseller, rollback-email-reseller, activate-control-plane, enable-production-web-traffic, disable-production-web-traffic, enable-klyrow-email-delivery, disable-klyrow-email-delivery]
       protected_sha:
         description: Exact protected platform SHA
         required: true
@@ -143,7 +143,7 @@ jobs:
             -o UserKnownHostsFile="${RUNNER_TEMP}/operator-ssh/known_hosts"
           )
           command="${ACTION} ${PROTECTED_SHA} ${IMAGE_DIGEST} ${CHANGE_ID} ${MAINTENANCE_DATE}"
-          if test "${ACTION}" = stage; then
+          if test "${ACTION}" = stage || test "${ACTION}" = rollout-email-reseller; then
             test -n "${GHCR_TOKEN}"
             printf '%s' "${GHCR_TOKEN}" |
               ssh "${ssh_args[@]}" "${OPERATOR_USER}@${OPERATOR_HOST}" "${command}"
