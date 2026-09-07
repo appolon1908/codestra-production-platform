@@ -244,7 +244,10 @@ class MonitoringGovernanceTests(unittest.TestCase):
 
     def test_platform_ci_publishes_required_legacy_status(self) -> None:
         workflow = (ROOT / ".github/workflows/platform-source-gate.yml").read_text()
-        self.assertIn('- "reports/**"', workflow)
+        definition = yaml.load(workflow, Loader=yaml.BaseLoader)
+        self.assertIn("pull_request", definition["on"])
+        self.assertIn(definition["on"]["pull_request"], (None, "", {}))
+        self.assertNotIn("if", definition["jobs"]["validate"])
         self.assertIn("statuses: write", workflow)
         self.assertIn("TARGET_SHA: ${{ github.event.pull_request.head.sha }}", workflow)
         self.assertIn('statuses/${TARGET_SHA}', workflow)
