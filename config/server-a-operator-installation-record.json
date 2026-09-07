@@ -22,13 +22,13 @@
   },
   "operator_public_key_fingerprint": {
     "value": null,
-    "source": "owner read-back of the root-owned approved public-key file using ssh-keygen -lf",
+    "source": "Server A read-only attempt through configured codestra-app SSH succeeded, but direct ssh-keygen was denied by mode 0600 and sudo -n ssh-keygen required a password; effective sudo policy contains no authorized fingerprint command",
     "approval": null
   },
   "arguments": {
     "operator_public_key": {
       "value": "/home/codestra-admin/operator-current.tR55n3.pub",
-      "source": "Server A 65.109.65.169 read-only stat: root:root, mode 0600, one link, 81 bytes; fingerprint remains owner-controlled because root execution was unavailable",
+      "source": "Server A 65.109.65.169 read-only stat: root:root, mode 0600, one link, 81 bytes; configured SSH access works, but the effective sudo policy does not authorize no-password ssh-keygen fingerprint readback",
       "approval": "Owner-directed existing public-key path in the e75783fee4ea60259e3aee8e0b5ebe6eb30617dd preparation request"
     },
     "protected_commit": {
