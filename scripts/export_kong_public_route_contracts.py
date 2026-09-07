@@ -26,6 +26,7 @@ SENSITIVE_KEYS = {
     "cookie",
     "password",
     "private_key",
+    "provision_key",
     "proxy_authorization",
     "rsa_private_key",
     "secret",
