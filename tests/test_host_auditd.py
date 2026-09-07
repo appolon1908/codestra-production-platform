@@ -840,8 +840,26 @@ def test_verified_bootstrap_checks_stdlib_before_python_execution() -> None:
     assert "/usr/bin/find" in launcher
     assert "! -user root -o -perm /022" in launcher
     assert launcher.index("/usr/bin/find") < launcher.index('exec "$python_alias" -I')
+    assert "/usr/local/sbin/install-provider-host-auditd-verified" in launcher
+    assert "/usr/local/libexec/codestra-host-auditd/install-provider-host-auditd.py" in launcher
+    assert 'exec "$python_alias" -I -S' in launcher
     source = (PACKAGE / "install-provider-host-auditd.py").read_text()
     assert "verified bootstrap launcher is required" in source
+
+
+def test_root_bootstrap_installs_launcher_outside_operator_checkout() -> None:
+    bootstrap = (PACKAGE / "bootstrap-provider-host-auditd-launcher").read_text()
+    assert 'test "$EUID" -eq 0' in bootstrap
+    assert "/usr/local/sbin/install-provider-host-auditd-verified" in bootstrap
+    assert "/usr/local/libexec/codestra-host-auditd/install-provider-host-auditd.py" in bootstrap
+
+
+def test_restored_ownership_is_fsynced_before_rollback_evidence() -> None:
+    source = (PACKAGE / "install-provider-host-auditd.py").read_text()
+    restore = source.split("def restore_file(", 1)[1].split(
+        "def restored_checkpoint_evidence", 1
+    )[0]
+    assert restore.index("os.chown(") < restore.index("fsync_file(target)")
 
 
 def test_validator_requires_exact_root_owned_release_trust() -> None:

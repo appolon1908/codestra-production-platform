@@ -515,6 +515,14 @@ def fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def fsync_file(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def secure_directory(path: Path, mode: int = 0o700) -> None:
     missing: list[Path] = []
     cursor = path
@@ -1286,6 +1294,7 @@ def restore_file(record: dict[str, object], checkpoint: Path) -> None:
         raise InstallError("rollback snapshot checksum mismatch")
     atomic_write(target, value, int(record["mode"]))
     os.chown(target, int(record["uid"]), int(record["gid"]), follow_symlinks=False)
+    fsync_file(target)
 
 
 def restored_checkpoint_evidence(
