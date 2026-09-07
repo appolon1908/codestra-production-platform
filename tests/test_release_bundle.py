@@ -62,6 +62,11 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
     assert deployment["release_tuple"]["middleware_image_digest"] == (
         "sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a"
     )
+    installation = deployment["operator_installation"]
+    assert installation["mode"] == "preserve-existing-sudoers"
+    assert installation["installation_record_status"] == "incomplete"
+    for key in ("installer_sha256", "launcher_sha256", "installation_record_sha256"):
+        assert len(installation[key]) == 64
     sbom = json.loads((outputs[0] / "sbom.cdx.json").read_text())
     assert sbom["bomFormat"] == "CycloneDX"
     assert sbom["components"]
@@ -70,6 +75,13 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
     assert provenance["predicateType"] == "https://slsa.dev/provenance/v1"
     assert provenance["predicate"]["buildDefinition"]["externalParameters"]["commit"] == "a" * 40
     assert provenance["predicate"]["runDetails"]["metadata"]["invocationId"] == "fixture-run"
+
+
+def test_release_builder_derives_installation_record_status() -> None:
+    source = (Path(__file__).parents[1] / "tools/build_release_bundle.py").read_text()
+    assert 'installation_record.get("status")' in source
+    assert "validate_installation_record(" in source
+    assert '"installation_record_status": installation_record_status' in source
 
 
 def test_release_bundle_rejects_staging_only_middleware_digest(tmp_path: Path) -> None:
