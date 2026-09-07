@@ -79,6 +79,20 @@ def test_active_session_authorization_is_bounded_and_fail_closed() -> None:
 
 def test_required_platform_source_gate_covers_contracts_and_regression() -> None:
     workflow = (ROOT / ".github/workflows/platform-source-gate.yml").read_text(encoding="utf-8")
-    assert '      - "contracts/telephony/**"' in workflow
-    assert "Verify canonical calling contract in required validation" in workflow
-    assert "tests/test_calling_contract_remediation.py" in workflow
+    # Unfiltered PR validation is stronger than a telephony-only path filter:
+    # contract checks must run for every candidate, even an otherwise unknown file.
+    definition = yaml.load(workflow, Loader=yaml.BaseLoader)
+    assert "pull_request" in definition["on"]
+    assert definition["on"]["pull_request"] in (None, "", {})
+    validate = definition["jobs"]["validate"]
+    assert "if" not in validate
+    step = next(item for item in validate["steps"]
+                if item.get("name") == "Verify canonical calling contract in required validation")
+    assert "if" not in step
+    assert "continue-on-error" not in step
+    assert "scripts/telephony-contract-digest.sh" in step["run"]
+    assert 'test "$actual" = "$expected"' in step["run"]
+    assert "python -m pytest -q" in step["run"]
+    for filename in ("test_calling_contract_digest.py", "test_canonical_caddy_api_contract.py",
+                     "test_calling_contract_remediation.py"):
+        assert "tests/" + filename in step["run"]

@@ -1,44 +1,8 @@
 name: Platform source validation
 
+# Mandatory CI must run even for README-only or unclassified file changes.
 on:
   pull_request:
-    paths:
-      - ".github/workflows/**"
-      - "campaign_provisioning/**"
-      - "control_plane/**"
-      - "control_plane_service/**"
-      - "eventing/**"
-      - "identity/**"
-      - "integrations/**"
-      - "services/private-integration-gateway/**"
-      - "operations/**"
-      - "orbit/**"
-      - "evidence/**"
-      - "reports/**"
-      - "production-green-evidence/**"
-      - "config/**"
-      - "deploy/**"
-      - "docs/**"
-      - "n8n/**"
-      - "odoo_addons/**"
-      - "contracts/telephony/**"
-      - "schemas/**"
-      - "scripts/**"
-      - "tel_events/**"
-      - "tools/**"
-      - "tests/**"
-      - "AUTOMATED_PRODUCTION_GATES.md"
-      - "PRODUCTION-*.md"
-      - "PRODUCTION-*.yaml"
-      - "REPOSITORY-AUTHORITY-MATRIX.yaml"
-      - "STAGING-CERTIFICATION-REPORT.md"
-      - "BACKUP-RESTORE-CERTIFICATION.md"
-      - "OBSERVABILITY-CERTIFICATION.md"
-      - "SECURITY-CERTIFICATION.md"
-      - "EXTERNAL-CAPABILITY-ACTIVATION-MATRIX.yaml"
-      - "pytest.ini"
-      - ".gitleaksignore"
-      - ".gitignore"
 
 permissions:
   contents: read
