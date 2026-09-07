@@ -65,13 +65,17 @@ class CodestraCrmCallFollowupAutomation(models.Model):
         jobs = self.mapped("automation_job_ids").filtered(
             lambda job: job.state in {"retry", "dead"}
         )
-        jobs.sudo().write(
-            {
+        for job in jobs.sudo():
+            values = {
                 "state": "pending",
                 "next_attempt_at": fields.Datetime.now(),
                 "last_error": False,
             }
-        )
+            if job.state == "dead":
+                # Preserve historical attempts while granting a complete new
+                # policy-sized recovery window.
+                values["max_attempts"] = job.attempt_count + job.policy_id.max_attempts
+            job.write(values)
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",

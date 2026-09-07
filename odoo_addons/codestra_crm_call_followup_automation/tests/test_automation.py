@@ -15,6 +15,9 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
         agent_group = cls.env.ref(
             "codestra_crm_call_followup.group_call_followup_user"
         )
+        manager_group = cls.env.ref(
+            "codestra_crm_call_followup.group_call_followup_manager"
+        )
         service_group = cls.env.ref(
             "codestra_crm_call_followup.group_call_followup_service"
         )
@@ -36,6 +39,16 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
                 "company_id": cls.company.id,
                 "company_ids": [Command.set([cls.company.id])],
                 "group_ids": [Command.set([base_user.id, service_group.id])],
+            }
+        )
+        cls.manager = cls.env["res.users"].with_context(no_reset_password=True).create(
+            {
+                "name": "Automation Manager",
+                "login": "automation-manager@test.invalid",
+                "email": "automation-manager@test.invalid",
+                "company_id": cls.company.id,
+                "company_ids": [Command.set([cls.company.id])],
+                "group_ids": [Command.set([base_user.id, manager_group.id])],
             }
         )
         cls.customer = cls.env["res.partner"].create(
@@ -150,7 +163,8 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
 
         self.assertEqual(Job._cron_process_jobs(), 1)
         job = Job.search([("followup_id", "=", followup.id)], limit=1)
-        self.assertEqual(job.state, "done")
+        self.assertEqual(job.state, "pending")
+        self.assertTrue(job.next_attempt_at)
         self.assertFalse(job.activity_id)
         followup.invalidate_recordset()
         self.assertFalse(followup.automation_missed_callback_at)
@@ -165,6 +179,32 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
             ),
             2,
         )
+        Job._cron_process_jobs()
+        followup.invalidate_recordset()
+        self.assertTrue(followup.automation_missed_callback_at)
+        self.assertEqual(
+            Job.search_count([
+                ("followup_id", "=", followup.id),
+                ("job_type", "=", "missed_callback"),
+                ("activity_id", "!=", False),
+            ]),
+            1,
+        )
+
+    def test_dead_job_manual_retry_restores_full_policy_budget(self):
+        followup = self._register("automation-dead-recovery")
+        Job = self.env["codestra.crm.call.followup.job"]
+        Job._cron_enqueue_due_jobs(company_ids=[self.company.id])
+        job = Job.search([("followup_id", "=", followup.id)], limit=1)
+        job.write({"state": "dead", "attempt_count": 3, "max_attempts": 3})
+
+        self.env(user=self.manager)["codestra.crm.call.followup"].browse(
+            followup.id
+        ).action_retry_failed_automation()
+
+        job.invalidate_recordset()
+        self.assertEqual(job.state, "pending")
+        self.assertEqual(job.max_attempts, 6)
 
     def test_pending_sla_job_rechecks_current_policy_deadline(self):
         followup = self._register(
@@ -177,7 +217,8 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
 
         self.assertEqual(Job._cron_process_jobs(), 1)
         job = Job.search([("followup_id", "=", followup.id)], limit=1)
-        self.assertEqual(job.state, "done")
+        self.assertEqual(job.state, "pending")
+        self.assertTrue(job.next_attempt_at)
         self.assertFalse(job.activity_id)
         followup.invalidate_recordset()
         self.assertFalse(followup.automation_pending_sla_at)
@@ -191,6 +232,17 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
                 ("followup_id", "=", followup.id), ("job_type", "=", "pending_sla")
             ]),
             2,
+        )
+        Job._cron_process_jobs()
+        followup.invalidate_recordset()
+        self.assertTrue(followup.automation_pending_sla_at)
+        self.assertEqual(
+            Job.search_count([
+                ("followup_id", "=", followup.id),
+                ("job_type", "=", "pending_sla"),
+                ("activity_id", "!=", False),
+            ]),
+            1,
         )
 
     def test_calendar_reschedule_resets_callback_completion_occurrence(self):

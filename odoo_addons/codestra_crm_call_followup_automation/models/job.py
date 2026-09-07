@@ -158,12 +158,16 @@ class CodestraCrmCallFollowupJob(models.Model):
                     limit=limit_per_policy,
                 )
                 for followup in missed:
-                    occurrence = fields.Datetime.to_string(followup.callback_at)
+                    deadline = followup.callback_at + timedelta(
+                        minutes=policy.callback_grace_minutes
+                    )
+                    occurrence = fields.Datetime.to_string(deadline)
                     _, created = self._enqueue(
                         policy,
                         followup,
                         "missed_callback",
                         f"missed-callback:{policy.id}:{followup.id}:{occurrence}",
+                        {"effective_deadline": occurrence},
                     )
                     created_count += int(created)
 
@@ -247,7 +251,10 @@ class CodestraCrmCallFollowupJob(models.Model):
             )
             try:
                 with self.env.cr.savepoint():
-                    job._process_job()
+                    applied = job._process_job()
+                    if applied is False:
+                        processed += 1
+                        continue
                     job.write(
                         {
                             "state": "done",
@@ -315,18 +322,41 @@ class CodestraCrmCallFollowupJob(models.Model):
             "missed_callback": self._process_missed_callback,
             "reminder_health": self._process_reminder_health,
         }
-        handlers[self.job_type]()
+        return handlers[self.job_type]()
+
+    def _lock_followup(self):
+        """Serialize an occurrence's final check and escalation mutation."""
+        self.followup_id.flush_recordset()
+        self.env.cr.execute(
+            "SELECT id FROM codestra_crm_call_followup WHERE id = %s FOR UPDATE",
+            [self.followup_id.id],
+        )
+        self.followup_id.invalidate_recordset()
+        return self.followup_id
+
+    def _defer_until(self, deadline):
+        self.write(
+            {
+                "state": "pending",
+                "next_attempt_at": deadline,
+                "locked_at": False,
+            }
+        )
+        return False
 
     def _process_pending_sla(self):
-        followup = self.followup_id
+        followup = self._lock_followup()
+        deadline = followup.ended_at + timedelta(
+            minutes=self.policy_id.pending_sla_minutes
+        )
         if (
             followup.state != "pending"
             or followup.popup_completed_at
-            or followup.ended_at
-            > fields.Datetime.now()
-            - timedelta(minutes=self.policy_id.pending_sla_minutes)
+            or followup.automation_pending_sla_at
         ):
-            return
+            return True
+        if deadline > fields.Datetime.now():
+            return self._defer_until(deadline)
         self._create_activity_once(
             _("Post-call follow-up is overdue"),
             _("The assigned agent has not completed the call outcome within the configured SLA."),
@@ -334,19 +364,23 @@ class CodestraCrmCallFollowupJob(models.Model):
         followup._write_from_workflow(
             {"automation_pending_sla_at": fields.Datetime.now()}
         )
+        return True
 
     def _process_missed_callback(self):
-        followup = self.followup_id
+        followup = self._lock_followup()
         if (
             followup.state != "completed"
             or followup.schedule_kind == "none"
             or not followup.callback_at
             or followup.callback_completed_at
-            or followup.callback_at
-            > fields.Datetime.now()
-            - timedelta(minutes=self.policy_id.callback_grace_minutes)
+            or followup.automation_missed_callback_at
         ):
-            return
+            return True
+        deadline = followup.callback_at + timedelta(
+            minutes=self.policy_id.callback_grace_minutes
+        )
+        if deadline > fields.Datetime.now():
+            return self._defer_until(deadline)
         self._create_activity_once(
             _("Callback or appointment requires attention"),
             _("The scheduled client contact has passed its configured grace period."),
@@ -354,6 +388,7 @@ class CodestraCrmCallFollowupJob(models.Model):
         followup._write_from_workflow(
             {"automation_missed_callback_at": fields.Datetime.now()}
         )
+        return True
 
     def _process_reminder_health(self):
         followup = self.followup_id

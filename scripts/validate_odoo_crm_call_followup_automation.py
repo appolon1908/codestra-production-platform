@@ -202,7 +202,8 @@ def main() -> int:
         "company_id = ANY(%s)",
         "callback_grace_minutes",
         "pending_sla_minutes",
-        'fields.Datetime.to_string(followup.callback_at)',
+        'minutes=policy.callback_grace_minutes',
+        'SELECT id FROM codestra_crm_call_followup WHERE id = %s FOR UPDATE',
     ):
         if token not in sla_source:
             errors.append(f"SLA automation is missing invariant: {token}")
