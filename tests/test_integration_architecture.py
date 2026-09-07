@@ -67,4 +67,12 @@ def test_forbidden_connector_edge_fails_closed():
 
 def test_odoo_only_changes_trigger_architecture_ci():
     workflow = (ROOT / ".github/workflows/platform-source-gate.yml").read_text()
-    assert '"odoo_addons/**"' in workflow
+    definition = yaml.load(workflow, Loader=yaml.BaseLoader)
+    assert "pull_request" in definition["on"]
+    assert definition["on"]["pull_request"] in (None, "", {})
+    validate_job = definition["jobs"]["validate"]
+    assert "if" not in validate_job
+    step = next(item for item in validate_job["steps"]
+                if item.get("name") == "Enforce integration constitution")
+    assert "if" not in step and "continue-on-error" not in step
+    assert "python tools/check_integration_architecture.py" in step["run"]
