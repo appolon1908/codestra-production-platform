@@ -41,13 +41,15 @@ def main() -> None:
     assert sys.version_info[:3] == (3, 11, 16)
     assert sys.implementation.name == "cpython"
     assert tuple(map(int, pyexpat.EXPAT_VERSION.removeprefix("expat_").split("."))) >= (2, 8, 0)
-    expat_library = ctypes.util.find_library("expat")
-    if not expat_library:
-        raise AssertionError("runtime Expat library was not found")
-    expat = ctypes.CDLL(expat_library)
+    # Alpine's CPython may link Expat into pyexpat rather than install a
+    # separately discoverable libexpat soname. Inspect the exact loaded
+    # extension first, then the shared library when one exists.
+    expat_libraries = [ctypes.CDLL(pyexpat.__file__)]
+    if expat_library := ctypes.util.find_library("expat"):
+        expat_libraries.append(ctypes.CDLL(expat_library))
     required_symbols = ["XML_SetHashSalt16Bytes"]
     for symbol in required_symbols:
-        if not getattr(expat, symbol, None):
+        if not any(getattr(library, symbol, None) for library in expat_libraries):
             raise AssertionError(f"runtime Expat symbol is missing: {symbol}")
 
     process = multiprocessing.Process(target=_parse_nested_model, args=(2_000,))
