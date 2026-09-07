@@ -25,6 +25,10 @@ def complete() -> dict:
         "release_archive_sha256": "b" * 64,
         "release_manifest_sha256": "c" * 64,
         "installer_sha256": "d" * 64,
+        "launcher_sha256": "1" * 64,
+        "embedded_installation_record_sha256": "2" * 64,
+        "trust_anchor_sha256": "3" * 64,
+        "manifest_signature_verified": True,
         "approval": "independent protected review",
     }
     value["operator_public_key_fingerprint"] = {
