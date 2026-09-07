@@ -11,7 +11,8 @@ The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
 `rollback-control-plane`, `enable-production-web-traffic`,
 `disable-production-web-traffic`, `enable-klyrow-email-delivery`, or
 `disable-klyrow-email-delivery`, plus the bounded `rollout-middleware` and
-`rollback-middleware` pair.
+`rollback-middleware` pair and the bounded `status-email-reseller`,
+`rollout-email-reseller`, and `rollback-email-reseller` actions.
 
 Klyrow email enablement requires `/etc/codestra/production-operator/klyrow-email-authorization.json`
 as a root-owned `0600` file matching `klyrow-email-authorization.example.json`.
@@ -45,9 +46,9 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `039be99ac394b619c8ee0b883ded13434f63ca349fa9c09b917d5d88af29f1e4` |
-| `codestra-production-forced-command` | `80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb` |
-| `codestra-production-operator.sudoers` | `aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65` |
+| `codestra-production-operator` | `292128d6c80f52ef1397511e7a758531a82e334d5ed555ff25683124d1ad308a` |
+| `codestra-production-forced-command` | `af3c013fd7d7504eb19d4484038337b334786c6a18b4a67100a6ca9c788b4307` |
+| `codestra-production-operator.sudoers` | `c3a9d1445c1681a9cb631b1effa1ce1d6c170a3c6f176b63157199f533744203` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `codestra-readiness-restore.override.conf` | `bbc8e4af977ae21b4faffd8c755ed1a0220aebb2796f10c90c94483be3eed06e` |
 | `codestra-isolated-restore-rehearsal.sh` | `1e39b423c41f41b3a5784a4041500fbb6f8ae8d0dc2907aa35403b821cc67945` |
@@ -81,7 +82,7 @@ The system user is password-locked. SSH requires public-key authentication,
 has no TTY or forwarding, and applies the forced command in both `sshd_config`
 and `authorized_keys`. The validator switches to the dedicated account to prove
 that the complete parent-directory chain permits reading that key. Sudoers
-enumerates nine exact command lines and contains
+enumerates only the exact allowlisted command lines and contains
 neither `NOPASSWD: ALL` nor wildcard arguments.
 
 ## Installation and validation
@@ -102,6 +103,57 @@ modified payloads, unsafe source/key modes, unexpected ownership or modes on
 existing targets, malformed or multiple keys, invalid sudoers, and invalid SSH
 configuration.
 
+The checksum manifest is part of the same transaction: an existing regular
+root-owned `0600` manifest is backed up with its bytes and metadata, an absent
+manifest is recorded as absent, and the replacement is written to a private
+temporary file before atomic publication. A failure after publication restores
+the old manifest (or removes the newly created one) together with the previous
+operator files. The failure output keeps a nonzero status and reports rollback
+success separately without exposing command output or secrets.
+Every protected restore result contributes to that rollback status; restoration
+continues after a failure, and incomplete rollback retains the private backup
+directory for recovery. A `.absent` marker is the only evidence that a target
+was originally absent. Missing or conflicting backup evidence fails rollback.
+
+Database-manifest validation and certification are separate results. Successful
+structural validation is reported as `STRUCTURAL_VALIDATION=PASS`, while
+`DATABASE_CERTIFICATION_STATUS` is read from the manifest's single exact
+`certification_status` field. A structurally valid `FAIL` remains `FAIL`, and a
+missing, duplicate, or malformed status fails the installation transaction.
+
+## Offline archive staging runbook
+
+`stage-operator-release.py` verifies and extracts a reviewed release package;
+it never installs it. Create the dedicated root-controlled hierarchy without
+changing `/opt/codestra` or any user's home, then place the already acquired
+archive in `source` as a root-owned `0600` regular file:
+
+```sh
+sudo install -d -o root -g root -m 0700 \
+  /opt/codestra-operator-releases \
+  /opt/codestra-operator-releases/source
+sudo install -o root -g root -m 0600 reviewed-release.tar.gz \
+  /opt/codestra-operator-releases/source/reviewed-release.tar.gz
+sudo ./stage-operator-release.py \
+  /opt/codestra-operator-releases/source/reviewed-release.tar.gz \
+  REVIEWED_ARCHIVE_SHA256 REVIEWED_RELEASE_ID
+```
+
+The digest and release ID must come from the independent release review. The
+script snapshots the archive to a private root-owned file, verifies that exact
+snapshot, validates every member, extracts only from the snapshot, checks the
+complete tree, and atomically publishes a previously absent destination below
+`/opt/codestra-operator-releases/staged`. Absolute/traversal names, links,
+special files, duplicate/conflicting destinations, unsafe path ownership or
+permissions, and existing destinations fail closed. Snapshot files are removed
+after completion. Do not use this step to create signing keys, change the SSH
+public-key identity, invent approval data, or install a staged tree.
+
+The immutable `ec5a8a74ecac2fd156e5f748c1f43315caf6887d` release and its tags
+remain unchanged. These modified installer bytes require a new independently
+reviewed release package and new published hashes after merge; do not reuse or
+repoint the old release and do not silently change its maintenance date.
+
 ## Status and operation
 
 Remote callers send an action plus the exact installed SHA, image digest,
@@ -111,7 +163,7 @@ sessions are rejected before sudo. Each accepted invocation acquires a global
 lock and writes a sanitized JSON result under the evidence directory.
 `status` and `collect-evidence` remain available when a safety probe fails so
 an incident can be diagnosed. `rollback` remains available outside the normal
-window and when safety flags or telephony counters are unsafe. All four recovery
+window and when safety flags or telephony counters are unsafe. Recovery
 actions skip remote telephony and runtime-safety probes so an unreachable peer
 cannot strand rollback; the recovery operation itself retains its fixed-target,
 tuple, checksum, and readback controls. `rollback` can remove
@@ -163,6 +215,30 @@ identity `middleware_app`, while the runtime remains `mw_integration_api` and it
 byte to production, on an internal-only disposable network. The exact candidate
 then starts without a host port and must return healthy `/healthz` and
 database-online `/readyz` responses before production is touched.
+
+`rollout-email-reseller` accepts a two-token JSON envelope only on standard
+input: the existing GHCR read credential and the workflow's short-lived,
+Actions-read GitHub token. It recreates only `codestra-email-reseller-api-1`.
+The operator downloads the fixed immutable-build artifact by repository, run,
+and artifact ID without forwarding authorization across the signed-storage
+redirect. It rejects extra archive entries, traversal, oversized content, or
+checksum-manifest drift; hashes the actual candidate, Cosign verification,
+provenance, SBOM, labels, and summary bytes; and validates their exact image,
+source, workflow, issuer, run, signature subject, and attestation structure.
+The protected archive, receiver Compose files, immutable candidate lock, image
+digest, OCI source labels, and supply-chain evidence are checksum-bound. The
+candidate lock intentionally remains non-authorizing; the protected production
+environment approval of this exact action supplies the separate deployment
+authority. Before replacement, the operator requires the existing receiver to
+be healthy on schema `email-reseller-schema-v1`, tags its immutable image ID,
+and publishes a root-only exact-tuple rollback bundle. No database migration is
+run. Readback requires the loopback-only port, read-only filesystem, dropped
+capabilities, healthy database, exact source/version identity, callback backlog
+counts, Klyrow reachability, synthetic submission mode, and false email, SMS,
+and PSTN delivery flags. Any failed readback automatically restores the captured
+image. `status-email-reseller` exposes only sanitized identity, health, link,
+and backlog fields; `rollback-email-reseller` remains available as a fixed-target
+recovery action.
 
 `activate-control-plane` requires exact-tuple PASS evidence from both staging
 and validation, a validated encrypted backup, a rollback snapshot, healthy
