@@ -27,17 +27,6 @@ work=$(/usr/bin/mktemp -d /run/codestra-host-auditd-bootstrap.XXXXXX)
 cleanup() { /usr/bin/find "$work" -xdev -depth -delete 2>/dev/null || true; }
 committed=false
 targets=("$installer_target" "$launcher_target" "$python_target" "$digest_target" "$runtime_path_target")
-test -x /usr/bin/chattr -a -x /usr/bin/lsattr
-for index in "${!targets[@]}"; do
-  target=${targets[$index]}
-  if [ -e "$target" ]; then
-    test -f "$target" -a ! -L "$target"
-    /usr/bin/chattr -i "$target"
-    /usr/bin/cp --preserve=mode,ownership,timestamps "$target" "$work/backup-$index"
-  else
-    : > "$work/absent-$index"
-  fi
-done
 rollback_bootstrap() {
   if [ "$committed" = false ]; then
     if [ -n "${installed_record:-}" ]; then
@@ -59,6 +48,17 @@ rollback_bootstrap() {
   cleanup
 }
 trap rollback_bootstrap EXIT
+test -x /usr/bin/chattr -a -x /usr/bin/lsattr -a -x /usr/bin/getfacl
+for index in "${!targets[@]}"; do
+  target=${targets[$index]}
+  if [ -e "$target" ]; then
+    test -f "$target" -a ! -L "$target"
+    /usr/bin/chattr -i "$target"
+    /usr/bin/cp --preserve=mode,ownership,timestamps "$target" "$work/backup-$index"
+  else
+    : > "$work/absent-$index"
+  fi
+done
 
 /usr/bin/install -d -o root -g root -m 0755 /usr/local/libexec/codestra-host-auditd
 /usr/bin/install -d -o root -g root -m 0700 "$evidence_dir"

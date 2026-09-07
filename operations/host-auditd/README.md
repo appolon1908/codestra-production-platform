@@ -19,7 +19,8 @@ kernel is already locked and the exact rule set is not already active.
 
 ## Prerequisites
 
-- Debian or Ubuntu with the distribution `auditd` package already installed;
+- Debian or Ubuntu with the distribution `auditd`, `acl`, and `e2fsprogs`
+  packages already installed (providing `getfacl`, `chattr`, and `lsattr`);
 - an authorized, audited installation administrator with root privilege;
 - the exact protected platform archive, deployment manifest, checksum manifest,
   and detached signature;
