@@ -10,7 +10,6 @@ authority by itself.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 from pathlib import Path
@@ -72,6 +71,7 @@ BEARER_VALUE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
 PRIVATE_KEY_MARKER = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")
 SECRET_PATH_MARKERS = {"callback", "callbacks", "hook", "hooks", "webhook", "webhooks"}
 HIGH_ENTROPY_PATH_SEGMENT = re.compile(r"^[A-Za-z0-9._~+/=-]{24,}$")
+CODE_BEARING_KEYS = {"access", "body_filter", "certificate", "functions", "header_filter", "log", "rewrite"}
 
 
 def request(base: str, path: str) -> dict:
@@ -113,8 +113,8 @@ def sensitive_key(key: str) -> bool:
 
 
 def redacted(value) -> dict[str, object]:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    return {"redacted": True, "sha256": hashlib.sha256(payload).hexdigest()}
+    del value
+    return {"redacted": True}
 
 
 def sensitive_scalar(value: object, key: str) -> bool:
@@ -159,7 +159,7 @@ def sanitized_origin(value: str) -> str:
 
 
 def sanitize(value, key: str = ""):
-    if sensitive_key(key):
+    if sensitive_key(key) or key.lower().replace("-", "_") in CODE_BEARING_KEYS:
         return redacted(value)
     if isinstance(value, dict):
         return {name: sanitize(item, name) for name, item in sorted(value.items())}
@@ -180,8 +180,7 @@ def sanitize_route_path(value: str) -> str:
             "", "v1", "v2", "v3"
         }
         if marked_secret or HIGH_ENTROPY_PATH_SEGMENT.fullmatch(segment):
-            digest = hashlib.sha256(segment.encode()).hexdigest()
-            segments[index] = f"<redacted:sha256:{digest}>"
+            segments[index] = "<redacted>"
     return "/".join(segments)
 
 

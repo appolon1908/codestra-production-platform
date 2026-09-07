@@ -299,6 +299,7 @@ def test_read_only_route_exporter_redacts_secret_values_without_exporting_creden
             "https://storage.example.invalid/object?X-Goog-Credential=credential"
             "&X-Goog-Signature=signature"
         ),
+        "access": ["local expected='p4sscode'"],
     }
     sanitized = module.sanitize(value)
     assert sanitized["client_secret"]["redacted"] is True
@@ -315,6 +316,7 @@ def test_read_only_route_exporter_redacts_secret_values_without_exporting_creden
     assert sanitized["aws_url"]["redacted"] is True
     assert sanitized["azure_url"]["redacted"] is True
     assert sanitized["gcs_url"]["redacted"] is True
+    assert sanitized["access"] == {"redacted": True}
     rendered = json.dumps(sanitized)
     assert "do-not-export" not in rendered
     assert "method=\"GET\"" in source
@@ -331,6 +333,13 @@ def test_exporter_pagination_cannot_leave_the_selected_admin_origin():
         )
 
 
+def test_kong_wildcard_host_matches_public_subdomains():
+    module = _module()
+    assert module.host_matches("*.codestra.agency", "api.codestra.agency")
+    assert not module.host_matches("*.codestra.agency", "codestra.agency")
+    assert not module.host_matches("*.codestra.agency", "api.codestra.co")
+
+
 def test_exporter_admin_origin_strips_basic_auth_credentials():
     module = _exporter()
     assert (
@@ -344,8 +353,7 @@ def test_exporter_redacts_credentials_embedded_in_route_paths():
     secret = "company-signing-token-0123456789"
     sanitized = module.sanitize_route_path(f"/webhook/{secret}/events")
     assert secret not in sanitized
-    assert sanitized.startswith("/webhook/<redacted:sha256:")
-    assert sanitized.endswith(">/events")
+    assert sanitized == "/webhook/<redacted>/events"
     assert module.sanitize_route_path("/api/v1/events") == "/api/v1/events"
 
 

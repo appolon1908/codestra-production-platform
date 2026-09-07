@@ -331,6 +331,12 @@ def verify_managed_route(
     }
 
 
+def host_matches(pattern: str, host: str) -> bool:
+    return pattern == host or (
+        pattern.startswith("*.") and host.endswith(pattern[1:]) and host != pattern[2:]
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--admin-url", required=True)
@@ -363,11 +369,13 @@ def main() -> int:
         raise RuntimeError("a route cannot be both approved and unverified")
 
     public_hosts = {manifest["canonicalHost"], manifest["legacyHost"]}
+    def matches_public_host(pattern: str) -> bool:
+        return any(host_matches(pattern, host) for host in public_hosts)
     public_routes = [
         route
         for route in routes
         if is_http_route(route)
-        and (not route.get("hosts") or public_hosts.intersection(route.get("hosts") or []))
+        and (not route.get("hosts") or any(matches_public_host(host) for host in route.get("hosts") or []))
     ]
     unverified_public = sorted(
         route.get("name") or route["id"]
@@ -406,7 +414,10 @@ def main() -> int:
         route.get("name") or route["id"]
         for route in routes_after
         if is_http_route(route)
-        and (not route.get("hosts") or manifest["legacyHost"] in (route.get("hosts") or []))
+        and (not route.get("hosts") or any(
+            host_matches(host, manifest["legacyHost"])
+            for host in route.get("hosts") or []
+        ))
     )
     if not manifest["legacyHostEnabled"] and legacy_routes:
         print("LEGACY_PUBLIC_ROUTE_NAMES=" + ";".join(legacy_routes))
