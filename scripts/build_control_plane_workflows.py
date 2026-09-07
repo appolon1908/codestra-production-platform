@@ -38,17 +38,25 @@ if(b.business_process_status!=='ACTIONS_COMPLETED') throw new Error('business_ac
 return [{json:{event_id:b.event_id,correlation_id:b.correlation_id,idempotency_key:'n8n:'+b.idempotency_key,workflow_key:b.workflow_key,execution_id:String($execution.id),status:'COMPLETED',actions:(b.executed_actions||[]).map(item=>({type:item.type})),completed_at:new Date().toISOString(),tenant_id:b.tenant_id}}];"""
 
 
-def middleware_request(node_id: str, name: str, path: str, body: str, position: list[int]) -> dict:
+def middleware_request(
+    node_id: str, name: str, path: str, body: str, position: list[int],
+    *, include_tenant_header: bool = True,
+) -> dict:
+    # Error Trigger has no original tenant payload. For that callback only,
+    # Kong derives the tenant from the verified OAuth claim, not a fabricated
+    # header. Middleware still rejects an execution belonging to another tenant.
+    headers = [
+        {"name": "Idempotency-Key", "value": "={{$json.idempotency_key}}"},
+        {"name": "X-Correlation-ID", "value": "={{$json.correlation_id}}"},
+    ]
+    if include_tenant_header:
+        headers.insert(0, {"name": "X-Tenant-ID", "value": "={{$json.tenant_id}}"})
     return {
         "id": node_id, "name": name, "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
         "position": position, "parameters": {
-            "method": "POST", "url": "=http://codestra-kong-kong-gateway-1:8000" + path,
+            "method": "POST", "url": "=https://api.codestra.co" + path,
             "authentication": "predefinedCredentialType", "nodeCredentialType": "oAuth2Api",
-            "sendHeaders": True, "headerParameters": {"parameters": [
-                {"name": "X-Tenant-ID", "value": "={{$json.tenant_id}}"},
-                {"name": "Idempotency-Key", "value": "={{$json.idempotency_key}}"},
-                {"name": "X-Correlation-ID", "value": "={{$json.correlation_id}}"},
-            ]}, "sendBody": True, "contentType": "raw", "rawContentType": "application/json",
+            "sendHeaders": True, "headerParameters": {"parameters": headers}, "sendBody": True, "contentType": "raw", "rawContentType": "application/json",
             "body": body, "options": {"timeout": 10000, "response": {"response": {"neverError": False}}},
         },
         "credentials": {"oAuth2Api": {"id": "codestraMiddlewareOAuth2", "name": "Codestra Middleware OAuth2"}},
@@ -85,8 +93,8 @@ def error_workflow() -> dict:
         "nodes": [
             {"id": "cp-90-trigger", "name": "Workflow Error", "type": "n8n-nodes-base.errorTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {}},
             {"id": "cp-90-structure", "name": "Structure failure", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [280, 0],
-             "parameters": {"jsCode": "const e=$json.execution||{}; const executionId=String(e.id||$execution.id); return [{json:{ok:false,status:'FAILED',workflow_key:'resolve-from-execution',execution_id:executionId,event_id:'resolve-from-execution',correlation_id:'resolve-from-execution',idempotency_key:'n8n-failure:'+executionId,tenant_id:String($json.tenant_id||'unknown'),actions:[],completed_at:new Date().toISOString(),error:{name:e.error?.name||'WorkflowError',message:e.error?.message||'workflow_failed'}}}];"}},
-            middleware_request("cp-90-callback", "Record governed failure", "/api/v1/automation/results", "={{JSON.stringify($json)}}", [560, 0]),
+             "parameters": {"jsCode": "const e=$json.execution||{}; if(e.id===undefined || e.id===null || String(e.id).trim()==='') throw new Error('source_execution_required'); const executionId=String(e.id); return [{json:{ok:false,status:'FAILED',workflow_key:'resolve-from-execution',execution_id:executionId,event_id:'resolve-from-execution',correlation_id:'resolve-from-execution',idempotency_key:'n8n-failure:'+executionId,actions:[],completed_at:new Date().toISOString(),error:{name:e.error?.name||'WorkflowError',message:e.error?.message||'workflow_failed'}}}];"}},
+            middleware_request("cp-90-callback", "Record governed failure", "/api/v1/automation/results", "={{JSON.stringify($json)}}", [560, 0], include_tenant_header=False),
         ],
         "connections": {
             "Workflow Error": {"main": [[{"node": "Structure failure", "type": "main", "index": 0}]]},
