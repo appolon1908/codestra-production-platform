@@ -120,7 +120,12 @@ def stage(archive: Path, approved: str, release: str, root: Path, uid: int) -> P
             for member in members:
                 target = work.joinpath(*PurePosixPath(member.name).parts)
                 if member.isdir():
-                    target.mkdir(mode=0o755, parents=True, exist_ok=False)
+                    if target.exists() or target.is_symlink():
+                        info = target.lstat()
+                        if target.is_symlink() or not stat.S_ISDIR(info.st_mode):
+                            raise StageError("archive directory destination is unsafe")
+                    else:
+                        target.mkdir(mode=0o755, parents=True, exist_ok=False)
                     target.chmod(0o755)
                 else:
                     target.parent.mkdir(mode=0o755, parents=True, exist_ok=True)

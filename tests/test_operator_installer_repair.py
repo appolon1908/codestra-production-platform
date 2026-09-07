@@ -334,6 +334,26 @@ def test_stage_valid_archive_with_safe_tree(tmp_path: Path) -> None:
     assert not list((root / "snapshots").iterdir())
 
 
+def test_stage_accepts_directory_member_after_its_child(tmp_path: Path) -> None:
+    root = make_root(tmp_path)
+    archive = make_archive(
+        root,
+        [
+            ("operator/file", tarfile.REGTYPE, b"ok", ""),
+            ("operator", tarfile.DIRTYPE, b"", ""),
+        ],
+    )
+    result = run_stage(root, archive, approved(archive))
+    assert result.returncode == 0, result.stderr
+    assert (root / "staged/release-1/operator/file").read_bytes() == b"ok"
+
+
+def test_runbook_uses_exact_database_certification_field() -> None:
+    runbook = (PACKAGE / "README.md").read_text()
+    assert "`DATABASE_CERTIFICATION_STATUS` is read" in runbook
+    assert "`DATABASE_CERTIFICATION` is read" not in runbook
+
+
 def test_stage_rejects_wrong_digest_and_existing_destination(tmp_path: Path) -> None:
     root = make_root(tmp_path)
     archive = make_archive(root, [("file", tarfile.REGTYPE, b"ok", "")])

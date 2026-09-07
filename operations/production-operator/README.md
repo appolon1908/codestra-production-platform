@@ -117,7 +117,7 @@ was originally absent. Missing or conflicting backup evidence fails rollback.
 
 Database-manifest validation and certification are separate results. Successful
 structural validation is reported as `STRUCTURAL_VALIDATION=PASS`, while
-`DATABASE_CERTIFICATION` is read from the manifest's single exact
+`DATABASE_CERTIFICATION_STATUS` is read from the manifest's single exact
 `certification_status` field. A structurally valid `FAIL` remains `FAIL`, and a
 missing, duplicate, or malformed status fails the installation transaction.
 
