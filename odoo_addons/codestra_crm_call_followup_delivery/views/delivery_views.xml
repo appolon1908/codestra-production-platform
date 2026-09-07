@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_codestra_crm_call_delivery_search" model="ir.ui.view">
+        <field name="name">codestra.crm.call.delivery.search</field>
+        <field name="model">codestra.crm.call.delivery</field>
+        <field name="arch" type="xml">
+            <search string="Call Email Deliveries">
+                <field name="name"/>
+                <field name="followup_id"/>
+                <field name="email_to"/>
+                <field name="agent_id"/>
+                <field name="partner_id"/>
+                <filter name="my_deliveries" string="My Deliveries" domain="[('agent_id', '=', uid)]"/>
+                <filter name="queued" string="Queued" domain="[('state', '=', 'queued')]"/>
+                <filter name="failed" string="Retry Scheduled" domain="[('state', '=', 'failed')]"/>
+                <filter name="dead" string="Dead Letter" domain="[('state', '=', 'dead')]"/>
+                <filter name="sent" string="Sent" domain="[('state', '=', 'sent')]"/>
+                <group>
+                    <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>
+                    <filter name="group_agent" string="Agent" context="{'group_by': 'agent_id'}"/>
+                    <filter name="group_company" string="Company" context="{'group_by': 'company_id'}" groups="base.group_multi_company"/>
+                    <filter name="group_day" string="Created Date" context="{'group_by': 'create_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_codestra_crm_call_delivery_list" model="ir.ui.view">
+        <field name="name">codestra.crm.call.delivery.list</field>
+        <field name="model">codestra.crm.call.delivery</field>
+        <field name="arch" type="xml">
+            <list string="Call Email Deliveries"
+                  create="0"
+                  delete="0"
+                  decoration-success="state == 'sent'"
+                  decoration-warning="state == 'failed'"
+                  decoration-danger="state == 'dead'"
+                  decoration-muted="state == 'cancelled'">
+                <field name="create_date"/>
+                <field name="followup_id"/>
+                <field name="partner_id" optional="show"/>
+                <field name="agent_id" optional="show"/>
+                <field name="email_to" optional="show"/>
+                <field name="attempt_count" optional="show"/>
+                <field name="next_attempt_at" optional="show"/>
+                <field name="mail_id" optional="hide"/>
+                <field name="state" widget="badge"
+                       decoration-info="state == 'queued'"
+                       decoration-success="state == 'sent'"
+                       decoration-warning="state == 'failed'"
+                       decoration-danger="state == 'dead'"
+                       decoration-muted="state == 'cancelled'"/>
+                <button name="action_retry_now"
+                        type="object"
+                        string="Retry Now"
+                        class="btn-link"
+                        invisible="state not in ['failed', 'dead']"
+                        groups="codestra_crm_call_followup.group_call_followup_manager"/>
+                <button name="action_open_followup"
+                        type="object"
+                        string="Open Call"
+                        class="btn-link"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_codestra_crm_call_delivery_form" model="ir.ui.view">
+        <field name="name">codestra.crm.call.delivery.form</field>
+        <field name="model">codestra.crm.call.delivery</field>
+        <field name="arch" type="xml">
+            <form string="Call Email Delivery" create="0" delete="0">
+                <header>
+                    <button name="action_retry_now"
+                            type="object"
+                            string="Retry Now"
+                            class="btn-primary"
+                            invisible="state not in ['failed', 'dead']"
+                            groups="codestra_crm_call_followup.group_call_followup_manager"/>
+                    <button name="action_cancel"
+                            type="object"
+                            string="Cancel Delivery"
+                            class="btn-secondary"
+                            invisible="state in ['sent', 'cancelled']"
+                            confirm="Cancel this queued delivery? The audit record will be retained."
+                            groups="codestra_crm_call_followup.group_call_followup_manager"/>
+                    <button name="action_open_followup"
+                            type="object"
+                            string="Open Call Follow-up"
+                            icon="fa-phone"
+                            class="btn-secondary"/>
+                    <button name="action_open_mail"
+                            type="object"
+                            string="Open Odoo Mail"
+                            icon="fa-envelope"
+                            class="btn-secondary"
+                            invisible="not mail_id"
+                            groups="codestra_crm_call_followup.group_call_followup_manager"/>
+                    <field name="state" widget="statusbar" statusbar_visible="queued,failed,dead,sent,cancelled"/>
+                </header>
+                <sheet>
+                    <widget name="web_ribbon" title="Dead Letter" bg_color="text-bg-danger" invisible="state != 'dead'"/>
+                    <widget name="web_ribbon" title="Sent" bg_color="text-bg-success" invisible="state != 'sent'"/>
+                    <div class="oe_title">
+                        <label for="name"/>
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="CRM">
+                            <field name="followup_id" readonly="1"/>
+                            <field name="lead_id" readonly="1"/>
+                            <field name="partner_id" readonly="1"/>
+                            <field name="agent_id" readonly="1"/>
+                            <field name="company_id" readonly="1" groups="base.group_multi_company"/>
+                        </group>
+                        <group string="Delivery">
+                            <field name="kind" readonly="1"/>
+                            <field name="attempt_count" readonly="1"/>
+                            <field name="max_attempts" readonly="1"/>
+                            <field name="queued_at" readonly="1"/>
+                            <field name="last_attempt_at" readonly="1"/>
+                            <field name="next_attempt_at" readonly="1"/>
+                            <field name="sent_at" readonly="1"/>
+                            <field name="mail_id" readonly="1"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Message">
+                            <group>
+                                <field name="email_to" readonly="1"/>
+                                <field name="email_cc" readonly="1"/>
+                                <field name="subject" readonly="1"/>
+                            </group>
+                            <field name="body_html" readonly="1" widget="html"/>
+                        </page>
+                        <page string="Failure" invisible="not last_error">
+                            <field name="last_error" readonly="1" nolabel="1"/>
+                        </page>
+                        <page string="Identity" groups="codestra_crm_call_followup.group_call_followup_manager">
+                            <group>
+                                <field name="idempotency_key" readonly="1"/>
+                                <field name="recipient_hash" readonly="1"/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_codestra_crm_call_delivery" model="ir.actions.act_window">
+        <field name="name">Email Deliveries</field>
+        <field name="res_model">codestra.crm.call.delivery</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_codestra_crm_call_delivery_search"/>
+        <field name="context">{'search_default_failed': 1, 'search_default_dead': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No delivery exceptions need attention.</p>
+            <p>Queued post-call email is tracked here until Odoo confirms sent, retry, dead-letter, or cancellation state.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_codestra_crm_call_delivery"
+              name="Email Deliveries"
+              parent="crm.crm_menu_sales"
+              action="action_codestra_crm_call_delivery"
+              sequence="16"
+              groups="codestra_crm_call_followup.group_call_followup_manager"/>
+</odoo>

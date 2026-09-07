@@ -114,7 +114,7 @@
                             </group>
                             <field name="email_body" readonly="1" widget="html"/>
                         </page>
-                        <page string="Integration" groups="codestra_crm_call_followup.group_call_followup_manager">
+                        <page name="integration" string="Integration" groups="codestra_crm_call_followup.group_call_followup_manager">
                             <group>
                                 <field name="source" readonly="1"/>
                                 <field name="correlation_id" readonly="1"/>
