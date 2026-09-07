@@ -99,6 +99,7 @@ def _release_manifest() -> dict:
         evidence_class: {
             "path": f"evidence/{evidence_class}.json",
             "sha256": sha,
+            "environment": "staging",
         }
         for evidence_class in (
             "integration",
@@ -126,6 +127,7 @@ def _release_manifest() -> dict:
         "middleware-breero-odoo-worker": "ghcr.io/appolon1908-hue/codestra-middleware",
         "odoo-19": "ghcr.io/codestra-srl/codestra-odoo",
         "email-reseller-api": "ghcr.io/appolon1908-hue/email-reseller",
+        "stalwart": "stalwartlabs/stalwart",
     })
     return {
         "schema_version": "platform-release-manifest.v1",
@@ -224,6 +226,7 @@ def test_release_manifest_binds_each_service_to_its_approved_image_name() -> Non
 def test_websocket_gateway_and_telephony_contracts_are_release_bearing() -> None:
     composition = json.loads((ROOT / "composition/runtime-composition.v1.json").read_text())
     assert "websocket-gateway" in composition["release_service_ids"]
+    assert "integration-control-plane" in composition["release_service_ids"]
     catalog = json.loads((ROOT / "contracts/catalog.v1.json").read_text())
     ids = {item["id"] for item in catalog["contracts"]}
     assert {
@@ -285,6 +288,7 @@ def test_production_acceptance_requires_staging_acceptance() -> None:
             evidence_class: {
                 "path": f"evidence/production-{evidence_class}.json",
                 "sha256": "0" * 64,
+                "environment": "production",
             }
             for evidence_class in (
                 "integration",
@@ -321,6 +325,7 @@ def test_production_acceptance_requires_every_evidence_class(
     evidence["approval"] = {
         "path": "evidence/production-approval.json",
         "sha256": "0" * 64,
+        "environment": "production",
     }
     evidence.pop(missing_class)
     manifest["promotion"]["production"] = {

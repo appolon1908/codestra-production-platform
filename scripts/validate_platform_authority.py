@@ -16,7 +16,7 @@ AUTHORITY_REPOSITORY = 'appolon1908-hue/codestra-production-platform'
 AUTHORITY_BRANCH = 'release/production-activation'
 CANONICAL_KYQRA_REPOSITORY = 'appolon1908-hue/kyqra-crawler'
 RETIRED_KYQRA_REPOSITORY = 'appolon1908-hue/kyqra'
-RELEASE_BEARING_WORKLOADS = {'caddy', 'kong', 'middleware', 'odoo-19', 'n8n', 'keycloak', 'kyqra-crawler', 'observability', 'postgresql', 'redis', 'nats-jetstream', 'temporal', 'telnexa', 'klyrow', 'middleware-external-webhook-worker', 'middleware-breero-odoo-worker', 'sms-event-worker', 'email-reseller-api', 'sms-api', 'mail-api', 'stalwart', 'kong-standby-auth', 'kong-identity-certification', 'beyvra-email-api', 'reseller-portal', 'private-vicidial-ingress', 'websocket-gateway'}
+RELEASE_BEARING_WORKLOADS = {'caddy', 'kong', 'middleware', 'odoo-19', 'n8n', 'keycloak', 'kyqra-crawler', 'observability', 'postgresql', 'redis', 'nats-jetstream', 'temporal', 'telnexa', 'klyrow', 'middleware-external-webhook-worker', 'middleware-breero-odoo-worker', 'sms-event-worker', 'email-reseller-api', 'sms-api', 'mail-api', 'stalwart', 'kong-standby-auth', 'kong-identity-certification', 'beyvra-email-api', 'reseller-portal', 'private-vicidial-ingress', 'websocket-gateway', 'integration-control-plane'}
 
 def load(path: str) -> dict:
     value = json.loads((ROOT / path).read_text(encoding='utf-8'))
@@ -97,7 +97,8 @@ def validate_release_schema() -> None:
     require(set(gate['allOf'][0]['then']['properties']['evidence']['required']) == required_evidence, 'platform authority invariant failed')
     production_gate = schema['$defs']['production_gate']
     require(production_gate['allOf'][0]['$ref'] == '#/$defs/environment_gate', 'platform authority invariant failed')
-    require(production_gate['allOf'][1]['then']['properties']['evidence']['required'] == ['approval'], 'platform authority invariant failed')
+    require(production_gate['allOf'][1]['$ref'] == '#/$defs/production_evidence_environment', 'platform authority invariant failed')
+    require(production_gate['allOf'][2]['then']['properties']['evidence']['required'] == ['approval'], 'platform authority invariant failed')
     promotion = schema['properties']['promotion']
     require(promotion['allOf'][0]['then']['properties']['staging']['properties']['status']['const'] == 'accepted', 'platform authority invariant failed')
     edge = schema['properties']['edge']['properties']

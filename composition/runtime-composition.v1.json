@@ -38,12 +38,13 @@
     "beyvra-email-api",
     "reseller-portal",
     "private-vicidial-ingress"
-    ,"websocket-gateway"
+    ,"websocket-gateway",
+    "integration-control-plane"
   ],
   "hosts": [
     {
       "id": "application-server-a",
-      "components": ["caddy", "kong", "middleware", "odoo-19", "n8n", "keycloak", "postgresql", "redis", "nats-jetstream", "temporal", "observability", "middleware-external-webhook-worker", "middleware-breero-odoo-worker", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress", "websocket-gateway"]
+      "components": ["caddy", "kong", "middleware", "odoo-19", "n8n", "keycloak", "postgresql", "redis", "nats-jetstream", "temporal", "observability", "middleware-external-webhook-worker", "middleware-breero-odoo-worker", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress", "websocket-gateway", "integration-control-plane"]
     },
     {
       "id": "provider-host",
@@ -252,6 +253,14 @@
       "authority_state": "unresolved-pending-pr-148-convergence",
       "composition_input": "deploy/architecture-remediation/compose.websocket-gateway.yaml",
       "role": "authenticated realtime telephony event gateway",
+      "deployment_state": "source-and-digest-reconciliation-required"
+    },
+    {
+      "id": "integration-control-plane",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/control-plane/compose.yaml",
+      "composition_input": "deploy/control-plane/compose.yaml",
+      "role": "integration API and durable worker control plane",
       "deployment_state": "source-and-digest-reconciliation-required"
     }
   ]

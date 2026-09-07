@@ -32,8 +32,8 @@
     },
     "services": {
       "type": "array",
-      "minItems": 27,
-      "maxItems": 27,
+      "minItems": 28,
+      "maxItems": 28,
       "allOf": [
         {"contains": {"properties": {"service_id": {"const": "caddy"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "kong"}}, "required": ["service_id"]}},
@@ -61,7 +61,8 @@
         {"contains": {"properties": {"service_id": {"const": "beyvra-email-api"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "reseller-portal"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "private-vicidial-ingress"}}, "required": ["service_id"]}},
-        {"contains": {"properties": {"service_id": {"const": "websocket-gateway"}}, "required": ["service_id"]}}
+        {"contains": {"properties": {"service_id": {"const": "websocket-gateway"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "integration-control-plane"}}, "required": ["service_id"]}}
       ],
       "items": {
         "type": "object",
@@ -69,7 +70,7 @@
         "required": ["service_id", "repository", "git_sha", "image", "service_manifest_sha256"],
         "allOf": [
           {
-            "if": {"properties": {"service_id": {"enum": ["caddy", "kong", "observability", "postgresql", "redis", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress", "websocket-gateway"]}}},
+            "if": {"properties": {"service_id": {"enum": ["caddy", "kong", "observability", "postgresql", "redis", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress", "websocket-gateway", "integration-control-plane"]}}},
             "then": {"properties": {"repository": {"const": "appolon1908-hue/codestra-production-platform"}}}
           },
           {
@@ -103,13 +104,14 @@
             {"properties":{"service_id":{"const":"email-reseller-api"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/email-reseller"}}}}},
             {"properties":{"service_id":{"const":"sms-api"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/sms-api"}}}}},
             {"properties":{"service_id":{"const":"mail-api"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/mail-api"}}}}},
-            {"properties":{"service_id":{"const":"stalwart"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/stalwart"}}}}},
+            {"properties":{"service_id":{"const":"stalwart"},"image":{"properties":{"reference":{"const":"stalwartlabs/stalwart"}}}}},
             {"properties":{"service_id":{"const":"kong-standby-auth"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/kong-standby-auth"}}}}},
             {"properties":{"service_id":{"const":"kong-identity-certification"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/kong-identity-certification"}}}}},
             {"properties":{"service_id":{"const":"beyvra-email-api"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/beyvra-email-api"}}}}},
             {"properties":{"service_id":{"const":"reseller-portal"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/reseller-portal"}}}}},
             {"properties":{"service_id":{"const":"private-vicidial-ingress"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/private-vicidial-ingress"}}}}},
-            {"properties":{"service_id":{"const":"websocket-gateway"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/websocket-gateway"}}}}}
+            {"properties":{"service_id":{"const":"websocket-gateway"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/websocket-gateway"}}}}},
+            {"properties":{"service_id":{"const":"integration-control-plane"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/integration-control-plane"}}}}}
           ]}
         ],
         "properties": {
@@ -154,7 +156,7 @@
       "required": ["staging", "production", "identical_digests_required"],
       "properties": {
         "identical_digests_required": {"const": true},
-        "staging": {"$ref": "#/$defs/environment_gate"},
+        "staging": {"$ref": "#/$defs/staging_gate"},
         "production": {"$ref": "#/$defs/production_gate"}
       },
       "allOf": [
@@ -195,7 +197,8 @@
       "required": ["path", "sha256"],
       "properties": {
         "path": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]+$"},
-        "sha256": {"$ref": "#/$defs/sha256"}
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "environment": {"enum": ["staging", "production"]}
       }
     },
     "environment_gate": {
@@ -236,6 +239,7 @@
     "production_gate": {
       "allOf": [
         {"$ref": "#/$defs/environment_gate"},
+        {"$ref": "#/$defs/production_evidence_environment"},
         {
           "if": {
             "properties": {"status": {"const": "accepted"}},
@@ -248,6 +252,31 @@
           }
         }
       ]
+    },
+    "staging_gate": {
+      "allOf": [
+        {"$ref": "#/$defs/environment_gate"},
+        {"$ref": "#/$defs/staging_evidence_environment"}
+      ]
+    },
+    "staging_evidence_environment": {
+      "properties": {"evidence": {"properties": {
+        "integration": {"properties": {"environment": {"const": "staging"}}, "required": ["environment"]},
+        "backup": {"properties": {"environment": {"const": "staging"}}, "required": ["environment"]},
+        "restore": {"properties": {"environment": {"const": "staging"}}, "required": ["environment"]},
+        "monitoring": {"properties": {"environment": {"const": "staging"}}, "required": ["environment"]},
+        "rollback": {"properties": {"environment": {"const": "staging"}}, "required": ["environment"]}
+      }}}
+    },
+    "production_evidence_environment": {
+      "properties": {"evidence": {"properties": {
+        "integration": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]},
+        "backup": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]},
+        "restore": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]},
+        "monitoring": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]},
+        "rollback": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]},
+        "approval": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]}
+      }}}
     }
   }
 }
