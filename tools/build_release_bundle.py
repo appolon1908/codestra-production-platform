@@ -162,6 +162,19 @@ def build(
             "artifact_sha256": sha256(archive),
             "required_flags": FAIL_CLOSED_FLAGS,
             "deployment_mode": "digest-only-fail-closed",
+            "operator_installation": {
+                "mode": "preserve-existing-sudoers",
+                "installer_sha256": sha256(
+                    root / "operations/production-operator/install-server-a-operator.sh"
+                ),
+                "launcher_sha256": sha256(
+                    root / "operations/production-operator/launch-reviewed-installation.sh"
+                ),
+                "installation_record_sha256": sha256(
+                    root / "config/server-a-operator-installation-record.json"
+                ),
+                "installation_record_status": "incomplete",
+            },
             "release_tuple": {
                 "orchestration_repository": (
                     "appolon1908-hue/codestra-production-platform"
