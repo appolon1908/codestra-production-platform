@@ -192,10 +192,14 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
         )
 
     def test_dead_job_manual_retry_restores_full_policy_budget(self):
-        followup = self._register("automation-dead-recovery")
+        followup = self._register(
+            "automation-dead-recovery",
+            fields.Datetime.now() - timedelta(minutes=20),
+        )
         Job = self.env["codestra.crm.call.followup.job"]
-        Job._cron_enqueue_due_jobs(company_ids=[self.company.id])
+        self.assertEqual(Job._cron_enqueue_due_jobs(company_ids=[self.company.id]), 1)
         job = Job.search([("followup_id", "=", followup.id)], limit=1)
+        self.assertTrue(job)
         job.write({"state": "dead", "attempt_count": 3, "max_attempts": 3})
 
         self.env(user=self.manager)["codestra.crm.call.followup"].browse(
