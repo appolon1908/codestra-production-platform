@@ -70,6 +70,12 @@ def test_control_plane_digest_cannot_be_substituted() -> None:
     assert any("control-plane archive" in error for error in validator.validate(candidate))
 
 
+def test_nonexistent_maintenance_date_is_rejected() -> None:
+    candidate = complete()
+    candidate["arguments"]["maintenance_date"]["value"] = "2026-02-31"
+    assert any("calendar date" in error for error in validator.validate(candidate))
+
+
 def test_launcher_is_zero_argument_and_preserve_only() -> None:
     launcher = (ROOT / "operations/production-operator/launch-reviewed-installation.sh").read_text()
     assert '[ "$#" -eq 0 ]' in launcher

@@ -77,6 +77,13 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
     assert provenance["predicate"]["runDetails"]["metadata"]["invocationId"] == "fixture-run"
 
 
+def test_release_builder_derives_installation_record_status() -> None:
+    source = (Path(__file__).parents[1] / "tools/build_release_bundle.py").read_text()
+    assert 'installation_record.get("status")' in source
+    assert "validate_installation_record(" in source
+    assert '"installation_record_status": installation_record_status' in source
+
+
 def test_release_bundle_rejects_staging_only_middleware_digest(tmp_path: Path) -> None:
     root = Path(__file__).parents[1]
     result = subprocess.run(

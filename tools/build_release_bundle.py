@@ -12,6 +12,8 @@ import subprocess
 import tarfile
 from pathlib import Path
 
+from validate_server_a_operator_installation_record import validate as validate_installation_record
+
 
 FAIL_CLOSED_FLAGS = {
     "SEND_EVENTS": False,
@@ -123,6 +125,18 @@ def build(
         }
         for path in sorted(files)
     ]
+    installation_record_path = root / "config/server-a-operator-installation-record.json"
+    installation_record = json.loads(installation_record_path.read_text(encoding="utf-8"))
+    installation_record_status = installation_record.get("status")
+    if installation_record_status not in {"incomplete", "approved"}:
+        raise SystemExit("installation record status is invalid")
+    installation_record_errors = validate_installation_record(
+        installation_record,
+        require_approved=installation_record_status == "approved",
+    )
+    if installation_record_errors:
+        raise SystemExit("installation record validation failed: " + "; ".join(installation_record_errors))
+
     write_json(
         output / "sbom.cdx.json",
         {
@@ -170,10 +184,8 @@ def build(
                 "launcher_sha256": sha256(
                     root / "operations/production-operator/launch-reviewed-installation.sh"
                 ),
-                "installation_record_sha256": sha256(
-                    root / "config/server-a-operator-installation-record.json"
-                ),
-                "installation_record_status": "incomplete",
+                "installation_record_sha256": sha256(installation_record_path),
+                "installation_record_status": installation_record_status,
             },
             "release_tuple": {
                 "orchestration_repository": (

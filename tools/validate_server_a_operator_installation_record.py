@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import re
 from pathlib import Path
@@ -56,6 +57,12 @@ def validate(record: dict, require_approved: bool = True) -> list[str]:
             errors.append(f"arguments.{name} is invalid")
         if not item.get("source"):
             errors.append(f"arguments.{name}.source is required")
+    maintenance_date = arguments.get("maintenance_date", {}).get("value")
+    if maintenance_date is not None and FIELDS["maintenance_date"].fullmatch(str(maintenance_date)):
+        try:
+            dt.date.fromisoformat(str(maintenance_date))
+        except ValueError:
+            errors.append("arguments.maintenance_date is not a calendar date")
     if target.get("protected_commit") and arguments.get("protected_commit", {}).get("value") != target["protected_commit"]:
         errors.append("protected commit argument does not match target release")
     control_digest = arguments.get("control_plane_archive_sha256", {}).get("value")
