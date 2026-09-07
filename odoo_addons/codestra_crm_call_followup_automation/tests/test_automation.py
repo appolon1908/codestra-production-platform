@@ -181,7 +181,10 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
         self.assertFalse(job.activity_id)
         followup.invalidate_recordset()
         self.assertFalse(followup.automation_pending_sla_at)
-        self.policy.pending_sla_minutes = 5
+        # A genuinely new effective deadline is a new SLA occurrence. Returning
+        # to the original five-minute deadline would correctly replay the first
+        # occurrence instead of creating a duplicate.
+        self.policy.pending_sla_minutes = 4
         self.assertEqual(Job._cron_enqueue_due_jobs(company_ids=[self.company.id]), 1)
         self.assertEqual(
             Job.search_count([
