@@ -125,7 +125,15 @@ def test_action_set_is_exact() -> None:
     }
 
 
-def test_email_reseller_candidate_is_bound_to_attested_release_files() -> None:
+def test_email_reseller_candidate_is_bound_to_attested_release_files(monkeypatch) -> None:
+    # The CI checkout remains runner-owned even though the suite itself runs
+    # under sudo. Runtime ownership enforcement has separate fixture coverage;
+    # this source test proves the compiled checksums and candidate contract.
+    monkeypatch.setattr(
+        OPERATOR,
+        "checked_root_bytes",
+        lambda path, **_kwargs: path.read_bytes(),
+    )
     result = OPERATOR.validate_email_reseller_release(ROOT)
     assert result == {
         "candidate_evidence": "PASS",
