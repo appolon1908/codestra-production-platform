@@ -43,8 +43,9 @@ services:
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/codestra/protocol/openid-connect/certs
       PUBLIC_WS_URL: wss://api.codestra.agency/ws/agent
       ALLOWED_ORIGINS: https://crm.codestra.agency,https://phone.codestra.agency,https://dialer.codestra.agency
-      NATS_HOST: host.docker.internal
-      NATS_PORT: "4222"
+      NATS_URL: tls://codestra-nats:4222
+      NATS_CALLING_STREAM: CODESTRA_CALLING_AGENT_EVENTS
+      REALTIME_EVENT_DELIVERY_ENABLED: "false"
       INTERNAL_EVENT_SOURCE_HEALTH_URL: http://middleware:8095/health
       INTERNAL_AUTHORIZATION_URL: https://middleware:8095/internal/v1/realtime/authorizations/revalidate
       INTERNAL_TICKET_CONSUME_URL: https://middleware:8095/internal/v1/realtime/tickets/consume
@@ -61,7 +62,6 @@ services:
     networks: [backend, edge, identity]
     ports:
       - "127.0.0.1:18102:8080"
-    extra_hosts: ["host.docker.internal:host-gateway"]
     read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]
     security_opt: ["no-new-privileges:true"]

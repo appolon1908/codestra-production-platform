@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import json
 import os
-import secrets
 import statistics
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-import asyncpg
 import httpx
 import websockets
 
@@ -28,7 +25,9 @@ def read(path: str) -> str:
 
 INTERNAL_TOKEN = read(os.environ["INTERNAL_TOKEN_FILE"])
 CLIENT_SECRET = read(os.environ["CERTIFIER_CLIENT_SECRET_FILE"])
-DATABASE_URL = read(os.environ["DATABASE_URL_FILE"])
+CERTIFIER_TENANT_ID = os.environ["CERTIFIER_TENANT_ID"]
+CERTIFIER_AGENT_ID = os.environ["CERTIFIER_AGENT_ID"]
+CERTIFIER_CAMPAIGN_ID = os.getenv("CERTIFIER_CAMPAIGN_ID", "TEST_SYN")
 
 
 async def token() -> str:
@@ -41,27 +40,20 @@ async def token() -> str:
         return response.json()["access_token"]
 
 
-async def issue(access_token: str) -> dict:
+async def issue(access_token: str, campaign_id: str = "TEST_SYN", resume_cursor: int = 0) -> dict:
     async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(f"{PUBLIC_API}/api/v1/realtime/sessions", headers={"Authorization": f"Bearer {access_token}"})
+        request_id = str(uuid.uuid4())
+        response = await client.post(
+            f"{PUBLIC_API}/api/v1/realtime/sessions",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Idempotency-Key": request_id,
+                "X-Correlation-ID": request_id,
+            },
+            json={"campaign_id": campaign_id, "resume_cursor": resume_cursor},
+        )
         response.raise_for_status()
         return response.json()
-
-
-async def seeded_ticket(pool: asyncpg.Pool, *, agent: str, user: str | None = None, campaign: str = "TEST_SYN") -> tuple[str, str]:
-    session_id = uuid.uuid4()
-    ticket = secrets.token_urlsafe(32)
-    digest = hashlib.sha256(ticket.encode()).hexdigest()
-    current = datetime.now(timezone.utc)
-    user = user or agent
-    async with pool.acquire() as connection, connection.transaction():
-        await connection.execute(
-            """INSERT INTO realtime_sessions(session_id,user_id,tenant_id,business_unit_id,agent_id,vicidial_user,extension,campaigns,realtime_role,authorization_epoch,created_at,expires_at)
-            VALUES($1,$2,'synthetic-tenant','TEST',$3,$4,'6101',$5::jsonb,'telephony_agent',1,$6,$7)""",
-            session_id, user, agent, agent, json.dumps([campaign]), current, current + timedelta(hours=1),
-        )
-        await connection.execute("INSERT INTO realtime_tickets(ticket_hash,session_id,expires_at) VALUES($1,$2,$3)", digest, session_id, current + timedelta(minutes=5))
-    return str(session_id), ticket
 
 
 async def connect(ticket: str, last_event_id: str | None = None):
@@ -75,8 +67,8 @@ async def connect(ticket: str, last_event_id: str | None = None):
     return websocket, authenticated
 
 
-def event(event_id: str, sequence: int, kind: str, *, agent: str = "CERT-AGENT-A", user: str | None = None,
-          tenant: str = "synthetic-tenant", campaign: str = "TEST_SYN", payload: dict | None = None) -> dict:
+def event(event_id: str, sequence: int, kind: str, *, agent: str = CERTIFIER_AGENT_ID, user: str | None = None,
+          tenant: str = CERTIFIER_TENANT_ID, campaign: str = CERTIFIER_CAMPAIGN_ID, payload: dict | None = None) -> dict:
     return {
         "event_id": event_id, "schema_version": "1.0", "type": kind,
         "correlation_id": f"cert-{event_id}", "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -113,7 +105,7 @@ async def main() -> None:
         assert invalid.status_code == 401
     results["EXPIRED_AUTH"] = "PASS"
 
-    issued = await issue(access_token)
+    issued = await issue(access_token, CERTIFIER_CAMPAIGN_ID)
     assert 30 <= (datetime.fromisoformat(issued["expires_at"]) - datetime.now(timezone.utc)).total_seconds() <= 60
     results["KEYCLOAK_AUTH"] = results["REALTIME_TICKET_ISSUANCE"] = "PASS"
     ws_a, _ = await connect(issued["ticket"])
@@ -139,27 +131,27 @@ async def main() -> None:
     assert json.loads(await ws_a.recv())["type"] == "recording.available"
     results["RECORDING_WEBSOCKET"] = "PASS"
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
-    _, ticket_b = await seeded_ticket(pool, agent="CERT-AGENT-B")
-    ws_b, _ = await connect(ticket_b)
     event_a = event(f"isolation-a-{uuid.uuid4()}", 4, "call.ringing", user=token_subject)
     assert (await publish(event_a))["delivered"] == 1
     assert json.loads(await ws_a.recv())["event_id"] == event_a["event_id"]
-    await no_message(ws_b)
+    other_agent = event(f"isolation-b-{uuid.uuid4()}", 4, "call.ringing",
+                        agent=f"{CERTIFIER_AGENT_ID}-OTHER", user=token_subject)
+    assert (await publish(other_agent))["delivered"] == 0
+    await no_message(ws_a)
     results["CROSS_AGENT_ISOLATION"] = "PASS"
 
     wrong_tenant = event(f"wrong-tenant-{uuid.uuid4()}", 1, "call.ringing", tenant="other-tenant", user=token_subject)
     wrong_campaign = event(f"wrong-campaign-{uuid.uuid4()}", 5, "call.ringing", campaign="OTHER_CAMPAIGN", user=token_subject)
     assert (await publish(wrong_tenant))["delivered"] == 0
     assert (await publish(wrong_campaign))["delivered"] == 0
-    await no_message(ws_a); await no_message(ws_b)
+    await no_message(ws_a)
     results["CROSS_TENANT_ISOLATION"] = results["WRONG_CAMPAIGN_ISOLATION"] = "PASS"
 
     await ws_a.close()
     replay_two = event(f"replay-2-{uuid.uuid4()}", 6, "call.answered", user=token_subject)
     replay_three = event(f"replay-3-{uuid.uuid4()}", 7, "call.connected", user=token_subject)
     await publish(replay_two); await publish(replay_three)
-    resumed = await issue(access_token)
+    resumed = await issue(access_token, CERTIFIER_CAMPAIGN_ID)
     ws_a, authenticated = await connect(resumed["ticket"], event_a["event_id"])
     replayed = [json.loads(await ws_a.recv()), json.loads(await ws_a.recv())]
     assert [item["event_id"] for item in replayed] == [replay_two["event_id"], replay_three["event_id"]]
@@ -191,13 +183,23 @@ async def main() -> None:
         assert closed.code == 4408
     results["AUTH_TIMEOUT"] = "PASS"
 
-    # Controlled load: server-side-bound synthetic tickets represent distinct authorized agents.
-    load_tickets = [await seeded_ticket(pool, agent=f"LOAD-{index:03d}") for index in range(250)]
+    # Every load identity must be provisioned by the canonical authority. The
+    # manifest is an audited JSON array of token_file/tenant_id/campaign_id/agent_id.
+    load_manifest = json.loads(read(os.environ["CERTIFIER_LOAD_IDENTITIES_FILE"]))
+    assert isinstance(load_manifest, list) and len(load_manifest) >= 250
+    load_identities = load_manifest[:250]
+    load_tickets = [
+        await issue(read(identity["token_file"]), identity["campaign_id"])
+        for identity in load_identities
+    ]
     load_started = time.perf_counter()
-    load_sockets = await asyncio.gather(*(connect(ticket) for _, ticket in load_tickets))
+    load_sockets = await asyncio.gather(*(connect(value["ticket"]) for value in load_tickets))
     connect_seconds = time.perf_counter() - load_started
     assert len(load_sockets) == 250
-    load_event = event(f"load-{uuid.uuid4()}", 1, "agent.ready", agent="LOAD-000", user="LOAD-000")
+    first = load_identities[0]
+    load_event = event(f"load-{uuid.uuid4()}", 1, "agent.ready", agent=first["agent_id"],
+                       user=first.get("user_id"), tenant=first["tenant_id"],
+                       campaign=first["campaign_id"])
     delivery_start = time.perf_counter()
     assert (await publish(load_event))["delivered"] == 1
     assert json.loads(await load_sockets[0][0].recv())["event_id"] == load_event["event_id"]
@@ -211,7 +213,7 @@ async def main() -> None:
     results["SCREEN_POP_LATENCY_MS"] = round(latency_ms, 3)
     results["LOAD_DELIVERY_LATENCY_MS"] = round(load_latency_ms, 3)
 
-    await ws_a.close(); await ws_b.close(); await pool.close()
+    await ws_a.close()
     print(json.dumps(results, indent=2, sort_keys=True))
 
 

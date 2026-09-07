@@ -7,7 +7,7 @@ import sys
 
 import asyncpg
 
-HEAD = "0001_realtime_gateway"
+MIGRATIONS = ("0001_realtime_gateway", "0002_canonical_scope")
 ROOT = pathlib.Path(__file__).with_name("migrations")
 
 
@@ -22,19 +22,23 @@ async def migrate(direction: str) -> None:
     connection = await asyncpg.connect(database_url())
     try:
         async with connection.transaction():
-            if direction == "up":
-                exists = await connection.fetchval(
-                    "SELECT to_regclass('public.websocket_schema_migrations') IS NOT NULL"
-                )
-                if exists:
-                    version = await connection.fetchval(
-                        "SELECT version FROM websocket_schema_migrations ORDER BY applied_at DESC LIMIT 1"
-                    )
-                    if version == HEAD:
-                        return
-                    raise RuntimeError(f"unknown database migration head: {version}")
-            sql = (ROOT / f"{HEAD}.{direction}.sql").read_text(encoding="utf-8")
-            await connection.execute(sql)
+            exists = await connection.fetchval(
+                "SELECT to_regclass('public.websocket_schema_migrations') IS NOT NULL"
+            )
+            applied = set()
+            if exists:
+                applied = {row["version"] for row in await connection.fetch(
+                    "SELECT version FROM websocket_schema_migrations"
+                )}
+                unknown = applied.difference(MIGRATIONS)
+                if unknown:
+                    raise RuntimeError(f"unknown database migrations: {sorted(unknown)}")
+            selected = MIGRATIONS if direction == "up" else tuple(reversed(MIGRATIONS))
+            for version in selected:
+                if (direction == "up" and version in applied) or (direction == "down" and version not in applied):
+                    continue
+                sql = (ROOT / f"{version}.{direction}.sql").read_text(encoding="utf-8")
+                await connection.execute(sql)
     finally:
         await connection.close()
 

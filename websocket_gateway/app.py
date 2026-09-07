@@ -16,6 +16,8 @@ from typing import Any
 import asyncpg
 import httpx
 import jwt
+import nats
+from nats.js import api as nats_api
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from jwt import PyJWKClient
 from pydantic import BaseModel, Field
@@ -31,6 +33,10 @@ EVENT_TYPES = {
     "recording.completed", "recording.failed", "recording.available",
     "agent.ready", "agent.not_ready", "agent.logged_in", "agent.logged_out",
     "session.expiring", "session.revoked", "realtime.reconnected",
+    "telephony.call.ringing.v1", "telephony.call.answered.v1",
+    "telephony.call.connected.v1", "telephony.call.transferred.v1",
+    "telephony.call.completed.v1", "telephony.call.missed.v1",
+    "telephony.call.dispositioned.v1", "telephony.agent.status-changed.v1",
 }
 
 ACTIVE = Gauge("websocket_connections_active", "Active authenticated sockets")
@@ -63,7 +69,6 @@ def log_event(message: str, **fields: Any) -> None:
 class Settings:
     database_url = ""
     internal_token = ""
-    middleware_service_token = ""
     issuer = os.getenv("KEYCLOAK_ISSUER", "https://auth.codestra.co/realms/codestra")
     audience = os.getenv("KEYCLOAK_AUDIENCE", "codestra-agent-desktop")
     jwks_url = os.getenv("KEYCLOAK_JWKS_URL", "http://keycloak:8080/realms/codestra/protocol/openid-connect/certs")
@@ -89,6 +94,10 @@ class Settings:
     middleware_cert_file = os.getenv("MIDDLEWARE_MTLS_CERT_FILE", "")
     middleware_key_file = os.getenv("MIDDLEWARE_MTLS_KEY_FILE", "")
     authorization_timeout = min(5, max(1, int(os.getenv("AUTHORIZATION_TIMEOUT_SECONDS", "3"))))
+    nats_url = os.getenv("NATS_URL", "tls://codestra-nats:4222")
+    nats_credentials_file = os.getenv("NATS_CREDENTIALS_FILE", "")
+    nats_stream = os.getenv("NATS_CALLING_STREAM", "CODESTRA_CALLING_AGENT_EVENTS")
+    event_delivery_enabled = os.getenv("REALTIME_EVENT_DELIVERY_ENABLED", "false").lower() == "true"
 
 
 settings = Settings()
@@ -103,7 +112,7 @@ class Event(BaseModel):
     tenant_id: str
     business_unit_id: str
     campaign_id: str
-    user_id: str
+    user_id: str | None = None
     agent_id: str
     call_id: str | None = None
     sequence: int = Field(ge=0)
@@ -120,12 +129,14 @@ class Connection:
         self.delivery_allowed.set()
 
     def allows(self, event: dict[str, Any]) -> bool:
+        if (
+            event["tenant_id"] != self.scope["tenant_id"]
+            or event["campaign_id"] not in self.scope["campaigns"]
+        ):
+            return False
         return (
-            event["tenant_id"] == self.scope["tenant_id"]
-            and event["business_unit_id"] == self.scope["business_unit_id"]
-            and event["user_id"] == self.scope["user_id"]
-            and event["agent_id"] == self.scope["agent_id"]
-            and event["campaign_id"] in self.scope["campaigns"]
+            self.scope["realtime_role"] == "telephony_supervisor"
+            or event["agent_id"] == self.scope["agent_id"]
         )
 
     async def send_loop(self) -> None:
@@ -151,15 +162,16 @@ connections: dict[str, Connection] = {}
 delivery_lock = asyncio.Lock()
 
 
-DATABASE_MIGRATION_HEAD = "0001_realtime_gateway"
+DATABASE_MIGRATION_HEAD = "0002_canonical_scope"
 
 
 async def verify_schema(pool: asyncpg.Pool) -> None:
     """Fail closed when the independently-run migration is not at HEAD."""
-    head = await pool.fetchval(
-        "SELECT version FROM websocket_schema_migrations ORDER BY applied_at DESC LIMIT 1"
+    at_head = await pool.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM websocket_schema_migrations WHERE version=$1)",
+        DATABASE_MIGRATION_HEAD,
     )
-    if head != DATABASE_MIGRATION_HEAD:
+    if not at_head:
         raise RuntimeError(f"database migration head mismatch: expected {DATABASE_MIGRATION_HEAD}")
     # Connections are process-local. A clean start clears stale ownership only.
     await pool.execute(
@@ -171,7 +183,9 @@ async def verify_schema(pool: asyncpg.Pool) -> None:
 async def lifespan(app: FastAPI):
     settings.database_url = secret_file("DATABASE_URL_FILE")
     settings.internal_token = secret_file("INTERNAL_TOKEN_FILE")
-    settings.middleware_service_token = secret_file("MIDDLEWARE_SERVICE_TOKEN_FILE")
+    # Validate presence at startup, but reload before every request because this
+    # is a short-lived rotated credential.
+    secret_file("MIDDLEWARE_SERVICE_TOKEN_FILE")
     app.state.pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=20, command_timeout=5)
     await verify_schema(app.state.pool)
     app.state.jwks = PyJWKClient(settings.jwks_url, cache_keys=True, lifespan=300)
@@ -307,7 +321,7 @@ async def consume_ticket(pool: asyncpg.Pool, ticket: str) -> dict[str, Any] | No
 
 def middleware_client() -> httpx.AsyncClient:
     if not all((settings.middleware_ca_file, settings.middleware_cert_file,
-                settings.middleware_key_file, settings.middleware_service_token)):
+                settings.middleware_key_file, os.getenv("MIDDLEWARE_SERVICE_TOKEN_FILE", ""))):
         raise RuntimeError("middleware_service_identity_incomplete")
     return httpx.AsyncClient(
         timeout=settings.authorization_timeout,
@@ -316,11 +330,17 @@ def middleware_client() -> httpx.AsyncClient:
     )
 
 
+def middleware_headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {secret_file('MIDDLEWARE_SERVICE_TOKEN_FILE')}",
+        "X-Correlation-ID": str(uuid.uuid4()),
+    }
+
+
 async def consume_middleware_ticket(pool: asyncpg.Pool, ticket: str) -> dict[str, Any] | None:
     """Atomically consume the canonical Middleware ticket and claim local ownership."""
-    headers = {"Authorization": f"Bearer {settings.middleware_service_token}",
-               "X-Correlation-ID": str(uuid.uuid4())}
     try:
+        headers = middleware_headers()
         async with middleware_client() as client:
             response = await client.post(
                 settings.ticket_consume_url, headers=headers, json={"ticket": ticket}
@@ -356,13 +376,13 @@ async def consume_middleware_ticket(pool: asyncpg.Pool, ticket: str) -> dict[str
                  session_id,user_id,tenant_id,business_unit_id,agent_id,vicidial_user,
                  extension,campaigns,realtime_role,authorization_epoch,created_at,
                  expires_at,active_connection)
-               VALUES($1,$2,$3,'canonical',$2,$2,'canonical',$4::jsonb,$5,$6,$7,$8,true)""",
-            session_id, principal["agent_id"], principal["tenant_id"],
+               VALUES($1,NULL,$2,NULL,$3,NULL,NULL,$4::jsonb,$5,$6,$7,$8,true)""",
+            session_id, principal["tenant_id"], principal["agent_id"],
             json.dumps([principal["campaign_id"]]), principal["role"],
             principal["authorization_epoch"], now(), expires_at,
         )
-    return {**principal, "session_id": session_id, "user_id": principal["agent_id"],
-            "business_unit_id": "canonical", "campaigns": [principal["campaign_id"]],
+    return {**principal, "session_id": session_id,
+            "campaigns": [principal["campaign_id"]],
             "expires_at": expires_at}
 
 
@@ -372,19 +392,20 @@ async def replay_bounds(
     after = 0
     if last_event_id:
         value = await pool.fetchval("""SELECT ordinal FROM realtime_events
-          WHERE event_id=$1 AND tenant_id=$2 AND business_unit_id=$3 AND user_id=$4
-            AND agent_id=$5 AND campaign_id=ANY($6::text[])""",
-          last_event_id, scope["tenant_id"], scope["business_unit_id"], scope["user_id"],
-          scope["agent_id"], scope["campaigns"])
+          WHERE event_id=$1 AND tenant_id=$2 AND campaign_id=ANY($3::text[])
+            AND ($4='telephony_supervisor' OR agent_id=$5)""",
+          last_event_id, scope["tenant_id"], scope["campaigns"],
+          scope["realtime_role"], scope["agent_id"])
         if value is None:
             raise ValueError("replay cursor is outside the authorized scope")
         after = int(value or 0)
     watermark = int(await pool.fetchval("SELECT COALESCE(MAX(ordinal), 0) FROM realtime_events") or 0)
     count = int(await pool.fetchval("""SELECT count(*) FROM realtime_events
-      WHERE ordinal>$1 AND ordinal<=$2 AND tenant_id=$3 AND business_unit_id=$4
-        AND user_id=$5 AND agent_id=$6 AND campaign_id=ANY($7::text[])""",
-      after, watermark, scope["tenant_id"], scope["business_unit_id"], scope["user_id"],
-      scope["agent_id"], scope["campaigns"]) or 0)
+      WHERE ordinal>$1 AND ordinal<=$2 AND tenant_id=$3
+        AND campaign_id=ANY($4::text[])
+        AND ($5='telephony_supervisor' OR agent_id=$6)""",
+      after, watermark, scope["tenant_id"], scope["campaigns"],
+      scope["realtime_role"], scope["agent_id"]) or 0)
     return after, watermark, count
 
 
@@ -393,10 +414,12 @@ async def replay_page(
 ) -> list[tuple[int, dict[str, Any]]]:
     rows = await pool.fetch("""SELECT ordinal,event_id,schema_version,event_type AS type,correlation_id,occurred_at AS timestamp,
       tenant_id,business_unit_id,campaign_id,user_id,agent_id,call_id,sequence,payload FROM realtime_events
-      WHERE ordinal>$1 AND ordinal<=$2 AND tenant_id=$3 AND business_unit_id=$4 AND user_id=$5
-        AND agent_id=$6 AND campaign_id=ANY($7::text[]) ORDER BY ordinal LIMIT 1000""",
-      after, watermark, scope["tenant_id"], scope["business_unit_id"], scope["user_id"],
-      scope["agent_id"], scope["campaigns"])
+      WHERE ordinal>$1 AND ordinal<=$2 AND tenant_id=$3
+        AND campaign_id=ANY($4::text[])
+        AND ($5='telephony_supervisor' OR agent_id=$6)
+      ORDER BY ordinal LIMIT 1000""",
+      after, watermark, scope["tenant_id"], scope["campaigns"],
+      scope["realtime_role"], scope["agent_id"])
     result: list[tuple[int, dict[str, Any]]] = []
     for row in rows:
         document = dict(row)
@@ -418,10 +441,7 @@ async def session_is_active(pool: asyncpg.Pool, scope: dict[str, Any]) -> bool:
 
 async def revalidate_authorization(scope: dict[str, Any]) -> str:
     """Return active, denied, or indeterminate from the middleware authority."""
-    headers = {
-        "Authorization": f"Bearer {settings.middleware_service_token}",
-        "X-Correlation-ID": str(uuid.uuid4()),
-    }
+    headers = middleware_headers()
     try:
         async with middleware_client() as client:
             for campaign_id in scope["campaigns"]:
@@ -450,6 +470,115 @@ async def revalidate_authorization(scope: dict[str, Any]) -> str:
     return "active"
 
 
+def calling_subjects(scope: dict[str, Any]) -> tuple[str, ...]:
+    values = (scope["tenant_id"], scope["campaigns"][0], scope["agent_id"])
+    if any(not value or "." in value or "*" in value or ">" in value for value in values):
+        raise RuntimeError("invalid_calling_subject_scope")
+    tenant, campaign, agent = values
+    if scope["realtime_role"] == "telephony_supervisor":
+        return (f"telephony.agent.{tenant}.{campaign}.*", f"telephony.supervisor.{tenant}.{campaign}")
+    return (f"telephony.agent.{tenant}.{campaign}.{agent}",)
+
+
+def canonical_event(envelope: dict[str, Any]) -> Event:
+    cursor = envelope.get("cursor")
+    value = envelope.get("event")
+    if not isinstance(cursor, int) or cursor < 1 or not isinstance(value, dict):
+        raise ValueError("invalid_calling_event_envelope")
+    return Event.model_validate({
+        **value,
+        "timestamp": value.get("occurred_at"),
+        "user_id": value.get("odoo_user_id"),
+        "call_id": value.get("operation_id"),
+        "sequence": cursor,
+        "payload": value,
+    })
+
+
+async def persist_and_deliver(pool: asyncpg.Pool, event: Event) -> dict[str, Any]:
+    encoded = json.dumps(event.payload, separators=(",", ":"))
+    if len(encoded.encode()) > settings.max_message_size:
+        raise ValueError("event_payload_too_large")
+    async with delivery_lock:
+        row = await pool.fetchrow("""INSERT INTO realtime_events
+          (event_id,schema_version,event_type,correlation_id,occurred_at,tenant_id,business_unit_id,campaign_id,user_id,agent_id,call_id,sequence,payload)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+          ON CONFLICT(event_id) DO NOTHING RETURNING ordinal""", event.event_id, event.schema_version,
+          event.type, event.correlation_id, event.timestamp, event.tenant_id, event.business_unit_id,
+          event.campaign_id, event.user_id, event.agent_id, event.call_id, event.sequence, encoded)
+        if not row:
+            return {"accepted": True, "duplicate": True, "delivered": 0}
+        document = event.model_dump(mode="json")
+        delivered = 0
+        for active in tuple(connections.values()):
+            if not active.allows(document):
+                CROSS_SCOPE.inc()
+                continue
+            try:
+                active.queue.put_nowait(document)
+                delivered += 1
+            except asyncio.QueueFull:
+                BACKPRESSURE.inc()
+                await active.websocket.close(code=4429)
+    return {"accepted": True, "duplicate": False, "delivered": delivered}
+
+
+async def forward_jetstream_events(connection: Connection, pool: asyncpg.Pool) -> None:
+    if not settings.event_delivery_enabled:
+        return
+    if not settings.nats_credentials_file:
+        raise RuntimeError("nats_credentials_missing")
+    client = await nats.connect(
+        servers=[settings.nats_url], user_credentials=settings.nats_credentials_file,
+        connect_timeout=3, max_reconnect_attempts=3,
+    )
+    try:
+        subscriptions = []
+        for subject in calling_subjects(connection.scope):
+            config_values: dict[str, Any] = {
+                "ack_policy": nats_api.AckPolicy.EXPLICIT,
+                "deliver_policy": nats_api.DeliverPolicy.NEW,
+                "max_ack_pending": settings.max_pending,
+            }
+            if connection.scope.get("resume_cursor") is not None:
+                config_values.update({
+                    "deliver_policy": nats_api.DeliverPolicy.BY_START_SEQUENCE,
+                    "opt_start_seq": int(connection.scope["resume_cursor"]) + 1,
+                })
+            subscriptions.append(await client.jetstream().pull_subscribe(
+                subject, stream=settings.nats_stream,
+                config=nats_api.ConsumerConfig(**config_values),
+            ))
+        while True:
+            for subscription in subscriptions:
+                try:
+                    messages = await subscription.fetch(1, timeout=1)
+                except (nats.errors.TimeoutError, asyncio.TimeoutError, TimeoutError):
+                    continue
+                for message in messages:
+                    try:
+                        event = canonical_event(json.loads(message.data))
+                        if not connection.allows(event.model_dump(mode="json")):
+                            await message.term()
+                            continue
+                        await persist_and_deliver(pool, event)
+                        await message.ack()
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        await message.term()
+    finally:
+        await client.close()
+
+
+async def run_jetstream(connection: Connection, pool: asyncpg.Pool) -> None:
+    try:
+        await forward_jetstream_events(connection, pool)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        LOG.exception("jetstream_delivery_failed")
+        await connection.websocket.close(code=1011, reason="event_delivery_unavailable")
+
+
 @app.websocket("/ws/agent")
 async def ws_agent(websocket: WebSocket) -> None:
     origin = websocket.headers.get("origin")
@@ -459,6 +588,7 @@ async def ws_agent(websocket: WebSocket) -> None:
     scope: dict[str, Any] | None = None
     connection: Connection | None = None
     established = False
+    jetstream_task: asyncio.Task[None] | None = None
     try:
         try:
             frame = await asyncio.wait_for(websocket.receive_json(), settings.auth_timeout)
@@ -471,6 +601,13 @@ async def ws_agent(websocket: WebSocket) -> None:
             AUTH_FAILURES.inc(); await websocket.close(code=4401); return
         if scope.get("duplicate"):
             await websocket.close(code=4409); return
+        resume_cursor = frame.get("resume_cursor")
+        if (resume_cursor is not None and
+                (not isinstance(resume_cursor, int) or resume_cursor < 0 or
+                 resume_cursor > scope["maximum_replay_cursor"])):
+            await websocket.close(code=4403, reason="invalid_resume_cursor")
+            return
+        scope["resume_cursor"] = resume_cursor
         sid = str(scope["session_id"])
         connection = Connection(websocket, scope)
         last_event_id = frame.get("last_event_id")
@@ -484,6 +621,9 @@ async def ws_agent(websocket: WebSocket) -> None:
                 ACTIVE.inc(); TOTAL.inc()
                 await websocket.send_json({"type": "authenticated", "session_id": sid, "replayed": replay_count})
                 connection.sender = asyncio.create_task(connection.send_loop())
+                jetstream_task = asyncio.create_task(
+                    run_jetstream(connection, websocket.app.state.pool)
+                )
                 while after < watermark:
                     page = await replay_page(websocket.app.state.pool, scope, after, watermark)
                     if not page:
@@ -544,6 +684,8 @@ async def ws_agent(websocket: WebSocket) -> None:
             ACTIVE.dec()
         if connection and connection.sender:
             connection.sender.cancel()
+        if jetstream_task:
+            jetstream_task.cancel()
 
 
 def require_internal(x_codestra_internal_token: str = Header(default="")) -> None:
@@ -555,29 +697,14 @@ def require_internal(x_codestra_internal_token: str = Header(default="")) -> Non
 async def publish_event(event: Event, request: Request) -> dict[str, Any]:
     if event.type not in EVENT_TYPES:
         raise HTTPException(422, "unsupported realtime event type")
-    encoded = json.dumps(event.payload, separators=(",", ":"))
-    if len(encoded.encode()) > settings.max_message_size:
-        raise HTTPException(413, "event payload too large")
-    async with delivery_lock:
-        row = await request.app.state.pool.fetchrow("""INSERT INTO realtime_events
-      (event_id,schema_version,event_type,correlation_id,occurred_at,tenant_id,business_unit_id,campaign_id,user_id,agent_id,call_id,sequence,payload)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
-      ON CONFLICT(event_id) DO NOTHING RETURNING ordinal""", event.event_id, event.schema_version, event.type,
-      event.correlation_id, event.timestamp, event.tenant_id, event.business_unit_id, event.campaign_id,
-          event.user_id, event.agent_id, event.call_id, event.sequence, encoded)
-        if not row:
-            return {"accepted": True, "duplicate": True, "delivered": 0}
-        document = event.model_dump(mode="json")
-        delivered = 0
-        for active in tuple(connections.values()):
-            if not active.allows(document):
-                CROSS_SCOPE.inc(); continue
-            try:
-                active.queue.put_nowait(document); delivered += 1
-            except asyncio.QueueFull:
-                BACKPRESSURE.inc(); await active.websocket.close(code=4429)
-    log_event("realtime_event_accepted", event_id=event.event_id, event_type=event.type, tenant_id=event.tenant_id, campaign_id=event.campaign_id, result="accepted", delivered=delivered)
-    return {"accepted": True, "duplicate": False, "delivered": delivered}
+    try:
+        result = await persist_and_deliver(request.app.state.pool, event)
+    except ValueError as exc:
+        raise HTTPException(413, str(exc)) from exc
+    log_event("realtime_event_accepted", event_id=event.event_id, event_type=event.type,
+              tenant_id=event.tenant_id, campaign_id=event.campaign_id, result="accepted",
+              delivered=result["delivered"])
+    return result
 
 
 @app.post("/internal/v1/realtime/sessions/{session_id}/revoke", dependencies=[Depends(require_internal)])

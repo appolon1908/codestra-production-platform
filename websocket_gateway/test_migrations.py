@@ -7,8 +7,10 @@ def test_migration_chain_has_matching_head_and_rollback() -> None:
     root = Path(__file__).with_name("migrations")
     assert (root / "0001_realtime_gateway.up.sql").is_file()
     assert (root / "0001_realtime_gateway.down.sql").is_file()
+    assert (root / "0002_canonical_scope.up.sql").is_file()
+    assert (root / "0002_canonical_scope.down.sql").is_file()
     source = Path(__file__).with_name("app.py").read_text(encoding="utf-8")
-    assert 'DATABASE_MIGRATION_HEAD = "0001_realtime_gateway"' in source
+    assert 'DATABASE_MIGRATION_HEAD = "0002_canonical_scope"' in source
     assert "CREATE TABLE IF NOT EXISTS realtime_sessions" not in source
 
 
@@ -80,10 +82,12 @@ def test_certifier_uses_issued_token_subject() -> None:
     assert "add_mapper authorization_epoch" in keycloak
 
 
-def test_seeded_sessions_include_required_authorization_fields() -> None:
+def test_certifier_uses_only_canonical_sessions() -> None:
     source = Path(__file__).with_name("certify.py").read_text()
-    assert "realtime_role,authorization_epoch" in source
-    assert "'telephony_agent',1" in source
+    assert "seeded_ticket" not in source
+    assert "CERTIFIER_LOAD_IDENTITIES_FILE" in source
+    assert 'json={"campaign_id": campaign_id, "resume_cursor": resume_cursor}' in source
+    assert '"Idempotency-Key": request_id' in source
 
 
 def test_version_endpoint_reports_release_and_contract_identity() -> None:
