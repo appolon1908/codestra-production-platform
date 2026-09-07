@@ -55,11 +55,13 @@ def main() -> int:
         "claim_pending_post_call_actions",
         "renew_popup_lease",
         "release_popup_lease",
-        "browser.sessionStorage",
+        "globalThis.crypto?.randomUUID",
         "{ force: true }",
     ):
         if snippet not in js:
             errors.append(f"realtime browser service missing invariant: {snippet}")
+    if "sessionStorage" in js or "localStorage" in js:
+        errors.append("realtime browser identity must remain page-local")
 
     combined = "\n".join(
         path.read_text(encoding="utf-8", errors="ignore")
