@@ -48,7 +48,13 @@ odoo() {
 }
 
 echo 'ANALYTICS_DISPOSABLE_INSTALL_TEST=START'
-odoo -i "$modules" --test-enable --test-tags /codestra_crm_call_followup_analytics
+# Model the supported lifecycle where core was installed before this release.
+odoo -i codestra_crm_call_followup
+docker exec "$postgres_container" psql -U "$database_user" -d "$database" -v ON_ERROR_STOP=1 \
+    -c 'DROP INDEX IF EXISTS codestra_crm_call_followup_email_sent_at_idx' \
+    -c 'ALTER TABLE codestra_crm_call_followup DROP COLUMN IF EXISTS email_sent_at'
+odoo -i codestra_crm_call_followup_analytics --test-enable \
+    --test-tags /codestra_crm_call_followup_analytics
 echo 'ANALYTICS_DISPOSABLE_INSTALL_TEST=PASS'
 odoo -u "$modules"
 installed=$(docker exec "$postgres_container" psql -U "$database_user" -d "$database" -Atqc \
