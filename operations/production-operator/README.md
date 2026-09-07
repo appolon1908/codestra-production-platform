@@ -97,6 +97,28 @@ sudo ./install-server-a-operator.sh /path/to/operator-ed25519.pub PROTECTED_SHA 
 sudo ./validate-server-a-operator.sh
 ```
 
+For an existing installation whose reviewed sudoers policy already matches,
+use the separately reviewed preserve mode:
+
+```sh
+sudo ./install-server-a-operator.sh --preserve-existing-sudoers \
+  /path/to/operator-ed25519.pub PROTECTED_SHA IMAGE_DIGEST CHANGE_ID \
+  MAINTENANCE_DATE CONTROL_PLANE_ARCHIVE_SHA256
+```
+
+Before any installation mutation, this mode requires the installed policy to
+be a root-owned, single-link, non-symlink regular file with mode `0440`, byte
+identical to the reviewed policy. Both the policy and complete sudo
+configuration must pass `visudo`. The policy is not backed up or entered in the
+changed-file ledger, so neither installation nor rollback modifies it.
+
+`config/server-a-operator-installation-record.json` consolidates the source and
+approval for all six arguments. The zero-argument
+`launch-reviewed-installation.sh` rejects incomplete records and verifies the
+exact installer digest before invoking preserve mode. It grants no privilege:
+an owner must place the complete release in a root-controlled path and approve
+that exact launcher through the existing bootstrap mechanism.
+
 The installer backs up every replaced target into a mode-0700 root directory.
 Any installation failure restores the prior files. It rejects symlink targets,
 modified payloads, unsafe source/key modes, unexpected ownership or modes on
