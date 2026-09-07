@@ -74,6 +74,60 @@ def test_installed_checksum_is_atomic_backed_up_and_rolled_back() -> None:
     assert "SOURCE_LOCK_STATUS=NOT_EVALUATED_BY_INSTALLER" in source
 
 
+@pytest.mark.parametrize("failure", ["remove", "copy"])
+def test_restore_failure_forces_rollback_failure(tmp_path: Path, failure: str) -> None:
+    source = INSTALLER.read_text()
+    functions = source[source.index("restore_path() {") : source.index("on_failure() {")]
+    rollback = tmp_path / "rollback"
+    rollback.mkdir()
+    (rollback / "operator").write_text("previous operator", encoding="utf-8")
+    harness = f"""
+rollback_dir=$1
+installed_checksum_tmp=
+installed=1
+state_dir_metadata_touched=0
+state_dir_existed=0
+created_user=0
+FAILURE=$2
+rm() {{
+  if [ "$FAILURE" = remove ] && [ "$3" = /usr/local/sbin/codestra-production-operator ]; then
+    return 1
+  fi
+  return 0
+}}
+cp() {{
+  if [ "$FAILURE" = copy ] && [ "$3" = "$rollback_dir/operator" ]; then
+    return 1
+  fi
+  return 0
+}}
+systemctl() {{ return 0; }}
+sshd() {{ return 0; }}
+chown() {{ return 0; }}
+chmod() {{ return 0; }}
+userdel() {{ return 0; }}
+{functions}
+rollback
+"""
+    result = subprocess.run(
+        ["sh", "-c", harness, "rollback-test", str(rollback), failure],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1, result.stderr
+
+
+def test_database_manifest_reporting_separates_structure_from_certification() -> None:
+    installer = INSTALLER.read_text()
+    validator = (ROOT / "tools/validate_production_database_manifest.py").read_text()
+    assert "'DATABASE_CERTIFICATION=PASS'" not in installer
+    assert "DATABASE_MANIFEST_STRUCTURAL_VALIDATION=PASS" in installer
+    assert 'DATABASE_CERTIFICATION_STATUS=$database_certification_status' in installer
+    assert 'print("PRODUCTION_DATABASE_MANIFEST_STRUCTURE=PASS")' in validator
+    assert 'PRODUCTION_DATABASE_CERTIFICATION_STATUS={certification_status}' in validator
+
+
 def test_installer_manifest_contract_covers_existing_absent_and_failure_boundaries(tmp_path: Path) -> None:
     """Exercise the backup/publish/rollback contract entirely below tmp_path."""
     target = tmp_path / "installed.sha256"

@@ -73,7 +73,7 @@ aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65  codestra-produ
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
 bbc8e4af977ae21b4faffd8c755ed1a0220aebb2796f10c90c94483be3eed06e  codestra-readiness-restore.override.conf
 dad62a1dcb35fabb97991ad2f0a1079d13d949528daa7bebe0d35d291ec23f67  ../../PRODUCTION-DATABASE-MANIFEST.yaml
-c6b3041ead24fb674d982a5787ff4f2d0eabbf0fd9bb45be8bcb695d09647235  ../../tools/validate_production_database_manifest.py
+8491a735a047120de199613c311abc30df1231a0c4ec37a48007a743d47a2133  ../../tools/validate_production_database_manifest.py
 EOF
 }
 verify_payload || fail
@@ -140,10 +140,11 @@ validate_existing_root_target() {
 restore_path() {
   target=$1
   label=$2
-  rm -f -- "$target"
+  rm -f -- "$target" || return 1
   if [ -e "$rollback_dir/$label" ] || [ -L "$rollback_dir/$label" ]; then
-    cp -a --no-dereference "$rollback_dir/$label" "$target"
+    cp -a --no-dereference "$rollback_dir/$label" "$target" || return 1
   fi
+  return 0
 }
 
 rollback() {
@@ -152,20 +153,20 @@ rollback() {
     rm -f -- "$installed_checksum_tmp" 2>/dev/null || rollback_failed=1
   fi
   if [ "$installed" -eq 1 ]; then
-    restore_path /usr/local/sbin/codestra-production-operator operator
-    restore_path /usr/local/libexec/codestra-production-forced-command forced-command
-    restore_path /etc/sudoers.d/codestra-production-operator sudoers
-    restore_path /etc/ssh/sshd_config.d/60-codestra-production-operator.conf sshd
-    restore_path /var/lib/codestra-production-operator/.ssh/authorized_keys authorized-keys
-    restore_path /etc/codestra/production-operator/release.json release-config
-    restore_path /etc/codestra/production-operator/maintenance-date maintenance-date
-    restore_path /etc/codestra/production-operator/control-plane-archive.sha256 control-plane-archive-checksum
-    restore_path /etc/codestra/production-operator/installed.sha256 installed-checksum
-    restore_path /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh readiness-restore
-    restore_path /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf readiness-restore-override
+    restore_path /usr/local/sbin/codestra-production-operator operator || rollback_failed=1
+    restore_path /usr/local/libexec/codestra-production-forced-command forced-command || rollback_failed=1
+    restore_path /etc/sudoers.d/codestra-production-operator sudoers || rollback_failed=1
+    restore_path /etc/ssh/sshd_config.d/60-codestra-production-operator.conf sshd || rollback_failed=1
+    restore_path /var/lib/codestra-production-operator/.ssh/authorized_keys authorized-keys || rollback_failed=1
+    restore_path /etc/codestra/production-operator/release.json release-config || rollback_failed=1
+    restore_path /etc/codestra/production-operator/maintenance-date maintenance-date || rollback_failed=1
+    restore_path /etc/codestra/production-operator/control-plane-archive.sha256 control-plane-archive-checksum || rollback_failed=1
+    restore_path /etc/codestra/production-operator/installed.sha256 installed-checksum || rollback_failed=1
+    restore_path /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh readiness-restore || rollback_failed=1
+    restore_path /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf readiness-restore-override || rollback_failed=1
     systemctl daemon-reload >/dev/null 2>&1 || rollback_failed=1
-    restore_path /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml database-manifest
-    restore_path /usr/local/libexec/validate-production-database-manifest database-validator
+    restore_path /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml database-manifest || rollback_failed=1
+    restore_path /usr/local/libexec/validate-production-database-manifest database-validator || rollback_failed=1
     sshd -t >/dev/null 2>&1 || rollback_failed=1
   fi
   if [ "$state_dir_metadata_touched" -eq 1 ] && [ "$state_dir_existed" -eq 1 ]; then
@@ -352,9 +353,16 @@ sh -n /usr/local/libexec/codestra-production-forced-command
 bash -n /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh
 python3 -c 'compile(open("/usr/local/sbin/codestra-production-operator", encoding="utf-8").read(), "/usr/local/sbin/codestra-production-operator", "exec")'
 python3 -c 'compile(open("/usr/local/libexec/validate-production-database-manifest", encoding="utf-8").read(), "/usr/local/libexec/validate-production-database-manifest", "exec")'
-/usr/local/libexec/validate-production-database-manifest \
+database_validation_output=$(/usr/local/libexec/validate-production-database-manifest \
   /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml \
-  /opt/codestra/evidence/database-certification
+  /opt/codestra/evidence/database-certification)
+printf '%s\n' "$database_validation_output"
+database_certification_status=$(printf '%s\n' "$database_validation_output" | sed -n 's/^PRODUCTION_DATABASE_CERTIFICATION_STATUS=//p')
+[ "$(printf '%s\n' "$database_certification_status" | wc -l)" -eq 1 ] || fail
+case "$database_certification_status" in
+  PASS|FAIL) ;;
+  *) fail ;;
+esac
 sha256sum --check --strict /etc/codestra/production-operator/installed.sha256 >/dev/null
 operator_hash=$(sha256sum /usr/local/sbin/codestra-production-operator | awk '{print $1}')
 rm -rf "$rollback_dir"
@@ -369,6 +377,7 @@ printf '%s\n' \
   'RESTRICTED_SUDO_POLICY=PASS' \
   'NEGATIVE_AUTHORIZATION_TESTS=PASS_IN_REVIEWED_SOURCE' \
   'STRUCTURAL_VALIDATION=PASS' \
-  'DATABASE_CERTIFICATION=PASS' \
+  'DATABASE_MANIFEST_STRUCTURAL_VALIDATION=PASS' \
+  "DATABASE_CERTIFICATION_STATUS=$database_certification_status" \
   'SOURCE_LOCK_STATUS=NOT_EVALUATED_BY_INSTALLER' \
   'ACTIVE_PRODUCTION_MUTATED=NO'

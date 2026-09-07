@@ -188,4 +188,7 @@ if __name__ == "__main__":
     manifest = Path(sys.argv[1] if len(sys.argv) > 1 else "PRODUCTION-DATABASE-MANIFEST.yaml")
     root = Path(sys.argv[2]) if len(sys.argv) > 2 else None
     validate(manifest, root)
-    print("PRODUCTION_DATABASE_MANIFEST=PASS")
+    certification_status = load_manifest(manifest)["certification_status"]
+    assert certification_status in {"PASS", "FAIL"}
+    print("PRODUCTION_DATABASE_MANIFEST_STRUCTURE=PASS")
+    print(f"PRODUCTION_DATABASE_CERTIFICATION_STATUS={certification_status}")
