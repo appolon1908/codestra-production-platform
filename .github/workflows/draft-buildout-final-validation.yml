@@ -1,0 +1,186 @@
+name: Verify remaining draft build-out
+on:
+  push:
+    branches: [chore/draft-buildout-inspection-20260907]
+    paths: [.github/workflows/draft-buildout-final-validation.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 129
+            parent: 348dc16c1abd47195a1c7366cc5f88ff0df3ec75
+            tree: fb6a6d4240d51c54710d82376bb71ed700bbea2d
+          - pr: 148
+            parent: 39e6e55270a32d726ab7ce0fbae748a3200e5323
+            tree: d09f848f9c1d6cfdeb053edbf990d73f6fe71696
+          - pr: 152
+            parent: 41e91aaeb087f16b44e674165d1c6f4e2c410a9d
+            tree: 0d1c814c92d58c12b6c3575d5f2b7fbed9a4028e
+          - pr: 174
+            parent: d6c7183bb80b3a4da279b590991432abdce71fe1
+            tree: 37e423af72fcb134776761151ae2bb900861170a
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      PR_NUMBER: ${{ matrix.pr }}
+      PARENT_SHA: ${{ matrix.parent }}
+      EXPECTED_TREE: ${{ matrix.tree }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ matrix.parent }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reconstruct pinned bounded source delta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,os,subprocess,urllib.request
+          from pathlib import Path
+          parts=[]
+          for sha in ['d46414893425e34d268a09044d8646c03e821f2f','4ee13447e9e12db99088091ba17227a6f310fa34','cb79c6a70d81051cd3779a338b471914b5406e2c']:
+              request=urllib.request.Request('https://api.github.com/repos/appolon1908-hue/codestra-production-platform/git/blobs/'+sha,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=30) as response: row=json.load(response)
+              data=base64.b64decode(row['content'])
+              assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==sha
+              parts.append(data)
+          packed=b''.join(parts)
+          assert len(packed)==14728 and hashlib.sha256(packed).hexdigest()=='c8f9a7d860ddd271370c87db847df960b975b4c4309113f7b7f4ca778b5bd3a1'
+          raw=lzma.decompress(packed)
+          assert len(raw)==55195
+          size=int.from_bytes(raw[:4],'big')
+          rows=json.loads(raw[4:4+size]);payload=raw[4+size:]
+          spec=next(row for row in rows if row['pr']==int(os.environ['PR_NUMBER']))
+          assert spec['parent']==os.environ['PARENT_SHA'] and spec['tree']==os.environ['EXPECTED_TREE']
+          assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==spec['parent']
+          assert not subprocess.check_output(['git','status','--porcelain'],text=True).strip()
+          patch=payload[spec['offset']:spec['offset']+spec['length']]
+          subprocess.run(['git','apply','--check','--index','-'],input=patch,check=True)
+          subprocess.run(['git','apply','--index','-'],input=patch,check=True)
+          assert set(subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines())==set(spec['paths'])
+          assert subprocess.check_output(['git','write-tree'],text=True).strip()==spec['tree']
+          (Path(os.environ['RUNNER_TEMP'])/'patch-manifest.json').write_text(json.dumps(spec))
+          print('RECONSTRUCTED_TREE='+spec['tree'])
+          PY
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+      - name: Install bounded source-test dependencies
+        run: python -m pip install pytest==9.0.2 PyYAML==6.0.3 'psycopg[binary]==3.2.9' 'PyJWT[crypto]==2.13.0' nats-py==2.15.0 ruff==0.12.10 jsonschema==4.26.0
+      - name: Run exact focused suites and source checks
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,subprocess,sys
+          from pathlib import Path
+          spec=json.loads((Path(os.environ['RUNNER_TEMP'])/'patch-manifest.json').read_text())
+          files=[p for p in spec['paths'] if p.endswith('.py')]
+          subprocess.run([sys.executable,'-m','compileall','-q',*files],check=True)
+          subprocess.run(['ruff','check','--select','E9,F63,F7,F82',*files],check=True)
+          if spec['pr']==174:
+              assert Path('/usr/bin/ssh-keygen').is_file()
+              subprocess.run(['sudo','-n',sys.executable,'-m','pytest','-q',*spec['tests']],check=True)
+          else:
+              subprocess.run([sys.executable,'-m','pytest','-q',*spec['tests']],check=True)
+          subprocess.run(['git','diff','--cached','--check'],check=True)
+          print('FOCUSED_SOURCE_TESTS=PASS')
+          print('SERVER_CONTACTED=NO')
+          PY
+      - name: Package verified source including exact file modes and digests
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          python3 - <<'PY'
+          import hashlib,json,os,subprocess,zipfile
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP']);spec=json.loads((root/'patch-manifest.json').read_text())
+          assert subprocess.check_output(['git','write-tree'],text=True).strip()==spec['tree']
+          rows=[]
+          with zipfile.ZipFile(root/'verified-source.zip','w',zipfile.ZIP_DEFLATED) as archive:
+              for name in spec['paths']:
+                  p=Path(name)
+                  assert p.is_file() and not p.is_symlink()
+                  data=p.read_bytes();mode=subprocess.check_output(['git','ls-files','-s','--',name],text=True).split()[0]
+                  rows.append({'path':name,'mode':mode,'type':'blob','sha':hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest(),'sha256':hashlib.sha256(data).hexdigest()})
+                  archive.writestr(name,data)
+              archive.writestr('verified-manifest.json',json.dumps({'pr':spec['pr'],'parent':spec['parent'],'tree':spec['tree'],'files':rows}))
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: verified-final-draft-${{ matrix.pr }}-${{ github.sha }}
+          path: ${{ runner.temp }}/verified-source.zip
+          if-no-files-found: error
+          retention-days: 3
+  store-source-objects:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 129
+            parent: 348dc16c1abd47195a1c7366cc5f88ff0df3ec75
+            tree: fb6a6d4240d51c54710d82376bb71ed700bbea2d
+          - pr: 148
+            parent: 39e6e55270a32d726ab7ce0fbae748a3200e5323
+            tree: d09f848f9c1d6cfdeb053edbf990d73f6fe71696
+          - pr: 152
+            parent: 41e91aaeb087f16b44e674165d1c6f4e2c410a9d
+            tree: 0d1c814c92d58c12b6c3575d5f2b7fbed9a4028e
+          - pr: 174
+            parent: d6c7183bb80b3a4da279b590991432abdce71fe1
+            tree: 37e423af72fcb134776761151ae2bb900861170a
+    steps:
+      # This job does not check out or execute repository code, nor update refs.
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: verified-final-draft-${{ matrix.pr }}-${{ github.sha }}
+          path: ${{ runner.temp }}/verified-draft
+      - name: Store verified Git objects only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ matrix.pr }}
+          PARENT_SHA: ${{ matrix.parent }}
+          EXPECTED_TREE: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,hashlib,json,os,urllib.request,zipfile
+          from pathlib import Path,PurePosixPath
+          api='https://api.github.com/repos/appolon1908-hue/codestra-production-platform/'
+          def call(path,value=None):
+              request=urllib.request.Request(api+path,data=None if value is None else json.dumps(value).encode(),headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='GET' if value is None else 'POST')
+              with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
+          with zipfile.ZipFile(Path(os.environ['RUNNER_TEMP'])/'verified-draft/verified-source.zip') as archive:
+              spec=json.loads(archive.read('verified-manifest.json'))
+              assert spec['parent']==os.environ['PARENT_SHA'] and spec['tree']==os.environ['EXPECTED_TREE'] and spec['pr']==int(os.environ['PR_NUMBER'])
+              assert 1<=len(spec['files'])<=5
+              names=[row['path'] for row in spec['files']]
+              assert len(set(names))==len(names) and set(archive.namelist())==set(names)|{'verified-manifest.json'}
+              for row in spec['files']:
+                  path=PurePosixPath(row['path']);data=archive.read(row['path'])
+                  assert not path.is_absolute() and '..' not in path.parts and row['mode'] in ('100644','100755')
+                  assert hashlib.sha256(data).hexdigest()==row['sha256']
+                  assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==row['sha']
+              for row in spec['files']:
+                  result=call('git/blobs',{'encoding':'base64','content':base64.b64encode(archive.read(row['path'])).decode()})
+                  assert result['sha']==row['sha']
+              parent=call('git/commits/'+spec['parent'])
+              tree=call('git/trees',{'base_tree':parent['tree']['sha'],'tree':[{k:row[k] for k in ('path','mode','type','sha')} for row in spec['files']]})
+              assert tree['sha']==spec['tree']
+              print('VERIFIED_PR='+str(spec['pr'])+' STORED_TREE='+tree['sha'])
+          print('REMOTE_REFS_CHANGED=NO')
+          print('SERVER_CONTACTED=NO')
+          PY
