@@ -17,6 +17,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from datetime import datetime, timezone
 
 
 RULE_TARGET = Path("/etc/audit/rules.d/60-codestra-provider-host.rules")
@@ -434,12 +435,18 @@ def installed_release_binding(
         raise ValidationError("installation validator launcher binding mismatch")
     if installation.get("schema") != "codestra.host-auditd.installation.v1":
         raise ValidationError("installation record schema rejected")
-    if (not isinstance(installation.get("change_id"), str)
-            or not isinstance(installation.get("approver"), str)
-            or not isinstance(installation.get("installed_at_utc"), str)):
+    if any(not isinstance(installation.get(key), str) or not installation[key].strip()
+           for key in ("change_id", "approver", "installed_at_utc")):
         raise ValidationError("installation approval evidence rejected")
+    try:
+        installed_at = datetime.fromisoformat(installation["installed_at_utc"].replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValidationError("installation timestamp rejected") from exc
+    if ("T" not in installation["installed_at_utc"] or installed_at.tzinfo is None
+            or installed_at.utcoffset() != timezone.utc.utcoffset(installed_at)):
+        raise ValidationError("installation timestamp must identify UTC")
     stamp = installation.get("rollback_stamp", "")
-    if not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp):
+    if not isinstance(stamp, str) or not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp):
         raise ValidationError("installation rollback identity rejected")
     release = installation.get("release")
     release_keys = {
@@ -451,9 +458,13 @@ def installed_release_binding(
     if (not isinstance(release, dict) or set(release) != release_keys
             or release.get("signature_verification") != "PASS"):
         raise ValidationError("installation release verification rejected")
-    if any(not re.fullmatch(r"[0-9a-f]{64}", str(value))
+    if any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
            for key, value in release.items() if key.endswith("sha256")):
         raise ValidationError("installation release digest rejected")
+    if (not isinstance(release.get("release_archive"), str) or not release["release_archive"].strip()
+            or not isinstance(release.get("signer_fingerprint"), str)
+            or not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", release["signer_fingerprint"])):
+        raise ValidationError("installation release identity rejected")
     state = installation.get("state")
     state_keys = {"service", "kernel_enabled", "kernel_lost", "managed_rule_sha256",
                   "validator_sha256", "validator_launcher_sha256", "managed_keys"}
@@ -463,9 +474,15 @@ def installed_release_binding(
             or state.get("validator_sha256") != validator_sha
             or state.get("validator_launcher_sha256") != launcher_sha
             or state.get("service") != "enabled-active"
-            or state.get("kernel_enabled") not in {1, 2}
-            or state.get("kernel_lost") != 0):
+            or type(state.get("kernel_enabled")) is not int
+            or state["kernel_enabled"] not in {1, 2}
+            or type(state.get("kernel_lost")) is not int
+            or state["kernel_lost"] != 0):
         raise ValidationError("installation state binding rejected")
+    keys = state.get("managed_keys")
+    if (not isinstance(keys, list) or any(not isinstance(key, str) for key in keys)
+            or len(keys) != len(set(keys)) or not REQUIRED_KEYS <= set(keys)):
+        raise ValidationError("installation managed keys rejected")
     checkpoint = BACKUP_ROOT / stamp
     manifest = checked_regular(checkpoint / "rollback.json", max_bytes=2 * 1024 * 1024)
     checksums = checked_regular(checkpoint / "SHA256SUMS", max_bytes=4096)

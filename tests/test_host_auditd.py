@@ -434,7 +434,17 @@ def test_installed_payloads_require_exact_executable_metadata(
         )
 
 
-def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch) -> None:
+@pytest.mark.parametrize("metadata_case", [
+    None, ("change_id", ""), ("approver", " "), ("installed_at_utc", "yesterday"),
+    ("installed_at_utc", "2026-09-07T13:00:00"), ("installed_at_utc", "2026-09-07T13:00:00-04:00"),
+    ("rollback_stamp", 7), ("release.release_archive", None),
+    ("release.signer_fingerprint", "invalid"), ("release.release_archive_sha256", int("1" * 64)),
+    ("state.kernel_enabled", True), ("state.kernel_enabled", 1.0), ("state.kernel_enabled", "1"),
+    ("state.kernel_lost", False), ("state.kernel_lost", 0.0), ("state.kernel_lost", "0"),
+    ("state.managed_keys", []), ("state.managed_keys", "codestra_audit_authority"),
+    ("state.managed_keys", [True]), ("state.managed_keys", ["unknown"]),
+])
+def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch, metadata_case) -> None:
     rule_path = Path("/test/managed.rules")
     validator_path = Path("/test/validator")
     launcher_path = Path("/test/launcher")
@@ -472,7 +482,7 @@ def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch) -> N
                       "kernel_lost": 0, "managed_rule_sha256": hashlib.sha256(rule).hexdigest(),
                       "validator_sha256": hashlib.sha256(validator).hexdigest(),
                       "validator_launcher_sha256": hashlib.sha256(launcher).hexdigest(),
-                      "managed_keys": ["codestra_audit_authority"]},
+                      "managed_keys": sorted(VALIDATOR.REQUIRED_KEYS)},
         }
     ).encode()
     payloads = {
@@ -493,6 +503,19 @@ def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch) -> N
         "checked_regular",
         lambda path, max_bytes=1024 * 1024: payloads[path],
     )
+
+    if metadata_case is not None:
+        key, value = metadata_case
+        altered = json.loads(record)
+        parts = key.split(".")
+        target = altered
+        for part in parts[:-1]:
+            target = target[part]
+        target[parts[-1]] = value
+        payloads[record_path] = json.dumps(altered).encode()
+        with pytest.raises(VALIDATOR.ValidationError):
+            VALIDATOR.installed_release_binding(source_sha)
+        return
 
     assert VALIDATOR.installed_release_binding(source_sha) == (
         rule,
@@ -767,7 +790,7 @@ def test_idempotent_install_requires_complete_canonical_record() -> None:
         "managed_rule_sha256": "c" * 64,
         "validator_sha256": "d" * 64,
         "validator_launcher_sha256": "e" * 64,
-        "managed_keys": ["codestra_audit_authority"],
+        "managed_keys": sorted(VALIDATOR.REQUIRED_KEYS),
     }
     record = {
         "schema": "codestra.host-auditd.installation.v1",
