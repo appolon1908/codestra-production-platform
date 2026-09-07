@@ -258,6 +258,21 @@ class TestCodestraCrmCallDeliveryOutbox(TransactionCase):
         self.assertEqual(delivery.state, "sent")
         self.assertEqual(delivery.mail_id, mail)
 
+    def test_cancel_moves_failed_linked_mail_to_terminal_cancel(self):
+        _, delivery = self._complete_with_email("delivery-cancel-failed-mail")
+        mail = delivery.mail_id
+        mail.sudo().write({"state": "exception"})
+        delivery._write_from_worker({"state": "failed", "attempt_count": 1})
+
+        self.env(user=self.manager)["codestra.crm.call.delivery"].browse(
+            delivery.id
+        ).action_cancel()
+
+        delivery.invalidate_recordset()
+        mail.invalidate_recordset()
+        self.assertEqual(delivery.state, "cancelled")
+        self.assertEqual(mail.state, "cancel")
+
     def test_reconcile_fails_queued_delivery_when_linked_mail_is_removed(self):
         _, delivery = self._complete_with_email("delivery-missing-mail")
         delivery.mail_id.sudo().unlink()

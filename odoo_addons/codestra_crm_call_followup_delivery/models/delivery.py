@@ -356,8 +356,13 @@ class CodestraCrmCallDelivery(models.Model):
                 continue
             if delivery.state == "sent":
                 raise ValidationError(_("A sent delivery cannot be cancelled."))
-            if delivery.mail_id and delivery.mail_id.state == "outgoing":
-                delivery.mail_id.sudo().write({"state": "cancel"})
+            if delivery.mail_id:
+                mail = delivery.mail_id.sudo()
+                if mail.state != "cancel":
+                    mail.write({"state": "cancel"})
+                mail.invalidate_recordset(["state"])
+                if mail.state != "cancel":
+                    raise ValidationError(_("The linked Odoo mail could not be cancelled."))
             delivery.sudo()._write_from_worker(
                 {
                     "state": "cancelled",
