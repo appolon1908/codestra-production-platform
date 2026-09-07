@@ -63,6 +63,8 @@ def main() -> int:
         "recipient_hash",
         "BACKOFF_MINUTES",
         "FOR UPDATE SKIP LOCKED",
+        "FOR UPDATE OF d SKIP LOCKED",
+        "SELECT id FROM codestra_crm_call_delivery WHERE id = %s FOR UPDATE",
         'flush_model(["state", "attempt_count", "max_attempts", "next_attempt_at"])',
         "_cron_reconcile_mail_states",
         "_cron_retry_failed",

@@ -160,6 +160,29 @@ class TestCodestraCrmCallDeliveryOutbox(TransactionCase):
         self.assertEqual(delivery.state, "sent")
         self.assertTrue(delivery.sent_at)
 
+    def test_reconcile_skips_outgoing_backlog_and_processes_terminal_mail(self):
+        _, outgoing = self._complete_with_email("delivery-outgoing-backlog")
+        _, sent = self._complete_with_email("delivery-terminal-behind-backlog")
+        self.assertLess(outgoing.id, sent.id)
+        sent.mail_id.sudo().write({"state": "sent"})
+
+        self.env["codestra.crm.call.delivery"]._cron_reconcile_mail_states(limit=1)
+
+        outgoing.invalidate_recordset()
+        sent.invalidate_recordset()
+        self.assertEqual(outgoing.state, "queued")
+        self.assertEqual(sent.state, "sent")
+
+    def test_reconcile_preserves_native_mail_cancellation(self):
+        _, delivery = self._complete_with_email("delivery-native-cancel")
+        delivery.mail_id.sudo().write({"state": "cancel"})
+
+        self.env["codestra.crm.call.delivery"]._cron_reconcile_mail_states()
+
+        delivery.invalidate_recordset()
+        self.assertEqual(delivery.state, "cancelled")
+        self.assertFalse(delivery.next_attempt_at)
+
     def test_exception_schedules_retry_and_cron_requeues_mail(self):
         _, delivery = self._complete_with_email("delivery-retry")
         delivery.mail_id.sudo().write(

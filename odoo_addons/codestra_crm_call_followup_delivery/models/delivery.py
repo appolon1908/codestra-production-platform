@@ -261,6 +261,14 @@ class CodestraCrmCallDelivery(models.Model):
 
     def _queue_retry(self, *, manual=False):
         self.ensure_one()
+        # Serialize the decision and replacement creation. Without this lock,
+        # concurrent manager retries can each create a sendable orphan mail.
+        self.flush_recordset(["state", "mail_id", "attempt_count", "max_attempts"])
+        self.env.cr.execute(
+            "SELECT id FROM codestra_crm_call_delivery WHERE id = %s FOR UPDATE",
+            [self.id],
+        )
+        self.invalidate_recordset(["state", "mail_id", "attempt_count", "max_attempts"])
         if self.state == "sent":
             raise ValidationError(_("A sent delivery cannot be retried."))
         if self.state == "cancelled":
@@ -291,18 +299,35 @@ class CodestraCrmCallDelivery(models.Model):
 
     @api.model
     def _cron_reconcile_mail_states(self, limit=200):
-        records = self.sudo().search(
-            [("state", "=", "queued")],
-            order="id",
-            limit=limit,
+        # Select only rows that can make progress. A large stable outgoing
+        # backlog must not starve later terminal mail outcomes.
+        self.flush_model(["state", "mail_id"])
+        self.env["mail.mail"].flush_model(["state"])
+        self.env.cr.execute(
+            """
+            SELECT d.id
+              FROM codestra_crm_call_delivery d
+         LEFT JOIN mail_mail m ON m.id = d.mail_id
+             WHERE d.state = 'queued'
+               AND (m.id IS NULL OR m.state IN ('sent', 'exception', 'cancel'))
+             ORDER BY d.id
+             LIMIT %s
+             FOR UPDATE OF d SKIP LOCKED
+            """,
+            [max(1, min(int(limit), 1000))],
         )
+        records = self.sudo().browse([row[0] for row in self.env.cr.fetchall()])
         for delivery in records:
             mail = delivery.mail_id.sudo()
             if not mail:
                 delivery._record_failure(_("Queued mail record is missing."))
             elif mail.state == "sent":
                 delivery._mark_sent()
-            elif mail.state in {"exception", "cancel"}:
+            elif mail.state == "cancel":
+                delivery._write_from_worker(
+                    {"state": "cancelled", "next_attempt_at": False}
+                )
+            elif mail.state == "exception":
                 delivery._record_failure(
                     mail.failure_reason or _("Odoo mail queue reported %s") % mail.state
                 )
