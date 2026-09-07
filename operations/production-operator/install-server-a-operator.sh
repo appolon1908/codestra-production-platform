@@ -73,7 +73,7 @@ c3a9d1445c1681a9cb631b1effa1ce1d6c170a3c6f176b63157199f533744203  codestra-produ
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
 bbc8e4af977ae21b4faffd8c755ed1a0220aebb2796f10c90c94483be3eed06e  codestra-readiness-restore.override.conf
 dad62a1dcb35fabb97991ad2f0a1079d13d949528daa7bebe0d35d291ec23f67  ../../PRODUCTION-DATABASE-MANIFEST.yaml
-8491a735a047120de199613c311abc30df1231a0c4ec37a48007a743d47a2133  ../../tools/validate_production_database_manifest.py
+114a83febc48f43dd976dbc0f60f8234acb85057131d1409349580a81a5e8f73  ../../tools/validate_production_database_manifest.py
 EOF
 }
 verify_payload || fail
@@ -140,9 +140,16 @@ validate_existing_root_target() {
 restore_path() {
   target=$1
   label=$2
+  backup=$rollback_dir/$label
+  absent=$rollback_dir/$label.absent
   rm -f -- "$target" || return 1
-  if [ -e "$rollback_dir/$label" ] || [ -L "$rollback_dir/$label" ]; then
-    cp -a --no-dereference "$rollback_dir/$label" "$target" || return 1
+  if [ -e "$backup" ] || [ -L "$backup" ]; then
+    [ ! -e "$absent" ] && [ ! -L "$absent" ] || return 1
+    cp -a --no-dereference "$backup" "$target" || return 1
+  elif [ -f "$absent" ] && [ ! -L "$absent" ]; then
+    return 0
+  else
+    return 1
   fi
   return 0
 }
@@ -179,6 +186,7 @@ rollback() {
   chmod 0700 "$rollback_dir" 2>/dev/null || rollback_failed=1
   return "$rollback_failed"
 }
+
 on_failure() {
   rc=$?
   trap - EXIT HUP INT TERM

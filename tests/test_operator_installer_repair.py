@@ -6,6 +6,7 @@ import io
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 
 import pytest
@@ -14,6 +15,22 @@ ROOT = Path(__file__).parents[1]
 PACKAGE = ROOT / "operations" / "production-operator"
 STAGER = PACKAGE / "stage-operator-release.py"
 INSTALLER = PACKAGE / "install-server-a-operator.sh"
+
+
+def installer_function(name: str) -> str:
+    source = INSTALLER.read_text()
+    start = source.index(f"{name}() {{")
+    end = source.index("\n}\n", start) + 3
+    return source[start:end]
+
+
+def run_shell(source: str, *args: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["/bin/sh", "-c", source, "installer-regression", *(str(arg) for arg in args)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
 
 def make_root(tmp_path: Path) -> Path:
@@ -72,6 +89,144 @@ def test_installed_checksum_is_atomic_backed_up_and_rolled_back() -> None:
     )
     assert "ROLLBACK_RESULT=$rollback_status" in source
     assert "SOURCE_LOCK_STATUS=NOT_EVALUATED_BY_INSTALLER" in source
+    restore_lines = [
+        line.strip() for line in source.splitlines() if line.strip().startswith("restore_path /")
+    ]
+    assert restore_lines
+    assert all(line.endswith("|| rollback_failed=1") for line in restore_lines)
+
+
+@pytest.mark.parametrize("failed_command", ["rm", "cp"])
+def test_actual_sh_rollback_failure_survives_later_success(
+    tmp_path: Path, failed_command: str
+) -> None:
+    """A later successful restore must not mask an earlier protected-file failure."""
+    rollback = tmp_path / "rollback"
+    rollback.mkdir()
+    installed = tmp_path / "installed.sha256"
+    sudoers = tmp_path / "sudoers"
+    installed.write_text("replacement\n")
+    sudoers.write_text("replacement\n")
+    (rollback / "installed-checksum").write_text("original checksum\n")
+    (rollback / "sudoers").write_text("original sudoers\n")
+    shell = installer_function("restore_path") + r'''
+rollback_dir=$1
+installed=$2
+sudoers=$3
+real_rm=$(command -v rm)
+real_cp=$(command -v cp)
+rm() {
+  if [ "$FAILED_COMMAND" = rm ] && [ "$3" = "$installed" ]; then return 1; fi
+  "$real_rm" "$@"
+}
+cp() {
+  if [ "$FAILED_COMMAND" = cp ] && [ "$4" = "$installed" ]; then return 1; fi
+  "$real_cp" "$@"
+}
+rollback_sequence() {
+  rollback_failed=0
+  restore_path "$installed" installed-checksum || rollback_failed=1
+  restore_path "$sudoers" sudoers || rollback_failed=1
+  return "$rollback_failed"
+}
+status=PASS
+rollback_sequence || status=FAIL
+printf 'ROLLBACK_RESULT=%s\n' "$status"
+test "$status" = FAIL
+test "$(cat "$sudoers")" = 'original sudoers'
+'''
+    result = subprocess.run(
+        ["/bin/sh", "-c", shell, "installer-regression", str(rollback), str(installed), str(sudoers)],
+        env={**os.environ, "FAILED_COMMAND": failed_command},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ROLLBACK_RESULT=FAIL" in result.stdout
+
+
+def test_actual_sh_distinguishes_absent_marker_from_missing_backup(tmp_path: Path) -> None:
+    rollback = tmp_path / "rollback"
+    rollback.mkdir()
+    absent_target = tmp_path / "originally-absent"
+    missing_target = tmp_path / "missing-evidence"
+    absent_target.write_text("replacement\n")
+    missing_target.write_text("replacement\n")
+    (rollback / "absent.absent").touch()
+    shell = installer_function("restore_path") + r'''
+rollback_dir=$1
+restore_path "$2" absent || exit 10
+test ! -e "$2" || exit 11
+restore_path "$3" missing && exit 12
+exit 0
+'''
+    result = run_shell(shell, rollback, absent_target, missing_target)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("mutation", ["missing", "malformed", "duplicate"])
+def test_manifest_validator_never_promotes_invalid_certification(
+    tmp_path: Path, mutation: str
+) -> None:
+    source = (ROOT / "PRODUCTION-DATABASE-MANIFEST.yaml").read_text()
+    certification = "certification_status: FAIL"
+    assert source.count(certification) == 1
+    if mutation == "missing":
+        source = source.replace(f"{certification}\n", "")
+    elif mutation == "malformed":
+        source = source.replace(certification, "certification_status: UNKNOWN")
+    else:
+        source = source.replace(certification, f"{certification}\n{certification}")
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(source)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/validate_production_database_manifest.py"), str(manifest)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "PRODUCTION_DATABASE_CERTIFICATION_STATUS=PASS" not in result.stdout
+
+
+def test_valid_fail_manifest_remains_reported_fail() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools/validate_production_database_manifest.py"),
+            str(ROOT / "PRODUCTION-DATABASE-MANIFEST.yaml"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "PRODUCTION_DATABASE_MANIFEST_STRUCTURE=PASS" in result.stdout
+    assert "PRODUCTION_DATABASE_CERTIFICATION_STATUS=FAIL" in result.stdout
+
+
+def test_installer_reports_structural_and_certification_results_separately() -> None:
+    source = INSTALLER.read_text()
+    assert "'STRUCTURAL_VALIDATION=PASS'" in source
+    assert "'DATABASE_MANIFEST_STRUCTURAL_VALIDATION=PASS'" in source
+    assert '"DATABASE_CERTIFICATION_STATUS=$database_certification_status"' in source
+    assert "'DATABASE_CERTIFICATION=PASS'" not in source
+
+
+def test_actual_sh_preserves_install_failure_status_when_rollback_fails() -> None:
+    shell = installer_function("on_failure") + r'''
+rollback() {
+  true
+  return 1
+}
+trap on_failure EXIT HUP INT TERM
+exit 23
+'''
+    result = run_shell(shell)
+    assert result.returncode == 23
+    assert "INSTALL_RESULT=FAIL" in result.stdout
+    assert "ROLLBACK_RESULT=FAIL" in result.stdout
 
 
 @pytest.mark.parametrize("failure", ["remove", "copy"])

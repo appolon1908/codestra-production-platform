@@ -64,6 +64,7 @@ def load_manifest(path: Path) -> dict:
         text = raw.strip()
         if indent == 0 and text in {"policy:", "components:"}:
             section = text[:-1]
+            assert section not in document, "duplicate manifest key"
             if section == "components":
                 document[section] = []
             else:
@@ -72,6 +73,7 @@ def load_manifest(path: Path) -> dict:
         if indent == 0 and not text.startswith("- "):
             key, separator, value = text.partition(":")
             assert separator and re.fullmatch(r"[a-z_][a-z0-9_]*", key), "unsupported manifest syntax"
+            assert key not in document, "duplicate manifest key"
             document[key] = scalar(value)
             section = "top"
             continue
@@ -129,6 +131,7 @@ REQUIRED_FIELDS = {
 
 def validate(path: Path, evidence_root: Path | None = None) -> None:
     document = load_manifest(path)
+    assert document.get("certification_status") in {"PASS", "FAIL"}
     assert document["schema_version"] == "codestra.production-database-manifest.v1"
     assert document["target"] == "65.109.65.169"
     policy = document["policy"]

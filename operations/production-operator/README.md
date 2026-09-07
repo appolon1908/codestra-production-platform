@@ -110,6 +110,16 @@ temporary file before atomic publication. A failure after publication restores
 the old manifest (or removes the newly created one) together with the previous
 operator files. The failure output keeps a nonzero status and reports rollback
 success separately without exposing command output or secrets.
+Every protected restore result contributes to that rollback status; restoration
+continues after a failure, and incomplete rollback retains the private backup
+directory for recovery. A `.absent` marker is the only evidence that a target
+was originally absent. Missing or conflicting backup evidence fails rollback.
+
+Database-manifest validation and certification are separate results. Successful
+structural validation is reported as `STRUCTURAL_VALIDATION=PASS`, while
+`DATABASE_CERTIFICATION` is read from the manifest's single exact
+`certification_status` field. A structurally valid `FAIL` remains `FAIL`, and a
+missing, duplicate, or malformed status fails the installation transaction.
 
 ## Offline archive staging runbook
 
