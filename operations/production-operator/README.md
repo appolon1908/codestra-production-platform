@@ -103,6 +103,57 @@ modified payloads, unsafe source/key modes, unexpected ownership or modes on
 existing targets, malformed or multiple keys, invalid sudoers, and invalid SSH
 configuration.
 
+The checksum manifest is part of the same transaction: an existing regular
+root-owned `0600` manifest is backed up with its bytes and metadata, an absent
+manifest is recorded as absent, and the replacement is written to a private
+temporary file before atomic publication. A failure after publication restores
+the old manifest (or removes the newly created one) together with the previous
+operator files. The failure output keeps a nonzero status and reports rollback
+success separately without exposing command output or secrets.
+Every protected restore result contributes to that rollback status; restoration
+continues after a failure, and incomplete rollback retains the private backup
+directory for recovery. A `.absent` marker is the only evidence that a target
+was originally absent. Missing or conflicting backup evidence fails rollback.
+
+Database-manifest validation and certification are separate results. Successful
+structural validation is reported as `STRUCTURAL_VALIDATION=PASS`, while
+`DATABASE_CERTIFICATION_STATUS` is read from the manifest's single exact
+`certification_status` field. A structurally valid `FAIL` remains `FAIL`, and a
+missing, duplicate, or malformed status fails the installation transaction.
+
+## Offline archive staging runbook
+
+`stage-operator-release.py` verifies and extracts a reviewed release package;
+it never installs it. Create the dedicated root-controlled hierarchy without
+changing `/opt/codestra` or any user's home, then place the already acquired
+archive in `source` as a root-owned `0600` regular file:
+
+```sh
+sudo install -d -o root -g root -m 0700 \
+  /opt/codestra-operator-releases \
+  /opt/codestra-operator-releases/source
+sudo install -o root -g root -m 0600 reviewed-release.tar.gz \
+  /opt/codestra-operator-releases/source/reviewed-release.tar.gz
+sudo ./stage-operator-release.py \
+  /opt/codestra-operator-releases/source/reviewed-release.tar.gz \
+  REVIEWED_ARCHIVE_SHA256 REVIEWED_RELEASE_ID
+```
+
+The digest and release ID must come from the independent release review. The
+script snapshots the archive to a private root-owned file, verifies that exact
+snapshot, validates every member, extracts only from the snapshot, checks the
+complete tree, and atomically publishes a previously absent destination below
+`/opt/codestra-operator-releases/staged`. Absolute/traversal names, links,
+special files, duplicate/conflicting destinations, unsafe path ownership or
+permissions, and existing destinations fail closed. Snapshot files are removed
+after completion. Do not use this step to create signing keys, change the SSH
+public-key identity, invent approval data, or install a staged tree.
+
+The immutable `ec5a8a74ecac2fd156e5f748c1f43315caf6887d` release and its tags
+remain unchanged. These modified installer bytes require a new independently
+reviewed release package and new published hashes after merge; do not reuse or
+repoint the old release and do not silently change its maintenance date.
+
 ## Status and operation
 
 Remote callers send an action plus the exact installed SHA, image digest,
