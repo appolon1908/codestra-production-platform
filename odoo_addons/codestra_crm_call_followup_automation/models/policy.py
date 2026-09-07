@@ -9,7 +9,7 @@ class CodestraCrmCallFollowupPolicy(models.Model):
     _order = "company_id, id"
 
     name = fields.Char(required=True, default="Call Follow-up Automation", tracking=True)
-    active = fields.Boolean(default=True, tracking=True)
+    active = fields.Boolean(default=False, tracking=True)
     company_id = fields.Many2one(
         "res.company",
         required=True,
@@ -32,9 +32,9 @@ class CodestraCrmCallFollowupPolicy(models.Model):
     )
     max_attempts = fields.Integer(default=5, required=True, tracking=True)
     retry_base_minutes = fields.Integer(default=2, required=True, tracking=True)
-    create_pending_activity = fields.Boolean(default=True, tracking=True)
-    create_missed_callback_activity = fields.Boolean(default=True, tracking=True)
-    repair_calendar_reminders = fields.Boolean(default=True, tracking=True)
+    create_pending_activity = fields.Boolean(default=False, tracking=True)
+    create_missed_callback_activity = fields.Boolean(default=False, tracking=True)
+    repair_calendar_reminders = fields.Boolean(default=False, tracking=True)
     escalation_user_id = fields.Many2one(
         "res.users",
         string="Escalation owner",

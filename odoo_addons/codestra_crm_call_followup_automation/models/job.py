@@ -406,11 +406,12 @@ class CodestraCrmCallFollowupJob(models.Model):
                     "codestra_crm_call_followup.calendar_alarm_email_15_minutes"
                 ).id
             )
-        alarms = set(event.alarm_ids.ids) | desired
-        event.sudo().with_context(
-            skip_codestra_followup_sync=True,
-            mail_notify_force_send=False,
-        ).write({"alarm_ids": [Command.set(sorted(alarms))]})
+        missing = desired - set(event.alarm_ids.ids)
+        if missing:
+            event.sudo().with_context(
+                skip_codestra_followup_sync=True,
+                mail_notify_force_send=False,
+            ).write({"alarm_ids": [Command.link(alarm_id) for alarm_id in sorted(missing)]})
         followup._write_from_workflow(
             {"automation_reminders_repaired_at": fields.Datetime.now()}
         )

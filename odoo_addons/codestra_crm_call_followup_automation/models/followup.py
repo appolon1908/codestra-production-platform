@@ -92,6 +92,8 @@ class CodestraCrmCallFollowupAutomation(models.Model):
 
     def action_mark_callback_completed(self):
         for record in self:
+            if record.callback_completed_at:
+                continue
             if not (
                 self.env.user.has_group(
                     "codestra_crm_call_followup.group_call_followup_manager"
