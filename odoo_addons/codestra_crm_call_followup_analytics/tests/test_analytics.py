@@ -186,10 +186,11 @@ class TestCodestraCallFollowupAnalytics(TransactionCase):
         call = self._register("analytics-auto-deleted-sent-mail")
         mail = self.env["mail.mail"].create({
             "subject": "Sent then deleted", "body_html": "<p>sent</p>",
-            "email_to": "customer@test.invalid", "state": "sent",
+            "email_to": "customer@test.invalid", "state": "outgoing",
+            "auto_delete": True,
         })
         call._write_from_workflow({"mail_id": mail.id})
-        mail.unlink()
+        mail._postprocess_sent_message([], ["customer@test.invalid"])
         call.invalidate_recordset()
         self.assertFalse(call.mail_id)
         self.assertTrue(call.email_sent_at)
