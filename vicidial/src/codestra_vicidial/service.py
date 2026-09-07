@@ -329,7 +329,25 @@ class AdapterService:
             desired["adopt_existing_sha256"] = None
             desired_hash = self.state.digest(desired)
             mapping = self.state.mapping("agent", command.agent.user_id)
-            existing = self.repository.agent(command.agent.user_id)
+            intent = self.state.agent_adoption_intent(command.agent.user_id) if mapping is None else None
+            if intent is not None and (
+                command.agent.adopt_existing_sha256 != intent["original_hash"]
+                or desired_hash != intent["desired_hash"]
+            ):
+                raise CollisionError("agent adoption intent mismatch")
+            try:
+                existing = self.repository.agent(command.agent.user_id)
+            except Exception as exc:
+                if intent is None:
+                    raise
+                # A matching durable intent may survive a MyISAM commit. Keep
+                # the agent disabled through the ACL-independent readback path;
+                # never clear intent or repeat sync when normalization fails.
+                disabled = self.repository.disable_agent(command.agent.user_id)
+                if (disabled.get("user_id") != command.agent.user_id
+                        or disabled.get("active") not in (False, "N")):
+                    raise RuntimeError("agent recovery disable read-back failed") from exc
+                raise RuntimeError("agent adoption reconciliation required; intent retained") from exc
             controlled_match = bool(existing) and (
                 existing.get("user_id") == desired["user_id"]
                 and existing.get("full_name") == desired["full_name"]

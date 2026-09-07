@@ -371,3 +371,45 @@ def test_test_syn_transfer_uses_test_business_unit(tmp_path):
     })
     assert service.sync_transfer_policy("test-syn-policy", policy)[
         "allowed_targets"] == [target]
+
+
+@pytest.mark.parametrize("mismatch", [False, True])
+def test_retained_agent_intent_handles_normalization_failure_before_retry(tmp_path, monkeypatch, mismatch):
+    service, repository = enabled_service(tmp_path)
+    existing = {"user_id":"COD1001", "full_name":"Legacy Agent", "user_group":"LEGACY",
+                "campaigns":["LEGACY01"], "inbound_groups":[], "active":False}
+    repository.agents["COD1001"] = dict(existing)
+    payload = {"context":context(), "agent": {"user_id":"COD1001",
+        "full_name":"Codestra Agent", "user_group":"COD_TEST_SDR", "campaigns":["CODT0001"],
+        "inbound_groups":["COD_TEST_CLOSERS"], "active":False,
+        "adopt_existing_sha256":service.state.digest(existing)}}
+    command = AgentCommand.model_validate(payload)
+    finalize = service.state.finalize_agent_adoption
+    monkeypatch.setattr(service.state, "finalize_agent_adoption",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("simulated lost mapping")))
+    with pytest.raises(RuntimeError, match="lost mapping"):
+        service.sync_agent("partial-commit", command)
+    monkeypatch.setattr(service.state, "finalize_agent_adoption", finalize)
+    retained = service.state.agent_adoption_intent("COD1001")
+    assert retained is not None
+    disabled = []
+    original_disable = repository.disable_agent
+    def disable(user):
+        disabled.append(user)
+        return original_disable(user)
+    monkeypatch.setattr(repository, "disable_agent", disable)
+    monkeypatch.setattr(repository, "agent", lambda user: (_ for _ in ()).throw(CollisionError("malformed ACL")))
+    monkeypatch.setattr(repository, "sync_agent_disabled", lambda spec: pytest.fail("must not repeat a committed sync"))
+    if mismatch:
+        payload["agent"]["full_name"] = "Different desired request"
+        command = AgentCommand.model_validate(payload)
+        with pytest.raises(CollisionError, match="intent mismatch"):
+            service.sync_agent("retry-different", command)
+        assert disabled == []
+    else:
+        with pytest.raises(RuntimeError, match="reconciliation required; intent retained"):
+            service.sync_agent("retry-normalization", command)
+        assert disabled == ["COD1001"]
+        assert repository.agents["COD1001"]["active"] is False
+    assert service.state.agent_adoption_intent("COD1001") == retained
+    assert service.state.mapping("agent", "COD1001") is None
