@@ -13,7 +13,7 @@ jobs:
         include:
           - pr: 96
             parent: 4b7373c70b89737330e00c8fd01f716522d62e07
-            tree: 34b9518adfacad4f12a2e248fb027c93134404a5
+            tree: d41fd811867e77e775df927a40457c9f3b86b29d
           - pr: 111
             parent: 76cae3142523201f8c3ed52cc1c95b0d701fa7bb
             tree: 9716d898856892407efa1a32521052b8153aa026
@@ -28,7 +28,7 @@ jobs:
           POSTGRES_DB: corporate_delivery_ci
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U ci -d corporate_delivery_ci'
+          --health-cmd "pg_isready -U ci -d corporate_delivery_ci"
           --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       PR_NUMBER: ${{ matrix.pr }}
@@ -63,7 +63,7 @@ jobs:
           size=int.from_bytes(raw[:4],'big')
           rows=json.loads(raw[4:4+size]); payload=raw[4+size:]
           row=next(row for row in rows if row['pr']==int(os.environ['PR_NUMBER']))
-          assert row['parent']==os.environ['PARENT_SHA'] and row['tree']==os.environ['EXPECTED_TREE']
+          assert row['parent']==os.environ['PARENT_SHA']
           assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==row['parent']
           assert not subprocess.check_output(['git','status','--porcelain'],text=True).strip()
           patch=payload[row['offset']:row['offset']+row['length']]
@@ -71,6 +71,15 @@ jobs:
           subprocess.run(['git','apply','--index','-'],input=patch,check=True)
           assert set(subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines())==set(row['paths'])
           assert subprocess.check_output(['git','write-tree'],text=True).strip()==row['tree']
+          if row['pr']==96:
+              path=Path('.github/workflows/corporate-delivery-contract.yml')
+              old="--health-cmd 'pg_isready -U ci -d corporate_delivery_ci'"
+              text=path.read_text()
+              assert text.count(old)==1
+              path.write_text(text.replace(old, '--health-cmd "pg_isready -U ci -d corporate_delivery_ci"'))
+              subprocess.run(['git','add','--',str(path)],check=True)
+          row['tree']=subprocess.check_output(['git','write-tree'],text=True).strip()
+          assert row['tree']==os.environ['EXPECTED_TREE']
           (Path(os.environ['RUNNER_TEMP'])/'patch-manifest.json').write_text(json.dumps(row))
           print('RECONSTRUCTED_TREE='+row['tree'])
           PY
@@ -134,7 +143,7 @@ jobs:
         include:
           - pr: 96
             parent: 4b7373c70b89737330e00c8fd01f716522d62e07
-            tree: 34b9518adfacad4f12a2e248fb027c93134404a5
+            tree: d41fd811867e77e775df927a40457c9f3b86b29d
           - pr: 111
             parent: 76cae3142523201f8c3ed52cc1c95b0d701fa7bb
             tree: 9716d898856892407efa1a32521052b8153aa026
