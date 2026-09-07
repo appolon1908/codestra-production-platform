@@ -42,7 +42,9 @@ canonical installer or launcher changes. This repeatable root-only operation is
 the governed upgrade path; it atomically replaces and reads back the launcher,
 installer, and a protected Python image, then writes root-only digest evidence
 bound to the approved source SHA before reporting PASS. It installs them under
-root-owned `/usr/local` paths; `codestra-admin` must never receive sudo access
+root-owned `/usr/local` paths and seals the executable boundary immutable; the
+next root-only upgrade explicitly unseals, replaces, verifies, and reseals it.
+`codestra-admin` must never receive sudo access
 to the bootstrap command or to a checkout-resident wrapper.
 
 Run the protected installer. The two

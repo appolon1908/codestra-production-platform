@@ -845,6 +845,9 @@ def test_verified_bootstrap_checks_stdlib_before_python_execution() -> None:
     assert 'exec "$python_image" -I -S' in launcher
     assert "python3.sha256" in launcher
     assert "/usr/bin/getfacl -cp" in launcher
+    assert "python3.stdlib" in launcher
+    assert "/usr/bin/getfacl -Rcp" in launcher
+    assert "/usr/bin/lsattr -d" in launcher
     source = (PACKAGE / "install-provider-host-auditd.py").read_text()
     assert "verified bootstrap launcher is required" in source
 
@@ -855,12 +858,22 @@ def test_root_bootstrap_installs_launcher_outside_operator_checkout() -> None:
     assert "/usr/local/sbin/install-provider-host-auditd-verified" in bootstrap
     assert "/usr/local/libexec/codestra-host-auditd/install-provider-host-auditd.py" in bootstrap
     assert "python3.sha256" in bootstrap
+    assert "python3.stdlib" in bootstrap
+    assert "/usr/bin/chattr +i" in bootstrap
     assert "source_sha=%s" in bootstrap
     assert "/usr/bin/cmp -s" in bootstrap
     assert "/var/lib/codestra/host-auditd-bootstrap" in bootstrap
     assert bootstrap.index("/usr/bin/cmp -s") < bootstrap.index(
         "CODESTRA_HOST_AUDITD_LAUNCHER_BOOTSTRAP=PASS"
     )
+
+
+def test_validation_holds_the_installation_lock_through_evidence() -> None:
+    source = (PACKAGE / "validate-provider-host-auditd.py").read_text()
+    acquire = source.index("fcntl.flock(lock_fd, fcntl.LOCK_EX)")
+    persist = source.index("durable_evidence(destination, payload)", acquire)
+    release = source.index("fcntl.flock(lock_fd, fcntl.LOCK_UN)", persist)
+    assert acquire < persist < release
 
 
 def test_restored_ownership_is_fsynced_before_rollback_evidence() -> None:

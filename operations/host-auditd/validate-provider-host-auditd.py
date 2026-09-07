@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ VALIDATOR_LAUNCHER = Path(
 )
 INSTALLATION_RECORD = Path("/var/lib/codestra/host-auditd/installation.json")
 EVIDENCE_ROOT = Path("/var/lib/codestra/host-auditd/evidence")
+MUTATION_LOCK = Path("/run/lock/codestra-provider-host-auditd.lock")
 AUDIT_CONFIG = Path("/etc/audit/auditd.conf")
 RELEASE_TRUST_ROOT = Path("/etc/codestra/release")
 ALLOWED_SIGNERS_AUTHORITY = RELEASE_TRUST_ROOT / "allowed_signers"
@@ -523,7 +525,17 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--expected-source-sha", required=True)
     args = parser.parse_args(argv)
+    lock_fd = -1
     try:
+        lock_fd = os.open(
+            MUTATION_LOCK,
+            os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+        )
+        lock_info = os.fstat(lock_fd)
+        if lock_info.st_uid != 0 or stat.S_IMODE(lock_info.st_mode) != 0o600:
+            raise ValidationError("unsafe mutation lock")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
         record = validate(args.expected_source_sha)
         payload = json.dumps(record, sort_keys=True, separators=(",", ":")).encode() + b"\n"
         destination = EVIDENCE_ROOT / f"{record['correlation_id']}.json"
@@ -540,6 +552,10 @@ def main(argv: list[str]) -> int:
     except (ValidationError, KeyError, OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
         print(f"HOST_AUDITD_VALIDATION=FAIL error={type(exc).__name__}", file=sys.stderr)
         return 1
+    finally:
+        if lock_fd >= 0:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
 
 
 if __name__ == "__main__":

@@ -21,15 +21,18 @@ launcher_target=/usr/local/sbin/install-provider-host-auditd-verified
 installer_target=/usr/local/libexec/codestra-host-auditd/install-provider-host-auditd.py
 python_target=$target_dir/python3
 digest_target=$target_dir/python3.sha256
+runtime_path_target=$target_dir/python3.stdlib
 evidence_dir=/var/lib/codestra/host-auditd-bootstrap
 work=$(/usr/bin/mktemp -d /run/codestra-host-auditd-bootstrap.XXXXXX)
 cleanup() { /usr/bin/find "$work" -xdev -depth -delete 2>/dev/null || true; }
 committed=false
-targets=("$installer_target" "$launcher_target" "$python_target" "$digest_target")
+targets=("$installer_target" "$launcher_target" "$python_target" "$digest_target" "$runtime_path_target")
+test -x /usr/bin/chattr -a -x /usr/bin/lsattr
 for index in "${!targets[@]}"; do
   target=${targets[$index]}
   if [ -e "$target" ]; then
     test -f "$target" -a ! -L "$target"
+    /usr/bin/chattr -i "$target"
     /usr/bin/cp --preserve=mode,ownership,timestamps "$target" "$work/backup-$index"
   else
     : > "$work/absent-$index"
@@ -49,6 +52,9 @@ rollback_bootstrap() {
       fi
       /usr/bin/sync -f "$(/usr/bin/dirname "$target")"
     done
+    for target in "${targets[@]}"; do
+      [ ! -f "$target" ] || /usr/bin/chattr +i "$target"
+    done
   fi
   cleanup
 }
@@ -61,8 +67,14 @@ trap rollback_bootstrap EXIT
 /usr/bin/install -o root -g root -m 0755 "$python_source" "$work/python3"
 python_sha=$(/usr/bin/sha256sum "$work/python3" | /usr/bin/cut -d' ' -f1)
 /usr/bin/printf '%s  python3\n' "$python_sha" > "$work/python3.sha256"
+python_name=${python_source##*/python}
+stdlib=/usr/lib/python${python_name}
+test -d "$stdlib"
+/usr/bin/printf '%s\n' "$stdlib" > "$work/python3.stdlib"
 /usr/bin/chown root:root "$work/python3.sha256"
 /usr/bin/chmod 0600 "$work/python3.sha256"
+/usr/bin/chown root:root "$work/python3.stdlib"
+/usr/bin/chmod 0600 "$work/python3.stdlib"
 
 # Atomic replacement is the governed upgrade path. The independently verified
 # source SHA and exact installed bytes are durably recorded below.
@@ -70,12 +82,14 @@ python_sha=$(/usr/bin/sha256sum "$work/python3" | /usr/bin/cut -d' ' -f1)
 /usr/bin/mv -f "$work/launcher" "$launcher_target"
 /usr/bin/mv -f "$work/python3" "$python_target"
 /usr/bin/mv -f "$work/python3.sha256" "$digest_target"
+/usr/bin/mv -f "$work/python3.stdlib" "$runtime_path_target"
 for pair in "$installer:$installer_target" "$launcher:$launcher_target" "$python_source:$python_target"; do
   source=${pair%%:*}; target=${pair#*:}
   /usr/bin/cmp -s "$source" "$target"
   test "$(/usr/bin/stat -c '%u:%g:%a' "$target")" = "0:0:755"
 done
 test "$(/usr/bin/stat -c '%u:%g:%a' "$digest_target")" = "0:0:600"
+test "$(/usr/bin/stat -c '%u:%g:%a' "$runtime_path_target")" = "0:0:600"
 test "$python_sha" = "$(/usr/bin/sha256sum "$python_target" | /usr/bin/cut -d' ' -f1)"
 
 stamp=$(/usr/bin/date -u +%Y%m%dT%H%M%S%NZ)
@@ -91,7 +105,11 @@ installed_record="$evidence_dir/bootstrap-${stamp}.record"
 /usr/bin/install -o root -g root -m 0600 "$record" "$installed_record"
 /usr/bin/cmp -s "$record" "$installed_record"
 test "$(/usr/bin/stat -c '%u:%g:%a' "$installed_record")" = "0:0:600"
-for target in "$installer_target" "$launcher_target" "$python_target" "$digest_target" "$installed_record"; do
+for target in "$installer_target" "$launcher_target" "$python_target" "$digest_target" "$runtime_path_target"; do
+  /usr/bin/chattr +i "$target"
+  /usr/bin/lsattr -d "$target" | /usr/bin/awk '{ exit(index($1,"i") ? 0 : 1) }'
+done
+for target in "$installer_target" "$launcher_target" "$python_target" "$digest_target" "$runtime_path_target" "$installed_record"; do
   /usr/bin/sync -f "$target"
 done
 /usr/bin/sync -f "$target_dir"
