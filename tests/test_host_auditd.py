@@ -443,12 +443,36 @@ def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch) -> N
     rule = b"signed rule\n"
     validator = b"signed validator\n"
     launcher = b"signed launcher\n"
+    stamp = "20260901T120000Z"
+    backup_root = Path("/test/backups")
+    rollback_path = backup_root / stamp / "rollback.json"
+    checksum_path = backup_root / stamp / "SHA256SUMS"
+    rollback = json.dumps({"schema": "codestra.host-auditd.rollback.v1",
+                           "stamp": stamp, "source_sha": source_sha,
+                           "service_before": {"enabled": True, "active": True},
+                           "files": []}, sort_keys=True).encode()
+    digest = "b" * 64
     record = json.dumps(
         {
+            "schema": "codestra.host-auditd.installation.v1",
             "source_sha": source_sha,
+            "change_id": "CHG-TEST-001", "approver": "Security Owner",
+            "installed_at_utc": "2026-09-01T12:00:00Z", "rollback_stamp": stamp,
             "rule_sha256": hashlib.sha256(rule).hexdigest(),
             "validator_sha256": hashlib.sha256(validator).hexdigest(),
             "validator_launcher_sha256": hashlib.sha256(launcher).hexdigest(),
+            "release": {"release_archive": "release.tar.gz",
+                        "release_archive_sha256": digest, "release_manifest_sha256": digest,
+                        "release_checksums_sha256": digest, "release_signature_sha256": digest,
+                        "allowed_signers_sha256": digest,
+                        "signer_fingerprint_authority_sha256": digest,
+                        "signer_fingerprint": "SHA256:" + "A" * 43,
+                        "signature_verification": "PASS"},
+            "state": {"service": "enabled-active", "kernel_enabled": 1,
+                      "kernel_lost": 0, "managed_rule_sha256": hashlib.sha256(rule).hexdigest(),
+                      "validator_sha256": hashlib.sha256(validator).hexdigest(),
+                      "validator_launcher_sha256": hashlib.sha256(launcher).hexdigest(),
+                      "managed_keys": ["codestra_audit_authority"]},
         }
     ).encode()
     payloads = {
@@ -456,11 +480,14 @@ def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch) -> N
         validator_path: validator,
         launcher_path: launcher,
         record_path: record,
+        rollback_path: rollback,
+        checksum_path: f"{hashlib.sha256(rollback).hexdigest()}  rollback.json\n".encode(),
     }
     monkeypatch.setattr(VALIDATOR, "RULE_TARGET", rule_path)
     monkeypatch.setattr(VALIDATOR, "VALIDATOR_TARGET", validator_path)
     monkeypatch.setattr(VALIDATOR, "VALIDATOR_LAUNCHER", launcher_path)
     monkeypatch.setattr(VALIDATOR, "INSTALLATION_RECORD", record_path)
+    monkeypatch.setattr(VALIDATOR, "BACKUP_ROOT", backup_root)
     monkeypatch.setattr(
         VALIDATOR,
         "checked_regular",

@@ -25,6 +25,7 @@ VALIDATOR_LAUNCHER = Path(
     "/usr/local/sbin/validate-codestra-provider-host-auditd-verified"
 )
 INSTALLATION_RECORD = Path("/var/lib/codestra/host-auditd/installation.json")
+BACKUP_ROOT = Path("/var/backups/codestra-operations/host-auditd")
 EVIDENCE_ROOT = Path("/var/lib/codestra/host-auditd/evidence")
 MUTATION_LOCK = Path("/run/lock/codestra-provider-host-auditd.lock")
 AUDIT_CONFIG = Path("/etc/audit/auditd.conf")
@@ -412,7 +413,12 @@ def installed_release_binding(
         VALIDATOR_LAUNCHER, max_bytes=2 * 1024 * 1024
     )
     installation = json.loads(checked_regular(INSTALLATION_RECORD))
-    if not isinstance(installation, dict):
+    required = {
+        "schema", "source_sha", "change_id", "approver", "installed_at_utc",
+        "rollback_stamp", "rule_sha256", "validator_sha256",
+        "validator_launcher_sha256", "release", "state",
+    }
+    if not isinstance(installation, dict) or set(installation) != required:
         raise ValidationError("installation record rejected")
     rule_sha = hashlib.sha256(installed_rule).hexdigest()
     validator_sha = hashlib.sha256(installed_validator).hexdigest()
@@ -426,6 +432,54 @@ def installed_release_binding(
         raise ValidationError("installation validator binding mismatch")
     if installation.get("validator_launcher_sha256") != launcher_sha:
         raise ValidationError("installation validator launcher binding mismatch")
+    if installation.get("schema") != "codestra.host-auditd.installation.v1":
+        raise ValidationError("installation record schema rejected")
+    if (not isinstance(installation.get("change_id"), str)
+            or not isinstance(installation.get("approver"), str)
+            or not isinstance(installation.get("installed_at_utc"), str)):
+        raise ValidationError("installation approval evidence rejected")
+    stamp = installation.get("rollback_stamp", "")
+    if not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp):
+        raise ValidationError("installation rollback identity rejected")
+    release = installation.get("release")
+    release_keys = {
+        "release_archive", "release_archive_sha256", "release_manifest_sha256",
+        "release_checksums_sha256", "release_signature_sha256",
+        "allowed_signers_sha256", "signer_fingerprint_authority_sha256",
+        "signer_fingerprint", "signature_verification",
+    }
+    if (not isinstance(release, dict) or set(release) != release_keys
+            or release.get("signature_verification") != "PASS"):
+        raise ValidationError("installation release verification rejected")
+    if any(not re.fullmatch(r"[0-9a-f]{64}", str(value))
+           for key, value in release.items() if key.endswith("sha256")):
+        raise ValidationError("installation release digest rejected")
+    state = installation.get("state")
+    state_keys = {"service", "kernel_enabled", "kernel_lost", "managed_rule_sha256",
+                  "validator_sha256", "validator_launcher_sha256", "managed_keys"}
+    if not isinstance(state, dict) or set(state) != state_keys:
+        raise ValidationError("installation state evidence rejected")
+    if (state.get("managed_rule_sha256") != rule_sha
+            or state.get("validator_sha256") != validator_sha
+            or state.get("validator_launcher_sha256") != launcher_sha
+            or state.get("service") != "enabled-active"
+            or state.get("kernel_enabled") not in {1, 2}
+            or state.get("kernel_lost") != 0):
+        raise ValidationError("installation state binding rejected")
+    checkpoint = BACKUP_ROOT / stamp
+    manifest = checked_regular(checkpoint / "rollback.json", max_bytes=2 * 1024 * 1024)
+    checksums = checked_regular(checkpoint / "SHA256SUMS", max_bytes=4096)
+    if checksums != f"{hashlib.sha256(manifest).hexdigest()}  rollback.json\n".encode():
+        raise ValidationError("installation rollback checkpoint rejected")
+    try:
+        rollback = json.loads(manifest)
+    except json.JSONDecodeError as exc:
+        raise ValidationError("installation rollback checkpoint rejected") from exc
+    if (not isinstance(rollback, dict)
+            or rollback.get("schema") != "codestra.host-auditd.rollback.v1"
+            or rollback.get("stamp") != stamp
+            or rollback.get("source_sha") != expected_source_sha):
+        raise ValidationError("installation rollback checkpoint rejected")
     return installed_rule, rule_sha, validator_sha, launcher_sha
 
 
