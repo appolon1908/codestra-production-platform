@@ -67,9 +67,9 @@ validate_trusted_source() {
 verify_payload() {
   cd "$script_dir"
   cat <<'EOF' | sha256sum --check --strict - >/dev/null
-039be99ac394b619c8ee0b883ded13434f63ca349fa9c09b917d5d88af29f1e4  codestra-production-operator
-80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb  codestra-production-forced-command
-aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65  codestra-production-operator.sudoers
+490e73847ece44d134fed81e468c66469a139eb0ccea24b1bdc7f872404b7ef4  codestra-production-operator
+af3c013fd7d7504eb19d4484038337b334786c6a18b4a67100a6ca9c788b4307  codestra-production-forced-command
+c3a9d1445c1681a9cb631b1effa1ce1d6c170a3c6f176b63157199f533744203  codestra-production-operator.sudoers
 2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c  codestra-production-operator.sshd
 bbc8e4af977ae21b4faffd8c755ed1a0220aebb2796f10c90c94483be3eed06e  codestra-readiness-restore.override.conf
 dad62a1dcb35fabb97991ad2f0a1079d13d949528daa7bebe0d35d291ec23f67  ../../PRODUCTION-DATABASE-MANIFEST.yaml
