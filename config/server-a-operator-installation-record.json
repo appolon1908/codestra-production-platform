@@ -3,12 +3,22 @@
   "status": "incomplete",
   "mode": "preserve-existing-sudoers",
   "reference_release": "462c12e9957c3e6a9d92fe94a5019cd29d09d777",
+  "server_a_identity": {
+    "hostname": "middleware",
+    "primary_ipv4": "65.109.65.169",
+    "observed_as": "codestra-admin",
+    "public_key_metadata": "root:root mode=0600 links=1 bytes=81 path=/home/codestra-admin/operator-current.tR55n3.pub"
+  },
   "target_release": {
-    "protected_commit": null,
-    "release_archive_sha256": null,
-    "release_manifest_sha256": null,
-    "installer_sha256": null,
-    "approval": null
+    "protected_commit": "e75783fee4ea60259e3aee8e0b5ebe6eb30617dd",
+    "release_archive_sha256": "fc7842ab8145b2d5149256b45bbe939f9aaedd9ff31e245a388590e19d5553b1",
+    "release_manifest_sha256": "0124b209f34e60fcd5f1099708ccc87ad133f43282d7859f829fe032f825a458",
+    "installer_sha256": "015c9fc7f839a32f3703c92398c801299eb2a8680c1323b5c3f7095562330584",
+    "launcher_sha256": "5a00af38ab12f7b25a0a63605f186ffe1b379bdbace6b0c93eb52987f5039a70",
+    "embedded_installation_record_sha256": "3be3f23f5d904f973f4093cc53cb3a6c62729b0aa28f14fc35e1348aeabade65",
+    "trust_anchor_sha256": "5eebb999b050985d6f12585d9d6046e9b59da09a0dc0e04e415ac9afe3820720",
+    "manifest_signature_verified": true,
+    "approval": "Owner approved protected-e75783fee4ea60259e3aee8e0b5ebe6eb30617dd; signed manifest independently verified with established trust-anchor SHA-256 5eebb999b050985d6f12585d9d6046e9b59da09a0dc0e04e415ac9afe3820720"
   },
   "operator_public_key_fingerprint": {
     "value": null,
@@ -18,23 +28,23 @@
   "arguments": {
     "operator_public_key": {
       "value": "/home/codestra-admin/operator-current.tR55n3.pub",
-      "source": "Server A read-only inventory; fingerprint remains owner-controlled because the root-owned 0600 key was not readable",
-      "approval": null
+      "source": "Server A 65.109.65.169 read-only stat: root:root, mode 0600, one link, 81 bytes; fingerprint remains owner-controlled because root execution was unavailable",
+      "approval": "Owner-directed existing public-key path in the e75783fee4ea60259e3aee8e0b5ebe6eb30617dd preparation request"
     },
     "protected_commit": {
-      "value": null,
-      "source": "new protected release produced after this change merges",
-      "approval": null
+      "value": "e75783fee4ea60259e3aee8e0b5ebe6eb30617dd",
+      "source": "GitHub tag protected-e75783fee4ea60259e3aee8e0b5ebe6eb30617dd and independently verified signed manifest.sha256",
+      "approval": "Owner approval of protected-e75783fee4ea60259e3aee8e0b5ebe6eb30617dd"
     },
     "image_digest": {
       "value": "sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a",
-      "source": "reference release deployment-manifest.json; must be reconciled against the new protected release",
-      "approval": "PR #312 and protected release 462c12e9957c3e6a9d92fe94a5019cd29d09d777"
+      "source": "signed deployment-manifest.json from protected-e75783fee4ea60259e3aee8e0b5ebe6eb30617dd",
+      "approval": "Owner-approved e75783fee4ea60259e3aee8e0b5ebe6eb30617dd release and protected reconciliation review"
     },
     "change_id": {
       "value": "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01",
-      "source": "reference release deployment-manifest.json; must be reconciled against the new protected release",
-      "approval": "PR #312 and protected release 462c12e9957c3e6a9d92fe94a5019cd29d09d777"
+      "source": "signed deployment-manifest.json from protected-e75783fee4ea60259e3aee8e0b5ebe6eb30617dd",
+      "approval": "Owner-approved e75783fee4ea60259e3aee8e0b5ebe6eb30617dd release and protected reconciliation review"
     },
     "maintenance_date": {
       "value": null,
@@ -43,7 +53,7 @@
     },
     "control_plane_archive_sha256": {
       "value": null,
-      "source": "approved control-plane archive evidence required; must not use an operator or release-package checksum",
+      "source": "No distinct e75783fee4ea60259e3aee8e0b5ebe6eb30617dd control-plane archive is present on Server A or published as a dedicated release asset; platform, installer, image, and historical checksums are explicitly excluded",
       "approval": null
     }
   }
