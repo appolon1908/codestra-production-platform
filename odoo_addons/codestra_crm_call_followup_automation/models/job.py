@@ -7,6 +7,7 @@ from psycopg2 import IntegrityError
 
 from odoo import _, api, fields, models
 from odoo.fields import Command
+from odoo.exceptions import ValidationError
 
 
 _logger = logging.getLogger(__name__)
@@ -80,6 +81,18 @@ class CodestraCrmCallFollowupJob(models.Model):
     def _enqueue(self, policy, followup, job_type, idempotency_key, payload=None):
         existing = self.sudo().search([("idempotency_key", "=", idempotency_key)], limit=1)
         if existing:
+            completed_without_effect = (
+                existing.state == "done"
+                and not existing.activity_id
+                and (
+                    (job_type == "pending_sla" and not followup.automation_pending_sla_at)
+                    or (job_type == "missed_callback" and not followup.automation_missed_callback_at)
+                    or (job_type == "reminder_health" and not followup.automation_reminders_repaired_at)
+                )
+            )
+            if completed_without_effect:
+                existing.write({"state": "pending", "completed_at": False,
+                                "next_attempt_at": fields.Datetime.now(), "last_error": False})
             return existing, False
         values = {
             "name": _("%s — %s") % (dict(JOB_TYPES)[job_type], followup.display_name),
@@ -114,21 +127,28 @@ class CodestraCrmCallFollowupJob(models.Model):
         now = fields.Datetime.now()
         created_count = 0
 
+        def candidates(domain, order):
+            offset = 0
+            while True:
+                batch = Followup.search(domain, order=order, limit=limit_per_policy,
+                                        offset=offset)
+                if not batch:
+                    return
+                yield from batch
+                offset += len(batch)
+
         for policy in policies:
             if policy.create_pending_activity:
                 cutoff = now - timedelta(minutes=policy.pending_sla_minutes)
-                pending = Followup.search(
-                    [
+                pending_domain = [
                         ("company_id", "=", policy.company_id.id),
                         ("state", "=", "pending"),
                         ("popup_completed_at", "=", False),
                         ("ended_at", "<=", cutoff),
                         ("automation_pending_sla_at", "=", False),
-                    ],
-                    order="ended_at, id",
-                    limit=limit_per_policy,
-                )
-                for followup in pending:
+                    ]
+                type_created = 0
+                for followup in candidates(pending_domain, "ended_at, id"):
                     deadline = followup.ended_at + timedelta(
                         minutes=policy.pending_sla_minutes
                     )
@@ -141,11 +161,13 @@ class CodestraCrmCallFollowupJob(models.Model):
                         {"effective_deadline": occurrence},
                     )
                     created_count += int(created)
+                    type_created += int(created)
+                    if type_created >= limit_per_policy:
+                        break
 
             if policy.create_missed_callback_activity:
                 callback_cutoff = now - timedelta(minutes=policy.callback_grace_minutes)
-                missed = Followup.search(
-                    [
+                missed_domain = [
                         ("company_id", "=", policy.company_id.id),
                         ("state", "=", "completed"),
                         ("schedule_kind", "!=", "none"),
@@ -153,11 +175,9 @@ class CodestraCrmCallFollowupJob(models.Model):
                         ("callback_at", "<=", callback_cutoff),
                         ("callback_completed_at", "=", False),
                         ("automation_missed_callback_at", "=", False),
-                    ],
-                    order="callback_at, id",
-                    limit=limit_per_policy,
-                )
-                for followup in missed:
+                    ]
+                type_created = 0
+                for followup in candidates(missed_domain, "callback_at, id"):
                     deadline = followup.callback_at + timedelta(
                         minutes=policy.callback_grace_minutes
                     )
@@ -170,25 +190,25 @@ class CodestraCrmCallFollowupJob(models.Model):
                         {"effective_deadline": occurrence},
                     )
                     created_count += int(created)
+                    type_created += int(created)
+                    if type_created >= limit_per_policy:
+                        break
 
             if policy.repair_calendar_reminders:
-                scheduled = Followup.search(
-                    [
+                scheduled_domain = [
                         ("company_id", "=", policy.company_id.id),
                         ("state", "=", "completed"),
                         ("calendar_event_id", "!=", False),
                         ("callback_at", ">", now),
-                    ],
-                    order="callback_at, id",
-                    limit=limit_per_policy,
-                )
+                    ]
                 required_notification = self.env.ref(
                     "codestra_crm_call_followup.calendar_alarm_prepare_30_minutes"
                 )
                 required_email = self.env.ref(
                     "codestra_crm_call_followup.calendar_alarm_email_15_minutes"
                 )
-                for followup in scheduled:
+                type_created = 0
+                for followup in candidates(scheduled_domain, "callback_at, id"):
                     desired = {required_notification.id}
                     if followup.reminder_email_enabled:
                         desired.add(required_email.id)
@@ -207,6 +227,9 @@ class CodestraCrmCallFollowupJob(models.Model):
                         {"calendar_event_id": followup.calendar_event_id.id},
                     )
                     created_count += int(created)
+                    type_created += int(created)
+                    if type_created >= limit_per_policy:
+                        break
         return created_count
 
     @api.model
@@ -281,12 +304,15 @@ class CodestraCrmCallFollowupJob(models.Model):
                         "last_error": f"{type(exc).__name__}: processing failed",
                     }
                 )
-                job.followup_id._write_from_workflow(
-                    {
-                        "automation_exception_count": job.followup_id.automation_exception_count
-                        + 1,
-                        "automation_last_job_at": fields.Datetime.now(),
-                    }
+                self.env.cr.execute(
+                    """UPDATE codestra_crm_call_followup
+                          SET automation_exception_count = COALESCE(automation_exception_count, 0) + 1,
+                              automation_last_job_at = %s
+                        WHERE id = %s""",
+                    [fields.Datetime.now(), job.followup_id.id],
+                )
+                job.followup_id.invalidate_recordset(
+                    ["automation_exception_count", "automation_last_job_at"]
                 )
         return processed
 
@@ -295,6 +321,13 @@ class CodestraCrmCallFollowupJob(models.Model):
         owner = self.policy_id.escalation_user_id
         if not owner or not owner.active or self.company_id not in owner.company_ids:
             owner = self.followup_id.agent_id
+        if not owner or not owner.active or self.company_id not in owner.company_ids:
+            owner = self.env["res.users"].sudo().search(
+                [("active", "=", True), ("share", "=", False),
+                 ("company_ids", "in", self.company_id.id)], limit=1,
+            )
+        if not owner:
+            raise ValidationError(_("No active escalation owner can access this company."))
         return owner
 
     def _create_activity_once(self, summary, note):
@@ -317,6 +350,13 @@ class CodestraCrmCallFollowupJob(models.Model):
 
     def _process_job(self):
         self.ensure_one()
+        enabled = {
+            "pending_sla": self.policy_id.create_pending_activity,
+            "missed_callback": self.policy_id.create_missed_callback_activity,
+            "reminder_health": self.policy_id.repair_calendar_reminders,
+        }
+        if not self.policy_id.active or not enabled[self.job_type]:
+            return True
         handlers = {
             "pending_sla": self._process_pending_sla,
             "missed_callback": self._process_missed_callback,

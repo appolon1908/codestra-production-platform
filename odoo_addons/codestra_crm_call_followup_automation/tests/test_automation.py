@@ -62,6 +62,10 @@ class TestCodestraCallFollowupAutomation(TransactionCase):
                 "callback_grace_minutes": 5,
                 "max_attempts": 3,
                 "retry_base_minutes": 1,
+                "active": True,
+                "create_pending_activity": True,
+                "create_missed_callback_activity": True,
+                "repair_calendar_reminders": True,
                 "escalation_user_id": cls.agent.id,
             }
         )
