@@ -75,6 +75,36 @@
       },
       "consumers": ["Middleware", "codestra-production-platform"],
       "activation": "source-only-until-runtime-verified"
+    },
+    {
+      "id": "codestra.telephony.calling-api.v1",
+      "kind": "openapi",
+      "source": {
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "path": "contracts/telephony/codestra-calling-api.v1.openapi.yaml"
+      },
+      "consumers": ["Middleware", "Odoo", "VICIdial adapter", "operator tooling"],
+      "activation": "fail-closed"
+    },
+    {
+      "id": "codestra.telephony.calling-events.v1",
+      "kind": "asyncapi",
+      "source": {
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "path": "contracts/telephony/codestra-calling-events.v1.asyncapi.yaml"
+      },
+      "consumers": ["Middleware", "WebSocket gateway", "NATS JetStream"],
+      "activation": "fail-closed"
+    },
+    {
+      "id": "codestra.telephony.calling-ecosystem.v1",
+      "kind": "runtime-contract",
+      "source": {
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "path": "contracts/telephony/codestra-calling-ecosystem.v1.yaml"
+      },
+      "consumers": ["platform release assembler", "Middleware", "Odoo", "WebSocket gateway", "VICIdial adapter"],
+      "activation": "fail-closed"
     }
   ]
 }

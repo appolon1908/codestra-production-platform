@@ -114,6 +114,19 @@ def _release_manifest() -> dict:
     repositories = {
         item["id"]: item["source_repository"] for item in composition["components"]
     }
+    image_references = {
+        service_id: f"ghcr.io/appolon1908-hue/{service_id}"
+        for service_id in composition["release_service_ids"]
+    }
+    image_references.update({
+        "middleware": "ghcr.io/appolon1908-hue/codestra-middleware",
+        "nats-jetstream": "ghcr.io/appolon1908-hue/codestra-middleware",
+        "temporal": "ghcr.io/appolon1908-hue/codestra-middleware",
+        "middleware-external-webhook-worker": "ghcr.io/appolon1908-hue/codestra-middleware",
+        "middleware-breero-odoo-worker": "ghcr.io/appolon1908-hue/codestra-middleware",
+        "odoo-19": "ghcr.io/codestra-srl/codestra-odoo",
+        "email-reseller-api": "ghcr.io/appolon1908-hue/email-reseller",
+    })
     return {
         "schema_version": "platform-release-manifest.v1",
         "release_id": "release-20260828",
@@ -133,7 +146,7 @@ def _release_manifest() -> dict:
                 "repository": repositories[service_id],
                 "git_sha": "b" * 40,
                 "image": {
-                    "reference": f"ghcr.io/appolon1908-hue/{service_id}",
+                    "reference": image_references[service_id],
                     "digest": f"sha256:{sha}",
                 },
                 "service_manifest_sha256": sha,
@@ -196,6 +209,28 @@ def test_release_manifest_binds_each_service_to_its_authoritative_repository() -
         wrong["services"][index]["repository"] = "appolon1908-hue/unrelated"
         with pytest.raises(ValidationError):
             Draft202012Validator(schema).validate(wrong)
+
+
+def test_release_manifest_binds_each_service_to_its_approved_image_name() -> None:
+    schema = json.loads((ROOT / "release/platform-release-manifest.v1.schema.json").read_text())
+    manifest = _release_manifest()
+    for index in range(len(manifest["services"])):
+        wrong = deepcopy(manifest)
+        wrong["services"][index]["image"]["reference"] = "ghcr.io/appolon1908-hue/unrelated"
+        with pytest.raises(ValidationError):
+            Draft202012Validator(schema).validate(wrong)
+
+
+def test_websocket_gateway_and_telephony_contracts_are_release_bearing() -> None:
+    composition = json.loads((ROOT / "composition/runtime-composition.v1.json").read_text())
+    assert "websocket-gateway" in composition["release_service_ids"]
+    catalog = json.loads((ROOT / "contracts/catalog.v1.json").read_text())
+    ids = {item["id"] for item in catalog["contracts"]}
+    assert {
+        "codestra.telephony.calling-api.v1",
+        "codestra.telephony.calling-events.v1",
+        "codestra.telephony.calling-ecosystem.v1",
+    } <= ids
 
 
 @pytest.mark.parametrize("field,path", [

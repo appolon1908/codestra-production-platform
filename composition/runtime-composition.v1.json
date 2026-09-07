@@ -38,11 +38,12 @@
     "beyvra-email-api",
     "reseller-portal",
     "private-vicidial-ingress"
+    ,"websocket-gateway"
   ],
   "hosts": [
     {
       "id": "application-server-a",
-      "components": ["caddy", "kong", "middleware", "odoo-19", "n8n", "keycloak", "postgresql", "redis", "nats-jetstream", "temporal", "observability", "middleware-external-webhook-worker", "middleware-breero-odoo-worker", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress"]
+      "components": ["caddy", "kong", "middleware", "odoo-19", "n8n", "keycloak", "postgresql", "redis", "nats-jetstream", "temporal", "observability", "middleware-external-webhook-worker", "middleware-breero-odoo-worker", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress", "websocket-gateway"]
     },
     {
       "id": "provider-host",
@@ -241,6 +242,16 @@
       "source_repository": "appolon1908-hue/codestra-production-platform",
       "source_path": "deploy/architecture-remediation/compose.private-integration.yaml",
       "role": "private VICIdial ingress proxy",
+      "deployment_state": "source-and-digest-reconciliation-required"
+    },
+    {
+      "id": "websocket-gateway",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "deploy/architecture-remediation/compose.websocket-gateway.yaml",
+      "candidate_source_path": "websocket_gateway",
+      "authority_state": "unresolved-pending-pr-148-convergence",
+      "composition_input": "deploy/architecture-remediation/compose.websocket-gateway.yaml",
+      "role": "authenticated realtime telephony event gateway",
       "deployment_state": "source-and-digest-reconciliation-required"
     }
   ]

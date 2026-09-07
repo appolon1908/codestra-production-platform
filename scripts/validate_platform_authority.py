@@ -16,7 +16,7 @@ AUTHORITY_REPOSITORY = 'appolon1908-hue/codestra-production-platform'
 AUTHORITY_BRANCH = 'release/production-activation'
 CANONICAL_KYQRA_REPOSITORY = 'appolon1908-hue/kyqra-crawler'
 RETIRED_KYQRA_REPOSITORY = 'appolon1908-hue/kyqra'
-RELEASE_BEARING_WORKLOADS = {'caddy', 'kong', 'middleware', 'odoo-19', 'n8n', 'keycloak', 'kyqra-crawler', 'observability', 'postgresql', 'redis', 'nats-jetstream', 'temporal', 'telnexa', 'klyrow', 'middleware-external-webhook-worker', 'middleware-breero-odoo-worker', 'sms-event-worker', 'email-reseller-api', 'sms-api', 'mail-api', 'stalwart', 'kong-standby-auth', 'kong-identity-certification', 'beyvra-email-api', 'reseller-portal', 'private-vicidial-ingress'}
+RELEASE_BEARING_WORKLOADS = {'caddy', 'kong', 'middleware', 'odoo-19', 'n8n', 'keycloak', 'kyqra-crawler', 'observability', 'postgresql', 'redis', 'nats-jetstream', 'temporal', 'telnexa', 'klyrow', 'middleware-external-webhook-worker', 'middleware-breero-odoo-worker', 'sms-event-worker', 'email-reseller-api', 'sms-api', 'mail-api', 'stalwart', 'kong-standby-auth', 'kong-identity-certification', 'beyvra-email-api', 'reseller-portal', 'private-vicidial-ingress', 'websocket-gateway'}
 
 def load(path: str) -> dict:
     value = json.loads((ROOT / path).read_text(encoding='utf-8'))
