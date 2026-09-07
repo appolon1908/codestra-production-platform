@@ -22,13 +22,13 @@
   },
   "operator_public_key_fingerprint": {
     "value": null,
-    "source": "owner read-back of the root-owned approved public-key file using ssh-keygen -lf",
+    "source": "Server A read-only attempt through configured codestra-app SSH succeeded, but direct ssh-keygen was denied by mode 0600 and sudo -n ssh-keygen required a password; effective sudo policy contains no authorized fingerprint command",
     "approval": null
   },
   "arguments": {
     "operator_public_key": {
       "value": "/home/codestra-admin/operator-current.tR55n3.pub",
-      "source": "Server A 65.109.65.169 read-only stat: root:root, mode 0600, one link, 81 bytes; fingerprint remains owner-controlled because root execution was unavailable",
+      "source": "Server A 65.109.65.169 read-only stat: root:root, mode 0600, one link, 81 bytes; configured SSH access works, but the effective sudo policy does not authorize no-password ssh-keygen fingerprint readback",
       "approval": "Owner-directed existing public-key path in the e75783fee4ea60259e3aee8e0b5ebe6eb30617dd preparation request"
     },
     "protected_commit": {
@@ -52,9 +52,9 @@
       "approval": null
     },
     "control_plane_archive_sha256": {
-      "value": null,
-      "source": "No distinct e75783fee4ea60259e3aee8e0b5ebe6eb30617dd control-plane archive is present on Server A or published as a dedicated release asset; platform, installer, image, and historical checksums are explicitly excluded",
-      "approval": null
+      "value": "fc7842ab8145b2d5149256b45bbe939f9aaedd9ff31e245a388590e19d5553b1",
+      "source": "Immutable GitHub release asset codestra-production-platform-e75783fee4ea60259e3aee8e0b5ebe6eb30617dd.tar.gz; deployment-manifest.json names the artifact and digest, provenance.json binds the same digest to protected source e75783fee4ea60259e3aee8e0b5ebe6eb30617dd, and read-only archive inventory confirms the required codestra/ root",
+      "approval": "Covered by the preserved owner approval of protected release e75783fee4ea60259e3aee8e0b5ebe6eb30617dd and its independently verified signed manifest; installation execution remains separately pending"
     }
   }
 }
