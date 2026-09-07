@@ -14,9 +14,15 @@ The canonical record is
 - an explicitly approved maintenance date; and
 - the SHA-256 of the approved control-plane archive.
 
-The control-plane value cannot be a release-package or operator checksum. A
-date is never derived from the current day or an older installed tuple. Each
-value may cite a separate authoritative approval.
+The protected `e75783f` platform release archive is intentionally also the
+control-plane source archive. Its signed `deployment-manifest.json` and
+`provenance.json` bind the immutable asset name and SHA-256, and its contents
+use the `codestra/` root enforced by the operator. Therefore the two record
+fields share `fc7842ab8145b2d5149256b45bbe939f9aaedd9ff31e245a388590e19d5553b1`
+by verified identity, not checksum substitution. No operator package,
+installer, image, manifest, Odoo bundle, historical release, or arbitrary
+local archive may supply this value. A date is never derived from the current
+day or an older installed tuple.
 
 After protected merge, publish a new immutable protected release. Reviewers
 must reconcile the record to that exact release in a separate protected change
