@@ -15,12 +15,15 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_one_time_realtime_session_token_is_bound_and_replay_safe(monkeypatch, tmp_path):
     monkeypatch.setenv("REALTIME_TOKEN_SECRET", "test-only-realtime-secret-that-is-long-enough")
     realtime_gateway.STORE = Store(str(tmp_path / "control-plane.db"))
-    token, expires = realtime_gateway.issue_token("tenant-a", "agent-7", "campaign-4", "crm-ui")
+    token, expires = realtime_gateway.issue_token(
+        "tenant-a", "agent-7", "campaign-4", "crm-ui", "keycloak-subject-7"
+    )
     assert expires > 0
     claims = realtime_gateway.consume_token(token)
     assert claims["tenant_id"] == "tenant-a"
     assert claims["agent_id"] == "agent-7"
     assert claims["campaign_id"] == "campaign-4"
+    assert claims["authenticated_subject"] == "keycloak-subject-7"
     with pytest.raises(ValueError, match="replayed_or_unknown"):
         realtime_gateway.consume_token(token)
 
@@ -29,17 +32,20 @@ def test_realtime_session_creation_replays_one_original_nonce(monkeypatch, tmp_p
     monkeypatch.setenv("REALTIME_TOKEN_SECRET", "test-only-realtime-secret-that-is-long-enough")
     realtime_gateway.STORE = Store(str(tmp_path / "control-plane.db"))
     first = realtime_gateway.issue_idempotent_session(
-        "tenant-a", "agent-7", "campaign-4", "crm-ui", "session-request-1", 12
+        "tenant-a", "agent-7", "campaign-4", "crm-ui", "keycloak-subject-7",
+        "session-request-1", 12
     )
     replay = realtime_gateway.issue_idempotent_session(
-        "tenant-a", "agent-7", "campaign-4", "crm-ui", "session-request-1", 12
+        "tenant-a", "agent-7", "campaign-4", "crm-ui", "keycloak-subject-7",
+        "session-request-1", 12
     )
     assert replay == first
     with realtime_gateway.STORE.connect() as db:
         assert db.execute("SELECT count(*) AS n FROM realtime_session_nonce").fetchone()["n"] == 1
     with pytest.raises(ValueError, match="idempotency_conflict"):
         realtime_gateway.issue_idempotent_session(
-            "tenant-a", "agent-7", "other-campaign", "crm-ui", "session-request-1", 12
+            "tenant-a", "agent-7", "other-campaign", "crm-ui", "keycloak-subject-7",
+            "session-request-1", 12
         )
 
 
@@ -54,6 +60,9 @@ def test_realtime_gateway_has_bounded_transport_defaults():
     assert "ai.system='KEYCLOAK'" in source
     assert "resolve_agent_membership" in source
     assert "forward_agent_events" in source
+    assert "REALTIME_EVENT_DELIVERY_ENABLED" in source
+    assert "opt_start_seq" in source
+    assert "authorized_agent_membership" in source
 
 
 def test_realtime_compose_declares_every_secret_and_network():
@@ -61,7 +70,11 @@ def test_realtime_compose_declares_every_secret_and_network():
     assert "control_plane_database_url:" in compose
     assert "realtime_token_secret:" in compose
     assert "kong_gateway_secret:" in compose
-    assert "realtime_nats_credentials:" in compose
+    assert 'REALTIME_EVENT_DELIVERY_ENABLED: "false"' in compose
+    assert "realtime_nats_credentials:" not in compose
+    enabled = (ROOT / "deploy/control-plane/compose.realtime-events-enabled.yaml").read_text()
+    assert 'REALTIME_EVENT_DELIVERY_ENABLED: "true"' in enabled
+    assert "realtime_nats_credentials:" in enabled
     assert '"127.0.0.1:18103:18103"' in compose
     assert "name: codestra_edge" in compose
     assert "name: codestra_backend" in compose

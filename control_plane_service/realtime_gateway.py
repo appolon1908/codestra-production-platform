@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 from websockets.asyncio.server import ServerConnection, serve
 import nats
+from nats.js import api as nats_api
 
 from .core import Store
 from .database import is_postgres
@@ -73,13 +74,18 @@ def _ensure_nonce_table() -> None:
         """)
 
 
-def _token_material(tenant_id: str, agent_id: str, campaign_id: str) -> tuple[str, float, str, int]:
+def _token_material(
+    tenant_id: str, agent_id: str, campaign_id: str,
+    authenticated_subject: str, resume_cursor: int | None = None,
+) -> tuple[str, float, str, int]:
     now = int(time.time())
     expires = now + TOKEN_TTL
     nonce = uuid.uuid4().hex
     payload = {
         "iss": ISSUER, "aud": AUDIENCE, "sub": agent_id,
         "tenant_id": tenant_id, "agent_id": agent_id, "campaign_id": campaign_id,
+        "authenticated_subject": authenticated_subject,
+        "resume_cursor": resume_cursor,
         "jti": nonce, "iat": now, "exp": expires,
     }
     encoded = _b64(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
@@ -88,8 +94,13 @@ def _token_material(tenant_id: str, agent_id: str, campaign_id: str) -> tuple[st
             hashlib.sha256(nonce.encode()).hexdigest(), now)
 
 
-def issue_token(tenant_id: str, agent_id: str, campaign_id: str, source_client: str) -> tuple[str, float]:
-    token, expires, digest, issued_at = _token_material(tenant_id, agent_id, campaign_id)
+def issue_token(
+    tenant_id: str, agent_id: str, campaign_id: str, source_client: str,
+    authenticated_subject: str,
+) -> tuple[str, float]:
+    token, expires, digest, issued_at = _token_material(
+        tenant_id, agent_id, campaign_id, authenticated_subject
+    )
     _ensure_nonce_table()
     with STORE.connect() as db:
         db.execute(
@@ -163,14 +174,19 @@ def resolve_agent_membership(
 
 def issue_idempotent_session(
     tenant_id: str, agent_id: str, campaign_id: str, source_client: str,
-    idempotency_key: str, resume_cursor: int | None,
+    authenticated_subject: str, idempotency_key: str, resume_cursor: int | None,
 ) -> dict[str, object]:
     request_hash = hashlib.sha256(json.dumps(
-        {"campaign_id": campaign_id, "resume_cursor": resume_cursor},
+        {
+            "agent_id": agent_id,
+            "authenticated_subject": authenticated_subject,
+            "campaign_id": campaign_id,
+            "resume_cursor": resume_cursor,
+        },
         sort_keys=True, separators=(",", ":"),
     ).encode()).hexdigest()
     token, expires, nonce_hash, issued_at = _token_material(
-        tenant_id, agent_id, campaign_id
+        tenant_id, agent_id, campaign_id, authenticated_subject, resume_cursor
     )
     response: dict[str, object] = {
         "token": token, "expires_at": expires,
@@ -293,7 +309,8 @@ class SessionHandler(BaseHTTPRequestHandler):
             if not agent_id:
                 return self._json(403, {"error": "active_agent_membership_required"})
             response = issue_idempotent_session(
-                tenant, agent_id, campaign_id, client, idempotency_key, resume_cursor
+                tenant, agent_id, campaign_id, client, subject,
+                idempotency_key, resume_cursor
             )
         except (KeyError, ValueError, json.JSONDecodeError) as exc:
             return self._json(422, {"error": str(exc)})
@@ -307,6 +324,8 @@ async def forward_agent_events(connection: ServerConnection, claims: dict[str, o
     subject = "telephony.agent.{tenant}.{campaign}.{agent}".format(
         tenant=claims["tenant_id"], campaign=claims["campaign_id"], agent=claims["agent_id"]
     )
+    if os.getenv("REALTIME_EVENT_DELIVERY_ENABLED", "false").lower() != "true":
+        raise RuntimeError("realtime_event_delivery_disabled")
     credentials = os.getenv("REALTIME_NATS_CREDENTIALS_FILE", "")
     if not credentials:
         raise RuntimeError("realtime_nats_credentials_missing")
@@ -315,8 +334,34 @@ async def forward_agent_events(connection: ServerConnection, claims: dict[str, o
         user_credentials=credentials, connect_timeout=3, max_reconnect_attempts=3,
     )
     try:
-        subscription = await nc.jetstream().subscribe(subject, ordered_consumer=True)
-        async for message in subscription.messages:
+        subscribe_options: dict[str, object] = {
+            "ordered_consumer": True,
+            "deliver_policy": nats_api.DeliverPolicy.NEW,
+        }
+        resume_cursor = claims.get("resume_cursor")
+        if resume_cursor is not None:
+            subscribe_options.update({
+                "deliver_policy": nats_api.DeliverPolicy.BY_START_SEQUENCE,
+                "opt_start_seq": int(resume_cursor) + 1,
+            })
+        subscription = await nc.jetstream().subscribe(subject, **subscribe_options)
+        last_authorization_check = 0.0
+        while True:
+            now = time.monotonic()
+            if now - last_authorization_check >= 30:
+                allowed = await asyncio.to_thread(
+                    authorized_agent_membership,
+                    str(claims["tenant_id"]), str(claims["agent_id"]),
+                    str(claims["campaign_id"]), str(claims["authenticated_subject"]),
+                )
+                if not allowed:
+                    await connection.close(code=4403, reason="realtime_authorization_revoked")
+                    return
+                last_authorization_check = now
+            try:
+                message = await subscription.next_msg(timeout=1)
+            except (asyncio.TimeoutError, TimeoutError):
+                continue
             if len(message.data) > 262144:
                 await message.term()
                 continue

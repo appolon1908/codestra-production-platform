@@ -1,0 +1,11 @@
+services:
+  realtime:
+    environment:
+      REALTIME_EVENT_DELIVERY_ENABLED: "true"
+      REALTIME_NATS_CREDENTIALS_FILE: /run/secrets/realtime_nats_credentials
+    secrets:
+      - realtime_nats_credentials
+
+secrets:
+  realtime_nats_credentials:
+    file: /etc/codestra/runtime-secrets/control-plane/realtime-nats.creds
