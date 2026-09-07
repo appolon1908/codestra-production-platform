@@ -27,6 +27,7 @@ ACTIONS = {
     "canary", "status", "rollback", "collect-evidence",
     "stage-control-plane", "validate-control-plane", "rollback-control-plane",
     "rollout-middleware", "rollback-middleware",
+    "status-email-reseller", "rollout-email-reseller", "rollback-email-reseller",
     "activate-control-plane", "enable-production-web-traffic", "disable-production-web-traffic",
     "enable-klyrow-email-delivery", "disable-klyrow-email-delivery",
 }
