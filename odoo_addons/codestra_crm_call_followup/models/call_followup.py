@@ -122,6 +122,7 @@ class CodestraCrmCallFollowup(models.Model):
         copy=False,
         ondelete="set null",
     )
+    email_sent_at = fields.Datetime(readonly=True, copy=False, index=True)
 
     popup_requested_at = fields.Datetime(readonly=True, copy=False)
     popup_completed_at = fields.Datetime(readonly=True, copy=False)
