@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import io
 import os
 from pathlib import Path
@@ -79,7 +78,7 @@ def test_installed_checksum_is_atomic_backed_up_and_rolled_back() -> None:
     assert f"validate_existing_root_target {target} 600" in source
     assert '[ "$(stat -c %h "$target")" -eq 1 ] || fail' in source
     assert f"backup_path {target} installed-checksum" in source
-    assert f"restore_path {target} installed-checksum" in source
+    assert f"restore_if_changed {target} installed-checksum" in source
     assert "installed_checksum_tmp=$(mktemp" in source
     assert 'chmod 0600 "$installed_checksum_tmp"' in source
     assert f'mv -f "$installed_checksum_tmp" {target}' in source
@@ -90,10 +89,79 @@ def test_installed_checksum_is_atomic_backed_up_and_rolled_back() -> None:
     assert "ROLLBACK_RESULT=$rollback_status" in source
     assert "SOURCE_LOCK_STATUS=NOT_EVALUATED_BY_INSTALLER" in source
     restore_lines = [
-        line.strip() for line in source.splitlines() if line.strip().startswith("restore_path /")
+        line.strip() for line in source.splitlines() if line.strip().startswith("restore_if_changed /")
     ]
     assert restore_lines
     assert all(line.endswith("|| rollback_failed=1") for line in restore_lines)
+
+
+def test_preserve_policy_mode_validates_before_first_mutation() -> None:
+    source = INSTALLER.read_text()
+    validation = 'validate_preserved_sudoers "$sudoers_target"'
+    assert validation in source
+    assert source.index(validation) < source.index("rollback_dir=$(mktemp")
+    function = installer_function("validate_preserved_sudoers")
+    for requirement in ("[ -f", "[ ! -L", "stat -c %h", "root:root", "= 440", "cmp -s"):
+        assert requirement in function
+    assert 'visudo -cf "$target"' in function
+    assert "visudo -cf /etc/sudoers" in function
+
+
+def test_matching_policy_validation_is_read_only_and_mismatch_fails(tmp_path: Path) -> None:
+    reviewed = tmp_path / "reviewed"
+    installed = tmp_path / "installed"
+    reviewed.write_text("policy\n")
+    installed.write_text("policy\n")
+    reviewed.chmod(0o440)
+    installed.chmod(0o440)
+    before = installed.stat().st_mtime_ns
+    shell = installer_function("validate_preserved_sudoers") + r'''
+fail() { exit 2; }
+visudo() { return 0; }
+validate_preserved_sudoers "$1" "$2"
+'''
+    accepted = run_shell(shell, installed, reviewed)
+    assert accepted.returncode == 0, accepted.stderr
+    assert installed.stat().st_mtime_ns == before
+    reviewed.chmod(0o600)
+    reviewed.write_text("different\n")
+    rejected = run_shell(shell, installed, reviewed)
+    assert rejected.returncode == 2
+
+
+def test_missing_preserved_policy_fails_validation(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    reviewed = tmp_path / "reviewed"
+    reviewed.write_text("policy\n")
+    shell = installer_function("validate_preserved_sudoers") + r'''
+fail() { exit 2; }
+visudo() { return 0; }
+validate_preserved_sudoers "$1" "$2"
+'''
+    assert run_shell(shell, missing, reviewed).returncode == 2
+
+
+def test_preserve_policy_mode_excludes_sudoers_from_mutation_ledger() -> None:
+    source = INSTALLER.read_text()
+    assert 'if [ "$preserve_sudoers" -eq 0 ]; then\n  backup_path /etc/sudoers.d/codestra-production-operator sudoers' in source
+    assert 'if [ "$preserve_sudoers" -eq 0 ]; then\n  mark_changed sudoers' in source
+    assert "restore_if_changed /etc/sudoers.d/codestra-production-operator sudoers" in source
+
+
+def test_untouched_policy_is_not_restored_after_failure(tmp_path: Path) -> None:
+    policy = tmp_path / "sudoers"
+    policy.write_text("reviewed policy\n")
+    original = policy.stat().st_mtime_ns
+    shell = installer_function("was_changed") + installer_function("restore_if_changed") + r'''
+changed_files=" operator"
+restore_path() { printf 'unexpected restore\n'; return 90; }
+restore_if_changed "$1" sudoers
+'''
+    result = run_shell(shell, policy)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert policy.read_text() == "reviewed policy\n"
+    assert policy.stat().st_mtime_ns == original
 
 
 @pytest.mark.parametrize("failed_command", ["rm", "cp"])

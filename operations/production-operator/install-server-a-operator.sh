@@ -8,6 +8,11 @@ fail() {
 }
 
 [ "$(id -u)" -eq 0 ] || fail
+preserve_sudoers=0
+if [ "${1-}" = "--preserve-existing-sudoers" ]; then
+  preserve_sudoers=1
+  shift
+fi
 [ "$#" -eq 6 ] || fail
 
 public_key=$1
@@ -87,6 +92,24 @@ verify_payload || fail
 validate_trusted_source "$database_manifest_source"
 validate_trusted_source "$database_validator_source"
 
+sudoers_target=/etc/sudoers.d/codestra-production-operator
+validate_preserved_sudoers() {
+  target=$1
+  reviewed=$2
+  [ -f "$target" ] || fail
+  [ ! -L "$target" ] || fail
+  [ "$(stat -c %h "$target")" -eq 1 ] || fail
+  [ "$(stat -c '%U:%G' "$target")" = root:root ] || fail
+  [ "$(stat -c %a "$target")" = 440 ] || fail
+  cmp -s "$reviewed" "$target" || fail
+  visudo -cf "$target" >/dev/null || fail
+  visudo -cf /etc/sudoers >/dev/null || fail
+}
+if [ "$preserve_sudoers" -eq 1 ]; then
+  validate_preserved_sudoers "$sudoers_target" \
+    "$script_dir/codestra-production-operator.sudoers"
+fi
+
 for payload in \
   codestra-production-operator \
   codestra-production-forced-command \
@@ -111,6 +134,28 @@ state_dir_uid=
 state_dir_gid=
 state_dir_mode=
 installed_checksum_tmp=
+changed_files=
+
+mark_changed() {
+  case " $changed_files " in
+    *" $1 "*) ;;
+    *) changed_files="$changed_files $1" ;;
+  esac
+}
+
+was_changed() {
+  case " $changed_files " in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+restore_if_changed() {
+  target=$1
+  label=$2
+  was_changed "$label" || return 0
+  restore_path "$target" "$label"
+}
 
 backup_path() {
   target=$1
@@ -160,20 +205,20 @@ rollback() {
     rm -f -- "$installed_checksum_tmp" 2>/dev/null || rollback_failed=1
   fi
   if [ "$installed" -eq 1 ]; then
-    restore_path /usr/local/sbin/codestra-production-operator operator || rollback_failed=1
-    restore_path /usr/local/libexec/codestra-production-forced-command forced-command || rollback_failed=1
-    restore_path /etc/sudoers.d/codestra-production-operator sudoers || rollback_failed=1
-    restore_path /etc/ssh/sshd_config.d/60-codestra-production-operator.conf sshd || rollback_failed=1
-    restore_path /var/lib/codestra-production-operator/.ssh/authorized_keys authorized-keys || rollback_failed=1
-    restore_path /etc/codestra/production-operator/release.json release-config || rollback_failed=1
-    restore_path /etc/codestra/production-operator/maintenance-date maintenance-date || rollback_failed=1
-    restore_path /etc/codestra/production-operator/control-plane-archive.sha256 control-plane-archive-checksum || rollback_failed=1
-    restore_path /etc/codestra/production-operator/installed.sha256 installed-checksum || rollback_failed=1
-    restore_path /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh readiness-restore || rollback_failed=1
-    restore_path /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf readiness-restore-override || rollback_failed=1
+    restore_if_changed /usr/local/sbin/codestra-production-operator operator || rollback_failed=1
+    restore_if_changed /usr/local/libexec/codestra-production-forced-command forced-command || rollback_failed=1
+    restore_if_changed /etc/sudoers.d/codestra-production-operator sudoers || rollback_failed=1
+    restore_if_changed /etc/ssh/sshd_config.d/60-codestra-production-operator.conf sshd || rollback_failed=1
+    restore_if_changed /var/lib/codestra-production-operator/.ssh/authorized_keys authorized-keys || rollback_failed=1
+    restore_if_changed /etc/codestra/production-operator/release.json release-config || rollback_failed=1
+    restore_if_changed /etc/codestra/production-operator/maintenance-date maintenance-date || rollback_failed=1
+    restore_if_changed /etc/codestra/production-operator/control-plane-archive.sha256 control-plane-archive-checksum || rollback_failed=1
+    restore_if_changed /etc/codestra/production-operator/installed.sha256 installed-checksum || rollback_failed=1
+    restore_if_changed /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh readiness-restore || rollback_failed=1
+    restore_if_changed /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf readiness-restore-override || rollback_failed=1
     systemctl daemon-reload >/dev/null 2>&1 || rollback_failed=1
-    restore_path /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml database-manifest || rollback_failed=1
-    restore_path /usr/local/libexec/validate-production-database-manifest database-validator || rollback_failed=1
+    restore_if_changed /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml database-manifest || rollback_failed=1
+    restore_if_changed /usr/local/libexec/validate-production-database-manifest database-validator || rollback_failed=1
     sshd -t >/dev/null 2>&1 || rollback_failed=1
   fi
   if [ "$state_dir_metadata_touched" -eq 1 ] && [ "$state_dir_existed" -eq 1 ]; then
@@ -255,7 +300,9 @@ validate_existing_root_target /etc/codestra/production-operator/installed.sha256
 
 backup_path /usr/local/sbin/codestra-production-operator operator
 backup_path /usr/local/libexec/codestra-production-forced-command forced-command
-backup_path /etc/sudoers.d/codestra-production-operator sudoers
+if [ "$preserve_sudoers" -eq 0 ]; then
+  backup_path /etc/sudoers.d/codestra-production-operator sudoers
+fi
 backup_path /etc/ssh/sshd_config.d/60-codestra-production-operator.conf sshd
 backup_path /var/lib/codestra-production-operator/.ssh/authorized_keys authorized-keys
 backup_path /etc/codestra/production-operator/release.json release-config
@@ -268,12 +315,16 @@ backup_path /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml 
 backup_path /usr/local/libexec/validate-production-database-manifest database-validator
 installed=1
 
+mark_changed operator
 install -o root -g root -m 0750 "$script_dir/codestra-production-operator" \
   /usr/local/sbin/codestra-production-operator
+mark_changed forced-command
 install -o root -g root -m 0755 "$script_dir/codestra-production-forced-command" \
   /usr/local/libexec/codestra-production-forced-command
+mark_changed readiness-restore
 install -o root -g root -m 0755 "$restore_source" \
   /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh
+mark_changed readiness-restore-override
 install -o root -g root -m 0644 "$restore_override_source" \
   /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf
 systemctl daemon-reload
@@ -282,17 +333,23 @@ effective_restore_exec=$(systemctl show codestra-readiness-restore.service -p Ex
 printf '%s\n' "$effective_restore_exec" | grep -F \
   'path=/opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh ; argv[]=/opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh ;' \
   >/dev/null || fail
+mark_changed database-manifest
 install -o root -g root -m 0644 "$database_manifest_source" \
   /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml
+mark_changed database-validator
 install -o root -g root -m 0755 "$database_validator_source" \
   /usr/local/libexec/validate-production-database-manifest
 
-sudoers_tmp=$(mktemp /etc/sudoers.d/.codestra-production-operator.XXXXXX)
-install -o root -g root -m 0440 "$script_dir/codestra-production-operator.sudoers" "$sudoers_tmp"
-visudo -cf "$sudoers_tmp" >/dev/null
-mv -f "$sudoers_tmp" /etc/sudoers.d/codestra-production-operator
-visudo -cf /etc/sudoers.d/codestra-production-operator >/dev/null
+if [ "$preserve_sudoers" -eq 0 ]; then
+  mark_changed sudoers
+  sudoers_tmp=$(mktemp /etc/sudoers.d/.codestra-production-operator.XXXXXX)
+  install -o root -g root -m 0440 "$script_dir/codestra-production-operator.sudoers" "$sudoers_tmp"
+  visudo -cf "$sudoers_tmp" >/dev/null
+  mv -f "$sudoers_tmp" /etc/sudoers.d/codestra-production-operator
+  visudo -cf /etc/sudoers.d/codestra-production-operator >/dev/null
+fi
 
+mark_changed sshd
 install -o root -g root -m 0644 "$script_dir/codestra-production-operator.sshd" \
   /etc/ssh/sshd_config.d/60-codestra-production-operator.conf
 sshd -t
@@ -307,6 +364,7 @@ authorized_tmp=$(mktemp /var/lib/codestra-production-operator/.ssh/.authorized_k
 } > "$authorized_tmp"
 chown codestra-production-operator:codestra-production-operator "$authorized_tmp"
 chmod 0600 "$authorized_tmp"
+mark_changed authorized-keys
 mv -f "$authorized_tmp" /var/lib/codestra-production-operator/.ssh/authorized_keys
 
 release_tmp=$(mktemp /etc/codestra/production-operator/.release.XXXXXX)
@@ -326,18 +384,21 @@ with open(target, "w", encoding="ascii") as stream:
 PY
 chown root:root "$release_tmp"
 chmod 0644 "$release_tmp"
+mark_changed release-config
 mv -f "$release_tmp" /etc/codestra/production-operator/release.json
 
 maintenance_tmp=$(mktemp /etc/codestra/production-operator/.maintenance-date.XXXXXX)
 printf '%s\n' "$maintenance_date" > "$maintenance_tmp"
 chown root:root "$maintenance_tmp"
 chmod 0600 "$maintenance_tmp"
+mark_changed maintenance-date
 mv -f "$maintenance_tmp" /etc/codestra/production-operator/maintenance-date
 
 control_plane_checksum_tmp=$(mktemp /etc/codestra/production-operator/.control-plane-archive.XXXXXX)
 printf '%s\n' "$control_plane_archive_sha256" > "$control_plane_checksum_tmp"
 chown root:root "$control_plane_checksum_tmp"
 chmod 0644 "$control_plane_checksum_tmp"
+mark_changed control-plane-archive-checksum
 mv -f "$control_plane_checksum_tmp" /etc/codestra/production-operator/control-plane-archive.sha256
 
 installed_checksum_tmp=$(mktemp /etc/codestra/production-operator/.installed.sha256.XXXXXX)
@@ -355,6 +416,7 @@ sha256sum /usr/local/sbin/codestra-production-operator \
   > "$installed_checksum_tmp"
 chown root:root "$installed_checksum_tmp"
 chmod 0600 "$installed_checksum_tmp"
+mark_changed installed-checksum
 mv -f "$installed_checksum_tmp" /etc/codestra/production-operator/installed.sha256
 
 sh -n /usr/local/libexec/codestra-production-forced-command
