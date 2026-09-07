@@ -11,6 +11,8 @@ from tools.check_control_plane_api_surface import (
     delegated_handler_called,
     endpoint_route_predicate_covered,
     implementation_handler_sources,
+    kong_covering_routes,
+    kong_routes,
     load_yaml,
     validate,
 )
@@ -20,6 +22,22 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "config/control-plane-api-surface.yaml"
 ASSURANCE_PATH = ROOT / "config/control-plane-api-assurance.yaml"
 OPTIONAL_FIELDS = {"remediation", "idempotency_exemption"}
+
+
+def test_kong_scope_proof_stays_bound_to_covering_route_plugins() -> None:
+    parsed = kong_routes({"services": [{
+        "plugins": [{"name": "pre-function", "config": {"access": ["scope.a"]}}],
+        "routes": [
+            {"paths": ["/a"], "methods": ["POST"]},
+            {"paths": ["/b"], "methods": ["POST"], "plugins": [
+                {"name": "pre-function", "config": {"access": ["scope.b"]}}
+            ]},
+        ],
+    }]})
+    covering = kong_covering_routes(parsed, "POST", "/a/item")
+    assert len(covering) == 1
+    assert "scope.a" in str(covering[0]["plugins"])
+    assert "scope.b" not in str(covering[0]["plugins"])
 
 
 def manifest():

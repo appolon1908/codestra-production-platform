@@ -208,23 +208,28 @@ def registry_operations(registry: dict[str, Any]) -> set[tuple[str, str]]:
     }
 
 
-def kong_routes(kong: dict[str, Any]) -> list[tuple[set[str], str]]:
-    routes: list[tuple[set[str], str]] = []
+def kong_routes(kong: dict[str, Any]) -> list[dict[str, Any]]:
+    routes: list[dict[str, Any]] = []
     for service in kong.get("services", []):
         for route in service.get("routes", []):
             methods = {str(value).upper() for value in route.get("methods", [])}
             for path in route.get("paths", []):
-                routes.append((methods, str(path).rstrip("/") or "/"))
+                routes.append({
+                    "methods": methods,
+                    "prefix": str(path).rstrip("/") or "/",
+                    "plugins": [*(service.get("plugins") or []), *(route.get("plugins") or [])],
+                })
     return routes
 
 
-def kong_covers(routes: list[tuple[set[str], str]], method: str, path: str) -> bool:
-    for methods, prefix in routes:
-        if methods and method not in methods:
-            continue
-        if path == prefix or path.startswith(prefix + "/"):
-            return True
-    return False
+def kong_covering_routes(routes: list[dict[str, Any]], method: str, path: str) -> list[dict[str, Any]]:
+    return [route for route in routes if
+            (not route["methods"] or method in route["methods"]) and
+            (path == route["prefix"] or path.startswith(route["prefix"] + "/"))]
+
+
+def kong_covers(routes: list[dict[str, Any]], method: str, path: str) -> bool:
+    return bool(kong_covering_routes(routes, method, path))
 
 
 def _token_fragment(token: str) -> str:
@@ -343,9 +348,14 @@ def _gateway_route_proof(
     routes = kong_routes(kong)
     if not methods or not all(kong_covers(routes, method, path) for method in methods):
         return False
-    config_source = (root / str(config_path)).read_text(encoding="utf-8")
-    if scope and scope not in {"none", "not_required"} and scope not in config_source:
-        return False
+    if scope and scope not in {"none", "not_required"}:
+        for method in methods:
+            covering = kong_covering_routes(routes, method, path)
+            if not covering or not any(
+                scope in json.dumps(route["plugins"], sort_keys=True)
+                for route in covering
+            ):
+                return False
     return True
 
 
