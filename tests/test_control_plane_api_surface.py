@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import subprocess
 import sys
+
+import pytest
 from pathlib import Path
 
 from tools.check_control_plane_api_surface import (
@@ -358,3 +360,17 @@ def test_named_path_guard_requires_prior_single_assignment() -> None:
     assert not endpoint_route_predicate_covered(overwritten, ['"/v1/crm/leads/"'])
     unrelated = 'def handler(self):\n    if "/invented/" in self.headers:\n        return True\n'
     assert not endpoint_route_predicate_covered(unrelated, ['"/invented/"'])
+
+
+@pytest.mark.parametrize("endpoints", [None, 7, "endpoint", {}, [None], [{}]])
+def test_invalid_endpoint_cli_emits_fail_without_traceback(tmp_path, endpoints):
+    import yaml
+    candidate = copy.deepcopy(manifest())
+    candidate["endpoints"] = endpoints
+    path = tmp_path / "candidate.yaml"
+    path.write_text(yaml.safe_dump(candidate))
+    result = subprocess.run([sys.executable, "tools/check_control_plane_api_surface.py",
+                             "--manifest", str(path)], cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "CONTROL_PLANE_API_SURFACE=FAIL" in result.stdout
+    assert "Traceback" not in result.stderr

@@ -964,12 +964,12 @@ def main() -> int:
     manifest = load_yaml(manifest_path)
     assurance = load_assurance(root, assurance_path)
     structural = validate(root, manifest, assurance)
-    gaps = coverage_gaps(manifest, assurance)
+    gaps = coverage_gaps(manifest, assurance) if not structural else []
     findings = structural + (gaps if args.strict and not structural else [])
     payload = {
-        "manifest": str(manifest_path.relative_to(root)),
-        "assurance": str(assurance_path.relative_to(root)),
-        "endpoints": len(manifest.get("endpoints", [])),
+        "manifest": str(manifest_path),
+        "assurance": str(assurance_path),
+        "endpoints": len(manifest["endpoints"]) if isinstance(manifest.get("endpoints"), list) else 0,
         "coverage_gaps": len(gaps),
         "strict": args.strict,
         "status": "PASS" if not findings else "FAIL",
