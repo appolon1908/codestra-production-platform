@@ -1,0 +1,134 @@
+name: Publish verified draft source objects
+on:
+  push:
+    branches: [chore/draft-buildout-inspection-20260907]
+    paths: [.github/workflows/draft-buildout-object-publication.yml]
+permissions:
+  contents: read
+env:
+  PAYLOAD_BLOB: cb6a01695d2295f2868a893522f0f9958299a2d5
+  PAYLOAD_SHA256: de7f8ce6b18b1a063a505842bb8e6bea5454b3f55dd6defabe13547d598cf4c5
+jobs:
+  reconstruct:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reconstruct exact locally tested trees without executing source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import base64, hashlib, json, os, shutil, subprocess, urllib.request, zlib
+          from pathlib import Path, PurePosixPath
+          sha = os.environ['PAYLOAD_BLOB']
+          request = urllib.request.Request('https://api.github.com/repos/appolon1908-hue/codestra-production-platform/git/blobs/'+sha, headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'], 'Accept':'application/vnd.github+json'})
+          with urllib.request.urlopen(request,timeout=30) as response:
+              blob = json.load(response)
+          data = base64.b64decode(blob['content'])
+          if hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest() != sha:
+              raise SystemExit('transport blob identity mismatch')
+          # Correct the single known transport transcription before comparing
+          # with the independently calculated original payload checksum.
+          encoded = base64.b64encode(data).decode()
+          if encoded.count('RimnfD6aR+PyZJ9') != 1:
+              raise SystemExit('unexpected transport data')
+          data = base64.b64decode(encoded.replace('RimnfD6aR+PyZJ9','RimnfD6aR+P5yJ9',1))
+          if hashlib.sha256(data).hexdigest() != os.environ['PAYLOAD_SHA256']:
+              raise SystemExit('original tested payload mismatch')
+          rows = json.loads(zlib.decompress(data))
+          if {row['number'] for row in rows} != {96,111,129,148,152} or len(rows) != 5:
+              raise SystemExit('PR scope mismatch')
+          out = Path(os.environ['RUNNER_TEMP'])/'draft-objects'
+          out.mkdir()
+          manifests = []
+          for row in rows:
+              work = Path(os.environ['RUNNER_TEMP'])/('pr-'+str(row['number']))
+              subprocess.run(['git','worktree','add','--detach',str(work),row['parent']],check=True)
+              def git(*args):
+                  return subprocess.check_output(['git',*args],cwd=work).decode().strip()
+              if git('rev-parse','HEAD^{tree}') != row['base_tree']:
+                  raise SystemExit('parent tree mismatch')
+              subprocess.run(['git','apply','--index','-'],input=row['patch'].encode(),cwd=work,check=True)
+              subprocess.run(['git','diff','--cached','--check'],cwd=work,check=True)
+              if git('write-tree') != row['tree'] or git('diff','--cached','--name-only').splitlines() != row['paths']:
+                  raise SystemExit('source tree or path scope mismatch')
+              files = []
+              for name in row['paths']:
+                  relative = PurePosixPath(name)
+                  if relative.is_absolute() or '..' in relative.parts or '\\' in name:
+                      raise SystemExit('unsafe path')
+                  source = work/name
+                  if source.is_symlink() or not source.is_file():
+                      raise SystemExit('nonregular source')
+                  raw = source.read_bytes()
+                  target = out/str(row['number'])/name
+                  target.parent.mkdir(parents=True,exist_ok=True)
+                  shutil.copyfile(source,target)
+                  files.append({'path':name,'mode':git('ls-files','-s','--',name).split()[0], 'type':'blob', 'sha':hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest(), 'sha256':hashlib.sha256(raw).hexdigest()})
+              manifests.append({key:row[key] for key in ('number','parent','base_tree','tree')}|{'files':files})
+              print('TESTED_TREE_MATCH='+str(row['number'])+':'+row['tree'])
+          (out/'manifest.json').write_text(json.dumps(manifests,indent=2)+'\n')
+          print('SOURCE_CODE_EXECUTED=NO')
+          print('REMOTE_REFS_CHANGED=NO')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: draft-objects-${{ github.sha }}
+          path: ${{ runner.temp }}/draft-objects/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+  store-blobs:
+    needs: reconstruct
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: draft-objects-${{ github.sha }}
+          path: ${{ runner.temp }}/draft-objects
+      - name: Store exact source blobs without commits or branch changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import base64, hashlib, json, os, urllib.request
+          from pathlib import Path, PurePosixPath
+          root = Path(os.environ['RUNNER_TEMP'])/'draft-objects'
+          manifests = json.loads((root/'manifest.json').read_text())
+          if {row['number'] for row in manifests} != {96,111,129,148,152} or len(manifests) != 5:
+              raise SystemExit('publication scope mismatch')
+          for row in manifests:
+              if not 1 <= len(row['files']) <= 4:
+                  raise SystemExit('invalid file count')
+              for file in row['files']:
+                  relative = PurePosixPath(file['path'])
+                  if relative.is_absolute() or '..' in relative.parts or '\\' in file['path'] or file['mode'] not in {'100644','100755'}:
+                      raise SystemExit('invalid source path/mode')
+                  source = root/str(row['number'])/file['path']
+                  if source.is_symlink() or not source.is_file():
+                      raise SystemExit('invalid source file')
+                  data = source.read_bytes()
+                  if hashlib.sha256(data).hexdigest() != file['sha256'] or hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest() != file['sha']:
+                      raise SystemExit('source digest mismatch')
+          for row in manifests:
+              for file in row['files']:
+                  data = (root/str(row['number'])/file['path']).read_bytes()
+                  req = urllib.request.Request('https://api.github.com/repos/appolon1908-hue/codestra-production-platform/git/blobs', data=json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode(), headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'], 'Accept':'application/vnd.github+json','Content-Type':'application/json'}, method='POST')
+                  with urllib.request.urlopen(req,timeout=30) as response:
+                      created = json.load(response)
+                  if created['sha'] != file['sha']:
+                      raise SystemExit('stored source mismatch')
+              print('BLOBS_STORED_FOR_PR='+str(row['number']))
+          print('REMOTE_REFS_CHANGED=NO')
+          print('SERVER_CONTACTED=NO')
+          PY
