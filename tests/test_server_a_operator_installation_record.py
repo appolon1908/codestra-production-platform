@@ -151,7 +151,7 @@ def test_incomplete_record_allows_only_boolean_or_null_signature(value: object, 
     assert run_validator(candidate, tmp_path).returncode == 2
 
 
-@pytest.mark.parametrize("field", TARGET_DIGEST_FIELDS)
+@pytest.mark.parametrize("field", tuple(field for field in TARGET_DIGEST_FIELDS if field != "release_archive_sha256"))
 @pytest.mark.parametrize("require_approved", [False, True])
 def test_every_target_digest_is_rejected_as_control_plane(field: str, require_approved: bool, tmp_path: Path) -> None:
     candidate = complete()
@@ -173,6 +173,26 @@ def test_image_digest_is_not_control_plane_archive(require_approved: bool, tmp_p
     candidate["arguments"]["control_plane_archive_sha256"]["value"] = candidate["arguments"]["image_digest"]["value"].removeprefix("sha256:")
     assert any("control-plane archive" in error for error in validator.validate(candidate, require_approved=require_approved))
     assert run_validator(candidate, tmp_path, allow_incomplete=not require_approved).returncode == 2
+
+
+def test_signed_platform_archive_is_the_control_plane_archive(tmp_path: Path) -> None:
+    candidate = complete()
+    digest = candidate["target_release"]["release_archive_sha256"]
+    control = candidate["arguments"]["control_plane_archive_sha256"]
+    control["value"] = digest
+    control["source"] = "immutable GitHub release asset bound by deployment-manifest.json and provenance.json"
+    assert validator.validate(candidate) == []
+    assert run_validator(candidate, tmp_path).returncode == 0
+
+
+def test_release_archive_reuse_requires_explicit_provenance(tmp_path: Path) -> None:
+    candidate = complete()
+    candidate["arguments"]["control_plane_archive_sha256"].update(
+        value=candidate["target_release"]["release_archive_sha256"],
+        source="some local archive",
+    )
+    assert any("signed release provenance" in error for error in validator.validate(candidate))
+    assert run_validator(candidate, tmp_path).returncode == 2
 
 
 def test_cli_accepts_complete_fixture_and_keeps_committed_record_incomplete(tmp_path: Path) -> None:
