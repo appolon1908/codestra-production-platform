@@ -62,9 +62,12 @@ class CodestraCrmCallFollowupAutomation(models.Model):
             "codestra_crm_call_followup.group_call_followup_manager"
         ):
             raise AccessError(_("Call follow-up manager access is required."))
-        jobs = self.mapped("automation_job_ids").filtered(
-            lambda job: job.state in {"retry", "dead"}
-        )
+        # Search the durable queue directly. The one2many relation may have
+        # been cached before a cron created the failed job in this transaction.
+        jobs = self.env["codestra.crm.call.followup.job"].search([
+            ("followup_id", "in", self.ids),
+            ("state", "in", ["retry", "dead"]),
+        ])
         for job in jobs.sudo():
             values = {
                 "state": "pending",
