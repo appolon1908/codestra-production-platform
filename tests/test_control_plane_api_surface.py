@@ -143,6 +143,17 @@ def test_idempotency_proof_rejects_absolute_host_path() -> None:
     assert "idempotency-test-proof" in rules
 
 
+def test_idempotency_proof_rejects_scalar_token_fields() -> None:
+    for field in ("implementation_tokens", "test_tokens"):
+        value = copy.deepcopy(assurance())
+        value["endpoints"]["source-event-ingest"]["idempotency"][field] = "e"
+        rules = {
+            finding.rule for finding in validate(ROOT, manifest(), value)
+            if finding.location == "source-event-ingest"
+        }
+        assert "idempotency-proof" in rules or "idempotency-test-proof" in rules
+
+
 def test_gateway_proof_rejects_unrelated_repository_prose() -> None:
     value = copy.deepcopy(assurance())
     gateway = value["endpoints"]["source-event-ingest"]["gateway_auth"]

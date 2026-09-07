@@ -621,10 +621,10 @@ def validate(
                     )
                 )
             if status == "present":
-                tokens = [
-                    str(value)
-                    for value in idempotency_evidence.get("implementation_tokens", [])
-                ]
+                raw_tokens = idempotency_evidence.get("implementation_tokens", [])
+                tokens = raw_tokens if isinstance(raw_tokens, list) and all(
+                    isinstance(value, str) and value for value in raw_tokens
+                ) else []
                 if not tokens:
                     findings.append(
                         Finding(
@@ -645,9 +645,10 @@ def validate(
                             )
                         )
                 test_path_value = str(idempotency_evidence.get("test_path", "")).strip()
-                test_tokens = [
-                    str(value) for value in idempotency_evidence.get("test_tokens", [])
-                ]
+                raw_test_tokens = idempotency_evidence.get("test_tokens", [])
+                test_tokens = raw_test_tokens if isinstance(raw_test_tokens, list) and all(
+                    isinstance(value, str) and value for value in raw_test_tokens
+                ) else []
                 if not test_path_value or not test_tokens:
                     findings.append(
                         Finding(
