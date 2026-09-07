@@ -7,6 +7,10 @@ class CodestraCrmPostCallWizardAutomation(models.TransientModel):
     def action_complete(self):
         self.ensure_one()
         followup = self.followup_id
+        # Claim before invoking the inherited completion so this extension can
+        # distinguish the winning transition from stale/concurrent submissions.
+        if not self._claim_pending_followup():
+            return {"type": "ir.actions.act_window_close"}
         result = super().action_complete()
         followup.invalidate_recordset(
             [
