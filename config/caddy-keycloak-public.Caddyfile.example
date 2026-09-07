@@ -1,5 +1,6 @@
-# Public Keycloak ingress. Caddy owns ACME issuance and renewal.
-# Do not add `tls internal` to this public hostname.
+# Compatibility example only. The canonical production source is
+# operations/caddy/auth.codestra.co.caddy.
+# Caddy owns ACME issuance and renewal; do not add `tls internal`.
 auth.codestra.co {
 	header {
 		X-Content-Type-Options nosniff
