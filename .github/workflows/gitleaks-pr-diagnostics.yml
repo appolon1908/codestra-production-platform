@@ -1,9 +1,8 @@
 name: Gitleaks PR diagnostics
 
+# Mandatory CI must run even for README-only or unclassified file changes.
 on:
   pull_request:
-    paths:
-      - "**"
 
 permissions:
   contents: read
