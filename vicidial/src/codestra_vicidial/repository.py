@@ -179,6 +179,7 @@ class MemoryRepository:
             "campaign_id": spec.actual_id, "canonical_id": spec.canonical_id,
             "campaign_name": spec.name, "active": "N", "dial_method": spec.dial_method,
             "local_call_time": spec.call_time,
+            "hopper_level": 0, "auto_dial_level": "0",
         }
         checks = [
             (self.campaigns, spec.actual_id, campaign_desired,
@@ -231,6 +232,7 @@ class MemoryRepository:
             "campaign_name": spec.name, "active": "N", "dial_method": spec.dial_method,
             "local_call_time": spec.call_time, "campaign_recording": spec.recording_policy,
             "scheduled_callbacks": "Y" if spec.callback_enabled else "N",
+            "hopper_level": 0, "auto_dial_level": "0",
         }
         status = self._adopt(self.campaigns, spec.actual_id, campaign,
                              ("canonical_id", "campaign_name", "dial_method", "local_call_time"))

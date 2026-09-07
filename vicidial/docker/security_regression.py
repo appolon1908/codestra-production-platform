@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import http.cookies
+import ctypes
+import ctypes.util
 import json
 import multiprocessing
 import pickle
@@ -39,6 +41,14 @@ def main() -> None:
     assert sys.version_info[:3] == (3, 11, 16)
     assert sys.implementation.name == "cpython"
     assert tuple(map(int, pyexpat.EXPAT_VERSION.removeprefix("expat_").split("."))) >= (2, 8, 0)
+    expat_library = ctypes.util.find_library("expat")
+    if not expat_library:
+        raise AssertionError("runtime Expat library was not found")
+    expat = ctypes.CDLL(expat_library)
+    required_symbols = ["XML_SetHashSalt16Bytes"]
+    for symbol in required_symbols:
+        if not getattr(expat, symbol, None):
+            raise AssertionError(f"runtime Expat symbol is missing: {symbol}")
 
     process = multiprocessing.Process(target=_parse_nested_model, args=(2_000,))
     process.start()
@@ -75,6 +85,7 @@ def main() -> None:
         "cve_2026_4224": "PASS",
         "cve_2026_3644": "PASS",
         "cve_2026_7210_runtime_component": "PASS",
+        "source_symbols": required_symbols,
     }, sort_keys=True))
 
 

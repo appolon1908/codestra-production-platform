@@ -96,6 +96,8 @@ class AdapterService:
             "local_call_time": spec.call_time,
             "campaign_recording": spec.recording_policy,
             "scheduled_callbacks": "Y" if spec.callback_enabled else "N",
+            "hopper_level": 0,
+            "auto_dial_level": "0",
         }
         results.append(self._comparison(
             "campaign", spec.actual_id, campaign_desired, campaign,

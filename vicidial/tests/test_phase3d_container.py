@@ -74,6 +74,7 @@ def test_vulnerability_policy_is_exact_and_verifier_fails_closed(tmp_path):
     regression = {"python_short": "3.11.16", "implementation": "cpython",
                   "expat_short": "2.8.3", "openssl_short": "3.5.8",
                   "libcrypto3": "3.5.8-r0", "libssl3": "3.5.8-r0",
+                  "source_symbols": ["XML_SetHashSalt16Bytes"],
                   **{x["required_regression"]: "PASS" for x in policy["adjudications"]}}
     match = {"vulnerability": {"id": "CVE-2026-4224", "severity": "High"},
              "artifact": {"name": "python", "version": "3.11.16"}}
@@ -93,6 +94,12 @@ def test_vulnerability_policy_is_exact_and_verifier_fails_closed(tmp_path):
     assert verify(policy, grype, [metadata], regression, "a" * 40,
                   today=__import__("datetime").date(2026, 8, 26),
                   trivy=trivy)["status"] == "PASS"
+    symbol_match = {"vulnerability": {"id": "CVE-2026-7210", "severity": "High"},
+                    "artifact": {"name": "python", "version": "3.11.16"}}
+    with pytest.raises(ValueError, match="unadjudicated High"):
+        verify(policy, {**grype, "matches": [symbol_match]}, metadata,
+               {**regression, "source_symbols": []}, "a" * 40,
+               today=__import__("datetime").date(2026, 8, 26), trivy=trivy)
     for bad_grype, bad_trivy, error in (
         ({}, trivy, "Grype report is incomplete"),
         (grype, {}, "Trivy report identity is incomplete"),
