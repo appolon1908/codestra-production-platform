@@ -10,25 +10,32 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 from pathlib import Path
 
 try:
+    from tools.verify_attestation_predicate import (
+        _canonical_predicate,
+        _loads,
+        documents as _documents,
+        statement as _statement,
+    )
     from tools.verify_slsa_provenance_attestation import (
         AUTHORIZED_BUILDER,
         EXPECTED_BUILD_TYPE,
         SOURCE_REPOSITORY,
-        _documents,
-        _statement,
         _validate_subject,
     )
 except ModuleNotFoundError:
+    from verify_attestation_predicate import (
+        _canonical_predicate,
+        _loads,
+        documents as _documents,
+        statement as _statement,
+    )
     from verify_slsa_provenance_attestation import (
         AUTHORIZED_BUILDER,
         EXPECTED_BUILD_TYPE,
         SOURCE_REPOSITORY,
-        _documents,
-        _statement,
         _validate_subject,
     )
 
@@ -41,7 +48,7 @@ def validate(
     expected_source: str,
     expected_digest: str,
 ) -> None:
-    manifest = json.loads(manifest_path.read_text())
+    manifest = _loads(manifest_path.read_text(encoding="utf-8"))
     image_name = "ghcr.io/appolon1908-hue/codestra-middleware"
     if (
         manifest["source"]["git_sha"] != expected_source
@@ -75,8 +82,9 @@ def validate(
     }
     for path, kind, expected in (
         (provenance, "https://slsa.dev/provenance/v1", predicate),
-        (sbom, "https://spdx.dev/Document", json.loads(sbom_path.read_text())),
+        (sbom, "https://spdx.dev/Document", _loads(sbom_path.read_text(encoding="utf-8"))),
     ):
+        expected_json = _canonical_predicate(expected)
         for document in _documents(path):
             statement = _statement(document)
             if statement.get("_type") != "https://in-toto.io/Statement/v0.1":
@@ -84,7 +92,7 @@ def validate(
             if statement.get("predicateType") != kind:
                 raise ValueError("invalid attestation predicate type")
             _validate_subject(statement, image_name, expected_digest)
-            if statement.get("predicate") != expected:
+            if _canonical_predicate(statement["predicate"]) != expected_json:
                 raise ValueError("attestation differs from signed release evidence")
 
 
