@@ -27,34 +27,80 @@ work=$(/usr/bin/mktemp -d /run/codestra-host-auditd-bootstrap.XXXXXX)
 cleanup() { /usr/bin/find "$work" -xdev -depth -delete 2>/dev/null || true; }
 committed=false
 targets=("$installer_target" "$launcher_target" "$python_target" "$digest_target" "$runtime_path_target")
+touched=()
+declare -A was_immutable=()
 rollback_bootstrap() {
+  local status=$? index target attributes
+  local rollback_failed=false
+  trap - EXIT
+  # Attempt every touched target even if an earlier restoration fails.
+  set +e
   if [ "$committed" = false ]; then
+    [ "$status" -ne 0 ] || status=1
     if [ -n "${installed_record:-}" ]; then
-      /usr/bin/rm -f -- "$installed_record"
+      /usr/bin/rm -f -- "$installed_record" || rollback_failed=true
     fi
-    for index in "${!targets[@]}"; do
+    for index in "${touched[@]}"; do
       target=${targets[$index]}
-      if [ -f "$work/backup-$index" ]; then
-        /usr/bin/cp --preserve=mode,ownership,timestamps "$work/backup-$index" "$target"
-      else
-        /usr/bin/rm -f -- "$target"
+      # Missing checkpoints are not proof that a target was originally absent.
+      if [ ! -f "$work/backup-$index" ] && [ ! -f "$work/absent-$index" ]; then
+        rollback_failed=true
+        continue
       fi
-      /usr/bin/sync -f "$(/usr/bin/dirname "$target")"
-    done
-    for target in "${targets[@]}"; do
-      [ ! -f "$target" ] || /usr/bin/chattr +i "$target"
+      if [ -e "$target" ] || [ -L "$target" ]; then
+        if [ ! -f "$target" ] || [ -L "$target" ]; then
+          rollback_failed=true
+          continue
+        fi
+        # A later sealing failure may leave earlier targets immutable.
+        if ! /usr/bin/chattr -i "$target"; then
+          rollback_failed=true
+          continue
+        fi
+      fi
+      if [ -f "$work/backup-$index" ]; then
+        if ! /usr/bin/cp --preserve=mode,ownership,timestamps "$work/backup-$index" "$target"; then
+          rollback_failed=true
+          continue
+        fi
+        /usr/bin/cmp -s "$work/backup-$index" "$target" || rollback_failed=true
+        if [ "${was_immutable[$index]:-false}" = true ]; then
+          /usr/bin/chattr +i "$target" || rollback_failed=true
+        fi
+        attributes=$(/usr/bin/lsattr -d "$target") || rollback_failed=true
+        if [ "${was_immutable[$index]:-false}" = true ]; then
+          [[ "${attributes%% *}" == *i* ]] || rollback_failed=true
+        else
+          [[ "${attributes%% *}" != *i* ]] || rollback_failed=true
+        fi
+      else
+        /usr/bin/rm -f -- "$target" || rollback_failed=true
+      fi
+      /usr/bin/sync -f "$(/usr/bin/dirname "$target")" || rollback_failed=true
     done
   fi
+  if [ "$rollback_failed" = true ]; then
+    # Keep the only surviving recovery copies instead of deleting them.
+    /usr/bin/printf 'CODESTRA_HOST_AUDITD_BOOTSTRAP_ROLLBACK=FAIL\nRECOVERY_DIRECTORY=%s\n' "$work" >&2
+    return 1
+  fi
   cleanup
+  return "$status"
 }
 trap rollback_bootstrap EXIT
 test -x /usr/bin/chattr -a -x /usr/bin/lsattr -a -x /usr/bin/getfacl
+# Snapshot every target while the live executable boundary is still sealed.
+# A prerequisite or partial-copy failure must never mutate installed targets.
 for index in "${!targets[@]}"; do
   target=${targets[$index]}
+  test ! -L "$target"
   if [ -e "$target" ]; then
-    test -f "$target" -a ! -L "$target"
-    /usr/bin/chattr -i "$target"
+    test -f "$target"
+    attributes=$(/usr/bin/lsattr -d "$target")
+    was_immutable[$index]=false
+    [[ "${attributes%% *}" != *i* ]] || was_immutable[$index]=true
     /usr/bin/cp --preserve=mode,ownership,timestamps "$target" "$work/backup-$index"
+    /usr/bin/cmp -s "$target" "$work/backup-$index"
   else
     : > "$work/absent-$index"
   fi
@@ -75,6 +121,16 @@ test -d "$stdlib"
 /usr/bin/chmod 0600 "$work/python3.sha256"
 /usr/bin/chown root:root "$work/python3.stdlib"
 /usr/bin/chmod 0600 "$work/python3.stdlib"
+
+# Register a target before its first possible mutation, only after all snapshots
+# and staged replacements are complete. Untouched targets are never rolled back.
+for index in "${!targets[@]}"; do
+  target=${targets[$index]}
+  touched+=("$index")
+  if [ -e "$target" ]; then
+    /usr/bin/chattr -i "$target"
+  fi
+done
 
 # Atomic replacement is the governed upgrade path. The independently verified
 # source SHA and exact installed bytes are durably recorded below.
