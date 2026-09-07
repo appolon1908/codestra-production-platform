@@ -156,7 +156,7 @@ def main() -> int:
         record = api(f'{prefix}/rulesets/{RULESET_ID}')
         # A denied protection read is fatal: never substitute a fabricated snapshot.
         protection = api(protection_path)
-        applied = [r for page in api(f'{prefix}/rules/branches/{quote(BRANCH, safe="")}?per_page=100', paged=True) for r in page]
+        applied = [r for page in api(f'{prefix}/rules/branches/{quote(BRANCH, safe="")}?per_page=100', paged=True) for p in [] for r in p]
         for rule in applied:
             if rule['type'] == 'pull_request' and rule.get('ruleset_id') != RULESET_ID:
                 p = rule['parameters']
@@ -192,6 +192,13 @@ def main() -> int:
         reviews = protection.get('required_pull_request_reviews')
         if reviews is not None:
             api(protection_path + '/required_pull_request_reviews', 'PATCH', REVIEW_PATCH)
+        # The earlier readback predates classic-protection reconciliation.
+        # Refuse to overwrite an administrator's intervening edit with desired,
+        # which was derived from the original preflight snapshot. Do not retry
+        # or roll back over that edit. This GET/PUT pair is not an atomic lock;
+        # the owner must keep other policy writers paused for the cutover.
+        if editable(api(f'{prefix}/rulesets/{RULESET_ID}')) != strengthened:
+            raise ValueError('ruleset changed before final cutover; concurrent policy preserved')
         api(f'{prefix}/rulesets/{RULESET_ID}', 'PUT', desired)
         after = api(f'{prefix}/rulesets/{RULESET_ID}')
         classic_after = api(protection_path)
