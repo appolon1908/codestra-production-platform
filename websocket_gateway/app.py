@@ -63,6 +63,7 @@ def log_event(message: str, **fields: Any) -> None:
 class Settings:
     database_url = ""
     internal_token = ""
+    middleware_service_token = ""
     issuer = os.getenv("KEYCLOAK_ISSUER", "https://auth.codestra.co/realms/codestra")
     audience = os.getenv("KEYCLOAK_AUDIENCE", "codestra-agent-desktop")
     jwks_url = os.getenv("KEYCLOAK_JWKS_URL", "http://keycloak:8080/realms/codestra/protocol/openid-connect/certs")
@@ -78,8 +79,15 @@ class Settings:
     event_source_health_url = os.getenv("INTERNAL_EVENT_SOURCE_HEALTH_URL", "http://middleware:8095/health")
     authorization_url = os.getenv(
         "INTERNAL_AUTHORIZATION_URL",
-        "http://middleware:8095/internal/v1/realtime/authorizations/revalidate",
+        "https://middleware:8095/internal/v1/realtime/authorizations/revalidate",
     )
+    ticket_consume_url = os.getenv(
+        "INTERNAL_TICKET_CONSUME_URL",
+        "https://middleware:8095/internal/v1/realtime/tickets/consume",
+    )
+    middleware_ca_file = os.getenv("MIDDLEWARE_MTLS_CA_FILE", "")
+    middleware_cert_file = os.getenv("MIDDLEWARE_MTLS_CERT_FILE", "")
+    middleware_key_file = os.getenv("MIDDLEWARE_MTLS_KEY_FILE", "")
     authorization_timeout = min(5, max(1, int(os.getenv("AUTHORIZATION_TIMEOUT_SECONDS", "3"))))
 
 
@@ -163,6 +171,7 @@ async def verify_schema(pool: asyncpg.Pool) -> None:
 async def lifespan(app: FastAPI):
     settings.database_url = secret_file("DATABASE_URL_FILE")
     settings.internal_token = secret_file("INTERNAL_TOKEN_FILE")
+    settings.middleware_service_token = secret_file("MIDDLEWARE_SERVICE_TOKEN_FILE")
     app.state.pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=20, command_timeout=5)
     await verify_schema(app.state.pool)
     app.state.jwks = PyJWKClient(settings.jwks_url, cache_keys=True, lifespan=300)
@@ -232,6 +241,21 @@ async def readyz(request: Request) -> dict[str, Any]:
     return {"status": "ready", "checks": checks}
 
 
+@app.get("/version")
+async def version() -> dict[str, str]:
+    identity = {
+        "service": "codestra-websocket-gateway",
+        "source_sha": os.getenv("SOURCE_SHA", "unknown"),
+        "image_digest": os.getenv("IMAGE_DIGEST", "unknown"),
+        "contract_digest": os.getenv("CALLING_CONTRACT_DIGEST", "unknown"),
+    }
+    if (len(identity["source_sha"]) != 40
+            or not identity["image_digest"].startswith("sha256:")
+            or len(identity["contract_digest"]) != 64):
+        raise HTTPException(503, "immutable release identity unavailable")
+    return identity
+
+
 @app.get("/metrics")
 async def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -279,6 +303,67 @@ async def consume_ticket(pool: asyncpg.Pool, ticket: str) -> dict[str, Any] | No
         stored_campaigns = result["campaigns"]
         result["campaigns"] = json.loads(stored_campaigns) if isinstance(stored_campaigns, str) else list(stored_campaigns)
         return result
+
+
+def middleware_client() -> httpx.AsyncClient:
+    if not all((settings.middleware_ca_file, settings.middleware_cert_file,
+                settings.middleware_key_file, settings.middleware_service_token)):
+        raise RuntimeError("middleware_service_identity_incomplete")
+    return httpx.AsyncClient(
+        timeout=settings.authorization_timeout,
+        verify=settings.middleware_ca_file,
+        cert=(settings.middleware_cert_file, settings.middleware_key_file),
+    )
+
+
+async def consume_middleware_ticket(pool: asyncpg.Pool, ticket: str) -> dict[str, Any] | None:
+    """Atomically consume the canonical Middleware ticket and claim local ownership."""
+    headers = {"Authorization": f"Bearer {settings.middleware_service_token}",
+               "X-Correlation-ID": str(uuid.uuid4())}
+    try:
+        async with middleware_client() as client:
+            response = await client.post(
+                settings.ticket_consume_url, headers=headers, json={"ticket": ticket}
+            )
+    except (httpx.HTTPError, RuntimeError):
+        return None
+    if response.status_code != 200:
+        return None
+    try:
+        principal = response.json()
+        expires_at = datetime.fromisoformat(str(principal["expires_at"]).replace("Z", "+00:00"))
+        required = ("tenant_id", "campaign_id", "agent_id", "role",
+                    "authorization_epoch", "maximum_replay_cursor")
+        if (principal.get("active") is not True or any(principal.get(key) is None for key in required)
+                or principal["role"] not in {"telephony_agent", "telephony_supervisor"}
+                or not isinstance(principal["authorization_epoch"], int)
+                or principal["authorization_epoch"] < 1 or expires_at <= now()):
+            return None
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    session_id = uuid.uuid4()
+    async with pool.acquire() as connection, connection.transaction():
+        conflict = await connection.fetchval(
+            """SELECT session_id FROM realtime_sessions
+               WHERE tenant_id=$1 AND agent_id=$2 AND active_connection=true
+                 AND revoked_at IS NULL AND expires_at>now() LIMIT 1""",
+            principal["tenant_id"], principal["agent_id"],
+        )
+        if conflict:
+            return {"duplicate": True}
+        await connection.execute(
+            """INSERT INTO realtime_sessions(
+                 session_id,user_id,tenant_id,business_unit_id,agent_id,vicidial_user,
+                 extension,campaigns,realtime_role,authorization_epoch,created_at,
+                 expires_at,active_connection)
+               VALUES($1,$2,$3,'canonical',$2,$2,'canonical',$4::jsonb,$5,$6,$7,$8,true)""",
+            session_id, principal["agent_id"], principal["tenant_id"],
+            json.dumps([principal["campaign_id"]]), principal["role"],
+            principal["authorization_epoch"], now(), expires_at,
+        )
+    return {**principal, "session_id": session_id, "user_id": principal["agent_id"],
+            "business_unit_id": "canonical", "campaigns": [principal["campaign_id"]],
+            "expires_at": expires_at}
 
 
 async def replay_bounds(
@@ -334,11 +419,11 @@ async def session_is_active(pool: asyncpg.Pool, scope: dict[str, Any]) -> bool:
 async def revalidate_authorization(scope: dict[str, Any]) -> str:
     """Return active, denied, or indeterminate from the middleware authority."""
     headers = {
-        "Authorization": f"Bearer {settings.internal_token}",
+        "Authorization": f"Bearer {settings.middleware_service_token}",
         "X-Correlation-ID": str(uuid.uuid4()),
     }
     try:
-        async with httpx.AsyncClient(timeout=settings.authorization_timeout) as client:
+        async with middleware_client() as client:
             for campaign_id in scope["campaigns"]:
                 response = await client.post(settings.authorization_url, headers=headers, json={
                     "tenant_id": scope["tenant_id"],
@@ -360,7 +445,7 @@ async def revalidate_authorization(scope: dict[str, Any]) -> str:
                     or not 1 <= int(status.get("revalidate_after_seconds", 0)) <= 30
                 ):
                     return "denied"
-    except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+    except (httpx.HTTPError, RuntimeError, ValueError, TypeError, json.JSONDecodeError):
         return "indeterminate"
     return "active"
 
@@ -381,7 +466,7 @@ async def ws_agent(websocket: WebSocket) -> None:
             AUTH_FAILURES.inc(); await websocket.close(code=4408); return
         if frame.get("type") != "auth" or not isinstance(frame.get("ticket"), str) or len(frame["ticket"]) > 256:
             AUTH_FAILURES.inc(); await websocket.close(code=4401); return
-        scope = await consume_ticket(websocket.app.state.pool, frame["ticket"])
+        scope = await consume_middleware_ticket(websocket.app.state.pool, frame["ticket"])
         if not scope:
             AUTH_FAILURES.inc(); await websocket.close(code=4401); return
         if scope.get("duplicate"):
@@ -450,9 +535,12 @@ async def ws_agent(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        if established and scope:
+        if scope and not scope.get("duplicate"):
             await websocket.app.state.pool.execute("UPDATE realtime_sessions SET active_connection=false WHERE session_id=$1", scope["session_id"])
-            connections.pop(str(scope["session_id"]), None)
+            removed = connections.pop(str(scope["session_id"]), None)
+        else:
+            removed = None
+        if established and removed:
             ACTIVE.dec()
         if connection and connection.sender:
             connection.sender.cancel()

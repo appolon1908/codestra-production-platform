@@ -52,6 +52,7 @@ add_mapper agent oidc-hardcoded-claim-mapper '{"claim.name":"agent_id","claim.va
 add_mapper vicidial_user oidc-hardcoded-claim-mapper '{"claim.name":"vicidial_user","claim.value":"CERT6101","jsonType.label":"String","access.token.claim":"true"}'
 add_mapper extension oidc-hardcoded-claim-mapper '{"claim.name":"extension","claim.value":"6101","jsonType.label":"String","access.token.claim":"true"}'
 add_mapper campaigns oidc-hardcoded-claim-mapper '{"claim.name":"campaigns","claim.value":"[\"TEST_SYN\"]","jsonType.label":"JSON","access.token.claim":"true"}'
+add_mapper authorization_epoch oidc-hardcoded-claim-mapper '{"claim.name":"authorization_epoch","claim.value":"1","jsonType.label":"long","access.token.claim":"true"}'
 
 service_user_id="$(curl -fsS "${auth[@]}" "$base_url/admin/realms/$realm/clients/$client_uuid/service-account-user" | jq -er .id)"
 for role in telephony.webphone.use realtime.agent.connect; do

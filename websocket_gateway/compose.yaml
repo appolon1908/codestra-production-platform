@@ -34,6 +34,10 @@ services:
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
       INTERNAL_TOKEN_FILE: /run/secrets/internal_token
+      MIDDLEWARE_SERVICE_TOKEN_FILE: /run/secrets/middleware_service_token
+      MIDDLEWARE_MTLS_CA_FILE: /run/secrets/middleware_mtls_ca
+      MIDDLEWARE_MTLS_CERT_FILE: /run/secrets/middleware_mtls_cert
+      MIDDLEWARE_MTLS_KEY_FILE: /run/secrets/middleware_mtls_key
       KEYCLOAK_ISSUER: https://auth.codestra.co/realms/codestra
       KEYCLOAK_AUDIENCE: codestra-agent-desktop
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/codestra/protocol/openid-connect/certs
@@ -42,14 +46,18 @@ services:
       NATS_HOST: host.docker.internal
       NATS_PORT: "4222"
       INTERNAL_EVENT_SOURCE_HEALTH_URL: http://middleware:8095/health
-      INTERNAL_AUTHORIZATION_URL: http://middleware:8095/internal/v1/realtime/authorizations/revalidate
+      INTERNAL_AUTHORIZATION_URL: https://middleware:8095/internal/v1/realtime/authorizations/revalidate
+      INTERNAL_TICKET_CONSUME_URL: https://middleware:8095/internal/v1/realtime/tickets/consume
       AUTHORIZATION_TIMEOUT_SECONDS: "3"
       TICKET_TTL_SECONDS: "45"
       WS_AUTH_TIMEOUT_SECONDS: "5"
       MAX_PENDING_MESSAGES: "100"
       MAX_MESSAGE_SIZE: "65536"
       WRITE_TIMEOUT_SECONDS: "3"
-    secrets: [database_url, internal_token]
+      SOURCE_SHA: ${GATEWAY_SOURCE_SHA:?set exact gateway source SHA}
+      IMAGE_DIGEST: ${GATEWAY_DIGEST:?set gateway digest}
+      CALLING_CONTRACT_DIGEST: ${CALLING_CONTRACT_DIGEST:?set calling contract digest}
+    secrets: [database_url, internal_token, middleware_service_token, middleware_mtls_ca, middleware_mtls_cert, middleware_mtls_key]
     networks: [backend, edge, identity]
     ports:
       - "127.0.0.1:18102:8080"
@@ -89,6 +97,14 @@ secrets:
     file: /etc/codestra/secrets/websocket-gateway/database_url
   internal_token:
     file: /etc/codestra/secrets/websocket-gateway/internal_token
+  middleware_service_token:
+    file: /etc/codestra/secrets/websocket-gateway/middleware_service_token
+  middleware_mtls_ca:
+    file: /etc/codestra/secrets/websocket-gateway/middleware_mtls_ca
+  middleware_mtls_cert:
+    file: /etc/codestra/secrets/websocket-gateway/middleware_mtls_cert
+  middleware_mtls_key:
+    file: /etc/codestra/secrets/websocket-gateway/middleware_mtls_key
 volumes:
   realtime_postgres:
 networks:

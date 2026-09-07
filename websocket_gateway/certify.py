@@ -56,8 +56,8 @@ async def seeded_ticket(pool: asyncpg.Pool, *, agent: str, user: str | None = No
     user = user or agent
     async with pool.acquire() as connection, connection.transaction():
         await connection.execute(
-            """INSERT INTO realtime_sessions(session_id,user_id,tenant_id,business_unit_id,agent_id,vicidial_user,extension,campaigns,created_at,expires_at)
-            VALUES($1,$2,'synthetic-tenant','TEST',$3,$4,'6101',$5::jsonb,$6,$7)""",
+            """INSERT INTO realtime_sessions(session_id,user_id,tenant_id,business_unit_id,agent_id,vicidial_user,extension,campaigns,realtime_role,authorization_epoch,created_at,expires_at)
+            VALUES($1,$2,'synthetic-tenant','TEST',$3,$4,'6101',$5::jsonb,'telephony_agent',1,$6,$7)""",
             session_id, user, agent, agent, json.dumps([campaign]), current, current + timedelta(hours=1),
         )
         await connection.execute("INSERT INTO realtime_tickets(ticket_hash,session_id,expires_at) VALUES($1,$2,$3)", digest, session_id, current + timedelta(minutes=5))

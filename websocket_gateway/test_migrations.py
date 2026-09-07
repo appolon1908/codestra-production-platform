@@ -30,6 +30,17 @@ def test_open_socket_revalidates_middleware_authorization_fail_closed() -> None:
     assert "connection.delivery_allowed.clear()" in source
     assert 'code = 1008 if authorization == "denied" else 1011' in source
     assert 'next_revalidation = time.monotonic() + 30.0' in source
+    assert "middleware_client()" in source
+    compose = Path(__file__).with_name("compose.yaml").read_text()
+    for secret in ("middleware_mtls_ca", "middleware_mtls_cert", "middleware_mtls_key"):
+        assert secret in compose
+
+
+def test_socket_consumes_canonical_middleware_ticket() -> None:
+    source = Path(__file__).with_name("app.py").read_text()
+    assert "/internal/v1/realtime/tickets/consume" in source
+    assert "await consume_middleware_ticket(" in source
+    assert 'json={"ticket": ticket}' in source
 
 
 def test_replay_is_watermarked_paginated_and_serialized_with_publication() -> None:
@@ -42,10 +53,11 @@ def test_replay_is_watermarked_paginated_and_serialized_with_publication() -> No
     assert source.index("connections[sid] = connection") < source.index("while after < watermark:")
 
 
-def test_duplicate_ticket_cleanup_requires_established_connection() -> None:
+def test_partial_ticket_claim_is_released_even_before_establishment() -> None:
     source = Path(__file__).with_name("app.py").read_text()
     assert "established = False" in source
-    assert "if established and scope:" in source
+    assert 'if scope and not scope.get("duplicate"):' in source
+    assert "if established and removed:" in source
 
 
 def test_session_schema_persists_revalidation_authority() -> None:
@@ -64,6 +76,21 @@ def test_certifier_uses_issued_token_subject() -> None:
     assert 'access_token.split(".")[1]' in source
     assert "user=token_subject" in source
     assert "2a725359-2b9d-42da-af45-9af008a61353" not in source
+    keycloak = Path(__file__).with_name("configure_keycloak_certifier.sh").read_text()
+    assert "add_mapper authorization_epoch" in keycloak
+
+
+def test_seeded_sessions_include_required_authorization_fields() -> None:
+    source = Path(__file__).with_name("certify.py").read_text()
+    assert "realtime_role,authorization_epoch" in source
+    assert "'telephony_agent',1" in source
+
+
+def test_version_endpoint_reports_release_and_contract_identity() -> None:
+    source = Path(__file__).with_name("app.py").read_text()
+    assert '@app.get("/version")' in source
+    for field in ("source_sha", "image_digest", "contract_digest"):
+        assert f'"{field}"' in source
 
 
 def test_recovery_pass_requires_exact_single_render_per_event() -> None:

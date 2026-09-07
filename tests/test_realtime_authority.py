@@ -37,3 +37,14 @@ def test_gateway_rejects_browser_command_authority() -> None:
     assert '"client_command_not_allowed"' in gateway
     assert "/internal/v1/realtime/events" in gateway
     assert "require_internal" in gateway
+
+
+def test_popup_submission_is_fenced_by_current_lease() -> None:
+    javascript = (REALTIME_ADDON / "static/src/js/post_call_lease_service.js").read_text()
+    wizard = (REALTIME_ADDON / "models/post_call_wizard.py").read_text()
+    lease = (REALTIME_ADDON / "models/realtime_lease.py").read_text()
+    for token in ("default_popup_lease_owner", "default_popup_lease_token"):
+        assert token in javascript
+    assert "FOR UPDATE" in wizard
+    assert "_validate_popup_lease" in wizard
+    assert "popup_lease_expires_at <= fields.Datetime.now()" in lease

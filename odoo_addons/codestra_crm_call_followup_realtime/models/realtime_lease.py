@@ -122,6 +122,8 @@ class CodestraCrmCallFollowup(models.Model):
             raise AccessError(_("The popup lease token is invalid or stale."))
         if self.popup_lease_owner != client_id:
             raise AccessError(_("This popup lease belongs to another browser tab."))
+        if not self.popup_lease_expires_at or self.popup_lease_expires_at <= fields.Datetime.now():
+            raise AccessError(_("This popup lease has expired."))
         if self.agent_id != self.env.user:
             raise AccessError(_("Only the assigned agent may manage this popup lease."))
         if self.company_id not in self.env.companies:

@@ -120,6 +120,8 @@ const realtimePostCallService = {
                         target: "new",
                         context: {
                             default_followup_id: item.followup_id,
+                            default_popup_lease_owner: clientInstanceId,
+                            default_popup_lease_token: item.lease_token,
                             dialog_size: "large",
                         },
                     },
