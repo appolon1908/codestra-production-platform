@@ -41,6 +41,9 @@ ALLOWED_ACTIONS = {
     "rollback-control-plane",
     "rollout-middleware",
     "rollback-middleware",
+    "status-email-reseller",
+    "rollout-email-reseller",
+    "rollback-email-reseller",
     "activate-control-plane",
     "enable-production-web-traffic",
     "disable-production-web-traffic",
@@ -53,11 +56,13 @@ READ_ONLY_ACTIONS = {
     "collect-evidence",
     "kong-readback",
     "validate-control-plane",
+    "status-email-reseller",
 }
 RECOVERY_ACTIONS = {
     "rollback",
     "rollback-control-plane",
     "rollback-middleware",
+    "rollback-email-reseller",
     "disable-production-web-traffic",
     "disable-klyrow-email-delivery",
 }
@@ -68,6 +73,8 @@ SAFETY_BYPASS_ACTIONS = {
     "rollback",
     "rollback-control-plane",
     "rollback-middleware",
+    "status-email-reseller",
+    "rollback-email-reseller",
     "disable-production-web-traffic",
     "disable-klyrow-email-delivery",
 }
@@ -178,6 +185,40 @@ MIDDLEWARE_DB_CONTAINER = "codestra-postgres-1"
 MIDDLEWARE_DB = "codestra_middleware_appolon"
 MIDDLEWARE_REQUIRED_DATABASE_HEAD = "0056_klyrow_delivery_events"
 MIDDLEWARE_REQUIRED_SOURCE_SHA = "63b6c0c8bca5168a1178895bd12858d0b1e8086e"
+EMAIL_RESELLER_PROJECT = "codestra-email-reseller"
+EMAIL_RESELLER_CONTAINER = "codestra-email-reseller-api-1"
+EMAIL_RESELLER_SUBJECT = (
+    "ghcr.io/appolon1908-hue/email-reseller@"
+    "sha256:fe7a85a9bf71ff6c343743db465681c111c23e44dc8997e67c03ba849ce19b8c"
+)
+EMAIL_RESELLER_IMAGE_DIGEST = (
+    "sha256:fe7a85a9bf71ff6c343743db465681c111c23e44dc8997e67c03ba849ce19b8c"
+)
+EMAIL_RESELLER_SOURCE_SHA = "e3bdb3dc202a6e9a26f49bb2b52495079996ec91"
+EMAIL_RESELLER_BUILD_TIMESTAMP = "2026-09-06T19:45:17.763859543Z"
+EMAIL_RESELLER_MIGRATION_REVISION = "email-reseller-schema-v1"
+EMAIL_RESELLER_BACKUP_ROOT = Path(
+    "/opt/codestra/backups/email-reseller-protected-deploy"
+)
+EMAIL_RESELLER_ROLLBACK_MARKER = EMAIL_RESELLER_BACKUP_ROOT / "LAST_SUCCESS"
+EMAIL_RESELLER_RELEASE_FILES = {
+    "compose.yaml": "3367637bf0b6bbd4aabfb5e8768dc63793a7578915acfb5a383373813c6330ff",
+    "compose.live-delivery-safety.yaml": "a5be861cd4549a55da8fafe8ee1d88f8442e94fe163f70e4061aa3edcee42892",
+    "immutable-candidate-lock.json": "3a87ddff91c00c283a9fe97df8f176c2f44e00808b1ccc06328ce352eb30b605",
+}
+EMAIL_RESELLER_SAFETY_ENV = {
+    "EMAIL_SUBMISSION_MODE": "synthetic",
+    "LIVE_EMAIL_DELIVERY": "false",
+    "LIVE_SMS_DELIVERY": "false",
+    "LIVE_PSTN_DIALING": "false",
+    "CODESTRA_MIGRATION_REVISION": EMAIL_RESELLER_MIGRATION_REVISION,
+    "CODESTRA_ENVIRONMENT": "production",
+}
+EMAIL_RESELLER_REQUIRED_ENV = {
+    **EMAIL_RESELLER_SAFETY_ENV,
+    "CODESTRA_IMAGE_DIGEST": EMAIL_RESELLER_IMAGE_DIGEST,
+    "CODESTRA_BUILD_TIMESTAMP": EMAIL_RESELLER_BUILD_TIMESTAMP,
+}
 MIDDLEWARE_COMPOSE_LAYERS = (
     (Path("/opt/codestra/compose/compose.yaml"), "d6a7f2d3eeda3fa9e0709caa509f74510d1a552f21148754d8011928a7e3cd2d"),
     (Path("/opt/codestra/compose/compose.middleware-runtime.yaml"), "d6e2ba0372ecc8f7bc6e7a2bc0fb124bb71159664ab6110cc7478aa63a6a2906"),
@@ -1240,6 +1281,568 @@ def require_evidence_value(path: Path, key: str, expected: object) -> None:
         raise OperatorError("operator evidence is malformed") from error
     if payload.get(key) != expected:
         raise OperatorError(f"operator evidence {key} mismatch")
+
+
+def prepare_email_reseller_release(config: dict[str, str]) -> Path:
+    """Materialize only the checksum-bound protected source tree needed by the receiver."""
+    archive, release = control_plane_paths(config)
+    expected = checked_root_file(CONTROL_PLANE_ARCHIVE_CHECKSUM, expected_mode=0o644)
+    if re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        raise OperatorError("control-plane archive checksum is malformed")
+    if release.exists() or release.is_symlink():
+        info = release.lstat()
+        if (
+            release.is_symlink()
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) != 0o755
+        ):
+            raise OperatorError("email-reseller protected release directory is unsafe")
+    else:
+        CONTROL_PLANE_RELEASE_ROOT.mkdir(mode=0o755, parents=True, exist_ok=True)
+        staging = Path(
+            tempfile.mkdtemp(
+                prefix=f".email-reseller-{config['protected_sha']}.",
+                dir=CONTROL_PLANE_RELEASE_ROOT,
+            )
+        )
+        try:
+            os.chmod(staging, 0o700)
+            trusted_archive = staging / "protected-release.tar.gz"
+            copy_pinned_control_plane_archive(archive, trusted_archive, expected)
+            validate_control_plane_archive(trusted_archive, config["protected_sha"])
+            prepare_control_plane_release(
+                trusted_archive, release, config["protected_sha"], expected
+            )
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+    marker = release / ".protected-archive.sha256"
+    if checked_root_file(marker, expected_mode=0o644) != expected:
+        raise OperatorError("email-reseller release archive binding mismatch")
+    return release
+
+
+def validate_email_reseller_release(release: Path) -> dict[str, object]:
+    directory = release / "deploy/email-reseller"
+    for name, expected in EMAIL_RESELLER_RELEASE_FILES.items():
+        content = checked_root_bytes(directory / name, expected_mode=0o644)
+        if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), expected):
+            raise OperatorError(f"email-reseller protected file checksum mismatch: {name}")
+    try:
+        lock = json.loads(
+            checked_root_bytes(
+                directory / "immutable-candidate-lock.json", expected_mode=0o644
+            )
+        )
+    except json.JSONDecodeError as error:
+        raise OperatorError("email-reseller candidate lock is malformed") from error
+    expected_lock = {
+        "schema_version": "codestra.email-reseller-immutable-candidate-lock.v1",
+        "image": EMAIL_RESELLER_SUBJECT,
+        "image_digest": EMAIL_RESELLER_IMAGE_DIGEST,
+        "source_sha": EMAIL_RESELLER_SOURCE_SHA,
+        "build_timestamp": EMAIL_RESELLER_BUILD_TIMESTAMP,
+        "deployment_authorized": False,
+        "production_certified": False,
+    }
+    if any(lock.get(key) != value for key, value in expected_lock.items()):
+        raise OperatorError("email-reseller candidate lock binding mismatch")
+    evidence = lock.get("evidence")
+    if (
+        not isinstance(evidence, dict)
+        or set(evidence) != {"candidate", "signature", "provenance", "sbom", "labels"}
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"status", "sha256"}
+            or item.get("status") != "PASS"
+            or re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256", ""))) is None
+            for item in evidence.values()
+        )
+    ):
+        raise OperatorError("email-reseller candidate evidence is incomplete")
+    workflow = lock.get("workflow_run")
+    if (
+        not isinstance(workflow, dict)
+        or workflow.get("repository")
+        != "appolon1908-hue/codestra-production-platform"
+        or workflow.get("oidc_issuer") != "https://token.actions.githubusercontent.com"
+        or workflow.get("run_id") != 34055841105
+        or workflow.get("artifact_id") != 9995939653
+    ):
+        raise OperatorError("email-reseller candidate workflow binding mismatch")
+    return {
+        "candidate_evidence": "PASS",
+        "candidate_lock_sha256": EMAIL_RESELLER_RELEASE_FILES[
+            "immutable-candidate-lock.json"
+        ],
+    }
+
+
+def email_reseller_compose(release: Path, rollback_override: Path | None = None) -> list[str]:
+    directory = release / "deploy/email-reseller"
+    command = [
+        "/usr/bin/docker",
+        "compose",
+        "--project-name",
+        EMAIL_RESELLER_PROJECT,
+        "--project-directory",
+        str(release),
+        "--file",
+        str(directory / "compose.yaml"),
+        "--file",
+        str(directory / "compose.live-delivery-safety.yaml"),
+    ]
+    if rollback_override is not None:
+        checked_root_bytes(rollback_override)
+        command.extend(("--file", str(rollback_override)))
+    return command
+
+
+def validate_email_reseller_compose(compose: list[str], expected_image: str) -> None:
+    try:
+        rendered = json.loads(
+            run_bytes([*compose, "config", "--format", "json"], timeout=120).stdout
+        )
+    except (json.JSONDecodeError, subprocess.CalledProcessError) as error:
+        raise OperatorError("email-reseller Compose rendering failed") from error
+    services = rendered.get("services")
+    api = services.get("api") if isinstance(services, dict) else None
+    if not isinstance(api, dict) or api.get("image") != expected_image:
+        raise OperatorError("email-reseller Compose image binding mismatch")
+    environment = api.get("environment")
+    required_environment = (
+        EMAIL_RESELLER_REQUIRED_ENV
+        if expected_image == EMAIL_RESELLER_SUBJECT
+        else EMAIL_RESELLER_SAFETY_ENV
+    )
+    if not isinstance(environment, dict) or any(
+        str(environment.get(name, "")) != value
+        for name, value in required_environment.items()
+    ):
+        raise OperatorError("email-reseller Compose environment is not fail-closed")
+    if (
+        api.get("read_only") is not True
+        or "ALL" not in api.get("cap_drop", [])
+        or "no-new-privileges:true" not in api.get("security_opt", [])
+        or api.get("entrypoint")
+        != ["/opt/venv/bin/python", "-m", "email_reseller_service.admission"]
+        or api.get("command")
+        != ["/opt/venv/bin/python", "-m", "email_reseller_service.server"]
+    ):
+        raise OperatorError("email-reseller Compose hardening mismatch")
+    ports = api.get("ports")
+    if not isinstance(ports, list) or not any(
+        isinstance(item, dict)
+        and item.get("target") == 8080
+        and str(item.get("published")) == "18181"
+        and item.get("host_ip") == "127.0.0.1"
+        and item.get("protocol") == "tcp"
+        for item in ports
+    ):
+        raise OperatorError("email-reseller loopback port binding mismatch")
+
+
+def pull_email_reseller_image() -> dict[str, object]:
+    credential = sys.stdin.buffer.read(16384)
+    if (
+        not credential
+        or len(credential) >= 16384
+        or any(item in credential for item in (b"\x00", b"\n", b"\r"))
+    ):
+        raise OperatorError("invalid GHCR credential input")
+    docker_config = Path(tempfile.mkdtemp(prefix="codestra-docker-", dir="/run"))
+    try:
+        run_bytes(
+            [
+                "/usr/bin/docker", "--config", str(docker_config), "login",
+                "ghcr.io", "--username", "appolon1908-hue", "--password-stdin",
+            ],
+            stdin=credential,
+            timeout=60,
+        )
+        credential = b""
+        run_bytes(
+            [
+                "/usr/bin/docker", "--config", str(docker_config), "pull",
+                "--quiet", EMAIL_RESELLER_SUBJECT,
+            ]
+        )
+        image = docker_inspect(EMAIL_RESELLER_SUBJECT)
+    finally:
+        credential = b""
+        shutil.rmtree(docker_config, ignore_errors=True)
+    labels = image.get("Config", {}).get("Labels", {})
+    if (
+        EMAIL_RESELLER_SUBJECT not in image.get("RepoDigests", [])
+        or not isinstance(labels, dict)
+        or labels.get("org.opencontainers.image.revision") != EMAIL_RESELLER_SOURCE_SHA
+        or labels.get("org.opencontainers.image.version") != EMAIL_RESELLER_SOURCE_SHA
+        or labels.get("org.opencontainers.image.source")
+        != "https://github.com/appolon1908-hue/codestra-production-platform"
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", str(image.get("Id", ""))) is None
+    ):
+        raise OperatorError("email-reseller pulled image identity mismatch")
+    return image
+
+
+def email_reseller_endpoint(path: str) -> dict[str, object]:
+    result = run_bytes(
+        [
+            "/usr/bin/docker", "exec", EMAIL_RESELLER_CONTAINER,
+            "/opt/venv/bin/python", "-c",
+            (
+                "import urllib.request;print(urllib.request.urlopen("
+                f"'http://127.0.0.1:8080{path}',timeout=5).read().decode())"
+            ),
+        ],
+        timeout=30,
+    )
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise OperatorError(f"email-reseller endpoint returned invalid JSON: {path}") from error
+    if not isinstance(value, dict):
+        raise OperatorError(f"email-reseller endpoint returned invalid data: {path}")
+    return value
+
+
+def email_reseller_callback_backlog() -> dict[str, int]:
+    script = (
+        "import json;from email_reseller_service.server import connect;"
+        "db=connect();row=db.execute(\"select count(*) as messages_total,"
+        "sum(case when status in ('accepted','queued','sent','soft_bounce') then 1 else 0 end) "
+        "as callback_backlog from email_messages\").fetchone();"
+        "events=db.execute('select count(*) as delivery_events_total from delivery_events').fetchone();"
+        "print(json.dumps({**dict(row),**dict(events)}));db.raw.close()"
+    )
+    result = run_bytes(
+        [
+            "/usr/bin/docker", "exec", EMAIL_RESELLER_CONTAINER,
+            "/opt/venv/bin/python", "-c", script,
+        ],
+        timeout=30,
+    )
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise OperatorError("email-reseller callback backlog readback failed") from error
+    expected = {"messages_total", "callback_backlog", "delivery_events_total"}
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected
+        or any(
+            item is not None and (isinstance(item, bool) or not isinstance(item, int) or item < 0)
+            for item in value.values()
+        )
+    ):
+        raise OperatorError("email-reseller callback backlog is malformed")
+    return {name: int(value.get(name) or 0) for name in expected}
+
+
+def wait_email_reseller_health(timeout_seconds: int = 120) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        status_value = docker_inspect(EMAIL_RESELLER_CONTAINER).get("State", {}).get(
+            "Health", {}
+        ).get("Status")
+        if status_value == "healthy":
+            return
+        if status_value == "unhealthy":
+            raise OperatorError("email-reseller became unhealthy")
+        time.sleep(2)
+    raise OperatorError("email-reseller health check timed out")
+
+
+def validate_email_reseller_runtime(
+    *, expected_image: str | None, expected_image_id: str | None = None
+) -> dict[str, object]:
+    current = docker_inspect(EMAIL_RESELLER_CONTAINER)
+    state = current.get("State", {})
+    if not state.get("Running") or state.get("Health", {}).get("Status") != "healthy":
+        raise OperatorError("email-reseller runtime is not healthy")
+    config = current.get("Config", {})
+    if expected_image is not None and config.get("Image") != expected_image:
+        raise OperatorError("email-reseller runtime image reference mismatch")
+    if expected_image_id is not None and current.get("Image") != expected_image_id:
+        raise OperatorError("email-reseller runtime image ID mismatch")
+    environment = dict(
+        item.split("=", 1) for item in config.get("Env", []) if "=" in item
+    )
+    required_environment = (
+        EMAIL_RESELLER_REQUIRED_ENV
+        if expected_image == EMAIL_RESELLER_SUBJECT
+        else EMAIL_RESELLER_SAFETY_ENV
+    )
+    if any(environment.get(name) != value for name, value in required_environment.items()):
+        raise OperatorError("email-reseller runtime environment is not fail-closed")
+    host = current.get("HostConfig", {})
+    ports = current.get("NetworkSettings", {}).get("Ports", {}).get("8080/tcp")
+    networks = current.get("NetworkSettings", {}).get("Networks", {})
+    if (
+        config.get("Entrypoint")
+        != ["/opt/venv/bin/python", "-m", "email_reseller_service.admission"]
+        or config.get("Cmd")
+        != ["/opt/venv/bin/python", "-m", "email_reseller_service.server"]
+        or host.get("ReadonlyRootfs") is not True
+        or host.get("CapDrop") != ["ALL"]
+        or "no-new-privileges:true" not in host.get("SecurityOpt", [])
+        or "/tmp" not in host.get("Tmpfs", {})
+        or host.get("RestartPolicy", {}).get("Name") != "unless-stopped"
+        or ports != [{"HostIp": "127.0.0.1", "HostPort": "18181"}]
+        or not isinstance(networks, dict)
+        or set(networks) != {"codestra_edge", "codestra_backend"}
+    ):
+        raise OperatorError("email-reseller runtime hardening readback mismatch")
+    version = email_reseller_endpoint("/version")
+    ready = email_reseller_endpoint("/readyz")
+    health = email_reseller_endpoint("/health")
+    capabilities = email_reseller_endpoint("/capabilities")
+    common_version = {
+        "service": "email-reseller",
+        "migration_revision": EMAIL_RESELLER_MIGRATION_REVISION,
+        "environment": "production",
+    }
+    if any(version.get(key) != value for key, value in common_version.items()):
+        raise OperatorError("email-reseller version readback mismatch")
+    if expected_image == EMAIL_RESELLER_SUBJECT and (
+        version.get("git_sha") != EMAIL_RESELLER_SOURCE_SHA
+        or version.get("application_version") != EMAIL_RESELLER_SOURCE_SHA
+        or version.get("image_digest") != EMAIL_RESELLER_IMAGE_DIGEST
+        or version.get("build_timestamp") != EMAIL_RESELLER_BUILD_TIMESTAMP
+    ):
+        raise OperatorError("email-reseller candidate identity readback mismatch")
+    if ready.get("status") != "ready" or ready.get("postgresql") != "ok":
+        raise OperatorError("email-reseller database readiness readback mismatch")
+    if health.get("status") != "ok" or health.get("submission_mode") != "synthetic":
+        raise OperatorError("email-reseller health readback mismatch")
+    capability_values = {
+        "business_writes_enabled": False,
+        "external_delivery_enabled": False,
+        "live_email_enabled": False,
+        "live_sms_enabled": False,
+        "live_pstn_enabled": False,
+        "simulation_enabled": True,
+    }
+    if any(capabilities.get(key) is not value for key, value in capability_values.items()):
+        raise OperatorError("email-reseller capability readback is not fail-closed")
+    klyrow = health.get("klyrow")
+    link = {
+        "reachable": bool(klyrow.get("reachable")) if isinstance(klyrow, dict) else False,
+        "safe_mode": klyrow.get("safe_mode") if isinstance(klyrow, dict) else None,
+        "production_gate_approved": (
+            klyrow.get("production_gate_approved") if isinstance(klyrow, dict) else None
+        ),
+    }
+    return {
+        "email_reseller_subject": config.get("Image"),
+        "email_reseller_image_id": current.get("Image"),
+        "email_reseller_health": "PASS",
+        "email_reseller_database": "PASS",
+        "email_reseller_delivery": "DISABLED",
+        "email_reseller_source_sha": version.get("git_sha"),
+        "klyrow_link": link,
+        **email_reseller_callback_backlog(),
+    }
+
+
+def email_reseller_status() -> dict[str, object]:
+    try:
+        current = docker_inspect(EMAIL_RESELLER_CONTAINER)
+    except subprocess.CalledProcessError:
+        return {
+            "email_reseller_present": False,
+            "email_reseller_expected_subject": EMAIL_RESELLER_SUBJECT,
+        }
+    config = current.get("Config", {})
+    environment = dict(
+        item.split("=", 1) for item in config.get("Env", []) if "=" in item
+    )
+    result: dict[str, object] = {
+        "email_reseller_present": True,
+        "email_reseller_running": bool(current.get("State", {}).get("Running")),
+        "email_reseller_health_status": current.get("State", {}).get("Health", {}).get("Status"),
+        "email_reseller_subject": config.get("Image"),
+        "email_reseller_image_id": current.get("Image"),
+        "email_reseller_expected_subject": EMAIL_RESELLER_SUBJECT,
+        "email_reseller_candidate_active": config.get("Image") == EMAIL_RESELLER_SUBJECT,
+        "email_reseller_delivery_flags_false": all(
+            environment.get(name) == value
+            for name, value in EMAIL_RESELLER_SAFETY_ENV.items()
+        ),
+    }
+    if result["email_reseller_running"]:
+        try:
+            result.update(
+                validate_email_reseller_runtime(
+                    expected_image=(
+                        EMAIL_RESELLER_SUBJECT
+                        if result["email_reseller_candidate_active"]
+                        else None
+                    )
+                )
+            )
+        except (OperatorError, subprocess.CalledProcessError):
+            result["email_reseller_readback"] = "FAIL"
+        else:
+            result["email_reseller_readback"] = "PASS"
+    return result
+
+
+def snapshot_email_reseller(config: dict[str, str]) -> str:
+    current = docker_inspect(EMAIL_RESELLER_CONTAINER)
+    image_id = str(current.get("Image", ""))
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
+        raise OperatorError("email-reseller rollback image ID is malformed")
+    validate_email_reseller_runtime(expected_image=None, expected_image_id=image_id)
+    environment = dict(
+        item.split("=", 1)
+        for item in current.get("Config", {}).get("Env", [])
+        if "=" in item
+    )
+    previous_digest = environment.get("CODESTRA_IMAGE_DIGEST", "")
+    previous_build_timestamp = environment.get("CODESTRA_BUILD_TIMESTAMP", "")
+    if (
+        re.fullmatch(r"sha256:[0-9a-f]{64}", previous_digest) is None
+        or not previous_build_timestamp
+        or len(previous_build_timestamp) > 80
+        or any(character not in "0123456789-:.+TZ" for character in previous_build_timestamp)
+    ):
+        raise OperatorError("email-reseller rollback version metadata is malformed")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup = EMAIL_RESELLER_BACKUP_ROOT / stamp
+    backup.mkdir(mode=0o700, parents=True)
+    tag = f"codestra/email-reseller-api:rollback-{stamp}"
+    run_bytes(["/usr/bin/docker", "tag", image_id, tag], timeout=60)
+    atomic_root_text(backup / "image-id", image_id + "\n", mode=0o600)
+    override_text = (
+        "services:\n"
+        "  api:\n"
+        f"    image: {tag}\n"
+        "    environment:\n"
+        f"      CODESTRA_IMAGE_DIGEST: {previous_digest}\n"
+        f"      CODESTRA_BUILD_TIMESTAMP: {json.dumps(previous_build_timestamp)}\n"
+    )
+    atomic_root_text(backup / "rollback.override.yaml", override_text, mode=0o600)
+    atomic_root_json(backup / "rollout-target.json", config, mode=0o600)
+    fsync_directory(backup)
+    atomic_root_text(EMAIL_RESELLER_ROLLBACK_MARKER, stamp + "\n", mode=0o600)
+    return stamp
+
+
+def validate_email_reseller_rollback(config: dict[str, str]) -> dict[str, object]:
+    stamp = checked_root_file(EMAIL_RESELLER_ROLLBACK_MARKER)
+    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", stamp) is None:
+        raise OperatorError("email-reseller rollback marker is malformed")
+    backup = EMAIL_RESELLER_BACKUP_ROOT / stamp
+    info = backup.lstat()
+    if (
+        backup.is_symlink()
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise OperatorError("email-reseller rollback directory is unsafe")
+    try:
+        target = json.loads(checked_root_file(backup / "rollout-target.json"))
+    except json.JSONDecodeError as error:
+        raise OperatorError("email-reseller rollback target is malformed") from error
+    if target != config:
+        raise OperatorError("email-reseller rollback target does not match exact release")
+    image_id = checked_root_file(backup / "image-id")
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
+        raise OperatorError("email-reseller rollback image ID is malformed")
+    tag = f"codestra/email-reseller-api:rollback-{stamp}"
+    if docker_inspect(tag).get("Id") != image_id:
+        raise OperatorError("email-reseller rollback image tag mismatch")
+    override = backup / "rollback.override.yaml"
+    override_bytes = checked_root_bytes(override)
+    if (
+        len(override_bytes) > 1024
+        or not override_bytes.startswith(
+            f"services:\n  api:\n    image: {tag}\n    environment:\n".encode("ascii")
+        )
+        or re.search(
+            rb"(?m)^      CODESTRA_IMAGE_DIGEST: sha256:[0-9a-f]{64}$",
+            override_bytes,
+        ) is None
+        or re.search(
+            rb'(?m)^      CODESTRA_BUILD_TIMESTAMP: "[0-9T:.+Z-]{1,80}"$',
+            override_bytes,
+        ) is None
+        or override_bytes.count(b"\n") != 6
+    ):
+        raise OperatorError("email-reseller rollback override mismatch")
+    return {"stamp": stamp, "image_id": image_id, "override": override}
+
+
+def rollback_email_reseller(config: dict[str, str]) -> dict[str, object]:
+    bundle = validate_email_reseller_rollback(config)
+    release = prepare_email_reseller_release(config)
+    validate_email_reseller_release(release)
+    compose = email_reseller_compose(release, bundle["override"])
+    validate_email_reseller_compose(
+        compose, f"codestra/email-reseller-api:rollback-{bundle['stamp']}"
+    )
+    run_bytes(
+        [*compose, "up", "--detach", "--no-deps", "--force-recreate", "api"],
+        timeout=300,
+    )
+    wait_email_reseller_health()
+    runtime = validate_email_reseller_runtime(
+        expected_image=f"codestra/email-reseller-api:rollback-{bundle['stamp']}",
+        expected_image_id=str(bundle["image_id"]),
+    )
+    return {
+        **runtime,
+        "email_reseller_rollback": "PASS",
+        "email_reseller_rollback_stamp": bundle["stamp"],
+    }
+
+
+def rollout_email_reseller(config: dict[str, str]) -> dict[str, object]:
+    """Replace only the callback receiver with the attested loop-fix image."""
+    release = prepare_email_reseller_release(config)
+    candidate = validate_email_reseller_release(release)
+    compose = email_reseller_compose(release)
+    validate_email_reseller_compose(compose, EMAIL_RESELLER_SUBJECT)
+    image = pull_email_reseller_image()
+    try:
+        current = validate_email_reseller_runtime(expected_image=EMAIL_RESELLER_SUBJECT)
+    except (OperatorError, subprocess.CalledProcessError):
+        current = None
+    if current is not None and current.get("email_reseller_image_id") == image.get("Id"):
+        return {
+            **candidate,
+            **current,
+            "email_reseller_rollout": "PASS",
+            "email_reseller_already_current": True,
+            "deployment_authority": "protected-production-environment",
+        }
+    stamp = snapshot_email_reseller(config)
+    try:
+        run_bytes(
+            [*compose, "up", "--detach", "--no-deps", "--force-recreate", "api"],
+            timeout=300,
+        )
+        wait_email_reseller_health()
+        runtime = validate_email_reseller_runtime(
+            expected_image=EMAIL_RESELLER_SUBJECT,
+            expected_image_id=str(image["Id"]),
+        )
+        if not runtime["klyrow_link"]["reachable"]:
+            raise OperatorError("email-reseller cannot reach Klyrow")
+    except Exception:
+        rollback_email_reseller(config)
+        raise
+    return {
+        **candidate,
+        **runtime,
+        "email_reseller_rollout": "PASS",
+        "email_reseller_rollback_stamp": stamp,
+        "deployment_authority": "protected-production-environment",
+    }
 
 
 def verify_middleware_runtime(config: dict[str, str]) -> dict[str, str]:
@@ -2914,6 +3517,12 @@ def execute(action: str) -> tuple[int, dict[str, object]]:
         result.update(rollout_middleware(config))
     elif action == "rollback-middleware":
         result.update(rollback_middleware(config))
+    elif action == "status-email-reseller":
+        result.update(email_reseller_status())
+    elif action == "rollout-email-reseller":
+        result.update(rollout_email_reseller(config))
+    elif action == "rollback-email-reseller":
+        result.update(rollback_email_reseller(config))
     elif action == "activate-control-plane":
         result.update(activate_control_plane(config))
     elif action == "enable-production-web-traffic":
