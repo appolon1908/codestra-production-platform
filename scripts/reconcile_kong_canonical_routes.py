@@ -334,6 +334,8 @@ def verify_managed_route(
 def host_matches(pattern: str, host: str) -> bool:
     return pattern == host or (
         pattern.startswith("*.") and host.endswith(pattern[1:]) and host != pattern[2:]
+    ) or (
+        pattern.endswith(".*") and host.startswith(pattern[:-1]) and host != pattern[:-2]
     )
 
 

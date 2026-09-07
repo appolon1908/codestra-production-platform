@@ -336,8 +336,12 @@ def test_exporter_pagination_cannot_leave_the_selected_admin_origin():
 def test_kong_wildcard_host_matches_public_subdomains():
     module = _module()
     assert module.host_matches("*.codestra.agency", "api.codestra.agency")
+    assert module.host_matches("api.codestra.*", "api.codestra.agency")
     assert not module.host_matches("*.codestra.agency", "codestra.agency")
     assert not module.host_matches("*.codestra.agency", "api.codestra.co")
+    exporter = _exporter()
+    assert exporter.host_matches("*.codestra.co", "api.codestra.co")
+    assert exporter.host_matches("api.codestra.*", "api.codestra.co")
 
 
 def test_exporter_admin_origin_strips_basic_auth_credentials():
@@ -369,7 +373,8 @@ def test_exporter_redacts_credentials_in_upstream_service_paths(monkeypatch):
 
 def test_exporter_includes_hostless_routes_in_public_evidence():
     source = EXPORTER_PATH.read_text()
-    assert "if route_hosts and not public_hosts.intersection(route_hosts):" in source
+    assert "if route_hosts and not any(" in source
+    assert "for pattern in route_hosts for host in public_hosts" in source
 
 
 def test_inline_and_standalone_control_plane_scope_policies_are_identical():

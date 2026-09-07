@@ -10,6 +10,7 @@ authority by itself.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -72,6 +73,14 @@ PRIVATE_KEY_MARKER = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY--
 SECRET_PATH_MARKERS = {"callback", "callbacks", "hook", "hooks", "webhook", "webhooks"}
 HIGH_ENTROPY_PATH_SEGMENT = re.compile(r"^[A-Za-z0-9._~+/=-]{24,}$")
 CODE_BEARING_KEYS = {"access", "body_filter", "certificate", "functions", "header_filter", "log", "rewrite"}
+
+
+def host_matches(pattern: str, host: str) -> bool:
+    return pattern == host or (
+        pattern.startswith("*.") and host.endswith(pattern[1:]) and host != pattern[2:]
+    ) or (
+        pattern.endswith(".*") and host.startswith(pattern[:-1]) and host != pattern[:-2]
+    )
 
 
 def request(base: str, path: str) -> dict:
@@ -283,7 +292,10 @@ def main() -> int:
         )
         public_hosts = {manifest["canonicalHost"], manifest["legacyHost"]}
         route_hosts = route.get("hosts") or []
-        if route_hosts and not public_hosts.intersection(route_hosts):
+        if route_hosts and not any(
+            host_matches(pattern, host)
+            for pattern in route_hosts for host in public_hosts
+        ):
             raise RuntimeError(f"declared unverified route is not public: {name}")
         records.append(route_record(args.admin_url, route, services))
 
