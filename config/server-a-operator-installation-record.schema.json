@@ -4,21 +4,36 @@
   "title": "Server A operator installation approval record",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "status", "mode", "reference_release", "target_release", "operator_public_key_fingerprint", "arguments"],
+  "required": ["schema_version", "status", "mode", "reference_release", "server_a_identity", "target_release", "operator_public_key_fingerprint", "arguments"],
   "properties": {
     "schema_version": {"const": "codestra.server-a-operator-installation-record.v1"},
     "status": {"enum": ["incomplete", "approved"]},
     "mode": {"const": "preserve-existing-sudoers"},
     "reference_release": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "server_a_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostname", "primary_ipv4", "observed_as", "public_key_metadata"],
+      "properties": {
+        "hostname": {"const": "middleware"},
+        "primary_ipv4": {"const": "65.109.65.169"},
+        "observed_as": {"const": "codestra-admin"},
+        "public_key_metadata": {"const": "root:root mode=0600 links=1 bytes=81 path=/home/codestra-admin/operator-current.tR55n3.pub"}
+      }
+    },
     "target_release": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["protected_commit", "release_archive_sha256", "release_manifest_sha256", "installer_sha256", "approval"],
+      "required": ["protected_commit", "release_archive_sha256", "release_manifest_sha256", "installer_sha256", "launcher_sha256", "embedded_installation_record_sha256", "trust_anchor_sha256", "manifest_signature_verified", "approval"],
       "properties": {
         "protected_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
         "release_archive_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
         "release_manifest_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
         "installer_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "launcher_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "embedded_installation_record_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "trust_anchor_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "manifest_signature_verified": {"type": ["boolean", "null"]},
         "approval": {"type": ["string", "null"], "minLength": 1}
       }
     },
