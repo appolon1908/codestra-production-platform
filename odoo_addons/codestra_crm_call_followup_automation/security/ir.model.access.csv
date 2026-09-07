@@ -1,2 +1,4 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_codestra_call_followup_outbox_manager,Call follow-up outbox manager,model_codestra_crm_call_followup_outbox,codestra_crm_call_followup.group_call_followup_manager,1,0,0,0
+access_followup_policy_manager,codestra.crm.call.followup.policy manager,model_codestra_crm_call_followup_policy,codestra_crm_call_followup.group_call_followup_manager,1,1,1,1
+access_followup_job_manager,codestra.crm.call.followup.job manager,model_codestra_crm_call_followup_job,codestra_crm_call_followup.group_call_followup_manager,1,0,0,0
