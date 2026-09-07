@@ -97,7 +97,7 @@ def _release_manifest() -> dict:
     sha = "0" * 64
     evidence = {
         evidence_class: {
-            "path": f"evidence/{evidence_class}.json",
+            "path": f"evidence/staging/{evidence_class}.json",
             "sha256": sha,
             "environment": "staging",
         }
@@ -120,14 +120,22 @@ def _release_manifest() -> dict:
         for service_id in composition["release_service_ids"]
     }
     image_references.update({
-        "middleware": "ghcr.io/appolon1908-hue/codestra-middleware",
-        "nats-jetstream": "ghcr.io/appolon1908-hue/codestra-middleware",
-        "temporal": "ghcr.io/appolon1908-hue/codestra-middleware",
-        "middleware-external-webhook-worker": "ghcr.io/appolon1908-hue/codestra-middleware",
-        "middleware-breero-odoo-worker": "ghcr.io/appolon1908-hue/codestra-middleware",
+        "middleware": "ghcr.io/codestra-srl/codestra-middleware",
+        "nats-jetstream": "ghcr.io/codestra-srl/codestra-middleware",
+        "temporal": "ghcr.io/codestra-srl/codestra-middleware",
+        "middleware-external-webhook-worker": "ghcr.io/codestra-srl/codestra-middleware",
+        "middleware-breero-odoo-worker": "ghcr.io/codestra-srl/codestra-middleware",
         "odoo-19": "ghcr.io/codestra-srl/codestra-odoo",
         "email-reseller-api": "ghcr.io/appolon1908-hue/email-reseller",
         "stalwart": "stalwartlabs/stalwart",
+        "redis": "redis",
+        "prometheus": "prom/prometheus",
+        "alertmanager": "prom/alertmanager",
+        "node-exporter": "prom/node-exporter",
+        "postgres-exporter": "docker.io/prometheuscommunity/postgres-exporter",
+        "redis-exporter": "docker.io/oliver006/redis_exporter",
+        "cadvisor": "gcr.io/cadvisor/cadvisor",
+        "blackbox-exporter": "prom/blackbox-exporter",
     })
     return {
         "schema_version": "platform-release-manifest.v1",
@@ -286,7 +294,7 @@ def test_production_acceptance_requires_staging_acceptance() -> None:
     production_evidence.update(
         {
             evidence_class: {
-                "path": f"evidence/production-{evidence_class}.json",
+                "path": f"evidence/production/{evidence_class}.json",
                 "sha256": "0" * 64,
                 "environment": "production",
             }
@@ -323,7 +331,7 @@ def test_production_acceptance_requires_every_evidence_class(
     manifest = _release_manifest()
     evidence = deepcopy(manifest["promotion"]["staging"]["evidence"])
     evidence["approval"] = {
-        "path": "evidence/production-approval.json",
+        "path": "evidence/production/approval.json",
         "sha256": "0" * 64,
         "environment": "production",
     }

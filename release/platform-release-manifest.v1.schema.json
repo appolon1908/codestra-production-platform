@@ -32,8 +32,8 @@
     },
     "services": {
       "type": "array",
-      "minItems": 28,
-      "maxItems": 28,
+      "minItems": 34,
+      "maxItems": 34,
       "allOf": [
         {"contains": {"properties": {"service_id": {"const": "caddy"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "kong"}}, "required": ["service_id"]}},
@@ -42,7 +42,13 @@
         {"contains": {"properties": {"service_id": {"const": "n8n"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "keycloak"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "kyqra-crawler"}}, "required": ["service_id"]}},
-        {"contains": {"properties": {"service_id": {"const": "observability"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "prometheus"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "alertmanager"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "node-exporter"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "postgres-exporter"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "redis-exporter"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "cadvisor"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "blackbox-exporter"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "postgresql"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "redis"}}, "required": ["service_id"]}},
         {"contains": {"properties": {"service_id": {"const": "nats-jetstream"}}, "required": ["service_id"]}},
@@ -70,7 +76,7 @@
         "required": ["service_id", "repository", "git_sha", "image", "service_manifest_sha256"],
         "allOf": [
           {
-            "if": {"properties": {"service_id": {"enum": ["caddy", "kong", "observability", "postgresql", "redis", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress", "websocket-gateway", "integration-control-plane"]}}},
+            "if": {"properties": {"service_id": {"enum": ["caddy", "kong", "prometheus", "alertmanager", "node-exporter", "postgres-exporter", "redis-exporter", "cadvisor", "blackbox-exporter", "postgresql", "redis", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress", "websocket-gateway", "integration-control-plane"]}}},
             "then": {"properties": {"repository": {"const": "appolon1908-hue/codestra-production-platform"}}}
           },
           {
@@ -86,20 +92,26 @@
           {"oneOf": [
             {"properties":{"service_id":{"const":"caddy"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/caddy"}}}}},
             {"properties":{"service_id":{"const":"kong"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/kong"}}}}},
-            {"properties":{"service_id":{"const":"middleware"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/codestra-middleware"}}}}},
+            {"properties":{"service_id":{"const":"middleware"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-middleware"}}}}},
             {"properties":{"service_id":{"const":"odoo-19"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-odoo"}}}}},
             {"properties":{"service_id":{"const":"n8n"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/n8n"}}}}},
             {"properties":{"service_id":{"const":"keycloak"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/keycloak"}}}}},
             {"properties":{"service_id":{"const":"kyqra-crawler"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/kyqra-crawler"}}}}},
-            {"properties":{"service_id":{"const":"observability"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/observability"}}}}},
+            {"properties":{"service_id":{"const":"prometheus"},"image":{"properties":{"reference":{"const":"prom/prometheus"}}}}},
+            {"properties":{"service_id":{"const":"alertmanager"},"image":{"properties":{"reference":{"const":"prom/alertmanager"}}}}},
+            {"properties":{"service_id":{"const":"node-exporter"},"image":{"properties":{"reference":{"const":"prom/node-exporter"}}}}},
+            {"properties":{"service_id":{"const":"postgres-exporter"},"image":{"properties":{"reference":{"const":"docker.io/prometheuscommunity/postgres-exporter"}}}}},
+            {"properties":{"service_id":{"const":"redis-exporter"},"image":{"properties":{"reference":{"const":"docker.io/oliver006/redis_exporter"}}}}},
+            {"properties":{"service_id":{"const":"cadvisor"},"image":{"properties":{"reference":{"const":"gcr.io/cadvisor/cadvisor"}}}}},
+            {"properties":{"service_id":{"const":"blackbox-exporter"},"image":{"properties":{"reference":{"const":"prom/blackbox-exporter"}}}}},
             {"properties":{"service_id":{"const":"postgresql"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/postgresql"}}}}},
-            {"properties":{"service_id":{"const":"redis"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/redis"}}}}},
-            {"properties":{"service_id":{"const":"nats-jetstream"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/codestra-middleware"}}}}},
-            {"properties":{"service_id":{"const":"temporal"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/codestra-middleware"}}}}},
+            {"properties":{"service_id":{"const":"redis"},"image":{"properties":{"reference":{"const":"redis"}}}}},
+            {"properties":{"service_id":{"const":"nats-jetstream"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-middleware"}}}}},
+            {"properties":{"service_id":{"const":"temporal"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-middleware"}}}}},
             {"properties":{"service_id":{"const":"telnexa"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/telnexa"}}}}},
             {"properties":{"service_id":{"const":"klyrow"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/klyrow"}}}}},
-            {"properties":{"service_id":{"const":"middleware-external-webhook-worker"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/codestra-middleware"}}}}},
-            {"properties":{"service_id":{"const":"middleware-breero-odoo-worker"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/codestra-middleware"}}}}},
+            {"properties":{"service_id":{"const":"middleware-external-webhook-worker"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-middleware"}}}}},
+            {"properties":{"service_id":{"const":"middleware-breero-odoo-worker"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-middleware"}}}}},
             {"properties":{"service_id":{"const":"sms-event-worker"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/sms-event-worker"}}}}},
             {"properties":{"service_id":{"const":"email-reseller-api"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/email-reseller"}}}}},
             {"properties":{"service_id":{"const":"sms-api"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/sms-api"}}}}},
@@ -123,7 +135,7 @@
             "additionalProperties": false,
             "required": ["reference", "digest"],
             "properties": {
-              "reference": {"type": "string", "pattern": "^[a-z0-9.-]+/[a-z0-9._/-]+$"},
+              "reference": {"type": "string", "pattern": "^(?:[a-z0-9.-]+/)?[a-z0-9._/-]+$"},
               "digest": {"$ref": "#/$defs/image_digest"}
             }
           },
@@ -261,21 +273,21 @@
     },
     "staging_evidence_environment": {
       "properties": {"evidence": {"properties": {
-        "integration": {"properties": {"environment": {"const": "staging"}}, "required": ["environment"]},
-        "backup": {"properties": {"environment": {"const": "staging"}}, "required": ["environment"]},
-        "restore": {"properties": {"environment": {"const": "staging"}}, "required": ["environment"]},
-        "monitoring": {"properties": {"environment": {"const": "staging"}}, "required": ["environment"]},
-        "rollback": {"properties": {"environment": {"const": "staging"}}, "required": ["environment"]}
+        "integration": {"properties": {"path": {"pattern": "^evidence/staging/"}, "environment": {"const": "staging"}}, "required": ["environment"]},
+        "backup": {"properties": {"path": {"pattern": "^evidence/staging/"}, "environment": {"const": "staging"}}, "required": ["environment"]},
+        "restore": {"properties": {"path": {"pattern": "^evidence/staging/"}, "environment": {"const": "staging"}}, "required": ["environment"]},
+        "monitoring": {"properties": {"path": {"pattern": "^evidence/staging/"}, "environment": {"const": "staging"}}, "required": ["environment"]},
+        "rollback": {"properties": {"path": {"pattern": "^evidence/staging/"}, "environment": {"const": "staging"}}, "required": ["environment"]}
       }}}
     },
     "production_evidence_environment": {
       "properties": {"evidence": {"properties": {
-        "integration": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]},
-        "backup": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]},
-        "restore": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]},
-        "monitoring": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]},
-        "rollback": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]},
-        "approval": {"properties": {"environment": {"const": "production"}}, "required": ["environment"]}
+        "integration": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]},
+        "backup": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]},
+        "restore": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]},
+        "monitoring": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]},
+        "rollback": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]},
+        "approval": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]}
       }}}
     }
   }

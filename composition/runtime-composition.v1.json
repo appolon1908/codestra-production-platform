@@ -19,7 +19,13 @@
     "n8n",
     "keycloak",
     "kyqra-crawler",
-    "observability",
+    "prometheus",
+    "alertmanager",
+    "node-exporter",
+    "postgres-exporter",
+    "redis-exporter",
+    "cadvisor",
+    "blackbox-exporter",
     "postgresql",
     "redis",
     "nats-jetstream",
@@ -44,7 +50,7 @@
   "hosts": [
     {
       "id": "application-server-a",
-      "components": ["caddy", "kong", "middleware", "odoo-19", "n8n", "keycloak", "postgresql", "redis", "nats-jetstream", "temporal", "observability", "middleware-external-webhook-worker", "middleware-breero-odoo-worker", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress", "websocket-gateway", "integration-control-plane"]
+      "components": ["caddy", "kong", "middleware", "odoo-19", "n8n", "keycloak", "postgresql", "redis", "nats-jetstream", "temporal", "prometheus", "alertmanager", "node-exporter", "postgres-exporter", "redis-exporter", "cadvisor", "blackbox-exporter", "middleware-external-webhook-worker", "middleware-breero-odoo-worker", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress", "websocket-gateway", "integration-control-plane"]
     },
     {
       "id": "provider-host",
@@ -107,11 +113,59 @@
       "deployment_state": "runtime-verification-required"
     },
     {
-      "id": "observability",
+      "id": "prometheus",
       "source_repository": "appolon1908-hue/codestra-production-platform",
       "source_path": "operations/monitoring",
       "composition_input": "operations/monitoring/compose.monitoring.yaml",
-      "role": "private metrics, logs, alerts, and release identity",
+      "role": "metrics collection and release identity",
+      "deployment_state": "upstream-digest-and-config-reconciliation-required"
+    },
+    {
+      "id": "alertmanager",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "operations/monitoring",
+      "composition_input": "operations/monitoring/compose.monitoring.yaml",
+      "role": "private alert routing",
+      "deployment_state": "upstream-digest-and-config-reconciliation-required"
+    },
+    {
+      "id": "node-exporter",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "operations/monitoring",
+      "composition_input": "operations/monitoring/compose.monitoring.yaml",
+      "role": "host metrics export",
+      "deployment_state": "upstream-digest-and-config-reconciliation-required"
+    },
+    {
+      "id": "postgres-exporter",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "operations/monitoring",
+      "composition_input": "operations/monitoring/compose.monitoring.yaml",
+      "role": "PostgreSQL metrics export",
+      "deployment_state": "upstream-digest-and-config-reconciliation-required"
+    },
+    {
+      "id": "redis-exporter",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "operations/monitoring",
+      "composition_input": "operations/monitoring/compose.monitoring.yaml",
+      "role": "Redis metrics export",
+      "deployment_state": "upstream-digest-and-config-reconciliation-required"
+    },
+    {
+      "id": "cadvisor",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "operations/monitoring",
+      "composition_input": "operations/monitoring/compose.monitoring.yaml",
+      "role": "container metrics export",
+      "deployment_state": "upstream-digest-and-config-reconciliation-required"
+    },
+    {
+      "id": "blackbox-exporter",
+      "source_repository": "appolon1908-hue/codestra-production-platform",
+      "source_path": "operations/monitoring",
+      "composition_input": "operations/monitoring/compose.monitoring.yaml",
+      "role": "endpoint probing metrics",
       "deployment_state": "reviewed-projection-required"
     },
     {
