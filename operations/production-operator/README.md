@@ -11,7 +11,8 @@ The operator accepts exactly one of `preflight`, `backup`, `validate-backup`,
 `rollback-control-plane`, `enable-production-web-traffic`,
 `disable-production-web-traffic`, `enable-klyrow-email-delivery`, or
 `disable-klyrow-email-delivery`, plus the bounded `rollout-middleware` and
-`rollback-middleware` pair.
+`rollback-middleware` pair and the bounded `status-email-reseller`,
+`rollout-email-reseller`, and `rollback-email-reseller` actions.
 
 Klyrow email enablement requires `/etc/codestra/production-operator/klyrow-email-authorization.json`
 as a root-owned `0600` file matching `klyrow-email-authorization.example.json`.
@@ -45,9 +46,9 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `039be99ac394b619c8ee0b883ded13434f63ca349fa9c09b917d5d88af29f1e4` |
-| `codestra-production-forced-command` | `80ad3377406d35ee0a5c3ecd827c9320a9e03868c8e01a1626faf2920e1bb8fb` |
-| `codestra-production-operator.sudoers` | `aebef8205744a176d26334647f52307b7ded040b5170ca2641fc62cb64417b65` |
+| `codestra-production-operator` | `490e73847ece44d134fed81e468c66469a139eb0ccea24b1bdc7f872404b7ef4` |
+| `codestra-production-forced-command` | `af3c013fd7d7504eb19d4484038337b334786c6a18b4a67100a6ca9c788b4307` |
+| `codestra-production-operator.sudoers` | `c3a9d1445c1681a9cb631b1effa1ce1d6c170a3c6f176b63157199f533744203` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
 | `codestra-readiness-restore.override.conf` | `bbc8e4af977ae21b4faffd8c755ed1a0220aebb2796f10c90c94483be3eed06e` |
 | `codestra-isolated-restore-rehearsal.sh` | `1e39b423c41f41b3a5784a4041500fbb6f8ae8d0dc2907aa35403b821cc67945` |
@@ -81,7 +82,7 @@ The system user is password-locked. SSH requires public-key authentication,
 has no TTY or forwarding, and applies the forced command in both `sshd_config`
 and `authorized_keys`. The validator switches to the dedicated account to prove
 that the complete parent-directory chain permits reading that key. Sudoers
-enumerates nine exact command lines and contains
+enumerates only the exact allowlisted command lines and contains
 neither `NOPASSWD: ALL` nor wildcard arguments.
 
 ## Installation and validation
@@ -111,7 +112,7 @@ sessions are rejected before sudo. Each accepted invocation acquires a global
 lock and writes a sanitized JSON result under the evidence directory.
 `status` and `collect-evidence` remain available when a safety probe fails so
 an incident can be diagnosed. `rollback` remains available outside the normal
-window and when safety flags or telephony counters are unsafe. All four recovery
+window and when safety flags or telephony counters are unsafe. Recovery
 actions skip remote telephony and runtime-safety probes so an unreachable peer
 cannot strand rollback; the recovery operation itself retains its fixed-target,
 tuple, checksum, and readback controls. `rollback` can remove
@@ -163,6 +164,23 @@ identity `middleware_app`, while the runtime remains `mw_integration_api` and it
 byte to production, on an internal-only disposable network. The exact candidate
 then starts without a host port and must return healthy `/healthz` and
 database-online `/readyz` responses before production is touched.
+
+`rollout-email-reseller` accepts the GHCR read credential only on standard
+input and recreates only `codestra-email-reseller-api-1`. The protected archive,
+receiver Compose files, immutable candidate lock, image digest, OCI source
+labels, and supply-chain evidence are checksum-bound in the operator. The
+candidate lock intentionally remains non-authorizing; the protected production
+environment approval of this exact action supplies the separate deployment
+authority. Before replacement, the operator requires the existing receiver to
+be healthy on schema `email-reseller-schema-v1`, tags its immutable image ID,
+and publishes a root-only exact-tuple rollback bundle. No database migration is
+run. Readback requires the loopback-only port, read-only filesystem, dropped
+capabilities, healthy database, exact source/version identity, callback backlog
+counts, Klyrow reachability, synthetic submission mode, and false email, SMS,
+and PSTN delivery flags. Any failed readback automatically restores the captured
+image. `status-email-reseller` exposes only sanitized identity, health, link,
+and backlog fields; `rollback-email-reseller` remains available as a fixed-target
+recovery action.
 
 `activate-control-plane` requires exact-tuple PASS evidence from both staging
 and validation, a validated encrypted backup, a rollback snapshot, healthy
