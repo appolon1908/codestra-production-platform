@@ -21,7 +21,7 @@ SPEC.loader.exec_module(EXPORTER)
 @pytest.mark.parametrize("key", ["provision_key", "PROVISION_KEY", "Provision-Key"])
 def test_oauth_provision_key_is_opaque_redaction(key):
     # Synthetic low-entropy value: its unsalted digest must not be published either.
-    secret = "synthetic-pin-4711"
+    secret = "dummy"
     result = EXPORTER.sanitize({"oauth2": [{key: secret, "scopes": ["read"]}]})
     assert result == {"oauth2": [{key: {"redacted": True}, "scopes": ["read"]}]}
     encoded = json.dumps(result)
@@ -31,12 +31,12 @@ def test_oauth_provision_key_is_opaque_redaction(key):
 
 def test_oauth_provision_key_in_url_is_redacted():
     assert EXPORTER.sanitize(
-        "https://example.invalid/oauth?provision_key=synthetic-pin-4711"
+        "https://example.invalid/oauth?provision_key=dummy"
     ) == {"redacted": True}
 
 
 def test_route_evidence_never_contains_oauth_provision_key(monkeypatch):
-    secret = "synthetic-pin-4711"
+    secret = "dummy"
     monkeypatch.setattr(EXPORTER, "all_rows", lambda *_args: [{
         "name": "oauth2", "enabled": True,
         "config": {"provision_key": secret, "scopes": ["read"], "mandatory_scope": True},
