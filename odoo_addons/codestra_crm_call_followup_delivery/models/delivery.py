@@ -280,6 +280,9 @@ class CodestraCrmCallDelivery(models.Model):
         if mail and mail.state == "sent":
             self._mark_sent()
             return
+        if mail and mail.state == "cancel":
+            self._write_from_worker({"state": "cancelled", "next_attempt_at": False})
+            return
         if not mail:
             mail = self._create_replacement_mail()
         else:
@@ -308,8 +311,9 @@ class CodestraCrmCallDelivery(models.Model):
             SELECT d.id
               FROM codestra_crm_call_delivery d
          LEFT JOIN mail_mail m ON m.id = d.mail_id
-             WHERE d.state = 'queued'
-               AND (m.id IS NULL OR m.state IN ('sent', 'exception', 'cancel'))
+             WHERE (d.state = 'queued'
+                    AND (m.id IS NULL OR m.state IN ('sent', 'exception', 'cancel')))
+                OR (d.state = 'failed' AND m.state IN ('sent', 'cancel'))
              ORDER BY d.id
              LIMIT %s
              FOR UPDATE OF d SKIP LOCKED

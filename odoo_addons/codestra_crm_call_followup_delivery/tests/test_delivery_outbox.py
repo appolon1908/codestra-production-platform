@@ -183,6 +183,17 @@ class TestCodestraCrmCallDeliveryOutbox(TransactionCase):
         self.assertEqual(delivery.state, "cancelled")
         self.assertFalse(delivery.next_attempt_at)
 
+    def test_reconcile_preserves_cancellation_after_delivery_failed(self):
+        _, delivery = self._complete_with_email("delivery-failed-then-cancelled")
+        delivery._write_from_worker({"state": "failed", "attempt_count": 1})
+        delivery.mail_id.sudo().write({"state": "cancel"})
+
+        self.env["codestra.crm.call.delivery"]._cron_reconcile_mail_states()
+
+        delivery.invalidate_recordset()
+        self.assertEqual(delivery.state, "cancelled")
+        self.assertFalse(delivery.next_attempt_at)
+
     def test_exception_schedules_retry_and_cron_requeues_mail(self):
         _, delivery = self._complete_with_email("delivery-retry")
         delivery.mail_id.sudo().write(
