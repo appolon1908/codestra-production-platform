@@ -324,6 +324,50 @@ def _repository_token_proof(
     return all(token in source for token in tokens_value)
 
 
+def _gateway_route_proof(
+    root: Path,
+    row: dict[str, Any],
+    evidence: dict[str, Any],
+) -> bool:
+    """Bind configuration and behavior evidence to this exact public route."""
+    methods = {str(value).upper() for value in row.get("methods", [])}
+    path = str(row.get("path", ""))
+    scope = str(row.get("scope", ""))
+    config_path = evidence.get("config_path")
+    if not _repository_token_proof(root, config_path, evidence.get("config_tokens")):
+        return False
+    try:
+        kong = load_yaml(root / str(config_path))
+    except (OSError, UnicodeError, yaml.YAMLError, ValueError):
+        return False
+    routes = kong_routes(kong)
+    if not methods or not all(kong_covers(routes, method, path) for method in methods):
+        return False
+    config_source = (root / str(config_path)).read_text(encoding="utf-8")
+    if path not in config_source or not all(method in config_source for method in methods):
+        return False
+    if scope and scope not in {"none", "not_required"} and scope not in config_source:
+        return False
+    return True
+
+
+def _gateway_behavior_proof(
+    root: Path,
+    row: dict[str, Any],
+    evidence: dict[str, Any],
+) -> bool:
+    """Require route-specific allow and authentication-deny assertions."""
+    test_path = evidence.get("test_path")
+    if not _repository_token_proof(root, test_path, evidence.get("test_tokens")):
+        return False
+    source = (root / str(test_path)).read_text(encoding="utf-8")
+    path = str(row.get("path", ""))
+    methods = {str(value).upper() for value in row.get("methods", [])}
+    has_deny = any(token in source for token in ("401", "403", "unauthorized", "forbidden"))
+    has_allow = any(token in source for token in ("200", "201", "202", "204", "success"))
+    return path in source and all(method in source for method in methods) and has_deny and has_allow
+
+
 def validate(
     root: Path,
     manifest: dict[str, Any],
@@ -614,28 +658,15 @@ def validate(
                         )
                     )
                 else:
-                    test_path = root / test_path_value
-                    if not test_path.is_file():
+                    if not _repository_token_proof(root, test_path_value, test_tokens):
                         findings.append(
                             Finding(
                                 "critical",
                                 "idempotency-test-proof",
                                 identity,
-                                f"missing test file: {test_path_value}",
+                                f"missing tracked behavioral test proof: {test_path_value}",
                             )
                         )
-                    else:
-                        test_source = test_path.read_text(encoding="utf-8")
-                        for token in test_tokens:
-                            if token not in test_source:
-                                findings.append(
-                                    Finding(
-                                        "critical",
-                                        "idempotency-test-token",
-                                        identity,
-                                        f"missing from {test_path_value}: {token}",
-                                    )
-                                )
             elif not _gap_remediation(row, idempotency_evidence):
                 findings.append(
                     Finding(
@@ -694,22 +725,14 @@ def validate(
                     )
                 )
             if status in {"present", "not_required"}:
-                if not _repository_token_proof(
-                    root,
-                    gateway_auth.get("config_path"),
-                    gateway_auth.get("config_tokens"),
-                ):
+                if not _gateway_route_proof(root, row, gateway_auth):
                     findings.append(Finding(
                         "critical",
                         "gateway-auth-config-proof",
                         identity,
                         f"status={status} requires gateway configuration path and tokens",
                     ))
-                if not _repository_token_proof(
-                    root,
-                    gateway_auth.get("test_path"),
-                    gateway_auth.get("test_tokens"),
-                ):
+                if not _gateway_behavior_proof(root, row, gateway_auth):
                     findings.append(Finding(
                         "critical",
                         "gateway-auth-test-proof",

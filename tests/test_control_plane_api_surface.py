@@ -131,6 +131,35 @@ def test_gateway_proof_must_be_git_tracked(tmp_path) -> None:
     assert not _repository_token_proof(tmp_path, "untracked.txt", ["required-token"])
 
 
+def test_idempotency_proof_rejects_absolute_host_path() -> None:
+    value = copy.deepcopy(assurance())
+    evidence = value["endpoints"]["source-event-ingest"]["idempotency"]
+    evidence["test_path"] = "/etc/passwd"
+    evidence["test_tokens"] = ["root:"]
+    rules = {
+        finding.rule for finding in validate(ROOT, manifest(), value)
+        if finding.location == "source-event-ingest"
+    }
+    assert "idempotency-test-proof" in rules
+
+
+def test_gateway_proof_rejects_unrelated_repository_prose() -> None:
+    value = copy.deepcopy(assurance())
+    gateway = value["endpoints"]["source-event-ingest"]["gateway_auth"]
+    gateway.update({
+        "status": "present",
+        "config_path": "README.md",
+        "config_tokens": ["Codestra"],
+        "test_path": "README.md",
+        "test_tokens": ["Codestra"],
+    })
+    rules = {
+        finding.rule for finding in validate(ROOT, manifest(), value)
+        if finding.location == "source-event-ingest"
+    }
+    assert {"gateway-auth-config-proof", "gateway-auth-test-proof"} <= rules
+
+
 def test_gateway_auth_status_requires_configuration_and_behavioral_proof() -> None:
     value = assurance()
     value = copy.deepcopy(value)

@@ -204,6 +204,10 @@ def test_resolved_gap_validates_every_claimed_proof_artifact(tmp_path) -> None:
             ]},
         }],
     }
+    assert "gap-resolution-evidence" in {
+        finding.rule for finding in validate_catalog(repository, value)
+    }
+    subprocess.run(["git", "commit", "-qm", "add resolution"], cwd=repository, check=True)
     assert validate_catalog(repository, value) == []
     proof.write_text('{"result":"changed"}\n', encoding="utf-8")
     assert "gap-resolution-evidence" in {

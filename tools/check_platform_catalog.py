@@ -123,13 +123,24 @@ def _repository_evidence_file(root: Path, reference: str) -> bool:
     if not candidate.is_relative_to(repository_root) or not candidate.is_file():
         return False
     tracked = subprocess.run(
-        ["git", "ls-files", "--error-unmatch", "--", reference],
+        ["git", "cat-file", "-e", f"HEAD:{reference}"],
         cwd=repository_root,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
     )
     return tracked.returncode == 0
+
+
+def _file_matches_commit(root: Path, reference: str, revision: str) -> bool:
+    """Require the checkout bytes to be the bytes certified by a Git commit."""
+    if not _repository_evidence_file(root, reference):
+        return False
+    committed = subprocess.run(
+        ["git", "show", f"{revision}:{reference}"],
+        cwd=root.resolve(), capture_output=True, check=False,
+    )
+    return committed.returncode == 0 and committed.stdout == (root / reference).read_bytes()
 
 
 def _reviewed_source_commit(root: Path, source_sha: str) -> bool:
@@ -168,6 +179,7 @@ def _gap_bound_resolution_evidence(root: Path, gap_id: str, reference: str) -> b
         and len(evidence["source_sha"]) == 40
         and all(character in "0123456789abcdef" for character in evidence["source_sha"])
         and _reviewed_source_commit(root, evidence["source_sha"])
+        and _file_matches_commit(root, reference, "HEAD")
         and isinstance(evidence.get("observed_at"), str)
         and evidence["observed_at"].endswith("Z")
         and isinstance(evidence.get("artifacts"), list)
@@ -184,6 +196,7 @@ def _gap_bound_resolution_evidence(root: Path, gap_id: str, reference: str) -> b
             or not artifact_path.startswith("evidence/")
             or artifact_path == reference
             or not _repository_evidence_file(root, artifact_path)
+            or not _file_matches_commit(root, artifact_path, evidence["source_sha"])
             or not isinstance(digest, str)
             or len(digest) != 64
             or any(character not in "0123456789abcdef" for character in digest)
