@@ -116,6 +116,7 @@ class Event(BaseModel):
     agent_id: str
     call_id: str | None = None
     sequence: int = Field(ge=0)
+    cursor: int | None = Field(default=None, ge=1)
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -487,10 +488,11 @@ def canonical_event(envelope: dict[str, Any]) -> Event:
         raise ValueError("invalid_calling_event_envelope")
     return Event.model_validate({
         **value,
+        "schema_version": str(value.get("schema_version")),
         "timestamp": value.get("occurred_at"),
         "user_id": value.get("odoo_user_id"),
         "call_id": value.get("operation_id"),
-        "sequence": cursor,
+        "cursor": cursor,
         "payload": value,
     })
 
@@ -506,21 +508,31 @@ async def persist_and_deliver(pool: asyncpg.Pool, event: Event) -> dict[str, Any
           ON CONFLICT(event_id) DO NOTHING RETURNING ordinal""", event.event_id, event.schema_version,
           event.type, event.correlation_id, event.timestamp, event.tenant_id, event.business_unit_id,
           event.campaign_id, event.user_id, event.agent_id, event.call_id, event.sequence, encoded)
-        if not row:
-            return {"accepted": True, "duplicate": True, "delivered": 0}
         document = event.model_dump(mode="json")
         delivered = 0
         for active in tuple(connections.values()):
             if not active.allows(document):
                 CROSS_SCOPE.inc()
                 continue
+            claimed = await pool.fetchval(
+                """INSERT INTO realtime_event_delivery(event_id,session_id,attempt_count)
+                   VALUES($1,$2,1) ON CONFLICT(event_id,session_id) DO NOTHING
+                   RETURNING true""",
+                event.event_id, active.scope["session_id"],
+            )
+            if not claimed:
+                continue
             try:
                 active.queue.put_nowait(document)
                 delivered += 1
+                await pool.execute(
+                    "UPDATE realtime_event_delivery SET delivered_at=now() WHERE event_id=$1 AND session_id=$2",
+                    event.event_id, active.scope["session_id"],
+                )
             except asyncio.QueueFull:
                 BACKPRESSURE.inc()
                 await active.websocket.close(code=4429)
-    return {"accepted": True, "duplicate": False, "delivered": delivered}
+    return {"accepted": True, "duplicate": not bool(row), "delivered": delivered}
 
 
 async def forward_jetstream_events(connection: Connection, pool: asyncpg.Pool) -> None:

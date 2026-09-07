@@ -102,3 +102,11 @@ def test_recovery_pass_requires_exact_single_render_per_event() -> None:
     assertion = source.index("await deliveries.count() !== 1")
     result = source.index('REPLAY_EXACTLY_ONCE:"PASS"')
     assert assertion < result
+
+
+def test_canonical_cursor_is_distinct_from_operation_sequence() -> None:
+    source = Path(__file__).with_name("app.py").read_text()
+    assert '"schema_version": str(value.get("schema_version"))' in source
+    assert '"cursor": cursor' in source
+    assert '"sequence": cursor' not in source
+    assert "INSERT INTO realtime_event_delivery" in source
