@@ -134,3 +134,50 @@ def test_realtime_request_and_response_match_canonical_schema():
         if 'type' in expected['properties'][key]:
             assert response['properties'][key]['type']==expected['properties'][key]['type']
     assert response['properties']['websocket_url']['enum']==[expected['properties']['websocket_url']['const']]
+
+
+def test_restart_preserves_calling_pause_and_circuit_state(tmp_path):
+    from control_plane_service.leasing import claim_event_deliveries
+
+    path = str(tmp_path / "control-plane.db")
+    current = Store(path)
+    current.ingest(calling_event())
+    with current.connect() as db:
+        db.execute("UPDATE integrations SET paused=1 WHERE name='calling'")
+        db.execute("UPDATE circuits SET state='open',failures=3 WHERE name='calling'")
+    restarted = Store(path)
+    restarted.initialize()
+    with restarted.connect() as db:
+        assert db.execute("SELECT paused FROM integrations WHERE name='calling'").fetchone()["paused"] == 1
+        assert dict(db.execute("SELECT state,failures FROM circuits WHERE name='calling'").fetchone()) == {
+            "state": "open", "failures": 3,
+        }
+        assert db.execute("SELECT COUNT(*) AS n FROM integrations WHERE name='calling'").fetchone()["n"] == 1
+    assert all(row["target"] != "calling" for row in claim_event_deliveries(restarted))
+
+
+def test_postgres_startup_registers_calling_without_resetting_state(monkeypatch):
+    from control_plane_service import core
+
+    statements = []
+
+    class Database:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, parameters=()):
+            statements.append((query, parameters))
+            return self
+
+        def fetchone(self):
+            return {"present": "events"}
+
+    monkeypatch.setattr(core, "is_postgres", lambda: True)
+    monkeypatch.setattr(Store, "connect", lambda self: Database())
+    Store("unused-disposable-path")
+    calling = [(sql, args) for sql, args in statements if args and args[0] == "calling"]
+    assert len(calling) == 2
+    assert all("ON CONFLICT DO NOTHING" in sql for sql, _ in calling)
