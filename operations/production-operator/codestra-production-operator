@@ -9,6 +9,7 @@ import fcntl
 import hashlib
 import hmac
 import ipaddress
+import io
 import json
 import os
 import pwd
@@ -21,7 +22,9 @@ import tarfile
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import zipfile
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -197,6 +200,10 @@ EMAIL_RESELLER_IMAGE_DIGEST = (
 EMAIL_RESELLER_SOURCE_SHA = "e3bdb3dc202a6e9a26f49bb2b52495079996ec91"
 EMAIL_RESELLER_BUILD_TIMESTAMP = "2026-09-06T19:45:17.763859543Z"
 EMAIL_RESELLER_MIGRATION_REVISION = "email-reseller-schema-v1"
+EMAIL_RESELLER_EVIDENCE_URL = (
+    "https://api.github.com/repos/appolon1908-hue/codestra-production-platform/"
+    "actions/artifacts/9995939653/zip"
+)
 EMAIL_RESELLER_BACKUP_ROOT = Path(
     "/opt/codestra/backups/email-reseller-protected-deploy"
 )
@@ -205,6 +212,16 @@ EMAIL_RESELLER_RELEASE_FILES = {
     "compose.yaml": "3367637bf0b6bbd4aabfb5e8768dc63793a7578915acfb5a383373813c6330ff",
     "compose.live-delivery-safety.yaml": "a5be861cd4549a55da8fafe8ee1d88f8442e94fe163f70e4061aa3edcee42892",
     "immutable-candidate-lock.json": "3a87ddff91c00c283a9fe97df8f176c2f44e00808b1ccc06328ce352eb30b605",
+}
+EMAIL_RESELLER_EVIDENCE_HASHES = {
+    "candidate.json": "076f079817b8dd1dd5b2bff24cb17e19c198ae8d98dc5c774ab5b8756284490a",
+    "signature-verification.json": "7b36de7da60a0a8e83adb66dac98f1140e874f74fa83e70bef7e49d594ef3988",
+    "provenance.json": "35193c520ed6493b2c38673a44aadff6368ba6e706e6d2a2ba609377bcb77a05",
+    "sbom.json": "8f5444fc8c6177d960f9b6e51d343de47ae08375519d8fb6b99980c56128e80c",
+    "labels.json": "ad7cae3e0de71e9050314ae2dec4bee25f20ed1f5bb68fffc7811aa1caff59c9",
+    "candidate-email-reseller.txt": (
+        "8159d2a1efc0129178f0ddf296d4ff37dd74616f8a4087a26f926d77e0a06481"
+    ),
 }
 EMAIL_RESELLER_SAFETY_ENV = {
     "EMAIL_SUBMISSION_MODE": "synthetic",
@@ -1349,17 +1366,25 @@ def validate_email_reseller_release(release: Path) -> dict[str, object]:
     if any(lock.get(key) != value for key, value in expected_lock.items()):
         raise OperatorError("email-reseller candidate lock binding mismatch")
     evidence = lock.get("evidence")
-    if (
-        not isinstance(evidence, dict)
-        or set(evidence) != {"candidate", "signature", "provenance", "sbom", "labels"}
-        or any(
-            not isinstance(item, dict)
-            or set(item) != {"status", "sha256"}
-            or item.get("status") != "PASS"
-            or re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256", ""))) is None
-            for item in evidence.values()
-        )
-    ):
+    expected_evidence = {
+        "candidate": {
+            "status": "PASS", "sha256": EMAIL_RESELLER_EVIDENCE_HASHES["candidate.json"]
+        },
+        "signature": {
+            "status": "PASS",
+            "sha256": EMAIL_RESELLER_EVIDENCE_HASHES["signature-verification.json"],
+        },
+        "provenance": {
+            "status": "PASS", "sha256": EMAIL_RESELLER_EVIDENCE_HASHES["provenance.json"]
+        },
+        "sbom": {
+            "status": "PASS", "sha256": EMAIL_RESELLER_EVIDENCE_HASHES["sbom.json"]
+        },
+        "labels": {
+            "status": "PASS", "sha256": EMAIL_RESELLER_EVIDENCE_HASHES["labels.json"]
+        },
+    }
+    if evidence != expected_evidence:
         raise OperatorError("email-reseller candidate evidence is incomplete")
     workflow = lock.get("workflow_run")
     if (
@@ -1372,7 +1397,7 @@ def validate_email_reseller_release(release: Path) -> dict[str, object]:
     ):
         raise OperatorError("email-reseller candidate workflow binding mismatch")
     return {
-        "candidate_evidence": "PASS",
+        "candidate_lock": "PASS",
         "candidate_lock_sha256": EMAIL_RESELLER_RELEASE_FILES[
             "immutable-candidate-lock.json"
         ],
@@ -1443,14 +1468,184 @@ def validate_email_reseller_compose(compose: list[str], expected_image: str) -> 
         raise OperatorError("email-reseller loopback port binding mismatch")
 
 
-def pull_email_reseller_image() -> dict[str, object]:
-    credential = sys.stdin.buffer.read(16384)
+def email_reseller_credentials() -> tuple[bytes, bytes]:
+    credential = sys.stdin.buffer.read(32768)
     if (
         not credential
-        or len(credential) >= 16384
+        or len(credential) >= 32768
         or any(item in credential for item in (b"\x00", b"\n", b"\r"))
     ):
-        raise OperatorError("invalid GHCR credential input")
+        raise OperatorError("invalid email-reseller credential input")
+    try:
+        value = json.loads(credential)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OperatorError("invalid email-reseller credential input") from error
+    if not isinstance(value, dict) or set(value) != {"ghcr_token", "evidence_token"}:
+        raise OperatorError("invalid email-reseller credential schema")
+    tokens: list[bytes] = []
+    for name in ("ghcr_token", "evidence_token"):
+        token = value.get(name)
+        if (
+            not isinstance(token, str)
+            or not token
+            or len(token) >= 16384
+            or any(character in token for character in "\x00\r\n")
+        ):
+            raise OperatorError(f"invalid email-reseller {name}")
+        try:
+            tokens.append(token.encode("ascii"))
+        except UnicodeError as error:
+            raise OperatorError(f"invalid email-reseller {name}") from error
+    return tokens[0], tokens[1]
+
+
+def download_email_reseller_evidence(credential: bytes) -> bytes:
+    try:
+        token = credential.decode("ascii")
+    except UnicodeError as error:
+        raise OperatorError("invalid GitHub evidence credential") from error
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    request = urllib.request.Request(
+        EMAIL_RESELLER_EVIDENCE_URL,
+        method="GET",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        response = urllib.request.build_opener(NoRedirect).open(request, timeout=30)
+    except urllib.error.HTTPError as error:
+        if error.code not in {301, 302, 303, 307, 308}:
+            raise OperatorError("email-reseller evidence download authorization failed") from error
+        location = error.headers.get("Location", "")
+    except (OSError, urllib.error.URLError) as error:
+        raise OperatorError("email-reseller evidence download failed") from error
+    else:
+        response.close()
+        raise OperatorError("email-reseller evidence download did not use signed storage")
+    parsed = urllib.parse.urlparse(location)
+    hostname = parsed.hostname or ""
+    if (
+        parsed.scheme != "https"
+        or not parsed.query
+        or not (
+            hostname.endswith(".blob.core.windows.net")
+            or hostname.endswith(".githubusercontent.com")
+        )
+    ):
+        raise OperatorError("email-reseller evidence redirect target rejected")
+    try:
+        with urllib.request.urlopen(location, timeout=60) as response:
+            artifact = response.read(4 * 1024 * 1024 + 1)
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError) as error:
+        raise OperatorError("email-reseller evidence archive download failed") from error
+    if not artifact or len(artifact) > 4 * 1024 * 1024:
+        raise OperatorError("email-reseller evidence archive size rejected")
+    return artifact
+
+
+def verify_email_reseller_evidence(artifact: bytes) -> dict[str, object]:
+    expected_hashes = dict(EMAIL_RESELLER_EVIDENCE_HASHES)
+    try:
+        with zipfile.ZipFile(io.BytesIO(artifact)) as bundle:
+            names = {item.filename for item in bundle.infolist()}
+            if names != {*expected_hashes, "SHA256SUMS"}:
+                raise OperatorError("email-reseller evidence archive entries mismatch")
+            evidence_bytes: dict[str, bytes] = {}
+            for item in bundle.infolist():
+                if (
+                    item.is_dir()
+                    or item.filename.startswith("/")
+                    or ".." in Path(item.filename).parts
+                    or item.file_size > 3 * 1024 * 1024
+                    or item.compress_size > 1024 * 1024
+                ):
+                    raise OperatorError("email-reseller evidence archive entry rejected")
+                evidence_bytes[item.filename] = bundle.read(item)
+    except (zipfile.BadZipFile, OSError, RuntimeError) as error:
+        raise OperatorError("email-reseller evidence archive is malformed") from error
+    try:
+        manifest = evidence_bytes["SHA256SUMS"].decode("ascii")
+    except UnicodeError as error:
+        raise OperatorError("email-reseller evidence checksum manifest is malformed") from error
+    records: dict[str, str] = {}
+    for line in manifest.splitlines():
+        match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9.-]+)", line)
+        if match is None or match.group(2) in records:
+            raise OperatorError("email-reseller evidence checksum manifest is malformed")
+        records[match.group(2)] = match.group(1)
+    if records != expected_hashes:
+        raise OperatorError("email-reseller evidence checksum manifest mismatch")
+    for name, expected in expected_hashes.items():
+        if not hmac.compare_digest(hashlib.sha256(evidence_bytes[name]).hexdigest(), expected):
+            raise OperatorError(f"email-reseller evidence checksum mismatch: {name}")
+    try:
+        candidate = json.loads(evidence_bytes["candidate.json"])
+        signature = json.loads(evidence_bytes["signature-verification.json"])
+        labels = json.loads(evidence_bytes["labels.json"])
+        provenance = json.loads(evidence_bytes["provenance.json"])
+        sbom = json.loads(evidence_bytes["sbom.json"])
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise OperatorError("email-reseller evidence JSON is malformed") from error
+    expected_candidate = {
+        "component": "email-reseller",
+        "image": EMAIL_RESELLER_SUBJECT,
+        "image_digest": EMAIL_RESELLER_IMAGE_DIGEST,
+        "source_sha": EMAIL_RESELLER_SOURCE_SHA,
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "run_id": 34055841105,
+        "run_attempt": 1,
+        "oidc_issuer": "https://token.actions.githubusercontent.com",
+        "workflow_identity": (
+            "https://github.com/appolon1908-hue/codestra-production-platform/"
+            ".github/workflows/immutable-candidate-build.yml@"
+            "refs/heads/release/production-activation"
+        ),
+        "deployment_authorized": False,
+        "production_certified": False,
+    }
+    if any(candidate.get(key) != value for key, value in expected_candidate.items()):
+        raise OperatorError("email-reseller candidate evidence binding mismatch")
+    if not isinstance(signature, list) or len(signature) != 1:
+        raise OperatorError("email-reseller signature evidence is malformed")
+    critical = signature[0].get("critical") if isinstance(signature[0], dict) else None
+    identity = critical.get("identity", {}) if isinstance(critical, dict) else {}
+    image = critical.get("image", {}) if isinstance(critical, dict) else {}
+    if (
+        identity.get("docker-reference") != EMAIL_RESELLER_SUBJECT
+        or image.get("docker-manifest-digest") != EMAIL_RESELLER_IMAGE_DIGEST
+        or critical.get("type") != "https://sigstore.dev/cosign/sign/v1"
+    ):
+        raise OperatorError("email-reseller signature evidence binding mismatch")
+    expected_labels = {
+        "org.opencontainers.image.revision": EMAIL_RESELLER_SOURCE_SHA,
+        "org.opencontainers.image.version": EMAIL_RESELLER_SOURCE_SHA,
+        "org.opencontainers.image.source": (
+            "https://github.com/appolon1908-hue/codestra-production-platform"
+        ),
+    }
+    if any(labels.get(key) != value for key, value in expected_labels.items()):
+        raise OperatorError("email-reseller label evidence binding mismatch")
+    if not isinstance(provenance, dict) or not provenance.get("SLSA"):
+        raise OperatorError("email-reseller provenance evidence is empty")
+    if not isinstance(sbom, dict) or not sbom.get("SPDX"):
+        raise OperatorError("email-reseller SBOM evidence is empty")
+    return {
+        "candidate_evidence": "PASS",
+        "signature_evidence": "PASS",
+        "provenance_evidence": "PASS",
+        "sbom_evidence": "PASS",
+        "evidence_artifact_id": 9995939653,
+    }
+
+
+def pull_email_reseller_image(credential: bytes) -> dict[str, object]:
     docker_config = Path(tempfile.mkdtemp(prefix="codestra-docker-", dir="/run"))
     try:
         run_bytes(
@@ -1807,14 +2002,26 @@ def rollout_email_reseller(config: dict[str, str]) -> dict[str, object]:
     candidate = validate_email_reseller_release(release)
     compose = email_reseller_compose(release)
     validate_email_reseller_compose(compose, EMAIL_RESELLER_SUBJECT)
-    image = pull_email_reseller_image()
+    ghcr_credential, evidence_credential = email_reseller_credentials()
+    try:
+        evidence = verify_email_reseller_evidence(
+            download_email_reseller_evidence(evidence_credential)
+        )
+        evidence_credential = b""
+        image = pull_email_reseller_image(ghcr_credential)
+    finally:
+        ghcr_credential = b""
+        evidence_credential = b""
     try:
         current = validate_email_reseller_runtime(expected_image=EMAIL_RESELLER_SUBJECT)
     except (OperatorError, subprocess.CalledProcessError):
         current = None
     if current is not None and current.get("email_reseller_image_id") == image.get("Id"):
+        if not current["klyrow_link"]["reachable"]:
+            raise OperatorError("email-reseller cannot reach Klyrow")
         return {
             **candidate,
+            **evidence,
             **current,
             "email_reseller_rollout": "PASS",
             "email_reseller_already_current": True,
@@ -1838,6 +2045,7 @@ def rollout_email_reseller(config: dict[str, str]) -> dict[str, object]:
         raise
     return {
         **candidate,
+        **evidence,
         **runtime,
         "email_reseller_rollout": "PASS",
         "email_reseller_rollback_stamp": stamp,
