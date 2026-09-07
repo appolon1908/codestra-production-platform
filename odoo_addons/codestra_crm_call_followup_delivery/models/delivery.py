@@ -380,19 +380,26 @@ class CodestraCrmCallDelivery(models.Model):
         self._require_manager()
         for delivery in self:
             delivery.check_access("read")
-            if delivery.mail_id.sudo().state == "sent":
-                delivery.sudo()._mark_sent()
+            worker = delivery.sudo()
+            worker.flush_recordset(["state", "mail_id"])
+            worker.env.cr.execute(
+                "SELECT id FROM codestra_crm_call_delivery WHERE id = %s FOR UPDATE",
+                [worker.id],
+            )
+            worker.invalidate_recordset(["state", "mail_id"])
+            if worker.mail_id.sudo().state == "sent":
+                worker._mark_sent()
                 continue
-            if delivery.state == "sent":
+            if worker.state == "sent":
                 raise ValidationError(_("A sent delivery cannot be cancelled."))
-            if delivery.mail_id:
-                mail = delivery.mail_id.sudo()
+            if worker.mail_id:
+                mail = worker.mail_id.sudo()
                 if mail.state != "cancel":
                     mail.write({"state": "cancel"})
                 mail.invalidate_recordset(["state"])
                 if mail.state != "cancel":
                     raise ValidationError(_("The linked Odoo mail could not be cancelled."))
-            delivery.sudo()._write_from_worker(
+            worker._write_from_worker(
                 {
                     "state": "cancelled",
                     "next_attempt_at": False,
