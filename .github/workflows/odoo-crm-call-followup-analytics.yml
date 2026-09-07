@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "odoo_addons/codestra_crm_call_followup_analytics/**"
+      - "odoo_addons/codestra_crm_call_followup/**"
       - "scripts/validate_odoo_crm_call_followup_analytics.py"
       - "scripts/test_odoo_crm_call_followup_analytics_disposable.sh"
       - ".github/workflows/odoo-crm-call-followup-analytics.yml"
