@@ -395,6 +395,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/internal/v1/adapters/vicidial/events":
+            from .calling_ingress import handle
+            handle(self, STORE)
+            return
         if parsed.path == "/api/v1/integrations/postal/inbound":
             if os.getenv("POSTAL_INBOUND_ENABLED", "false") != "true":
                 return self.send_json(503, {"error": "postal_inbound_disabled"})

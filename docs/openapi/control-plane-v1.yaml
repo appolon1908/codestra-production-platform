@@ -210,10 +210,10 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [agent_id, campaign_id]
+              required: [campaign_id]
               properties:
-                agent_id: {type: string, minLength: 1}
-                campaign_id: {type: string, minLength: 1}
+                campaign_id: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$'}
+                resume_cursor: {type: integer, minimum: 0}
       responses:
         "201":
           description: Sixty-second one-time session
@@ -221,11 +221,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [token, expires_at, websocket_url]
+                additionalProperties: false
+                required: [ticket, expires_at, websocket_url, contract_digest]
                 properties:
-                  token: {type: string, writeOnly: true}
-                  expires_at: {type: number}
-                  websocket_url: {type: string, format: uri}
+                  ticket: {type: string, minLength: 32, maxLength: 512}
+                  expires_at: {type: string, format: date-time}
+                  websocket_url: {type: string, enum: ['wss://api.codestra.co/ws/agent']}
+                  contract_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
         "403": {$ref: "#/components/responses/Error"}
   /ws/agent:
     get:

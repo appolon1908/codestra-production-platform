@@ -101,3 +101,36 @@ def test_calling_publisher_rejects_subject_injection(monkeypatch):
     monkeypatch.setenv("CALLING_CONTRACT_DIGEST", "a" * 64)
     with pytest.raises(RuntimeError, match="calling_publication_subject_rejected"):
         asyncio.run(worker._publish_calling_event(envelope))
+
+
+def test_calling_delivery_is_claimable_and_registration_preserves_pause(tmp_path):
+    from control_plane_service.leasing import claim_event_deliveries
+    current = Store(str(tmp_path / 'control-plane.db'))
+    current.ingest(calling_event())
+    claimed = claim_event_deliveries(current)
+    assert 'calling' in {row['target'] for row in claimed}
+    with current.connect() as db:
+        db.execute("UPDATE integrations SET paused=1 WHERE name='calling'")
+    current.initialize()
+    with current.connect() as db:
+        assert db.execute("SELECT paused FROM integrations WHERE name='calling'").fetchone()['paused'] == 1
+        assert db.execute("SELECT COUNT(*) AS n FROM circuits WHERE name='calling'").fetchone()['n'] == 1
+
+
+def test_realtime_request_and_response_match_canonical_schema():
+    from pathlib import Path
+    import yaml
+    root=Path(__file__).parents[1]
+    api=yaml.safe_load((root/'docs/openapi/control-plane-v1.yaml').read_text())
+    canonical=yaml.safe_load((root/'contracts/telephony/codestra-calling-api.v1.openapi.yaml').read_text())
+    path=api['paths']['/api/v1/realtime/sessions']['post']
+    request=path['requestBody']['content']['application/json']['schema']
+    response=path['responses']['201']['content']['application/json']['schema']
+    expected=canonical['components']['schemas']['RealtimeSession']
+    assert set(request['required'])=={'campaign_id'}
+    assert 'resume_cursor' in request['properties'] and 'agent_id' not in request['properties']
+    assert response['required']==expected['required']
+    for key in expected['required']:
+        if 'type' in expected['properties'][key]:
+            assert response['properties'][key]['type']==expected['properties'][key]['type']
+    assert response['properties']['websocket_url']['enum']==[expected['properties']['websocket_url']['const']]

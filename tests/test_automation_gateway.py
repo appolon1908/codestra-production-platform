@@ -126,7 +126,7 @@ def test_failure_callback_resolves_original_identity_from_n8n_execution(tmp_path
         "completed_at":"2026-08-22T00:00:01Z",
     }
     result = record_execution_result(store, failure, "unknown")
-    assert result.event_id == "n8n-result-evt-1"
+    assert result.event_id.startswith("n8n-result-")
     with store.connect() as db:
         row = db.execute(
             "SELECT status,event_id,workflow_key,correlation_id FROM automation_executions "

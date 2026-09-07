@@ -65,6 +65,18 @@ CREATE TABLE IF NOT EXISTS automation_action_executions(
  PRIMARY KEY(tenant_id,event_id,workflow_key,action));
 CREATE UNIQUE INDEX IF NOT EXISTS automation_executions_orchestrator
  ON automation_executions(execution_id) WHERE execution_id IS NOT NULL AND execution_id <> '';
+CREATE TABLE IF NOT EXISTS automation_execution_attempts(
+ execution_id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,event_id TEXT NOT NULL,
+ workflow_key TEXT NOT NULL,request_hash TEXT NOT NULL,started_at TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'RUNNING',completed_at TEXT,
+ FOREIGN KEY(tenant_id,event_id,workflow_key)
+ REFERENCES automation_executions(tenant_id,event_id,workflow_key));
+INSERT INTO automation_execution_attempts(
+ execution_id,tenant_id,event_id,workflow_key,request_hash,started_at,status,completed_at)
+ SELECT execution_id,tenant_id,event_id,workflow_key,request_hash,started_at,status,completed_at
+ FROM automation_executions WHERE execution_id IS NOT NULL AND execution_id <> ''
+ ON CONFLICT DO NOTHING;
+
 """
 
 
@@ -101,7 +113,7 @@ def _invoke_action(action: str, value: dict[str, Any], request_hash: str) -> dic
     if not url:
         raise ControlPlaneError(f"automation_action_handler_missing:{action}")
     action_key = f"{value['tenant_id']}:{value['event_id']}:{value['automation_key']}:{action}"
-    body = _canonical({"action": action, "idempotency_key": action_key, "event": value}).encode()
+    body = _canonical({"action": action, "idempotency_key": action_key, "event": {key: value[key] for key in sorted(ENVELOPE_FIELDS)}}).encode()
     signature = hmac.new(_action_secret(), body, hashlib.sha256).hexdigest()
     request = urllib.request.Request(url, body, {
         "Content-Type": "application/json",
@@ -186,6 +198,9 @@ def execute_automation(store: Store, value: dict[str, Any], tenant: str) -> dict
         raise ControlPlaneError("automation_identity_required")
     material["approved_actions"] = expected
     request_hash = hashlib.sha256(_canonical(material).encode()).hexdigest()
+    attempt_id = str(value.get("orchestration_execution_id") or "")
+    if not attempt_id or len(attempt_id) > 255:
+        raise ControlPlaneError("automation_execution_id_required")
     stamp = now_iso()
     with store.connect() as db:
         _ensure_embedded_schema(db)
@@ -204,10 +219,24 @@ def execute_automation(store: Store, value: dict[str, Any], tenant: str) -> dict
                WHERE tenant_id=? AND event_id=? AND workflow_key=?""",
             (tenant, event_id, workflow_key),
         ).fetchone()
-    if not row or row["request_hash"] != request_hash:
-        raise ControlPlaneError("idempotency_conflict")
-    if row["execution_id"] != str(value.get("orchestration_execution_id") or ""):
-        raise ControlPlaneError("idempotency_conflict")
+        if not row or row["request_hash"] != request_hash:
+            raise ControlPlaneError("idempotency_conflict")
+        # An n8n transport retry may create another execution. Bind every
+        # attempt atomically without changing the business-operation hash.
+        db.execute(
+            """INSERT INTO automation_execution_attempts(
+               execution_id,tenant_id,event_id,workflow_key,request_hash,started_at)
+               VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
+            (attempt_id, tenant, event_id, workflow_key, request_hash, stamp),
+        )
+        attempt = db.execute(
+            "SELECT tenant_id,event_id,workflow_key,request_hash FROM automation_execution_attempts WHERE execution_id=?",
+            (attempt_id,),
+        ).fetchone()
+        if not attempt or tuple(attempt[key] for key in
+                ("tenant_id", "event_id", "workflow_key", "request_hash")) != (
+                tenant, event_id, workflow_key, request_hash):
+            raise ControlPlaneError("idempotency_conflict")
     completed_actions = []
     for action in expected:
         with store.connect() as db:
@@ -242,7 +271,7 @@ def execute_automation(store: Store, value: dict[str, Any], tenant: str) -> dict
     with store.connect() as db:
         db.execute(
             """UPDATE automation_executions SET status='ACTIONS_COMPLETED',updated_at=?
-               WHERE tenant_id=? AND event_id=? AND workflow_key=? AND request_hash=?""",
+               WHERE tenant_id=? AND event_id=? AND workflow_key=? AND request_hash=? AND status!='COMPLETED'""",
             (now_iso(), tenant, event_id, workflow_key, request_hash),
         )
     return {
@@ -253,85 +282,96 @@ def execute_automation(store: Store, value: dict[str, Any], tenant: str) -> dict
 
 
 def record_execution_result(store: Store, value: dict[str, Any], tenant: str):
+    """Atomically record one attempt result; late failures never undo success."""
     if not isinstance(value, dict) or RESULT_FIELDS - set(value):
         raise ControlPlaneError("invalid_execution_result")
     if value["status"] not in {"COMPLETED", "FAILED", "RETRY_PENDING", "DEAD_LETTER"}:
         raise ControlPlaneError("invalid_execution_status")
+    if not isinstance(value["actions"], list):
+        raise ControlPlaneError("invalid_execution_result")
     value = dict(value)
-    if value["status"] != "COMPLETED":
-        with store.connect() as db:
-            execution = db.execute(
-                """SELECT tenant_id,event_id,workflow_key,correlation_id
-                   FROM automation_executions WHERE execution_id=?""",
-                (str(value["execution_id"]),),
-            ).fetchone()
-        if not execution:
-            raise ControlPlaneError("automation_execution_not_found")
-        if tenant not in {"", "unknown", execution["tenant_id"]}:
-            raise ControlPlaneError("cross_tenant_denied")
-        tenant = execution["tenant_id"]
-        value.update(
-            event_id=execution["event_id"], workflow_key=execution["workflow_key"],
-            correlation_id=execution["correlation_id"],
-        )
-    envelope = {
-        "event_id": "n8n-result-" + str(value["event_id"]),
-        "source": "n8n",
-        "event_type": "workflow.completed" if value["status"] == "COMPLETED" else "workflow.failed",
-        "event_version": "1.0", "occurred_at": value["completed_at"],
-        "tenant_id": tenant, "customer_id": None,
-        "correlation_id": value["correlation_id"], "idempotency_key": value["idempotency_key"],
-        "payload": {
-            "origin_event_id": value["event_id"], "workflow_key": value["workflow_key"],
-            "execution_id": value["execution_id"], "status": value["status"],
-            "actions": value["actions"],
-        },
-        "metadata": {"gateway_authenticated": True},
-    }
-    raw = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
+    envelope = None
     try:
         with store.connect() as db:
             _ensure_embedded_schema(db)
-            # Reserve the immutable result identity in the same transaction as
-            # the execution transition. Conflicting callbacks cannot both
-            # mutate status before one loses the idempotency race.
+            if not is_postgres():
+                db.execute("BEGIN IMMEDIATE")
+            execution = db.execute(
+                """SELECT a.tenant_id,a.event_id,a.workflow_key,a.request_hash,
+                   e.correlation_id,e.approved_actions FROM automation_execution_attempts a
+                   JOIN automation_executions e ON e.tenant_id=a.tenant_id
+                   AND e.event_id=a.event_id AND e.workflow_key=a.workflow_key
+                   WHERE a.execution_id=?""" + (" FOR UPDATE OF e" if is_postgres() else ""),
+                (str(value["execution_id"]),),
+            ).fetchone()
+            if not execution:
+                raise ControlPlaneError("automation_execution_not_found")
+            # Unknown identity remains supported only for the established error
+            # callback path; successful callbacks must name their bound tenant.
+            if tenant != execution["tenant_id"] and not (
+                    value["status"] != "COMPLETED" and tenant in {"", "unknown"}):
+                raise ControlPlaneError("cross_tenant_denied")
+            tenant = execution["tenant_id"]
+            if value["status"] == "COMPLETED":
+                for key in ("event_id", "workflow_key", "correlation_id"):
+                    if str(value[key]) != execution[key]:
+                        raise ControlPlaneError("automation_execution_not_found")
+            else:
+                value.update({key: execution[key] for key in ("event_id", "workflow_key", "correlation_id")})
+            result_id = "n8n-result-" + hashlib.sha256(_canonical([
+                tenant, execution["event_id"], execution["workflow_key"], str(value["execution_id"]),
+            ]).encode()).hexdigest()
+            envelope = {
+                "event_id": result_id, "source": "n8n",
+                "event_type": "workflow.completed" if value["status"] == "COMPLETED" else "workflow.failed",
+                "event_version": "1.0", "occurred_at": value["completed_at"],
+                "tenant_id": tenant, "customer_id": None,
+                "correlation_id": value["correlation_id"], "idempotency_key": value["idempotency_key"],
+                "payload": {"origin_event_id": value["event_id"], "workflow_key": value["workflow_key"],
+                            "execution_id": str(value["execution_id"]), "status": value["status"],
+                            "actions": value["actions"]},
+                "metadata": {"gateway_authenticated": True},
+            }
+            # Result identity, attempt state, aggregate state and outbox commit
+            # together. An altered callback loses before mutating any status.
             db.execute(
                 """INSERT INTO events(event_id,tenant_id,source,event_type,
-                   idempotency_key,correlation_id,envelope,created_at)
-                   VALUES(?,?,?,?,?,?,?,?)""",
-                (envelope["event_id"], tenant, "n8n", envelope["event_type"],
-                 envelope["idempotency_key"], envelope["correlation_id"], raw,
-                 __import__("time").time()),
+                   idempotency_key,correlation_id,envelope,created_at) VALUES(?,?,?,?,?,?,?,?)""",
+                (result_id, tenant, "n8n", envelope["event_type"], value["idempotency_key"],
+                 value["correlation_id"], _canonical(envelope), __import__("time").time()),
             )
             if value["status"] == "COMPLETED":
-                execution = db.execute(
-                """SELECT status,approved_actions FROM automation_executions
-                   WHERE tenant_id=? AND event_id=? AND workflow_key=?""",
-                (tenant, str(value["event_id"]), str(value["workflow_key"])),
-                ).fetchone()
-                if not execution or execution["status"] not in {"ACTIONS_COMPLETED", "COMPLETED"}:
+                expected = json.loads(execution["approved_actions"])
+                reported = [item.get("type") for item in value["actions"] if isinstance(item, dict)]
+                receipts = db.execute(
+                    """SELECT action,request_hash,status FROM automation_action_executions
+                       WHERE tenant_id=? AND event_id=? AND workflow_key=?""",
+                    (tenant, execution["event_id"], execution["workflow_key"]),
+                ).fetchall()
+                if {r["action"] for r in receipts if r["status"] == "COMPLETED"
+                        and r["request_hash"] == execution["request_hash"]} != set(expected):
                     raise ControlPlaneError("automation_actions_incomplete")
-                expected_actions = json.loads(execution["approved_actions"])
-                reported_actions = [item.get("type") for item in value["actions"] if isinstance(item, dict)]
-                if reported_actions != expected_actions:
+                if reported != expected:
                     raise ControlPlaneError("automation_action_result_mismatch")
-            changed = db.execute(
-            """UPDATE automation_executions
-               SET status=?,execution_id=?,completed_at=?,updated_at=?
-               WHERE tenant_id=? AND event_id=? AND workflow_key=? AND execution_id=?""",
-            (value["status"], str(value["execution_id"]), value["completed_at"], now_iso(),
-             tenant, str(value["event_id"]), str(value["workflow_key"]),
-             str(value["execution_id"])),
-            ).rowcount
-            if changed != 1:
-                raise ControlPlaneError("automation_execution_not_found")
-            db.executemany(
-                "INSERT INTO event_deliveries(event_id,target) VALUES(?,?)",
-                ((envelope["event_id"], target) for target in ("odoo",)),
+            db.execute(
+                "UPDATE automation_execution_attempts SET status=?,completed_at=? WHERE execution_id=?",
+                (value["status"], value["completed_at"], str(value["execution_id"])),
             )
-        return IngestResult(envelope["event_id"], envelope["correlation_id"], False, "queued")
+            db.execute(
+                """UPDATE automation_executions SET status=?,completed_at=?,updated_at=?
+                   WHERE tenant_id=? AND event_id=? AND workflow_key=? AND status!='COMPLETED'
+                   AND (?='COMPLETED' OR NOT EXISTS (
+                     SELECT 1 FROM automation_execution_attempts a
+                     WHERE a.tenant_id=? AND a.event_id=? AND a.workflow_key=?
+                       AND a.execution_id!=? AND a.status IN ('RUNNING','ACTIONS_COMPLETED')))""",
+                (value["status"], value["completed_at"], now_iso(), tenant, execution["event_id"],
+                 execution["workflow_key"], value["status"], tenant, execution["event_id"],
+                 execution["workflow_key"], str(value["execution_id"])),
+            )
+            db.execute("INSERT INTO event_deliveries(event_id,target) VALUES(?,?)", (result_id, "odoo"))
+        return IngestResult(result_id, str(value["correlation_id"]), False, "queued")
     except IntegrityError:
-        replay = store.exact_event_replay(envelope)
+        replay = store.exact_event_replay(envelope) if envelope is not None else None
         if replay is None:
             raise ControlPlaneError("idempotency_conflict") from None
         return replay
