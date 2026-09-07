@@ -1,0 +1,53 @@
+name: Refresh draft source heads
+on:
+  push:
+    branches: [chore/draft-buildout-inspection-20260907]
+    paths: [.github/workflows/draft-buildout-current-sources.yml]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export current immutable heads without running source code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import json, os, subprocess, urllib.request
+          from pathlib import Path
+          out = Path(os.environ['RUNNER_TEMP'])/'current-drafts'
+          out.mkdir()
+          repo = 'appolon1908-hue/codestra-production-platform'
+          def get(path):
+              request = urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path, headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'], 'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=30) as response:
+                  return json.load(response)
+          refs = []
+          records = []
+          for number in (96,111,129,130,148,152,174,244):
+              pr = get(f'pulls/{number}')
+              row = {'number':number, 'head':pr['head']['sha'], 'branch':pr['head']['ref'], 'base':pr['base']['sha'], 'state':pr['state'], 'merged':pr['merged'], 'draft':pr['draft']}
+              records.append(row)
+              ref = 'current-pr'+str(number)
+              subprocess.run(['git','branch',ref,row['head']],check=True)
+              refs.append(ref)
+              print(json.dumps(row))
+          base = get('git/ref/heads/release/production-activation')['object']['sha']
+          subprocess.run(['git','branch','current-protected',base],check=True)
+          subprocess.run(['git','bundle','create',str(out/'source.bundle'),*refs,'current-protected'],check=True)
+          (out/'heads.json').write_text(json.dumps({'protected':base,'prs':records},indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: current-drafts-${{ github.sha }}
+          path: ${{ runner.temp }}/current-drafts/
+          if-no-files-found: error
+          retention-days: 3
