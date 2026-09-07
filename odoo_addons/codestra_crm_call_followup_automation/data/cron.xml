@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <record id="ir_cron_enqueue_followup_automation" model="ir.cron">
+            <field name="name">CRM Follow-up: enqueue automation jobs</field>
+            <field name="model_id" ref="model_codestra_crm_call_followup_job"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_enqueue_due_jobs()</field>
+            <field name="interval_number">5</field>
+            <field name="interval_type">minutes</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ir_cron_process_followup_automation" model="ir.cron">
+            <field name="name">CRM Follow-up: process automation jobs</field>
+            <field name="model_id" ref="model_codestra_crm_call_followup_job"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_process_jobs()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">minutes</field>
+            <field name="active" eval="True"/>
+        </record>
+    </data>
+</odoo>
