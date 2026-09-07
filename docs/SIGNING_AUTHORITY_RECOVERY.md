@@ -60,6 +60,17 @@ for `ODOO_OUTBOUND_HMAC_SECRET` and `KLYROW_WEBHOOK_SECRET`. They form one
 atomic group because both currently reside in the same root-owned environment
 file. A partial field update is prohibited.
 
+The Klyrow verifier authority is replicated into three distinct root-owned
+environment files. The control-plane API/worker pair reads
+`/etc/codestra/secrets/control-plane.env`, the private integration gateway reads
+`/etc/kyqra-telnexa-integration/shared.env`, and the email-reseller verifier
+reads `/etc/codestra/secrets/kyqra-telnexa/middleware.env`. A Klyrow rotation is
+incomplete unless all three stores are staged and their exact, separate restart
+boundaries are recreated. The worker is recreated because it shares the atomic
+control-plane environment file; it is not classified as a Klyrow webhook
+verifier. The private gateway and email reseller must each prove successor
+acceptance and predecessor rejection independently.
+
 Success requires staged successor authorities at both ends, delivery switches
 remaining false, an atomic environment-file replacement, narrowly scoped
 consumer recreation, health read-back, new-key acceptance, predecessor
