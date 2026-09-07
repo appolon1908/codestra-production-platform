@@ -52,6 +52,8 @@ async def measure_delivery_batch(
     Scope, event and stream cursor must match, including PubAck. No timeout or
     malformed delivery may be dropped to improve the reported percentile.
     """
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("delivery timeout must be finite and positive")
     validate_load_scopes(documents)
     if len(sockets) != len(documents):
         raise ValueError("one connected socket per load identity is required")
@@ -96,6 +98,9 @@ def canonical_calling_envelope(document: dict[str, Any]) -> tuple[str, dict[str,
     for name in SCOPE_FIELDS:
         if not isinstance(document[name], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', document[name]):
             raise ValueError('invalid scoped JetStream subject token')
+    business_unit = document.get('business_unit_id')
+    if not isinstance(business_unit, str) or not 1 <= len(business_unit) <= 128:
+        raise ValueError('invalid canonical business unit')
     timestamp = datetime.fromisoformat(document['timestamp'].replace('Z', '+00:00'))
     if timestamp.tzinfo is None or type(document['sequence']) is not int or document['sequence'] < 1:
         raise ValueError('invalid calling timestamp or sequence')

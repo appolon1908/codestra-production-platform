@@ -109,3 +109,23 @@ def test_canonical_jetstream_payload_matches_calling_contract():
     document['event_id'] = 'load-' + document['event_id']
     with pytest.raises(ValueError):
         canonical_calling_envelope(document)
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, "1", float("inf"), float("nan")])
+def test_invalid_delivery_timeout_rejected_before_any_publish(timeout):
+    values = documents()
+    async def forbidden(_document):
+        pytest.fail("invalid timing policy must not publish")
+    with pytest.raises(ValueError, match="timeout"):
+        asyncio.run(measure_delivery_batch([Socket(doc) for doc in values], values, forbidden, timeout=timeout))
+
+
+@pytest.mark.parametrize("business_unit", [None, False, 1, "", "x" * 129])
+def test_canonical_business_unit_matches_schema_before_publish(business_unit):
+    import uuid
+    from websocket_gateway.certification_latency import canonical_calling_envelope
+    document = dict(event_id=str(uuid.uuid4()), call_id=str(uuid.uuid4()), correlation_id=str(uuid.uuid4()),
+                    type="agent.ready", tenant_id="synthetic", campaign_id="TEST_SYN", agent_id="TEST_AGENT",
+                    business_unit_id=business_unit, timestamp="2026-09-07T20:00:00Z", sequence=1, payload={})
+    with pytest.raises(ValueError, match="business unit"):
+        canonical_calling_envelope(document)
