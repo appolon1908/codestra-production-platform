@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_codestra_crm_call_delivery_user,Call delivery user,model_codestra_crm_call_delivery,codestra_crm_call_followup.group_call_followup_user,1,0,0,0
+access_codestra_crm_call_delivery_manager,Call delivery manager,model_codestra_crm_call_delivery,codestra_crm_call_followup.group_call_followup_manager,1,0,0,0
