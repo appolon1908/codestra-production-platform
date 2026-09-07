@@ -60,6 +60,7 @@ IDEMPOTENCY = {"required", "not_required", "exempt"}
 GAP_STATUSES = {"open", "in_progress", "resolved", "accepted_risk"}
 SEVERITIES = {"critical", "high", "medium", "low"}
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+HTTP_METHODS = MUTATING_METHODS | {"GET", "HEAD", "OPTIONS", "ANY"}
 EXTERNAL_PREFIXES = ("external:", "pr:", "repo:")
 
 
@@ -298,6 +299,8 @@ def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
             findings.append(Finding("critical", "api-idempotency", identity, str(row["idempotency"])))
         if not path.startswith("/"):
             findings.append(Finding("critical", "api-path", identity, "path must start with /"))
+        if method not in HTTP_METHODS:
+            findings.append(Finding("critical", "api-method", identity, f"unsupported method: {method}"))
         if row["exposure"] == "public_api" and row["ingress"] != "kong":
             findings.append(Finding("critical", "public-api-bypass", identity, "public business APIs must enter through Kong"))
         if row["exposure"] == "browser_application" and row["ingress"] != "caddy_browser":
@@ -308,7 +311,7 @@ def validate_catalog(root: Path, catalog: dict[str, Any]) -> list[Finding]:
             findings.append(Finding("critical", "health-ingress", identity, "public health must use a health-only Caddy or Kong route"))
         if row["exposure"] == "public_api" and str(row["auth"]).lower() == "none":
             findings.append(Finding("critical", "public-api-auth", identity, "public business APIs must authenticate"))
-        if method in MUTATING_METHODS and row["idempotency"] == "not_required":
+        if (method in MUTATING_METHODS or method == "ANY") and row["idempotency"] == "not_required":
             findings.append(Finding("critical", "mutation-idempotency", identity, "mutation requires idempotency or a documented exemption"))
         if row["idempotency"] == "exempt" and not row.get("idempotency_exemption"):
             findings.append(Finding("critical", "idempotency-exemption", identity, "exemption reason is required"))

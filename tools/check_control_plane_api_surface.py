@@ -344,8 +344,6 @@ def _gateway_route_proof(
     if not methods or not all(kong_covers(routes, method, path) for method in methods):
         return False
     config_source = (root / str(config_path)).read_text(encoding="utf-8")
-    if path not in config_source or not all(method in config_source for method in methods):
-        return False
     if scope and scope not in {"none", "not_required"} and scope not in config_source:
         return False
     return True

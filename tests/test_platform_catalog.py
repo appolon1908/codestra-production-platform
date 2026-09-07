@@ -270,6 +270,19 @@ def test_mutation_requires_idempotency_or_documented_exemption() -> None:
     assert "mutation-idempotency" in rules
 
 
+def test_wildcard_method_is_mutating_and_unknown_methods_are_rejected() -> None:
+    value = catalog()
+    row = next(item for item in value["apis"] if item["api_id"] == "campaign-results")
+    row["method"] = "ANY"
+    row["idempotency"] = "not_required"
+    rules = {item.rule for item in validate_catalog(ROOT, value)}
+    assert "mutation-idempotency" in rules
+
+    row["method"] = "CONNECT"
+    rules = {item.rule for item in validate_catalog(ROOT, value)}
+    assert "api-method" in rules
+
+
 def test_nonactive_feature_cannot_default_enabled() -> None:
     value = catalog()
     row = next(item for item in value["features"] if item["feature_id"] == "provisioning-production")
