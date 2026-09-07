@@ -148,7 +148,29 @@ def implementation_route_fragments(source: str) -> dict[str, set[str]]:
 
 
 def route_predicate_groups(source: str) -> list[set[str]]:
-    """Return path literals that must participate in the same branch predicate."""
+    """Extract path predicates, resolving only earlier single-assignment constants."""
+    tree = ast.parse(source)
+    writes: dict[str, list[ast.AST]] = {}
+    bindings: dict[str, tuple[str, int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            writes.setdefault(node.id, []).append(node)
+    functions = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    for function in functions:
+        for statement in function.body:
+            if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and len(writes.get(statement.targets[0].id, [])) == 1
+                    and isinstance(statement.value, ast.Constant)
+                    and isinstance(statement.value.value, str)):
+                bindings[statement.targets[0].id] = (statement.value.value, statement.lineno)
+
+    def strings(node: ast.AST) -> set[str]:
+        if isinstance(node, ast.Name) and node.id in bindings:
+            value, line = bindings[node.id]
+            return {value} if line < node.lineno else set()
+        return _string_values(node)
+
     def alternatives(node: ast.AST) -> list[set[str]]:
         if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
             return [group for value in node.values for group in alternatives(value)]
@@ -157,21 +179,23 @@ def route_predicate_groups(source: str) -> list[set[str]]:
             for value in node.values:
                 combined = [left | right for left in combined for right in alternatives(value)]
             return combined
-        values = {
-            child.value
-            for child in ast.walk(node)
-            if isinstance(child, ast.Constant)
-            and isinstance(child.value, str)
-            and child.value.startswith("/")
-        }
-        return [values]
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return alternatives(node.operand)
+        values: set[str] = set()
+        if isinstance(node, ast.Compare) and _path_expression(node.left):
+            for comparator in node.comparators:
+                values.update(strings(comparator))
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"startswith", "endswith"}
+                and _path_expression(node.func.value)):
+            for argument in node.args:
+                values.update(strings(argument))
+        return [{value for value in values if value.startswith("/")}]
 
-    tree = ast.parse(source)
     groups: list[set[str]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.If):
-            continue
-        groups.extend(group for group in alternatives(node.test) if group)
+        if isinstance(node, ast.If):
+            groups.extend(group for group in alternatives(node.test) if group)
     return groups
 
 
@@ -184,8 +208,8 @@ def endpoint_route_predicate_covered(
         for token in implementation_tokens
         if _token_fragment(token).startswith("/")
     }
-    if len(fragments) < 2:
-        return True
+    if not fragments:
+        return False
     return any(fragments.issubset(group) for group in route_predicate_groups(handler_source))
 
 
@@ -351,12 +375,26 @@ def _gateway_route_proof(
     if scope and scope not in {"none", "not_required"}:
         for method in methods:
             covering = kong_covering_routes(routes, method, path)
-            if not covering or not any(
-                scope in json.dumps(route["plugins"], sort_keys=True)
-                for route in covering
-            ):
+            if not covering or not all(_required_scope_proof(route["plugins"], scope) for route in covering):
                 return False
     return True
+
+
+def _required_scope_proof(plugins: list[dict[str, Any]], scope: str) -> bool:
+    """Only a literal native mandatory scope is statically provable here.
+
+    Conditional Lua/regex policy is not proof merely because a scope occurs in
+    its source. Keep those routes as gaps until their effective policy and
+    execution evidence have a supported verifier. Route-local overrides win.
+    """
+    effective = {plugin.get("name"): plugin for plugin in plugins if isinstance(plugin, dict)}
+    oidc = effective.get("openid-connect", {})
+    config = oidc.get("config", {})
+    if oidc.get("enabled", True) is not True or not isinstance(config, dict):
+        return False
+    required = config.get("scopes_required")
+    return (isinstance(required, list) and all(isinstance(value, str) for value in required)
+            and scope in required and config.get("auth_methods") == ["bearer"])
 
 
 def _gateway_behavior_proof(
@@ -364,16 +402,68 @@ def _gateway_behavior_proof(
     row: dict[str, Any],
     evidence: dict[str, Any],
 ) -> bool:
-    """Require route-specific allow and authentication-deny assertions."""
+    """Require executable request/status assertion pairs in Python test bodies.
+
+    This is source assurance, not proof a live gateway was certified. Unsupported
+    indirect/parameterized forms remain gaps rather than passing on prose.
+    """
     test_path = evidence.get("test_path")
     if not _repository_token_proof(root, test_path, evidence.get("test_tokens")):
         return False
-    source = (root / str(test_path)).read_text(encoding="utf-8")
-    path = str(row.get("path", ""))
+    path = root / str(test_path)
+    if path.suffix != ".py" or not path.name.startswith("test_"):
+        return False
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (SyntaxError, OSError, UnicodeError):
+        return False
+    wanted_path = str(row.get("path", ""))
     methods = {str(value).upper() for value in row.get("methods", [])}
-    has_deny = any(token in source for token in ("401", "403", "unauthorized", "forbidden"))
-    has_allow = any(token in source for token in ("200", "201", "202", "204", "success"))
-    return path in source and all(method in source for method in methods) and has_deny and has_allow
+    observed: dict[str, set[int]] = {method: set() for method in methods}
+
+    def request_method(expression: ast.AST) -> str | None:
+        if isinstance(expression, ast.Await):
+            expression = expression.value
+        if not isinstance(expression, ast.Call) or not isinstance(expression.func, ast.Attribute):
+            return None
+        method = expression.func.attr.upper()
+        args = list(expression.args)
+        if method == "REQUEST":
+            if not args or not isinstance(args[0], ast.Constant) or not isinstance(args[0].value, str):
+                return None
+            method = args.pop(0).value.upper()
+        if method not in methods or not args or not isinstance(args[0], ast.Constant) or args[0].value != wanted_path:
+            return None
+        return method
+
+    # Follow only straight-line statements. A docstring, dead branch, unrelated
+    # request, detached status literal or overwritten response cannot prove it.
+    for function in tree.body:
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)) or not function.name.startswith("test_"):
+            continue
+        responses: dict[str, str] = {}
+        for statement in function.body:
+            if isinstance(statement, ast.Assign):
+                method = request_method(statement.value)
+                for target in statement.targets:
+                    if isinstance(target, ast.Name):
+                        responses.pop(target.id, None)
+                        if method:
+                            responses[target.id] = method
+            elif isinstance(statement, ast.Assert) and isinstance(statement.test, ast.Compare):
+                comparison = statement.test
+                left = comparison.left
+                if (len(comparison.ops) == 1 and isinstance(comparison.ops[0], ast.Eq)
+                        and isinstance(left, ast.Attribute) and left.attr == "status_code"
+                        and isinstance(left.value, ast.Name) and left.value.id in responses
+                        and isinstance(comparison.comparators[0], ast.Constant)
+                        and type(comparison.comparators[0].value) is int):
+                    observed[responses[left.value.id]].add(comparison.comparators[0].value)
+            elif not isinstance(statement, (ast.Expr, ast.Pass)):
+                # Unknown control flow or assignment may invalidate every binding.
+                responses.clear()
+    return bool(methods) and all(statuses & {401, 403} and statuses & {200, 201, 202, 204}
+                                 for statuses in observed.values())
 
 
 def validate(
@@ -405,6 +495,21 @@ def validate(
     endpoints = manifest.get("endpoints", [])
     if not isinstance(endpoints, list):
         return findings + [Finding("critical", "manifest-schema", "endpoints", "must be a list")]
+    for position, row in enumerate(endpoints):
+        if not isinstance(row, dict):
+            findings.append(Finding("critical", "endpoint-schema", str(position), "must be a mapping"))
+            continue
+        tokens = row.get("implementation_tokens")
+        if not isinstance(tokens, list) or not tokens or any(
+                not isinstance(token, str) or not token.strip() for token in tokens):
+            findings.append(Finding("critical", "implementation-token-schema", str(row.get("endpoint_id", position)),
+                                    "implementation_tokens must be a nonempty list of nonempty strings"))
+        methods = row.get("methods")
+        if not isinstance(methods, list) or not methods or any(not isinstance(method, str) for method in methods):
+            findings.append(Finding("critical", "endpoint-method", str(row.get("endpoint_id", position)),
+                                    "methods must be a nonempty string list"))
+    if findings:
+        return findings
     findings += unique(endpoints, "endpoint_id", "endpoint")
     endpoint_ids = {str(row.get("endpoint_id", "")) for row in endpoints}
 
@@ -426,6 +531,10 @@ def validate(
                 Finding("critical", "assurance-entry-schema", identity, "must be a mapping")
             )
             continue
+        tokens = entry.get("tokens", [])
+        if not isinstance(tokens, list) or any(not isinstance(token, str) or not token.strip() for token in tokens):
+            findings.append(Finding("critical", "implementation-token-schema", identity,
+                                    "assurance tokens must be a list of nonempty strings"))
         unexpected = sorted(set(entry) - ASSURANCE_ENDPOINT_FIELDS)
         if unexpected:
             findings.append(

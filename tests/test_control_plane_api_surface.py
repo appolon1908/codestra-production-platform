@@ -300,3 +300,61 @@ def test_delegated_handlers_must_be_called_by_each_http_dispatcher() -> None:
     assert delegated_handler_called("crm_mutation", {"POST", "PATCH"}, handlers)
     handlers["do_GET"] = handlers["do_GET"].replace("self.crm_get(parsed)", "False")
     assert not delegated_handler_called("crm_get", {"GET"}, handlers)
+
+
+def test_route_tokens_reject_scalar_empty_and_nonstring_values() -> None:
+    for tokens in ('e', [], [''], [None], [1], {'route':'/invented'}):
+        value=copy.deepcopy(manifest());value['endpoints'][0]['implementation_tokens']=tokens
+        findings=validate(ROOT,value,assurance())
+        assert any(f.rule=='implementation-token-schema' for f in findings)
+    assert not endpoint_route_predicate_covered('def do_GET(self):\n    return "e"\n',['e'])
+    assert not endpoint_route_predicate_covered('def do_GET(self):\n    return "/fake"\n',['"/fake"'])
+
+
+def test_gateway_behavior_requires_real_bound_request_and_status_assertions(tmp_path) -> None:
+    from tools.check_control_plane_api_surface import _gateway_behavior_proof
+    subprocess.run(['git','init','-q'],cwd=tmp_path,check=True)
+    target=tmp_path/'test_auth.py'
+    subprocess.run(['git','add','--intent-to-add','--','test_auth.py'],cwd=tmp_path,check=False,capture_output=True)
+    evidence={'test_path':'test_auth.py','test_tokens':['/guarded','POST']}
+    row={'path':'/guarded','methods':['POST']}
+    cases=[
+        ('"""/guarded POST 200 401"""',False),
+        ('def test_auth(client):\n    doc="/guarded POST 200 401"\n',False),
+        ('def test_auth(client):\n    r=client.request("POST","/other")\n    assert r.status_code==401\n    r=client.request("POST","/guarded")\n    assert r.status_code==200\n',False),
+        ('def test_auth(client):\n    r=client.request("POST","/guarded")\n    r=unrelated()\n    assert r.status_code==401\n    assert r.status_code==200\n',False),
+        ('def test_auth(client):\n    r=client.request("POST","/guarded")\n    assert r.status_code==401\n    r=client.request("POST","/guarded",headers={"Authorization":"test-only"})\n    assert r.status_code==200\n',True),
+    ]
+    for source,expected in cases:
+        target.write_text(source)
+        subprocess.run(['git','add','test_auth.py'],cwd=tmp_path,check=True)
+        assert _gateway_behavior_proof(tmp_path,row,evidence) is expected
+
+
+def test_scope_mentions_in_unrelated_lua_branch_cannot_prove_enforcement(tmp_path) -> None:
+    import yaml
+    from tools.check_control_plane_api_surface import _gateway_route_proof
+    subprocess.run(['git','init','-q'],cwd=tmp_path,check=True)
+    config={'services':[{'name':'gateway','plugins':[{'name':'pre-function','config':{'access':[
+        'if path == "/unrelated" and method == "POST" then required="wanted.scope" end']}}],
+        'routes':[{'paths':['/guarded'],'methods':['GET']}]}]}
+    path=tmp_path/'kong.yaml';path.write_text(yaml.safe_dump(config))
+    subprocess.run(['git','add','kong.yaml'],cwd=tmp_path,check=True)
+    row={'path':'/guarded','methods':['GET'],'scope':'wanted.scope'}
+    evidence={'config_path':'kong.yaml','config_tokens':['gateway']}
+    assert not _gateway_route_proof(tmp_path,row,evidence)
+    oidc={'name':'openid-connect','config':{'auth_methods':['bearer'],'scopes_required':['wanted.scope']}}
+    config['services'][0]['plugins'].append(oidc);path.write_text(yaml.safe_dump(config))
+    assert _gateway_route_proof(tmp_path,row,evidence)
+    config['services'][0]['routes'][0]['plugins']=[{'name':'openid-connect','config':{'auth_methods':['bearer'],'scopes_required':['openid']}}]
+    path.write_text(yaml.safe_dump(config))
+    assert not _gateway_route_proof(tmp_path,row,evidence)
+
+
+def test_named_path_guard_requires_prior_single_assignment() -> None:
+    good = 'def handler(self):\n    prefix = "/v1/crm/leads/"\n    if not self.path.startswith(prefix):\n        return False\n'
+    assert endpoint_route_predicate_covered(good, ['"/v1/crm/leads/"'])
+    overwritten = good.replace('    if not', '    prefix = "/unrelated/"\n    if not')
+    assert not endpoint_route_predicate_covered(overwritten, ['"/v1/crm/leads/"'])
+    unrelated = 'def handler(self):\n    if "/invented/" in self.headers:\n        return True\n'
+    assert not endpoint_route_predicate_covered(unrelated, ['"/invented/"'])
