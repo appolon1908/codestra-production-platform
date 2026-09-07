@@ -4,7 +4,6 @@ import asyncio
 import base64
 import json
 import os
-import statistics
 import time
 import uuid
 from datetime import datetime, timezone
@@ -12,6 +11,11 @@ from datetime import datetime, timezone
 import httpx
 import nats
 import websockets
+
+try:
+    from .certification_latency import canonical_calling_envelope, latency_summary, measure_delivery_batch, validate_load_scopes
+except ImportError:  # Support the documented direct script invocation.
+    from certification_latency import canonical_calling_envelope, latency_summary, measure_delivery_batch, validate_load_scopes
 
 PUBLIC_API = os.getenv("PUBLIC_API", "https://api.codestra.agency")
 PUBLIC_WS = os.getenv("PUBLIC_WS", "wss://api.codestra.agency/ws/agent")
@@ -74,9 +78,9 @@ def event(event_id: str, sequence: int, kind: str, *, agent: str = CERTIFIER_AGE
           tenant: str = CERTIFIER_TENANT_ID, campaign: str = CERTIFIER_CAMPAIGN_ID, payload: dict | None = None) -> dict:
     return {
         "event_id": event_id, "schema_version": "1.0", "type": kind,
-        "correlation_id": f"cert-{event_id}", "timestamp": datetime.now(timezone.utc).isoformat(),
+        "correlation_id": str(uuid.uuid4()), "timestamp": datetime.now(timezone.utc).isoformat(),
         "tenant_id": tenant, "business_unit_id": "TEST", "campaign_id": campaign,
-        "user_id": user or agent, "agent_id": agent, "call_id": f"TEST-{event_id}", "sequence": sequence,
+        "user_id": user or agent, "agent_id": agent, "call_id": str(uuid.uuid4()), "sequence": sequence,
         "payload": payload or {},
     }
 
@@ -88,30 +92,20 @@ async def publish(document: dict) -> dict:
         return response.json()
 
 
-async def publish_jetstream(document: dict) -> int:
-    canonical_type = {
-        "call.ringing": "telephony.call.ringing.v1",
-        "call.answered": "telephony.call.answered.v1",
-        "call.connected": "telephony.call.connected.v1",
-        "agent.ready": "telephony.agent.status-changed.v1",
-    }[document["type"]]
-    value = {
-        "event_id": document["event_id"], "schema_version": 1,
-        "type": canonical_type, "tenant_id": document["tenant_id"],
-        "business_unit_id": document["business_unit_id"],
-        "campaign_id": document["campaign_id"], "agent_id": document["agent_id"],
-        "operation_id": document["call_id"], "correlation_id": document["correlation_id"],
-        "occurred_at": document["timestamp"], "sequence": document["sequence"],
-        **document["payload"],
-    }
-    subject = f"telephony.agent.{document['tenant_id']}.{document['campaign_id']}.{document['agent_id']}"
+async def publish_jetstream(document: dict, jetstream=None) -> int:
+    subject, envelope = canonical_calling_envelope(document)
+    # The load test reuses its authenticated JetStream connection. Do not merge
+    # arbitrary UI payload keys over the canonical identity fields.
+    if jetstream is not None:
+        ack = await jetstream.publish(subject, json.dumps(envelope).encode(), headers={"Nats-Msg-Id": document["event_id"]})
+        return int(ack.seq)
     client = await nats.connect(
         servers=[CERTIFIER_NATS_URL], user_credentials=CERTIFIER_NATS_CREDENTIALS_FILE,
         connect_timeout=3, max_reconnect_attempts=3,
     )
     try:
         ack = await client.jetstream().publish(
-            subject, json.dumps({"event": value}).encode(),
+            subject, json.dumps(envelope).encode(),
             headers={"Nats-Msg-Id": document["event_id"]},
         )
         return int(ack.seq)
@@ -144,7 +138,7 @@ async def main() -> None:
     results["KEYCLOAK_AUTH"] = results["REALTIME_TICKET_ISSUANCE"] = "PASS"
     ws_a, _ = await connect(issued["ticket"])
 
-    jetstream_id = f"jetstream-{uuid.uuid4()}"
+    jetstream_id = str(uuid.uuid4())
     await publish_jetstream(event(jetstream_id, 1, "call.ringing", user=token_subject))
     jetstream_received = json.loads(await asyncio.wait_for(ws_a.recv(), 5))
     assert jetstream_received["event_id"] == jetstream_id
@@ -229,33 +223,58 @@ async def main() -> None:
     load_manifest = json.loads(read(os.environ["CERTIFIER_LOAD_IDENTITIES_FILE"]))
     assert isinstance(load_manifest, list) and len(load_manifest) >= 250
     load_identities = load_manifest[:250]
+    validate_load_scopes(load_identities)
     load_tickets = [
         await issue(read(identity["token_file"]), identity["campaign_id"])
         for identity in load_identities
     ]
-    load_started = time.perf_counter()
-    load_sockets = await asyncio.gather(*(connect(value["ticket"]) for value in load_tickets))
-    connect_seconds = time.perf_counter() - load_started
-    assert len(load_sockets) == 250
-    first = load_identities[0]
-    load_event = event(f"load-{uuid.uuid4()}", 1, "agent.ready", agent=first["agent_id"],
-                       user=first.get("user_id"), tenant=first["tenant_id"],
-                       campaign=first["campaign_id"])
-    delivery_start = time.perf_counter()
-    assert (await publish(load_event))["delivered"] == 1
-    assert json.loads(await load_sockets[0][0].recv())["event_id"] == load_event["event_id"]
-    load_latency_ms = (time.perf_counter() - delivery_start) * 1000
-    await no_message(load_sockets[1][0])
-    await asyncio.gather(*(socket.close() for socket, _ in load_sockets))
-    results["LOAD_TEST"] = "PASS"
-    results["LOAD_CONNECTIONS"] = 250
-    results["LOAD_CONNECT_SECONDS"] = round(connect_seconds, 3)
-    results["P95_DELIVERY_LATENCY"] = "PASS" if max(latency_ms, load_latency_ms) < 500 else "FAIL"
-    results["SCREEN_POP_LATENCY_MS"] = round(latency_ms, 3)
-    results["LOAD_DELIVERY_LATENCY_MS"] = round(load_latency_ms, 3)
+    load_sockets = []
+    opening = []
+    nats_client = None
+
+    async def open_one(value):
+        socket, authenticated = await connect(value["ticket"])
+        load_sockets.append(socket)
+        return socket
+
+    try:
+        load_started = time.perf_counter()
+        opening = [asyncio.create_task(open_one(value)) for value in load_tickets]
+        ordered_sockets = await asyncio.gather(*opening)
+        connect_seconds = time.perf_counter() - load_started
+        nats_client = await nats.connect(
+            servers=[CERTIFIER_NATS_URL], user_credentials=CERTIFIER_NATS_CREDENTIALS_FILE,
+            connect_timeout=3, max_reconnect_attempts=3,
+        )
+        jetstream = nats_client.jetstream()
+        documents = [
+            event(str(uuid.uuid4()), 1, "agent.ready", agent=identity["agent_id"],
+                  user=identity.get("user_id"), tenant=identity["tenant_id"],
+                  campaign=identity["campaign_id"])
+            for identity in load_identities
+        ]
+        async def publish_load(document):
+            return await publish_jetstream(document, jetstream)
+        samples = await measure_delivery_batch(ordered_sockets, documents, publish_load)
+        results.update(latency_summary(samples))
+        results["LOAD_TEST"] = results["P95_DELIVERY_LATENCY"]
+        results["LOAD_CONNECTIONS"] = len(ordered_sockets)
+        results["LOAD_CONNECT_SECONDS"] = round(connect_seconds, 3)
+        # This older smoke measurement uses internal HTTP, not JetStream.
+        results["INTERNAL_HTTP_SCREEN_POP_LATENCY_MS"] = round(latency_ms, 3)
+    finally:
+        for task in opening:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*opening, return_exceptions=True)
+        await asyncio.gather(*(socket.close() for socket in load_sockets), return_exceptions=True)
+        if nats_client is not None:
+            await nats_client.close()
 
     await ws_a.close()
     print(json.dumps(results, indent=2, sort_keys=True))
+    if results.get("P95_DELIVERY_LATENCY") != "PASS":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

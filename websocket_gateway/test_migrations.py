@@ -117,7 +117,9 @@ def test_jetstream_delivery_is_connection_local_and_ordered() -> None:
     source = Path(__file__).with_name("app.py").read_text()
     assert "filter_subjects" in source
     assert "persist_and_deliver(pool, event, owner=connection)" in source
-    assert 'json.dumps({"event": value})' in Path(__file__).with_name("certify.py").read_text()
+    certify = Path(__file__).with_name("certify.py").read_text()
+    assert "canonical_calling_envelope(document)" in certify
+    assert "json.dumps(envelope).encode()" in certify
 
 
 def test_retention_and_browser_tab_identity_are_bounded() -> None:
