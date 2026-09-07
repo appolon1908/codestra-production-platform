@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from .campaign_gates import authorize_channel
-from .core import ControlPlaneError, Store, now_iso
-from .database import is_postgres
+from .core import ControlPlaneError, IngestResult, Store, now_iso
+from .database import IntegrityError, is_postgres
 
 
 ENVELOPE_FIELDS = {
@@ -288,35 +288,50 @@ def record_execution_result(store: Store, value: dict[str, Any], tenant: str):
         },
         "metadata": {"gateway_authenticated": True},
     }
-    # Validate an existing immutable result before touching execution state.
-    # This keeps an altered retry from committing a new status and only then
-    # discovering its idempotency conflict during event ingestion.
-    if store.event_exists(envelope["event_id"]):
-        if store.exact_event_replay(envelope) is None:
-            raise ControlPlaneError("idempotency_conflict")
-
-    with store.connect() as db:
-        _ensure_embedded_schema(db)
-        if value["status"] == "COMPLETED":
-            execution = db.execute(
+    raw = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
+    try:
+        with store.connect() as db:
+            _ensure_embedded_schema(db)
+            # Reserve the immutable result identity in the same transaction as
+            # the execution transition. Conflicting callbacks cannot both
+            # mutate status before one loses the idempotency race.
+            db.execute(
+                """INSERT INTO events(event_id,tenant_id,source,event_type,
+                   idempotency_key,correlation_id,envelope,created_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (envelope["event_id"], tenant, "n8n", envelope["event_type"],
+                 envelope["idempotency_key"], envelope["correlation_id"], raw,
+                 __import__("time").time()),
+            )
+            if value["status"] == "COMPLETED":
+                execution = db.execute(
                 """SELECT status,approved_actions FROM automation_executions
                    WHERE tenant_id=? AND event_id=? AND workflow_key=?""",
                 (tenant, str(value["event_id"]), str(value["workflow_key"])),
-            ).fetchone()
-            if not execution or execution["status"] not in {"ACTIONS_COMPLETED", "COMPLETED"}:
-                raise ControlPlaneError("automation_actions_incomplete")
-            expected_actions = json.loads(execution["approved_actions"])
-            reported_actions = [item.get("type") for item in value["actions"] if isinstance(item, dict)]
-            if reported_actions != expected_actions:
-                raise ControlPlaneError("automation_action_result_mismatch")
-        changed = db.execute(
+                ).fetchone()
+                if not execution or execution["status"] not in {"ACTIONS_COMPLETED", "COMPLETED"}:
+                    raise ControlPlaneError("automation_actions_incomplete")
+                expected_actions = json.loads(execution["approved_actions"])
+                reported_actions = [item.get("type") for item in value["actions"] if isinstance(item, dict)]
+                if reported_actions != expected_actions:
+                    raise ControlPlaneError("automation_action_result_mismatch")
+            changed = db.execute(
             """UPDATE automation_executions
                SET status=?,execution_id=?,completed_at=?,updated_at=?
                WHERE tenant_id=? AND event_id=? AND workflow_key=? AND execution_id=?""",
             (value["status"], str(value["execution_id"]), value["completed_at"], now_iso(),
              tenant, str(value["event_id"]), str(value["workflow_key"]),
              str(value["execution_id"])),
-        ).rowcount
-    if changed != 1:
-        raise ControlPlaneError("automation_execution_not_found")
-    return store.ingest(envelope)
+            ).rowcount
+            if changed != 1:
+                raise ControlPlaneError("automation_execution_not_found")
+            db.executemany(
+                "INSERT INTO event_deliveries(event_id,target) VALUES(?,?)",
+                ((envelope["event_id"], target) for target in ("odoo",)),
+            )
+        return IngestResult(envelope["event_id"], envelope["correlation_id"], False, "queued")
+    except IntegrityError:
+        replay = store.exact_event_replay(envelope)
+        if replay is None:
+            raise ControlPlaneError("idempotency_conflict") from None
+        return replay
