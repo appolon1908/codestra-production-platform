@@ -18,6 +18,14 @@ FIELDS = {
 }
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
+TARGET_DIGEST_FIELDS = (
+    "release_archive_sha256",
+    "release_manifest_sha256",
+    "installer_sha256",
+    "launcher_sha256",
+    "embedded_installation_record_sha256",
+    "trust_anchor_sha256",
+)
 
 
 def validate(record: dict, require_approved: bool = True) -> list[str]:
@@ -39,10 +47,17 @@ def validate(record: dict, require_approved: bool = True) -> list[str]:
         errors.append("operator_public_key_fingerprint is invalid")
     if not fingerprint.get("source"):
         errors.append("operator_public_key_fingerprint.source is required")
-    for name in ("protected_commit", "release_archive_sha256", "release_manifest_sha256", "installer_sha256", "launcher_sha256", "embedded_installation_record_sha256", "trust_anchor_sha256", "manifest_signature_verified", "approval"):
+    for name in ("protected_commit", *TARGET_DIGEST_FIELDS, "approval"):
         if require_approved and not target.get(name):
             errors.append(f"target_release.{name} is not approved")
-    for name in ("release_archive_sha256", "release_manifest_sha256", "installer_sha256", "launcher_sha256", "embedded_installation_record_sha256", "trust_anchor_sha256"):
+    # The launcher calls this validator without JSON Schema validation. Do not
+    # coerce strings, numbers or containers into signature-verification evidence.
+    signature_verified = target.get("manifest_signature_verified")
+    if signature_verified is not None and not isinstance(signature_verified, bool):
+        errors.append("target_release.manifest_signature_verified must be a boolean")
+    if require_approved and signature_verified is not True:
+        errors.append("target_release.manifest_signature_verified must be literal true")
+    for name in TARGET_DIGEST_FIELDS:
         value = target.get(name)
         if value is not None and not HEX64.fullmatch(str(value)):
             errors.append(f"target_release.{name} is invalid")
@@ -75,12 +90,14 @@ def validate(record: dict, require_approved: bool = True) -> list[str]:
     if target.get("protected_commit") and arguments.get("protected_commit", {}).get("value") != target["protected_commit"]:
         errors.append("protected commit argument does not match target release")
     control_digest = arguments.get("control_plane_archive_sha256", {}).get("value")
-    if control_digest and control_digest in {
-        target.get("installer_sha256"),
-        target.get("release_archive_sha256"),
-        target.get("release_manifest_sha256"),
-    }:
-        errors.append("control-plane archive checksum must not reuse a package or installer checksum")
+    # All package-related SHA-256 fields share one list so adding a required
+    # digest cannot omit it from the control-plane substitution guard.
+    non_control_digests = [target.get(name) for name in TARGET_DIGEST_FIELDS]
+    image_digest = arguments.get("image_digest", {}).get("value")
+    if isinstance(image_digest, str):
+        non_control_digests.append(image_digest.removeprefix("sha256:"))
+    if control_digest and control_digest in non_control_digests:
+        errors.append("control-plane archive checksum must not reuse a non-control-plane digest")
     control_source = str(arguments.get("control_plane_archive_sha256", {}).get("source", "")).lower()
     if control_digest and ("installer checksum" in control_source or "release-package checksum" in control_source):
         errors.append("control-plane archive checksum has invalid authority")

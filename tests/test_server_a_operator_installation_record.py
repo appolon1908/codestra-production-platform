@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).parents[1]
 RECORD = ROOT / "config/server-a-operator-installation-record.json"
@@ -86,3 +90,96 @@ def test_launcher_is_zero_argument_and_preserve_only() -> None:
     assert "--preserve-existing-sudoers" in launcher
     assert "ssh-keygen -lf" in launcher
     assert "sudo " not in launcher
+
+
+# Exercise the Python/CLI authority actually used by the root launcher. No
+# installer, SSH session, live key or production host is touched by these tests.
+NON_BOOLEAN_SIGNATURE_VALUES = ["false", "true", "", 0, 1, 0.0, 1.0, [], [True], {}, {"verified": True}]
+TARGET_DIGEST_FIELDS = (
+    "release_archive_sha256",
+    "release_manifest_sha256",
+    "installer_sha256",
+    "launcher_sha256",
+    "embedded_installation_record_sha256",
+    "trust_anchor_sha256",
+)
+
+
+def run_validator(candidate: dict, tmp_path: Path, *, allow_incomplete: bool = False) -> subprocess.CompletedProcess[str]:
+    path = tmp_path / "installation-record.json"
+    path.write_text(json.dumps(candidate), encoding="utf-8")
+    command = [sys.executable, str(VALIDATOR_PATH), str(path)]
+    if allow_incomplete:
+        command.append("--allow-incomplete")
+    return subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+
+
+@pytest.mark.parametrize("value", [False, None, *NON_BOOLEAN_SIGNATURE_VALUES])
+def test_approved_signature_requires_literal_true(value: object, tmp_path: Path) -> None:
+    candidate = complete()
+    candidate["target_release"]["manifest_signature_verified"] = value
+    assert any("manifest_signature_verified" in error for error in validator.validate(candidate))
+    result = run_validator(candidate, tmp_path)
+    assert result.returncode == 2
+    assert "manifest_signature_verified" in result.stdout
+    assert "INSTALLATION_RECORD_STATUS=APPROVED" not in result.stdout
+
+
+def test_approved_signature_cannot_be_omitted(tmp_path: Path) -> None:
+    candidate = complete()
+    del candidate["target_release"]["manifest_signature_verified"]
+    assert any("manifest_signature_verified" in error for error in validator.validate(candidate))
+    assert run_validator(candidate, tmp_path).returncode == 2
+
+
+@pytest.mark.parametrize("value", NON_BOOLEAN_SIGNATURE_VALUES)
+def test_incomplete_record_rejects_non_boolean_signature(value: object, tmp_path: Path) -> None:
+    candidate = record()
+    candidate["target_release"]["manifest_signature_verified"] = value
+    assert any("manifest_signature_verified" in error for error in validator.validate(candidate, require_approved=False))
+    assert run_validator(candidate, tmp_path, allow_incomplete=True).returncode == 2
+
+
+@pytest.mark.parametrize("value", [None, False, True])
+def test_incomplete_record_allows_only_boolean_or_null_signature(value: object, tmp_path: Path) -> None:
+    candidate = record()
+    candidate["target_release"]["manifest_signature_verified"] = value
+    assert validator.validate(candidate, require_approved=False) == []
+    result = run_validator(candidate, tmp_path, allow_incomplete=True)
+    assert result.returncode == 0
+    assert "INSTALLATION_RECORD_STATUS=INCOMPLETE" in result.stdout
+    assert run_validator(candidate, tmp_path).returncode == 2
+
+
+@pytest.mark.parametrize("field", TARGET_DIGEST_FIELDS)
+@pytest.mark.parametrize("require_approved", [False, True])
+def test_every_target_digest_is_rejected_as_control_plane(field: str, require_approved: bool, tmp_path: Path) -> None:
+    candidate = complete()
+    candidate["status"] = "approved" if require_approved else "incomplete"
+    control = candidate["arguments"]["control_plane_archive_sha256"]
+    control["value"] = candidate["target_release"][field]
+    # Use neutral provenance so this test cannot pass solely on the source-text guard.
+    control["source"] = "independently supplied archive bytes"
+    assert any("control-plane archive" in error for error in validator.validate(candidate, require_approved=require_approved))
+    result = run_validator(candidate, tmp_path, allow_incomplete=not require_approved)
+    assert result.returncode == 2
+    assert "control-plane archive" in result.stdout
+
+
+@pytest.mark.parametrize("require_approved", [False, True])
+def test_image_digest_is_not_control_plane_archive(require_approved: bool, tmp_path: Path) -> None:
+    candidate = complete()
+    candidate["status"] = "approved" if require_approved else "incomplete"
+    candidate["arguments"]["control_plane_archive_sha256"]["value"] = candidate["arguments"]["image_digest"]["value"].removeprefix("sha256:")
+    assert any("control-plane archive" in error for error in validator.validate(candidate, require_approved=require_approved))
+    assert run_validator(candidate, tmp_path, allow_incomplete=not require_approved).returncode == 2
+
+
+def test_cli_accepts_complete_fixture_and_keeps_committed_record_incomplete(tmp_path: Path) -> None:
+    result = run_validator(complete(), tmp_path)
+    assert result.returncode == 0
+    assert "INSTALLATION_RECORD_STATUS=APPROVED" in result.stdout
+    assert run_validator(record(), tmp_path).returncode == 2
+    result = run_validator(record(), tmp_path, allow_incomplete=True)
+    assert result.returncode == 0
+    assert "INSTALLATION_RECORD_STATUS=INCOMPLETE" in result.stdout
