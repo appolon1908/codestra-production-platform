@@ -90,9 +90,14 @@ def validate(record: dict, require_approved: bool = True) -> list[str]:
     if target.get("protected_commit") and arguments.get("protected_commit", {}).get("value") != target["protected_commit"]:
         errors.append("protected commit argument does not match target release")
     control_digest = arguments.get("control_plane_archive_sha256", {}).get("value")
-    # All package-related SHA-256 fields share one list so adding a required
-    # digest cannot omit it from the control-plane substitution guard.
-    non_control_digests = [target.get(name) for name in TARGET_DIGEST_FIELDS]
+    # The protected platform release archive is intentionally also the
+    # operator's control-plane source archive: build_release_bundle creates it
+    # with the required codestra/ root and binds it in the signed manifest and
+    # provenance. Other package components remain invalid substitutions.
+    non_control_digests = [
+        target.get(name) for name in TARGET_DIGEST_FIELDS
+        if name != "release_archive_sha256"
+    ]
     image_digest = arguments.get("image_digest", {}).get("value")
     if isinstance(image_digest, str):
         non_control_digests.append(image_digest.removeprefix("sha256:"))
@@ -101,6 +106,10 @@ def validate(record: dict, require_approved: bool = True) -> list[str]:
     control_source = str(arguments.get("control_plane_archive_sha256", {}).get("source", "")).lower()
     if control_digest and ("installer checksum" in control_source or "release-package checksum" in control_source):
         errors.append("control-plane archive checksum has invalid authority")
+    if control_digest and control_digest == target.get("release_archive_sha256"):
+        required_source_terms = ("immutable github release asset", "deployment-manifest.json", "provenance.json")
+        if not all(term in control_source for term in required_source_terms):
+            errors.append("control-plane archive reuse lacks signed release provenance")
     expected_status = "approved" if require_approved else "incomplete"
     if record.get("status") != expected_status:
         errors.append(f"record status must be {expected_status}")
