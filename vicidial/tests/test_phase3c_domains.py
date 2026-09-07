@@ -314,6 +314,24 @@ def test_mysql_campaign_actual_state_includes_all_adoption_proof_fields():
     source = inspect.getsource(MySQLRepository.campaign)
     assert "campaign_description," in source
     assert '"hopper_level,auto_dial_level "' in source
+    assert 'row["adoption_snapshot"]' in source
+    assert 'row["adoption_sha256"]' in source
+
+
+def test_mysql_campaign_disabled_levels_participate_in_adoption_comparison():
+    validation = inspect.getsource(MySQLRepository.validate_campaign)
+    provisioning = inspect.getsource(MySQLRepository.provision_campaign_disabled)
+    for source in (validation, provisioning):
+        assert '"hopper_level": 0' in source
+        assert '"auto_dial_level": "0"' in source
+    assert '"hopper_level", "auto_dial_level"' in provisioning
+
+
+def test_mysql_agent_post_commit_readback_is_not_a_collision():
+    source = inspect.getsource(MySQLRepository.sync_agent_disabled)
+    assert 'committed = True' in source
+    assert 'RuntimeError("agent post-commit readback failed")' in source
+    assert "if not committed:" in source
 
 
 def test_mysql_agent_disable_does_not_parse_legacy_campaign_membership():

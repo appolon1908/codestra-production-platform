@@ -392,6 +392,11 @@ class MySQLRepository:
             "FROM vicidial_campaigns WHERE campaign_id=%s", (actual_id,))
         if not row:
             return None
+        adoption_snapshot = dict(row)
+        row["adoption_snapshot"] = adoption_snapshot
+        row["adoption_sha256"] = hashlib.sha256(
+            json.dumps(adoption_snapshot, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         row["lists"] = self._all(
             "SELECT list_id,list_name,campaign_id,active FROM vicidial_lists WHERE campaign_id=%s",
             (actual_id,))
@@ -456,6 +461,8 @@ class MySQLRepository:
             "campaign_recording": spec.recording_policy,
             "scheduled_callbacks": "Y" if spec.callback_enabled else "N",
             "campaign_description": description,
+            "hopper_level": 0,
+            "auto_dial_level": "0",
         }
         current = self._one(
             "SELECT campaign_id,campaign_name,active,dial_method,local_call_time,"
@@ -537,6 +544,7 @@ class MySQLRepository:
             "campaign_recording": spec.recording_policy,
             "scheduled_callbacks": "Y" if spec.callback_enabled else "N",
             "campaign_description": description,
+            "hopper_level": 0, "auto_dial_level": "0",
         }
         current = self._one(
             "SELECT campaign_id,campaign_name,active,dial_method,local_call_time,"
@@ -546,6 +554,7 @@ class MySQLRepository:
         campaign_fields = (
             "campaign_name", "active", "dial_method", "local_call_time",
             "campaign_recording", "scheduled_callbacks", "campaign_description",
+            "hopper_level", "auto_dial_level",
         )
         adopted = False
         legacy_update = False
@@ -792,6 +801,7 @@ class MySQLRepository:
     def sync_agent_disabled(self, spec: AgentSpec) -> dict:
         adopting = spec.adopt_existing_sha256 is not None
         adoption_lock_held = False
+        committed = False
         try:
             if adopting:
                 self._execute(
@@ -821,12 +831,21 @@ class MySQLRepository:
             if affected != 1:
                 raise CollisionError("agent changed during synchronized update")
             self.db.commit()
+            committed = True
+            try:
+                actual = self.agent(spec.user_id) or {}
+            except Exception as exc:
+                # The MyISAM mutation is already durable. Report a readback
+                # failure without misclassifying it as a pre-mutation collision;
+                # the service must retain its recovery intent.
+                raise RuntimeError("agent post-commit readback failed") from exc
         except Exception:
-            self.db.rollback()
+            if not committed:
+                self.db.rollback()
             if adoption_lock_held:
                 self.release_agent_adoption_lock()
             raise
-        return self.agent(spec.user_id) or {}
+        return actual
 
     def release_agent_adoption_lock(self) -> None:
         self._execute("UNLOCK TABLES")
