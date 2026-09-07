@@ -156,7 +156,7 @@ def main() -> int:
         record = api(f'{prefix}/rulesets/{RULESET_ID}')
         # A denied protection read is fatal: never substitute a fabricated snapshot.
         protection = api(protection_path)
-        applied = [r for page in api(f'{prefix}/rules/branches/{quote(BRANCH, safe="")}?per_page=100', paged=True) for p in [] for r in p]
+        applied = [r for page in api(f'{prefix}/rules/branches/{quote(BRANCH, safe="")}?per_page=100', paged=True) for r in page]
         for rule in applied:
             if rule['type'] == 'pull_request' and rule.get('ruleset_id') != RULESET_ID:
                 p = rule['parameters']

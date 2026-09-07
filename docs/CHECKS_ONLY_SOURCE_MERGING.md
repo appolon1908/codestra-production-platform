@@ -56,6 +56,21 @@ snapshots: the policy change can be partial. Do not remove the new check gate
 just to force completion. Restore a prior policy only through an authorized
 owner change using `before.json`; never guess previous settings.
 
+### Concurrent administrators
+
+Pause other automated policy writers and coordinate with administrators before
+running the cutover. Immediately before the final whole-ruleset update, the
+command reads the ruleset again and requires it to equal the strengthened
+policy. This check occurs after classic review reconciliation. A changed,
+denied, or malformed read stops the final write and bootstrap merge; it never
+retries the stale payload or rolls back over an administrator's intervening edit.
+Earlier writes can remain applied, so retain and inspect the evidence directory.
+
+The read/compare/write sequence is not an atomic API lock. It detects changes
+visible at that final read but cannot prevent a writer racing the subsequent
+request. Keep the policy-administration window exclusive; do not claim full
+concurrency safety from a successful comparison alone.
+
 ## Routine integration
 
 For each eligible, non-draft PR, the repair agent updates the branch with the
@@ -82,6 +97,7 @@ missing even after source CI succeeds.
 
 ## Evidence
 
-Run `python -m pytest -q tests/test_checks_only_merge.py` for offline policy and
-negative CI regressions. Those tests do not claim that GitHub settings were
-changed; only successful API mutation and readback establish live activation.
+Run `python -m pytest -q tests/test_checks_only_merge.py tests/test_checks_only_cutover_concurrency.py`
+for offline policy, negative CI, and cutover-ordering regressions. Those tests
+use an in-memory API and do not claim that GitHub settings were changed; only
+successful API mutation and readback establish live activation.
