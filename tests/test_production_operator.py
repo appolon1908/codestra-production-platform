@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -136,9 +137,85 @@ def test_email_reseller_candidate_is_bound_to_attested_release_files(monkeypatch
     )
     result = OPERATOR.validate_email_reseller_release(ROOT)
     assert result == {
-        "candidate_evidence": "PASS",
+        "candidate_lock": "PASS",
         "candidate_lock_sha256": "3a87ddff91c00c283a9fe97df8f176c2f44e00808b1ccc06328ce352eb30b605",
     }
+
+
+def test_email_reseller_actual_evidence_archive_is_verified(monkeypatch) -> None:
+    candidate = {
+        "component": "email-reseller",
+        "image": OPERATOR.EMAIL_RESELLER_SUBJECT,
+        "image_digest": OPERATOR.EMAIL_RESELLER_IMAGE_DIGEST,
+        "source_sha": OPERATOR.EMAIL_RESELLER_SOURCE_SHA,
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "run_id": 34055841105,
+        "run_attempt": 1,
+        "oidc_issuer": "https://token.actions.githubusercontent.com",
+        "workflow_identity": (
+            "https://github.com/appolon1908-hue/codestra-production-platform/"
+            ".github/workflows/immutable-candidate-build.yml@"
+            "refs/heads/release/production-activation"
+        ),
+        "deployment_authorized": False,
+        "production_certified": False,
+    }
+    files = {
+        "candidate.json": json.dumps(candidate).encode(),
+        "signature-verification.json": json.dumps([{
+            "critical": {
+                "identity": {"docker-reference": OPERATOR.EMAIL_RESELLER_SUBJECT},
+                "image": {"docker-manifest-digest": OPERATOR.EMAIL_RESELLER_IMAGE_DIGEST},
+                "type": "https://sigstore.dev/cosign/sign/v1",
+            }
+        }]).encode(),
+        "provenance.json": b'{"SLSA":{"predicate":"present"}}',
+        "sbom.json": b'{"SPDX":{"packages":[]}}',
+        "labels.json": json.dumps({
+            "org.opencontainers.image.revision": OPERATOR.EMAIL_RESELLER_SOURCE_SHA,
+            "org.opencontainers.image.version": OPERATOR.EMAIL_RESELLER_SOURCE_SHA,
+            "org.opencontainers.image.source": (
+                "https://github.com/appolon1908-hue/codestra-production-platform"
+            ),
+        }).encode(),
+        "candidate-email-reseller.txt": b"candidate evidence\n",
+    }
+    hashes = {name: hashlib.sha256(value).hexdigest() for name, value in files.items()}
+    monkeypatch.setattr(OPERATOR, "EMAIL_RESELLER_EVIDENCE_HASHES", hashes)
+    manifest = "".join(f"{digest}  {name}\n" for name, digest in hashes.items()).encode()
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for name, value in {**files, "SHA256SUMS": manifest}.items():
+            bundle.writestr(name, value)
+    result = OPERATOR.verify_email_reseller_evidence(archive.getvalue())
+    assert result["candidate_evidence"] == "PASS"
+    assert result["signature_evidence"] == "PASS"
+    assert result["sbom_evidence"] == "PASS"
+    assert result["provenance_evidence"] == "PASS"
+
+
+def test_idempotent_email_reseller_rollout_requires_klyrow_link(monkeypatch) -> None:
+    image_id = "sha256:" + "a" * 64
+    monkeypatch.setattr(OPERATOR, "prepare_email_reseller_release", lambda _config: ROOT)
+    monkeypatch.setattr(OPERATOR, "validate_email_reseller_release", lambda _release: {})
+    monkeypatch.setattr(OPERATOR, "email_reseller_compose", lambda _release: ["compose"])
+    monkeypatch.setattr(OPERATOR, "validate_email_reseller_compose", lambda *_args: None)
+    monkeypatch.setattr(
+        OPERATOR, "email_reseller_credentials", lambda: (b"ghcr-token", b"evidence-token")
+    )
+    monkeypatch.setattr(OPERATOR, "download_email_reseller_evidence", lambda _token: b"zip")
+    monkeypatch.setattr(OPERATOR, "verify_email_reseller_evidence", lambda _zip: {})
+    monkeypatch.setattr(OPERATOR, "pull_email_reseller_image", lambda _token: {"Id": image_id})
+    monkeypatch.setattr(
+        OPERATOR,
+        "validate_email_reseller_runtime",
+        lambda **_kwargs: {
+            "email_reseller_image_id": image_id,
+            "klyrow_link": {"reachable": False},
+        },
+    )
+    with pytest.raises(OPERATOR.OperatorError, match="cannot reach Klyrow"):
+        OPERATOR.rollout_email_reseller(OPERATOR.load_release_config())
 
 
 def _email_reseller_rendered_config() -> dict[str, object]:

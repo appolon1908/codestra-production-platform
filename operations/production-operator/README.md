@@ -46,7 +46,7 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `490e73847ece44d134fed81e468c66469a139eb0ccea24b1bdc7f872404b7ef4` |
+| `codestra-production-operator` | `292128d6c80f52ef1397511e7a758531a82e334d5ed555ff25683124d1ad308a` |
 | `codestra-production-forced-command` | `af3c013fd7d7504eb19d4484038337b334786c6a18b4a67100a6ca9c788b4307` |
 | `codestra-production-operator.sudoers` | `c3a9d1445c1681a9cb631b1effa1ce1d6c170a3c6f176b63157199f533744203` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
@@ -206,10 +206,17 @@ byte to production, on an internal-only disposable network. The exact candidate
 then starts without a host port and must return healthy `/healthz` and
 database-online `/readyz` responses before production is touched.
 
-`rollout-email-reseller` accepts the GHCR read credential only on standard
-input and recreates only `codestra-email-reseller-api-1`. The protected archive,
-receiver Compose files, immutable candidate lock, image digest, OCI source
-labels, and supply-chain evidence are checksum-bound in the operator. The
+`rollout-email-reseller` accepts a two-token JSON envelope only on standard
+input: the existing GHCR read credential and the workflow's short-lived,
+Actions-read GitHub token. It recreates only `codestra-email-reseller-api-1`.
+The operator downloads the fixed immutable-build artifact by repository, run,
+and artifact ID without forwarding authorization across the signed-storage
+redirect. It rejects extra archive entries, traversal, oversized content, or
+checksum-manifest drift; hashes the actual candidate, Cosign verification,
+provenance, SBOM, labels, and summary bytes; and validates their exact image,
+source, workflow, issuer, run, signature subject, and attestation structure.
+The protected archive, receiver Compose files, immutable candidate lock, image
+digest, OCI source labels, and supply-chain evidence are checksum-bound. The
 candidate lock intentionally remains non-authorizing; the protected production
 environment approval of this exact action supplies the separate deployment
 authority. Before replacement, the operator requires the existing receiver to
