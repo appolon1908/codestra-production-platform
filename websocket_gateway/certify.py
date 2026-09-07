@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
+import nats
 import websockets
 
 PUBLIC_API = os.getenv("PUBLIC_API", "https://api.codestra.agency")
@@ -28,6 +29,8 @@ CLIENT_SECRET = read(os.environ["CERTIFIER_CLIENT_SECRET_FILE"])
 CERTIFIER_TENANT_ID = os.environ["CERTIFIER_TENANT_ID"]
 CERTIFIER_AGENT_ID = os.environ["CERTIFIER_AGENT_ID"]
 CERTIFIER_CAMPAIGN_ID = os.getenv("CERTIFIER_CAMPAIGN_ID", "TEST_SYN")
+CERTIFIER_NATS_URL = os.getenv("CERTIFIER_NATS_URL", "tls://codestra-nats:4222")
+CERTIFIER_NATS_CREDENTIALS_FILE = os.environ["CERTIFIER_NATS_CREDENTIALS_FILE"]
 
 
 async def token() -> str:
@@ -85,6 +88,37 @@ async def publish(document: dict) -> dict:
         return response.json()
 
 
+async def publish_jetstream(document: dict) -> int:
+    canonical_type = {
+        "call.ringing": "telephony.call.ringing.v1",
+        "call.answered": "telephony.call.answered.v1",
+        "call.connected": "telephony.call.connected.v1",
+        "agent.ready": "telephony.agent.status-changed.v1",
+    }[document["type"]]
+    value = {
+        "event_id": document["event_id"], "schema_version": 1,
+        "type": canonical_type, "tenant_id": document["tenant_id"],
+        "business_unit_id": document["business_unit_id"],
+        "campaign_id": document["campaign_id"], "agent_id": document["agent_id"],
+        "operation_id": document["call_id"], "correlation_id": document["correlation_id"],
+        "occurred_at": document["timestamp"], "sequence": document["sequence"],
+        **document["payload"],
+    }
+    subject = f"telephony.agent.{document['tenant_id']}.{document['campaign_id']}.{document['agent_id']}"
+    client = await nats.connect(
+        servers=[CERTIFIER_NATS_URL], user_credentials=CERTIFIER_NATS_CREDENTIALS_FILE,
+        connect_timeout=3, max_reconnect_attempts=3,
+    )
+    try:
+        ack = await client.jetstream().publish(
+            subject, json.dumps({"event": value}).encode(),
+            headers={"Nats-Msg-Id": document["event_id"]},
+        )
+        return int(ack.seq)
+    finally:
+        await client.close()
+
+
 async def no_message(websocket, seconds: float = 0.35) -> None:
     try:
         value = await asyncio.wait_for(websocket.recv(), seconds)
@@ -109,6 +143,13 @@ async def main() -> None:
     assert 30 <= (datetime.fromisoformat(issued["expires_at"]) - datetime.now(timezone.utc)).total_seconds() <= 60
     results["KEYCLOAK_AUTH"] = results["REALTIME_TICKET_ISSUANCE"] = "PASS"
     ws_a, _ = await connect(issued["ticket"])
+
+    jetstream_id = f"jetstream-{uuid.uuid4()}"
+    await publish_jetstream(event(jetstream_id, 1, "call.ringing", user=token_subject))
+    jetstream_received = json.loads(await asyncio.wait_for(ws_a.recv(), 5))
+    assert jetstream_received["event_id"] == jetstream_id
+    assert jetstream_received["cursor"] >= 1
+    results["JETSTREAM_END_TO_END"] = "PASS"
 
     ring_id = f"ring-{uuid.uuid4()}"
     started = time.perf_counter()

@@ -109,4 +109,20 @@ def test_canonical_cursor_is_distinct_from_operation_sequence() -> None:
     assert '"schema_version": str(value.get("schema_version"))' in source
     assert '"cursor": cursor' in source
     assert '"sequence": cursor' not in source
+    assert "metadata.sequence.stream" in source
     assert "INSERT INTO realtime_event_delivery" in source
+
+
+def test_jetstream_delivery_is_connection_local_and_ordered() -> None:
+    source = Path(__file__).with_name("app.py").read_text()
+    assert "filter_subjects" in source
+    assert "persist_and_deliver(pool, event, owner=connection)" in source
+    assert 'json.dumps({"event": value})' in Path(__file__).with_name("certify.py").read_text()
+
+
+def test_retention_and_browser_tab_identity_are_bounded() -> None:
+    source = Path(__file__).with_name("app.py").read_text()
+    assert "retention_worker" in source
+    assert "retention_seconds = 900" in source
+    lease = (Path(__file__).parents[1] / "odoo_addons/codestra_crm_call_followup_realtime/static/src/js/post_call_lease_service.js").read_text()
+    assert "sessionStorage" not in lease

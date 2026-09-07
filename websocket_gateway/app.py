@@ -44,6 +44,7 @@ TOTAL = Counter("websocket_connections_total", "Authenticated sockets")
 AUTH_FAILURES = Counter("websocket_auth_failures_total", "Authentication failures")
 SENT = Counter("websocket_messages_sent_total", "Messages sent")
 DELIVERY_FAILURES = Counter("websocket_delivery_failures_total", "Delivery failures")
+CLEANUP_FAILURES = Counter("websocket_cleanup_failures_total", "Retention cleanup failures")
 RECONNECTS = Counter("websocket_reconnects_total", "Reconnects")
 REPLAYED = Counter("websocket_replay_events_total", "Events replayed")
 BACKPRESSURE = Counter("websocket_backpressure_disconnects_total", "Backpressure disconnects")
@@ -98,6 +99,8 @@ class Settings:
     nats_credentials_file = os.getenv("NATS_CREDENTIALS_FILE", "")
     nats_stream = os.getenv("NATS_CALLING_STREAM", "CODESTRA_CALLING_AGENT_EVENTS")
     event_delivery_enabled = os.getenv("REALTIME_EVENT_DELIVERY_ENABLED", "false").lower() == "true"
+    retention_seconds = 900
+    cleanup_interval = max(30, int(os.getenv("REALTIME_CLEANUP_INTERVAL_SECONDS", "60")))
 
 
 settings = Settings()
@@ -180,6 +183,28 @@ async def verify_schema(pool: asyncpg.Pool) -> None:
     )
 
 
+async def retention_worker(pool: asyncpg.Pool) -> None:
+    while True:
+        await asyncio.sleep(settings.cleanup_interval)
+        try:
+            async with pool.acquire() as connection, connection.transaction():
+                await connection.execute(
+                    "DELETE FROM realtime_events WHERE persisted_at < now() - ($1 * interval '1 second')",
+                    settings.retention_seconds,
+                )
+                await connection.execute(
+                    "DELETE FROM realtime_sessions WHERE active_connection=false "
+                    "AND expires_at < now() - ($1 * interval '1 second')",
+                    settings.retention_seconds,
+                )
+                await connection.execute("DELETE FROM realtime_idempotency WHERE expires_at < now()")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            CLEANUP_FAILURES.inc()
+            LOG.exception("realtime_retention_cleanup_failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.database_url = secret_file("DATABASE_URL_FILE")
@@ -189,10 +214,13 @@ async def lifespan(app: FastAPI):
     secret_file("MIDDLEWARE_SERVICE_TOKEN_FILE")
     app.state.pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=20, command_timeout=5)
     await verify_schema(app.state.pool)
+    retention_task = asyncio.create_task(retention_worker(app.state.pool))
     app.state.jwks = PyJWKClient(settings.jwks_url, cache_keys=True, lifespan=300)
     yield
     for connection in tuple(connections.values()):
         await connection.websocket.close(code=1012)
+    retention_task.cancel()
+    await asyncio.gather(retention_task, return_exceptions=True)
     await app.state.pool.close()
 
 
@@ -481,8 +509,7 @@ def calling_subjects(scope: dict[str, Any]) -> tuple[str, ...]:
     return (f"telephony.agent.{tenant}.{campaign}.{agent}",)
 
 
-def canonical_event(envelope: dict[str, Any]) -> Event:
-    cursor = envelope.get("cursor")
+def canonical_event(envelope: dict[str, Any], cursor: int) -> Event:
     value = envelope.get("event")
     if not isinstance(cursor, int) or cursor < 1 or not isinstance(value, dict):
         raise ValueError("invalid_calling_event_envelope")
@@ -497,7 +524,9 @@ def canonical_event(envelope: dict[str, Any]) -> Event:
     })
 
 
-async def persist_and_deliver(pool: asyncpg.Pool, event: Event) -> dict[str, Any]:
+async def persist_and_deliver(
+    pool: asyncpg.Pool, event: Event, owner: Connection | None = None,
+) -> dict[str, Any]:
     encoded = json.dumps(event.payload, separators=(",", ":"))
     if len(encoded.encode()) > settings.max_message_size:
         raise ValueError("event_payload_too_large")
@@ -510,7 +539,8 @@ async def persist_and_deliver(pool: asyncpg.Pool, event: Event) -> dict[str, Any
           event.campaign_id, event.user_id, event.agent_id, event.call_id, event.sequence, encoded)
         document = event.model_dump(mode="json")
         delivered = 0
-        for active in tuple(connections.values()):
+        recipients = (owner,) if owner else tuple(connections.values())
+        for active in recipients:
             if not active.allows(document):
                 CROSS_SCOPE.inc()
                 continue
@@ -545,38 +575,41 @@ async def forward_jetstream_events(connection: Connection, pool: asyncpg.Pool) -
         connect_timeout=3, max_reconnect_attempts=3,
     )
     try:
-        subscriptions = []
-        for subject in calling_subjects(connection.scope):
-            config_values: dict[str, Any] = {
-                "ack_policy": nats_api.AckPolicy.EXPLICIT,
-                "deliver_policy": nats_api.DeliverPolicy.NEW,
-                "max_ack_pending": settings.max_pending,
-            }
-            if connection.scope.get("resume_cursor") is not None:
-                config_values.update({
-                    "deliver_policy": nats_api.DeliverPolicy.BY_START_SEQUENCE,
-                    "opt_start_seq": int(connection.scope["resume_cursor"]) + 1,
-                })
-            subscriptions.append(await client.jetstream().pull_subscribe(
-                subject, stream=settings.nats_stream,
-                config=nats_api.ConsumerConfig(**config_values),
-            ))
+        config_values: dict[str, Any] = {
+            "ack_policy": nats_api.AckPolicy.EXPLICIT,
+            "deliver_policy": nats_api.DeliverPolicy.NEW,
+            "max_ack_pending": settings.max_pending,
+            "filter_subjects": list(calling_subjects(connection.scope)),
+        }
+        if connection.scope.get("resume_cursor") is not None:
+            config_values.update({
+                "deliver_policy": nats_api.DeliverPolicy.BY_START_SEQUENCE,
+                "opt_start_seq": int(connection.scope["resume_cursor"]) + 1,
+            })
+        subscription = await client.jetstream().pull_subscribe(
+            "", stream=settings.nats_stream,
+            config=nats_api.ConsumerConfig(**config_values),
+        )
         while True:
-            for subscription in subscriptions:
+            try:
+                messages = await subscription.fetch(1, timeout=1)
+            except (nats.errors.TimeoutError, asyncio.TimeoutError, TimeoutError):
+                continue
+            for message in messages:
                 try:
-                    messages = await subscription.fetch(1, timeout=1)
-                except (nats.errors.TimeoutError, asyncio.TimeoutError, TimeoutError):
-                    continue
-                for message in messages:
-                    try:
-                        event = canonical_event(json.loads(message.data))
-                        if not connection.allows(event.model_dump(mode="json")):
-                            await message.term()
-                            continue
-                        await persist_and_deliver(pool, event)
-                        await message.ack()
-                    except (json.JSONDecodeError, ValueError, TypeError):
+                    metadata = message.metadata
+                    if metadata is None or metadata.sequence is None:
+                        raise ValueError("missing_jetstream_sequence")
+                    event = canonical_event(
+                        json.loads(message.data), int(metadata.sequence.stream),
+                    )
+                    if not connection.allows(event.model_dump(mode="json")):
                         await message.term()
+                        continue
+                    await persist_and_deliver(pool, event, owner=connection)
+                    await message.ack()
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    await message.term()
     finally:
         await client.close()
 

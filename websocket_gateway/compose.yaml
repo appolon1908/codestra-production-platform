@@ -46,6 +46,7 @@ services:
       NATS_URL: tls://codestra-nats:4222
       NATS_CALLING_STREAM: CODESTRA_CALLING_AGENT_EVENTS
       REALTIME_EVENT_DELIVERY_ENABLED: "false"
+      REALTIME_CLEANUP_INTERVAL_SECONDS: "60"
       INTERNAL_EVENT_SOURCE_HEALTH_URL: http://middleware:8095/health
       INTERNAL_AUTHORIZATION_URL: https://middleware:8095/internal/v1/realtime/authorizations/revalidate
       INTERNAL_TICKET_CONSUME_URL: https://middleware:8095/internal/v1/realtime/tickets/consume

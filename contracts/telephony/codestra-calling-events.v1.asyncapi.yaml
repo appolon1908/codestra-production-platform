@@ -129,13 +129,8 @@ components:
       type: object
       additionalProperties: false
       required:
-      - cursor
       - event
       properties:
-        cursor:
-          type: integer
-          minimum: 1
-          description: Monotonic JetStream stream sequence exposed as the replay cursor
         event:
           $ref: '#/components/schemas/CallingEvent'
     CallingEvent:
@@ -312,7 +307,7 @@ x-codestra-authorization:
 x-codestra-delivery:
   consumer_type: ephemeral ordered pull consumer per authenticated WebSocket connection
   start_position: first message strictly after the ticket-authorized resume cursor
-  cursor: JetStream stream sequence
+  cursor: JetStream stream sequence derived by the gateway from message metadata and added to the browser envelope
   cursor_monotonic: true
   event_deduplication_key: event.event_id
   duplicate_delivery: suppress identical event IDs and retain the highest cursor

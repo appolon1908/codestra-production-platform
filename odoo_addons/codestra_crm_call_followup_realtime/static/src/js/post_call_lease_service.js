@@ -7,19 +7,14 @@ import { _t } from "@web/core/l10n/translation";
 const POST_CALL_CHANNEL = "codestra_crm_call_followup.post_call";
 const FOLLOWUP_MODEL = "codestra.crm.call.followup";
 const FOLLOWUP_ACTION = "codestra_crm_call_followup.action_codestra_call_followup";
-const CLIENT_STORAGE_KEY = "codestra.crm_call_followup.client_instance";
 const RENEW_INTERVAL_MS = 40_000;
 const RECOVERY_INTERVAL_MS = 60_000;
 
 function makeClientInstanceId() {
-    let value = browser.sessionStorage.getItem(CLIENT_STORAGE_KEY);
-    if (value) {
-        return value;
-    }
-    value = globalThis.crypto?.randomUUID?.()
+    // Generate a new identity for every page execution so duplicated tabs
+    // cannot claim and renew the same server-side lease.
+    return globalThis.crypto?.randomUUID?.()
         || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    browser.sessionStorage.setItem(CLIENT_STORAGE_KEY, value);
-    return value;
 }
 
 const realtimePostCallService = {
