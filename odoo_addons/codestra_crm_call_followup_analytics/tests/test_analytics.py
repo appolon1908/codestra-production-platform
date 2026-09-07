@@ -181,3 +181,22 @@ class TestCodestraCallFollowupAnalytics(TransactionCase):
         )
         self.assertEqual(result["metrics"]["email_queued"], 0)
         self.assertGreaterEqual(result["metrics"]["email_sent"], 1)
+
+    def test_sent_mail_remains_counted_after_template_auto_delete(self):
+        call = self._register("analytics-auto-deleted-sent-mail")
+        mail = self.env["mail.mail"].create({
+            "subject": "Sent then deleted", "body_html": "<p>sent</p>",
+            "email_to": "customer@test.invalid", "state": "sent",
+        })
+        call._write_from_workflow({"mail_id": mail.id})
+        mail.unlink()
+        call.invalidate_recordset()
+        self.assertFalse(call.mail_id)
+        self.assertTrue(call.email_sent_at)
+        result = self.env(user=self.manager)[
+            "codestra.crm.call.followup.analytics.api"
+        ].summary_v1(
+            date_from=fields.Date.to_string(fields.Date.context_today(self.manager)),
+            date_to=fields.Date.to_string(fields.Date.context_today(self.manager)),
+        )
+        self.assertGreaterEqual(result["metrics"]["email_sent"], 1)

@@ -114,7 +114,10 @@ class CodestraCrmCallFollowupReport(models.Model):
                         f.calendar_event_id AS calendar_event_id,
                         f.send_post_call_email AS send_post_call_email,
                         f.mail_id AS mail_id,
-                        COALESCE(m.state, 'none') AS email_state,
+                        CASE
+                            WHEN f.email_sent_at IS NOT NULL THEN 'sent'
+                            ELSE COALESCE(m.state, 'none')
+                        END AS email_state,
                         CASE
                             WHEN f.state = 'pending' THEN 'pending'
                             WHEN f.state = 'cancelled' THEN 'cancelled'
@@ -131,7 +134,7 @@ class CodestraCrmCallFollowupReport(models.Model):
                         (f.schedule_kind = 'callback') AS is_callback,
                         (f.schedule_kind = 'appointment') AS is_appointment,
                         (f.calendar_event_id IS NOT NULL) AS has_calendar_event,
-                        (f.mail_id IS NOT NULL) AS has_email,
+                        (f.mail_id IS NOT NULL OR f.email_sent_at IS NOT NULL) AS has_email,
                         (m.state = 'exception') AS email_failed,
                         (
                             f.state = 'completed'
