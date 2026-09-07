@@ -3,7 +3,7 @@ set -eu
 umask 077
 
 fail() {
-  echo "INSTALL_RESULT=FAIL"
+  printf '%s\n' "INSTALL_RESULT=FAIL" "FAILURE_REASON=operator installation validation failed"
   exit 2
 }
 
@@ -110,6 +110,7 @@ state_dir_metadata_touched=0
 state_dir_uid=
 state_dir_gid=
 state_dir_mode=
+installed_checksum_tmp=
 
 backup_path() {
   target=$1
@@ -130,6 +131,7 @@ validate_existing_root_target() {
   expected_mode=$2
   if [ -e "$target" ]; then
     [ -f "$target" ] || fail
+    [ "$(stat -c %h "$target")" -eq 1 ] || fail
     [ "$(stat -c '%U:%G' "$target")" = "root:root" ] || fail
     [ "$(stat -c %a "$target")" = "$expected_mode" ] || fail
   fi
@@ -145,6 +147,10 @@ restore_path() {
 }
 
 rollback() {
+  rollback_failed=0
+  if [ -n "$installed_checksum_tmp" ]; then
+    rm -f -- "$installed_checksum_tmp" 2>/dev/null || rollback_failed=1
+  fi
   if [ "$installed" -eq 1 ]; then
     restore_path /usr/local/sbin/codestra-production-operator operator
     restore_path /usr/local/libexec/codestra-production-forced-command forced-command
@@ -154,27 +160,32 @@ rollback() {
     restore_path /etc/codestra/production-operator/release.json release-config
     restore_path /etc/codestra/production-operator/maintenance-date maintenance-date
     restore_path /etc/codestra/production-operator/control-plane-archive.sha256 control-plane-archive-checksum
+    restore_path /etc/codestra/production-operator/installed.sha256 installed-checksum
     restore_path /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh readiness-restore
     restore_path /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf readiness-restore-override
-    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || rollback_failed=1
     restore_path /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml database-manifest
     restore_path /usr/local/libexec/validate-production-database-manifest database-validator
-    sshd -t >/dev/null 2>&1 || true
+    sshd -t >/dev/null 2>&1 || rollback_failed=1
   fi
   if [ "$state_dir_metadata_touched" -eq 1 ] && [ "$state_dir_existed" -eq 1 ]; then
-    chown "$state_dir_uid:$state_dir_gid" "$state_dir" 2>/dev/null || true
-    chmod "$state_dir_mode" "$state_dir" 2>/dev/null || true
+    chown "$state_dir_uid:$state_dir_gid" "$state_dir" 2>/dev/null || rollback_failed=1
+    chmod "$state_dir_mode" "$state_dir" 2>/dev/null || rollback_failed=1
   fi
   if [ "$created_user" -eq 1 ]; then
-    userdel codestra-production-operator >/dev/null 2>&1 || true
+    userdel codestra-production-operator >/dev/null 2>&1 || rollback_failed=1
   fi
-  chmod 0700 "$rollback_dir" 2>/dev/null || true
+  chmod 0700 "$rollback_dir" 2>/dev/null || rollback_failed=1
+  return "$rollback_failed"
 }
 on_failure() {
   rc=$?
   trap - EXIT HUP INT TERM
-  rollback
-  echo "INSTALL_RESULT=FAIL"
+  rollback_status=PASS
+  rollback || rollback_status=FAIL
+  printf '%s\n' 'INSTALL_RESULT=FAIL' \
+    "FAILURE_REASON=operator installation failed; rollback status ${rollback_status}" \
+    "ROLLBACK_RESULT=$rollback_status"
   exit "$rc"
 }
 trap on_failure EXIT HUP INT TERM
@@ -218,6 +229,7 @@ reject_target_symlink /var/lib/codestra-production-operator/.ssh/authorized_keys
 reject_target_symlink /etc/codestra/production-operator/release.json
 reject_target_symlink /etc/codestra/production-operator/maintenance-date
 reject_target_symlink /etc/codestra/production-operator/control-plane-archive.sha256
+reject_target_symlink /etc/codestra/production-operator/installed.sha256
 reject_target_symlink /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh
 reject_target_symlink /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf
 reject_target_symlink /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml
@@ -230,6 +242,7 @@ validate_existing_root_target /opt/codestra/operations/readiness/codestra-isolat
 validate_existing_root_target /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf 644
 validate_existing_root_target /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml 644
 validate_existing_root_target /usr/local/libexec/validate-production-database-manifest 755
+validate_existing_root_target /etc/codestra/production-operator/installed.sha256 600
 
 backup_path /usr/local/sbin/codestra-production-operator operator
 backup_path /usr/local/libexec/codestra-production-forced-command forced-command
@@ -239,6 +252,7 @@ backup_path /var/lib/codestra-production-operator/.ssh/authorized_keys authorize
 backup_path /etc/codestra/production-operator/release.json release-config
 backup_path /etc/codestra/production-operator/maintenance-date maintenance-date
 backup_path /etc/codestra/production-operator/control-plane-archive.sha256 control-plane-archive-checksum
+backup_path /etc/codestra/production-operator/installed.sha256 installed-checksum
 backup_path /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh readiness-restore
 backup_path /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf readiness-restore-override
 backup_path /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml database-manifest
@@ -317,6 +331,7 @@ chown root:root "$control_plane_checksum_tmp"
 chmod 0644 "$control_plane_checksum_tmp"
 mv -f "$control_plane_checksum_tmp" /etc/codestra/production-operator/control-plane-archive.sha256
 
+installed_checksum_tmp=$(mktemp /etc/codestra/production-operator/.installed.sha256.XXXXXX)
 sha256sum /usr/local/sbin/codestra-production-operator \
   /usr/local/libexec/codestra-production-forced-command \
   /etc/sudoers.d/codestra-production-operator \
@@ -328,9 +343,10 @@ sha256sum /usr/local/sbin/codestra-production-operator \
   /usr/local/libexec/validate-production-database-manifest \
   /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh \
   /etc/systemd/system/codestra-readiness-restore.service.d/10-protected-operator.conf \
-  > /etc/codestra/production-operator/installed.sha256
-chmod 0600 /etc/codestra/production-operator/installed.sha256
-chown root:root /etc/codestra/production-operator/installed.sha256
+  > "$installed_checksum_tmp"
+chown root:root "$installed_checksum_tmp"
+chmod 0600 "$installed_checksum_tmp"
+mv -f "$installed_checksum_tmp" /etc/codestra/production-operator/installed.sha256
 
 sh -n /usr/local/libexec/codestra-production-forced-command
 bash -n /opt/codestra/operations/readiness/codestra-isolated-restore-rehearsal.sh
@@ -339,6 +355,7 @@ python3 -c 'compile(open("/usr/local/libexec/validate-production-database-manife
 /usr/local/libexec/validate-production-database-manifest \
   /etc/codestra/production-operator/PRODUCTION-DATABASE-MANIFEST.yaml \
   /opt/codestra/evidence/database-certification
+sha256sum --check --strict /etc/codestra/production-operator/installed.sha256 >/dev/null
 operator_hash=$(sha256sum /usr/local/sbin/codestra-production-operator | awk '{print $1}')
 rm -rf "$rollback_dir"
 trap - EXIT HUP INT TERM
@@ -351,4 +368,7 @@ printf '%s\n' \
   'FORCED_COMMAND_SSH=PASS' \
   'RESTRICTED_SUDO_POLICY=PASS' \
   'NEGATIVE_AUTHORIZATION_TESTS=PASS_IN_REVIEWED_SOURCE' \
+  'STRUCTURAL_VALIDATION=PASS' \
+  'DATABASE_CERTIFICATION=PASS' \
+  'SOURCE_LOCK_STATUS=NOT_EVALUATED_BY_INSTALLER' \
   'ACTIVE_PRODUCTION_MUTATED=NO'
