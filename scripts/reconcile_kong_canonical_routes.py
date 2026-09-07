@@ -207,6 +207,13 @@ def verify_contract_route(
     service = services[route["service"]["id"]]
     for field, value in authority_manifest["service"].items():
         require_equal(service.get(field), value, f"{expected['name']}.service.{field}")
+    # Absence is authoritative too: a surprise Kong service path rewrites the
+    # upstream URI even when every declared field still matches.
+    require_equal(
+        service.get("path"),
+        authority_manifest["service"].get("path"),
+        f"{expected['name']}.service.path",
+    )
     plugins = enabled_plugins(admin, route["id"])
     missing = sorted(set(expected["requiredPlugins"]) - set(plugins))
     if missing:

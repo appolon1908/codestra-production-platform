@@ -245,6 +245,25 @@ def test_contract_route_rejects_callback_timeout_drift(monkeypatch):
         module.verify_contract_route("http://kong", ROOT, expected, [route], {"service-1": service})
 
 
+def test_contract_route_rejects_unexpected_service_path(monkeypatch):
+    module = _module()
+    canonical = json.loads(MANIFEST_PATH.read_text())
+    expected = next(row for row in canonical["contractRoutes"] if row["name"] == "codestra-callback-control")
+    _, authority, _ = module.security_authority(ROOT, expected)
+    service = {**authority["service"], "id": "service-1", "path": "/unexpected"}
+    route = {
+        "id": "route-1", "name": expected["name"], "service": {"id": "service-1"},
+        "hosts": expected["hosts"], "paths": expected["paths"],
+        "methods": expected["methods"], "protocols": expected["protocols"],
+        "strip_path": expected["stripPath"], "preserve_host": expected["preserveHost"],
+        "https_redirect_status_code": 426, "headers": {}, "snis": [],
+        "sources": [], "destinations": [],
+    }
+    monkeypatch.setattr(module, "enabled_plugins", lambda *_args: {})
+    with pytest.raises(RuntimeError, match="service.path drift"):
+        module.verify_contract_route("http://kong", ROOT, expected, [route], {"service-1": service})
+
+
 def test_stream_routes_are_not_part_of_the_http_public_surface():
     module = _module()
     assert module.is_http_route({"protocols": ["http", "https"]})
