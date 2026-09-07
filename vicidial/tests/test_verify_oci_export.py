@@ -39,14 +39,14 @@ def _direct_oci_archive(path, source_sha: str, architecture: str = "amd64") -> t
         "config": {"Labels": {"org.opencontainers.image.revision": source_sha}},
         "rootfs": {"type": "layers", "diff_ids": [diff_id]},
     })
-    config_descriptor = _descriptor(config)
+    config_descriptor = _descriptor(config, "application/vnd.oci.image.config.v1+json")
     config_digest = config_descriptor["digest"]
     manifest = _json_bytes({
         "schemaVersion": 2,
         "config": config_descriptor,
         "layers": [layer_descriptor],
     })
-    manifest_descriptor = _descriptor(manifest)
+    manifest_descriptor = _descriptor(manifest, "application/vnd.oci.image.manifest.v1+json")
     manifest_digest = manifest_descriptor["digest"]
     index = _json_bytes({
         "schemaVersion": 2,
@@ -129,7 +129,7 @@ def test_verifier_rejects_invalid_root_manifest_schema_version(monkeypatch, tmp_
     manifest = json.loads(members.pop(old_name))
     manifest["schemaVersion"] = 1
     payload = _json_bytes(manifest)
-    descriptor = _descriptor(payload)
+    descriptor = _descriptor(payload, "application/vnd.oci.image.manifest.v1+json")
     index["manifests"][0] = descriptor
     members["index.json"] = _json_bytes(index)
     members["blobs/sha256/" + descriptor["digest"].split(":")[1]] = payload
@@ -215,7 +215,7 @@ def test_verifier_rejects_layer_identity_failures(monkeypatch, tmp_path, mutatio
         members[layer_name] = replacement
     if mutation in {"size", "extra", "reordered", "compression"}:
         members[manifest_name] = _json_bytes(manifest)
-        updated = _descriptor(members[manifest_name])
+        updated = _descriptor(members[manifest_name], "application/vnd.oci.image.manifest.v1+json")
         del members[manifest_name]
         index["manifests"][0] = updated
         manifest_name = "blobs/sha256/" + updated["digest"].split(":")[1]

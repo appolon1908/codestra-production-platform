@@ -186,6 +186,12 @@ def create_app(
 
     @app.get("/ready")
     def ready():
+        policy_verified = reconciliation_policy is not None
+        if reconciliation_policy is not None:
+            try:
+                reconciliation_policy.verify_current()
+            except PermissionError:
+                policy_verified = False
         return {
             "status": "ready",
             "writes_enabled": service.flags.writes,
@@ -193,7 +199,7 @@ def create_app(
             "deployment_profile": os.environ.get(
                 "CODESTRA_ADAPTER_DEPLOYMENT", "staging-read-only"
             ),
-            "reconciliation_policy_verified": reconciliation_policy is not None,
+            "reconciliation_policy_verified": policy_verified,
         }
 
     @app.get("/version")

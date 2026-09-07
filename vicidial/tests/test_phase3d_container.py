@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 DOCKER = ROOT / "vicidial/docker"
 LIVE_FLAGS = (
     "ENABLE_VICIDIAL_WRITES", "ENABLE_PROVISIONING", "ENABLE_AGENT_SYNC",
-    "ENABLE_LEAD_PUBLICATION", "ENABLE_CALLBACK_WRITES",
-    "ENABLE_TRANSFER_POLICY_SYNC", "ENABLE_PSTN_DIALING",
+    "ENABLE_LEAD_PUBLICATION", "ENABLE_IVR_CALLBACKS",
+    "ENABLE_WARM_TRANSFER", "ENABLE_PSTN_DIALING",
     "ENABLE_SMS_DELIVERY", "ENABLE_EMAIL_DELIVERY", "ENABLE_EXTERNAL_DELIVERY",
 )
 
@@ -94,11 +94,11 @@ def test_vulnerability_policy_is_exact_and_verifier_fails_closed(tmp_path):
     assert verify(policy, grype, [metadata], regression, "a" * 40,
                   today=__import__("datetime").date(2026, 8, 26),
                   trivy=trivy)["status"] == "PASS"
-    symbol_match = {"vulnerability": {"id": "CVE-2026-7210", "severity": "High"},
+    expat_match = {"vulnerability": {"id": "CVE-2026-7210", "severity": "High"},
                     "artifact": {"name": "python", "version": "3.11.16"}}
-    with pytest.raises(ValueError, match="unadjudicated High"):
-        verify(policy, {**grype, "matches": [symbol_match]}, metadata,
-               {**regression, "source_symbols": []}, "a" * 40,
+    with pytest.raises(ValueError, match="expat_short is below fixed minimum"):
+        verify(policy, {**grype, "matches": [expat_match]}, metadata,
+               {**regression, "expat_short": "2.7.9"}, "a" * 40,
                today=__import__("datetime").date(2026, 8, 26), trivy=trivy)
     for bad_grype, bad_trivy, error in (
         ({}, trivy, "Grype report is incomplete"),

@@ -45,6 +45,25 @@ def blob_json(archive: tarfile.TarFile, descriptor: dict) -> dict:
     return json.loads(descriptor_bytes(archive, descriptor))
 
 
+IMAGE_INDEX_MEDIA_TYPES = {
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+}
+IMAGE_MANIFEST_MEDIA_TYPES = {
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+}
+IMAGE_CONFIG_MEDIA_TYPES = {
+    "application/vnd.oci.image.config.v1+json",
+    "application/vnd.docker.container.image.v1+json",
+}
+
+
+def require_media_type(descriptor: dict, allowed: set[str], label: str) -> None:
+    if descriptor.get("mediaType") not in allowed:
+        raise ValueError(f"invalid {label} media type")
+
+
 def layer_diff_id(raw: bytes, media_type: str) -> str:
     if media_type.endswith("+gzip"):
         try:
@@ -85,6 +104,10 @@ def main() -> int:
         if len(roots) != 1:
             raise ValueError("OCI archive does not contain exactly one root manifest")
         root_descriptor = roots[0]
+        require_media_type(
+            root_descriptor, IMAGE_INDEX_MEDIA_TYPES | IMAGE_MANIFEST_MEDIA_TYPES,
+            "root descriptor",
+        )
         outer = blob_json(archive, root_descriptor)
         if not isinstance(outer, dict) or outer.get("schemaVersion") != 2:
             raise ValueError("OCI root manifest schema version is not 2")
@@ -96,6 +119,8 @@ def main() -> int:
             if len(candidates) != 1:
                 raise ValueError("OCI archive does not contain one linux/amd64 image")
             manifest_descriptor = candidates[0]
+            require_media_type(manifest_descriptor, IMAGE_MANIFEST_MEDIA_TYPES,
+                               "image manifest descriptor")
             manifest = blob_json(archive, manifest_descriptor)
         elif "config" in outer:
             manifest_descriptor = root_descriptor
@@ -104,6 +129,8 @@ def main() -> int:
             raise ValueError("OCI root is neither an image manifest nor an image index")
         if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 2:
             raise ValueError("OCI image manifest schema version is not 2")
+        require_media_type(manifest["config"], IMAGE_CONFIG_MEDIA_TYPES,
+                           "image config descriptor")
         if manifest["config"]["digest"] != expected_config:
             raise ValueError("OCI config digest differs from tested Docker image ID")
         config = blob_json(archive, manifest["config"])

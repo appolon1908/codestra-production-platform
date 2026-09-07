@@ -70,14 +70,17 @@ class ReconciliationPolicy:
             expected_release_sha=expected_release_sha,
         )
 
-    def authorize(self, command: ReconciliationCampaignCommand) -> None:
-        policy = self.document
+    def verify_current(self) -> None:
         age = (datetime.now(timezone.utc) - self.backup_created_at).total_seconds()
         if not 0 <= age <= 86400:
             raise ReconciliationDenied("backup evidence expired before request")
         self._verify_backup(
             self.backup_path, self.backup_checksum, self.backup_fingerprint
         )
+
+    def authorize(self, command: ReconciliationCampaignCommand) -> None:
+        self.verify_current()
+        policy = self.document
         if command.plan_sha256 != policy["plan_sha256"]:
             raise ReconciliationDenied("request plan digest mismatch")
         if command.authorization_reference != policy["authorization_reference"]:

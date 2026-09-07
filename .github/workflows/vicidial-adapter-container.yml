@@ -161,6 +161,7 @@ jobs:
           python vicidial/docker/generate_provenance.py \
             --image codestra/vicidial-restricted-adapter:${SOURCE_SHA} \
             --source-sha "${SOURCE_SHA}" \
+            --oci-verification evidence/OCI_EXPORT_VERIFICATION.json \
             --output evidence/vicidial-adapter-provenance.intoto.json
       - name: Generate complete Trivy vulnerability report
         uses: aquasecurity/trivy-action@v0.36.0

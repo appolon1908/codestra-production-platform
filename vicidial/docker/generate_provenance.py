@@ -13,12 +13,18 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
     parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--oci-verification", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     engine = "docker" if shutil.which("docker") else "podman"
     inspect = json.loads(subprocess.check_output(
         [engine, "image", "inspect", args.image], text=True))[0]
-    digest = inspect.get("Digest") or f"sha256:{inspect['Id'].split(':')[-1]}"
+    verification = json.loads(args.oci_verification.read_text(encoding="utf-8"))
+    digest = verification.get("oci_manifest_digest", "")
+    if (verification.get("status") != "PASS" or
+            verification.get("source_sha") != args.source_sha or
+            not digest.startswith("sha256:") or len(digest) != 71):
+        raise ValueError("verified OCI manifest identity is required")
     statement = {
         "_type": "https://in-toto.io/Statement/v1",
         "subject": [{"name": args.image, "digest": {"sha256": digest.removeprefix("sha256:")}}],
