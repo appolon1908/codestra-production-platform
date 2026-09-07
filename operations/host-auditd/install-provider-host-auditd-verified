@@ -7,12 +7,23 @@ test "$(/usr/bin/readlink -f "$0")" = "$canonical_launcher"
 test "$(/usr/bin/stat -c '%u:%g:%a' "$canonical_launcher")" = "0:0:755"
 test "$(/usr/bin/stat -c '%u:%g:%a' "$canonical_installer")" = "0:0:755"
 
-python_alias=/usr/bin/python3
-python_target=$(/usr/bin/readlink -f "$python_alias")
+python_image=/usr/local/libexec/codestra-host-auditd/python3
+python_digest=/usr/local/libexec/codestra-host-auditd/python3.sha256
+test "$([ -L "$python_image" ]; echo $?)" = 1
+test "$([ -L "$python_digest" ]; echo $?)" = 1
+test "$(/usr/bin/stat -c '%u:%g:%a' "$python_image")" = "0:0:755"
+test "$(/usr/bin/stat -c '%u:%g:%a' "$python_digest")" = "0:0:600"
+test "$(/usr/bin/getfacl -cp "$python_image")" = $'user::rwx\ngroup::r-x\nother::r-x'
+test "$(/usr/bin/getfacl -cp "$python_digest")" = $'user::rw-\ngroup::---\nother::---'
+expected_python_sha=$(/usr/bin/cut -d' ' -f1 "$python_digest")
+test "${#expected_python_sha}" -eq 64
+test "$expected_python_sha" = "$(/usr/bin/sha256sum "$python_image" | /usr/bin/cut -d' ' -f1)"
+
+python_target=$(/usr/bin/readlink -f "$python_image")
 python_name=${python_target##*/python}
 stdlib=/usr/lib/python${python_name}
 
-test -x "$python_alias"
+test -x "$python_image"
 test -d "$stdlib"
 for authority in /usr /usr/lib "$stdlib"; do
   test "$(/usr/bin/stat -c '%u:%g:%a' "$authority")" = "0:0:755"
@@ -20,4 +31,4 @@ done
 test -z "$(/usr/bin/find "$stdlib" -xdev \( ! -user root -o -perm /022 \) -print -quit)"
 
 export CODESTRA_HOST_AUDITD_BOOTSTRAP_VERIFIED=stdlib-root-owned-read-only-v1
-exec "$python_alias" -I -S "$canonical_installer" "$@"
+exec "$python_image" -I -S "$canonical_installer" "$@"

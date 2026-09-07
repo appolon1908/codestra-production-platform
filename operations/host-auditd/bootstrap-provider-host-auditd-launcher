@@ -1,20 +1,100 @@
 #!/bin/bash
 set -euo pipefail
 
-# One-time root bootstrap after the release bundle and signature have been
-# independently verified. This command is deliberately not a sudo target for
-# codestra-admin; it establishes the immutable routine privilege boundary.
+# Root-only bootstrap or upgrade after the release bundle and signature have
+# been independently verified. This command is deliberately not a sudo target
+# for codestra-admin; it establishes the immutable routine privilege boundary.
 test "$EUID" -eq 0
+test "$#" -eq 1
+source_sha=$1
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
 source_dir=$(/usr/bin/readlink -f "$(/usr/bin/dirname "$0")")
 launcher="$source_dir/install-provider-host-auditd-verified"
 installer="$source_dir/install-provider-host-auditd.py"
+python_source=$(/usr/bin/readlink -f /usr/bin/python3)
 test -f "$launcher" -a ! -L "$launcher"
 test -f "$installer" -a ! -L "$installer"
+test -f "$python_source" -a -x "$python_source" -a ! -L "$python_source"
+
+target_dir=/usr/local/libexec/codestra-host-auditd
+launcher_target=/usr/local/sbin/install-provider-host-auditd-verified
+installer_target=/usr/local/libexec/codestra-host-auditd/install-provider-host-auditd.py
+python_target=$target_dir/python3
+digest_target=$target_dir/python3.sha256
+evidence_dir=/var/lib/codestra/host-auditd-bootstrap
+work=$(/usr/bin/mktemp -d /run/codestra-host-auditd-bootstrap.XXXXXX)
+cleanup() { /usr/bin/find "$work" -xdev -depth -delete 2>/dev/null || true; }
+committed=false
+targets=("$installer_target" "$launcher_target" "$python_target" "$digest_target")
+for index in "${!targets[@]}"; do
+  target=${targets[$index]}
+  if [ -e "$target" ]; then
+    test -f "$target" -a ! -L "$target"
+    /usr/bin/cp --preserve=mode,ownership,timestamps "$target" "$work/backup-$index"
+  else
+    : > "$work/absent-$index"
+  fi
+done
+rollback_bootstrap() {
+  if [ "$committed" = false ]; then
+    if [ -n "${installed_record:-}" ]; then
+      /usr/bin/rm -f -- "$installed_record"
+    fi
+    for index in "${!targets[@]}"; do
+      target=${targets[$index]}
+      if [ -f "$work/backup-$index" ]; then
+        /usr/bin/cp --preserve=mode,ownership,timestamps "$work/backup-$index" "$target"
+      else
+        /usr/bin/rm -f -- "$target"
+      fi
+      /usr/bin/sync -f "$(/usr/bin/dirname "$target")"
+    done
+  fi
+  cleanup
+}
+trap rollback_bootstrap EXIT
+
 /usr/bin/install -d -o root -g root -m 0755 /usr/local/libexec/codestra-host-auditd
-/usr/bin/install -o root -g root -m 0755 "$installer" \
-  /usr/local/libexec/codestra-host-auditd/install-provider-host-auditd.py
-/usr/bin/install -o root -g root -m 0755 "$launcher" \
-  /usr/local/sbin/install-provider-host-auditd-verified
-/usr/bin/sync -f /usr/local/libexec/codestra-host-auditd/install-provider-host-auditd.py
-/usr/bin/sync -f /usr/local/sbin/install-provider-host-auditd-verified
+/usr/bin/install -d -o root -g root -m 0700 "$evidence_dir"
+/usr/bin/install -o root -g root -m 0755 "$installer" "$work/installer"
+/usr/bin/install -o root -g root -m 0755 "$launcher" "$work/launcher"
+/usr/bin/install -o root -g root -m 0755 "$python_source" "$work/python3"
+python_sha=$(/usr/bin/sha256sum "$work/python3" | /usr/bin/cut -d' ' -f1)
+/usr/bin/printf '%s  python3\n' "$python_sha" > "$work/python3.sha256"
+/usr/bin/chown root:root "$work/python3.sha256"
+/usr/bin/chmod 0600 "$work/python3.sha256"
+
+# Atomic replacement is the governed upgrade path. The independently verified
+# source SHA and exact installed bytes are durably recorded below.
+/usr/bin/mv -f "$work/installer" "$installer_target"
+/usr/bin/mv -f "$work/launcher" "$launcher_target"
+/usr/bin/mv -f "$work/python3" "$python_target"
+/usr/bin/mv -f "$work/python3.sha256" "$digest_target"
+for pair in "$installer:$installer_target" "$launcher:$launcher_target" "$python_source:$python_target"; do
+  source=${pair%%:*}; target=${pair#*:}
+  /usr/bin/cmp -s "$source" "$target"
+  test "$(/usr/bin/stat -c '%u:%g:%a' "$target")" = "0:0:755"
+done
+test "$(/usr/bin/stat -c '%u:%g:%a' "$digest_target")" = "0:0:600"
+test "$python_sha" = "$(/usr/bin/sha256sum "$python_target" | /usr/bin/cut -d' ' -f1)"
+
+stamp=$(/usr/bin/date -u +%Y%m%dT%H%M%S%NZ)
+record="$work/bootstrap-${stamp}.record"
+/usr/bin/printf 'source_sha=%s\nlauncher_sha256=%s\ninstaller_sha256=%s\npython_sha256=%s\n' \
+  "$source_sha" \
+  "$(/usr/bin/sha256sum "$launcher_target" | /usr/bin/cut -d' ' -f1)" \
+  "$(/usr/bin/sha256sum "$installer_target" | /usr/bin/cut -d' ' -f1)" \
+  "$python_sha" > "$record"
+/usr/bin/chown root:root "$record"
+/usr/bin/chmod 0600 "$record"
+installed_record="$evidence_dir/bootstrap-${stamp}.record"
+/usr/bin/install -o root -g root -m 0600 "$record" "$installed_record"
+/usr/bin/cmp -s "$record" "$installed_record"
+test "$(/usr/bin/stat -c '%u:%g:%a' "$installed_record")" = "0:0:600"
+for target in "$installer_target" "$launcher_target" "$python_target" "$digest_target" "$installed_record"; do
+  /usr/bin/sync -f "$target"
+done
+/usr/bin/sync -f "$target_dir"
+/usr/bin/sync -f "$evidence_dir"
+committed=true
 echo CODESTRA_HOST_AUDITD_LAUNCHER_BOOTSTRAP=PASS

@@ -35,9 +35,13 @@ change.
 
 ## Install
 
-After independently verifying the first signed release as root, run
-`operations/host-auditd/bootstrap-provider-host-auditd-launcher` once from that
-verified extraction. It installs the launcher and Python verifier under
+After independently verifying each signed release as root, run
+`operations/host-auditd/bootstrap-provider-host-auditd-launcher <protected-source-sha>`
+from that verified extraction for the first installation and whenever the
+canonical installer or launcher changes. This repeatable root-only operation is
+the governed upgrade path; it atomically replaces and reads back the launcher,
+installer, and a protected Python image, then writes root-only digest evidence
+bound to the approved source SHA before reporting PASS. It installs them under
 root-owned `/usr/local` paths; `codestra-admin` must never receive sudo access
 to the bootstrap command or to a checkout-resident wrapper.
 

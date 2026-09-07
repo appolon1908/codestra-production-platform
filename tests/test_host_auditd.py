@@ -839,10 +839,12 @@ def test_verified_bootstrap_checks_stdlib_before_python_execution() -> None:
     launcher = (PACKAGE / "install-provider-host-auditd-verified").read_text()
     assert "/usr/bin/find" in launcher
     assert "! -user root -o -perm /022" in launcher
-    assert launcher.index("/usr/bin/find") < launcher.index('exec "$python_alias" -I')
+    assert launcher.index("/usr/bin/find") < launcher.index('exec "$python_image" -I')
     assert "/usr/local/sbin/install-provider-host-auditd-verified" in launcher
     assert "/usr/local/libexec/codestra-host-auditd/install-provider-host-auditd.py" in launcher
-    assert 'exec "$python_alias" -I -S' in launcher
+    assert 'exec "$python_image" -I -S' in launcher
+    assert "python3.sha256" in launcher
+    assert "/usr/bin/getfacl -cp" in launcher
     source = (PACKAGE / "install-provider-host-auditd.py").read_text()
     assert "verified bootstrap launcher is required" in source
 
@@ -852,6 +854,13 @@ def test_root_bootstrap_installs_launcher_outside_operator_checkout() -> None:
     assert 'test "$EUID" -eq 0' in bootstrap
     assert "/usr/local/sbin/install-provider-host-auditd-verified" in bootstrap
     assert "/usr/local/libexec/codestra-host-auditd/install-provider-host-auditd.py" in bootstrap
+    assert "python3.sha256" in bootstrap
+    assert "source_sha=%s" in bootstrap
+    assert "/usr/bin/cmp -s" in bootstrap
+    assert "/var/lib/codestra/host-auditd-bootstrap" in bootstrap
+    assert bootstrap.index("/usr/bin/cmp -s") < bootstrap.index(
+        "CODESTRA_HOST_AUDITD_LAUNCHER_BOOTSTRAP=PASS"
+    )
 
 
 def test_restored_ownership_is_fsynced_before_rollback_evidence() -> None:
