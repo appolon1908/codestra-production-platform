@@ -167,7 +167,7 @@ def validate_release_manifest(manifest: dict) -> None:
                 'production evidence must not reuse staging artifact bytes')
 
 
-def validate_release_records(explicit: Path | None = None) -> None:
+def validate_release_records(explicit: Path | None = None, evidence_root: Path = ROOT) -> None:
     """Gate every committed central release record and an optional CLI candidate."""
     paths = sorted((ROOT / 'release/manifests').glob('*.json'))
     if explicit is not None:
@@ -185,19 +185,25 @@ def validate_release_records(explicit: Path | None = None) -> None:
         manifest = json.loads(path.read_text(encoding='utf-8'),
                               object_pairs_hook=unique_pairs, parse_constant=invalid_constant)
         validate_release_manifest(manifest)
+        try:
+            from .validate_platform_release_evidence import validate_release_evidence
+        except ImportError:
+            from validate_platform_release_evidence import validate_release_evidence
+        validate_release_evidence(manifest, root=evidence_root)
 
 
 def main() -> int:
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, help='validate an additional central release candidate')
+    parser.add_argument('--evidence-root', type=Path, default=ROOT)
     args = parser.parse_args()
     validate_catalog()
     validate_composition()
     validate_release_schema()
     validate_caddy_bundle()
     validate_caddy_home()
-    validate_release_records(args.manifest)
+    validate_release_records(args.manifest, args.evidence_root)
     print('Platform authority validation passed: contract catalog, runtime composition, release manifest, Caddy home, and Kyqra source are canonical.')
     return 0
 if __name__ == '__main__':
