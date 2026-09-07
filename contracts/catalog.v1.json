@@ -40,7 +40,7 @@
       "id": "codestra.middleware.event-envelope.v1",
       "kind": "json-schema",
       "source": {
-        "repository": "appolon1908-hue/Middleware-",
+        "repository": "Codestra-SRL/codestra-middleware",
         "path": "contracts/platform/event-envelope.v1.schema.json"
       },
       "consumers": ["codestra-production-platform", "Odoo", "N8N", "kyqra-crawler"],
@@ -50,7 +50,7 @@
       "id": "codestra.middleware.command-envelope.v1",
       "kind": "json-schema",
       "source": {
-        "repository": "appolon1908-hue/Middleware-",
+        "repository": "Codestra-SRL/codestra-middleware",
         "path": "contracts/platform/command-envelope.v1.schema.json"
       },
       "consumers": ["codestra-production-platform", "N8N", "trusted adapters"],
@@ -60,7 +60,7 @@
       "id": "codestra.middleware.release-manifest.v1",
       "kind": "json-schema",
       "source": {
-        "repository": "appolon1908-hue/Middleware-",
+        "repository": "Codestra-SRL/codestra-middleware",
         "path": "contracts/release-manifest.v1.schema.json"
       },
       "consumers": ["codestra-production-platform release assembler"],

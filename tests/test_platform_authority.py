@@ -22,6 +22,46 @@ def test_platform_authority_validator_passes() -> None:
     assert "Platform authority validation passed" in result.stdout
 
 
+def test_platform_authority_validator_cannot_be_disabled_by_optimization() -> None:
+    result = subprocess.run(
+        [sys.executable, "-O", "scripts/validate_platform_authority.py"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Platform authority validation passed" in result.stdout
+    assert "assert " not in (
+        ROOT / "scripts/validate_platform_authority.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_unresolved_middleware_candidate_is_not_a_composition_or_contract_source() -> None:
+    composition = json.loads(
+        (ROOT / "composition/runtime-composition.v1.json").read_text()
+    )
+    middleware = next(
+        item for item in composition["components"] if item["id"] == "middleware"
+    )
+    assert "composition_input" not in middleware
+
+    catalog = json.loads((ROOT / "contracts/catalog.v1.json").read_text())
+    middleware_contracts = [
+        item for item in catalog["contracts"] if item["id"].startswith("codestra.middleware.")
+    ]
+    assert middleware_contracts
+    assert {
+        item["source"]["repository"] for item in middleware_contracts
+    } == {"Codestra-SRL/codestra-middleware"}
+
+
+def test_container_caddy_uses_shared_network_upstreams() -> None:
+    api = (ROOT / "operations/caddy/api.codestra.co.caddy").read_text()
+    assert "reverse_proxy 127.0.0.1:" not in api
+    assert "reverse_proxy codestra-websocket-gateway-gateway-1:8080" in api
+    assert "reverse_proxy codestra-kong-kong-gateway-1:8000" in api
+
+
 def test_platform_catalog_has_no_legacy_kyqra_repository() -> None:
     files = [
         ROOT / "contracts/catalog.v1.json",

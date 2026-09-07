@@ -70,7 +70,6 @@
       "source_path": ".",
       "candidate_source_repository": "appolon1908-hue/Middleware-",
       "authority_state": "unresolved-pending-governed-convergence",
-      "composition_input": "deploy/middleware/compose.approved-release.yaml",
       "role": "cross-system write boundary",
       "deployment_state": "digest-required"
     },

@@ -10,7 +10,7 @@
     {
       "path": "operations/caddy/api.codestra.co.caddy",
       "deployment_target": "container-caddy",
-      "sha256": "c1c6558adfa8c02a4c064a9864a19849decf8e745ee0937b4d3e11ad9f61d825"
+      "sha256": "55187b20f42d9dc2f1371e14b7ff59ab32edf27c1abd29b0253de02e8dbafce1"
     },
     {
       "path": "operations/caddy/auth.codestra.co.caddy",
