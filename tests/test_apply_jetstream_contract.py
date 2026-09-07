@@ -6,6 +6,7 @@ import ssl
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from tools import apply_jetstream_contract as applicator
 
@@ -103,6 +104,12 @@ def test_tls_context_requires_ca_and_client_identity(monkeypatch) -> None:
 
 def test_source_gate_covers_release_deployment_and_docs() -> None:
     workflow = Path(".github/workflows/platform-source-gate.yml").read_text()
-    assert '- ".github/workflows/**"' in workflow
-    assert '- "deploy/**"' in workflow
-    assert '- "docs/**"' in workflow
+    definition = yaml.load(workflow, Loader=yaml.BaseLoader)
+    assert "pull_request" in definition["on"]
+    assert definition["on"]["pull_request"] in (None, "", {})
+    validate = definition["jobs"]["validate"]
+    assert "if" not in validate
+    suite = next(step for step in validate["steps"]
+                 if step.get("name") == "Run complete clean-checkout platform suite")
+    assert "if" not in suite and "continue-on-error" not in suite
+    assert "-m pytest -q" in suite["run"]
