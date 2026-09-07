@@ -70,4 +70,11 @@ CREATE TABLE IF NOT EXISTS public.automation_action_executions(
     REFERENCES public.automation_executions(tenant_id,event_id,workflow_key)
 );
 
+GRANT SELECT, INSERT, UPDATE ON public.realtime_session_nonce,
+  public.realtime_session_request, public.automation_executions,
+  public.automation_action_executions TO codestra_control_plane_runtime;
+REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON public.realtime_session_nonce,
+  public.realtime_session_request, public.automation_executions,
+  public.automation_action_executions FROM codestra_control_plane_runtime;
+
 COMMIT;

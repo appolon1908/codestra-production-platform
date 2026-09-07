@@ -29,6 +29,7 @@ def test_one_time_realtime_session_token_is_bound_and_replay_safe(monkeypatch, t
 
 
 def test_realtime_session_creation_replays_one_original_nonce(monkeypatch, tmp_path):
+    monkeypatch.setenv("CALLING_CONTRACT_DIGEST", "a" * 64)
     monkeypatch.setenv("REALTIME_TOKEN_SECRET", "test-only-realtime-secret-that-is-long-enough")
     realtime_gateway.STORE = Store(str(tmp_path / "control-plane.db"))
     first = realtime_gateway.issue_idempotent_session(

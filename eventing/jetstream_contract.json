@@ -93,9 +93,9 @@
       "subjects": ["telephony.agent.*.*.*", "telephony.supervisor.*.*"],
       "retention": "limits",
       "storage": "file",
-      "replicas": 1,
-      "max_age_seconds": 86400,
-      "duplicate_window_seconds": 120,
+      "replicas": 3,
+      "max_age_seconds": 900,
+      "duplicate_window_seconds": 300,
       "max_message_bytes": 262144,
       "deny_delete": true,
       "deny_purge": true

@@ -51,7 +51,7 @@ def test_workflows_are_inactive_authenticated_idempotent_and_context_preserving(
         assert callback["type"] == "n8n-nodes-base.httpRequest"
         assert callback["parameters"]["url"].endswith("/api/v1/automation/results")
         requests = json.dumps((authorize, execute, callback))
-        assert "http://codestra-integration-control-plane-api-1:8096" in requests
+        assert "http://codestra-kong-kong-gateway-1:8000" in requests
         assert "$env." not in requests
         assert authorize["parameters"]["nodeCredentialType"] == "oAuth2Api"
         assert execute["parameters"]["nodeCredentialType"] == "oAuth2Api"

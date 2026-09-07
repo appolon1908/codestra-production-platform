@@ -16,6 +16,7 @@ import re
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
@@ -116,6 +117,8 @@ def authorized_agent_membership(
     """Fail closed unless the Keycloak subject has an active, synced membership."""
     try:
         with STORE.connect() as db:
+            if is_postgres():
+                db.execute("SELECT set_config('app.tenant_id', ?, true)", (tenant_id,))
             row = db.execute(
                 """SELECT 1 AS allowed
                    FROM cp_agent a
@@ -131,7 +134,9 @@ def authorized_agent_membership(
                      AND COALESCE(c.effective_state,c.desired_state)='ACTIVE'
                      AND m.desired_state='ACTIVE'
                      AND COALESCE(m.actual_state,m.desired_state)='ACTIVE'
-                     AND m.sync_status='SYNCED' AND m.effective_until IS NULL
+                     AND m.sync_status='SYNCED'
+                     AND m.effective_from <= CURRENT_TIMESTAMP
+                     AND (m.effective_until IS NULL OR m.effective_until > CURRENT_TIMESTAMP)
                    LIMIT 1""",
                 (agent_id, campaign_id, tenant_id, tenant_id, tenant_id,
                  authenticated_subject, True),
@@ -147,6 +152,8 @@ def resolve_agent_membership(
     """Derive the active agent from the authenticated Keycloak subject."""
     try:
         with STORE.connect() as db:
+            if is_postgres():
+                db.execute("SELECT set_config('app.tenant_id', ?, true)", (tenant_id,))
             row = db.execute(
                 """SELECT a.id AS agent_id
                    FROM cp_agent a
@@ -162,7 +169,9 @@ def resolve_agent_membership(
                      AND COALESCE(c.effective_state,c.desired_state)='ACTIVE'
                      AND m.desired_state='ACTIVE'
                      AND COALESCE(m.actual_state,m.desired_state)='ACTIVE'
-                     AND m.sync_status='SYNCED' AND m.effective_until IS NULL
+                     AND m.sync_status='SYNCED'
+                     AND m.effective_from <= CURRENT_TIMESTAMP
+                     AND (m.effective_until IS NULL OR m.effective_until > CURRENT_TIMESTAMP)
                    LIMIT 2""",
                 (campaign_id, tenant_id, tenant_id, tenant_id,
                  authenticated_subject, True),
@@ -188,10 +197,14 @@ def issue_idempotent_session(
     token, expires, nonce_hash, issued_at = _token_material(
         tenant_id, agent_id, campaign_id, authenticated_subject, resume_cursor
     )
+    contract_digest = os.getenv("CALLING_CONTRACT_DIGEST", "")
+    if not re.fullmatch(r"[0-9a-f]{64}", contract_digest):
+        raise RuntimeError("calling_contract_digest_missing")
     response: dict[str, object] = {
-        "token": token, "expires_at": expires,
+        "ticket": token,
+        "expires_at": datetime.fromtimestamp(expires, timezone.utc).isoformat().replace("+00:00", "Z"),
         "websocket_url": "wss://api.codestra.co/ws/agent",
-        "subprotocols": ["codestra-agent-v1", "session.<token>"],
+        "contract_digest": contract_digest,
     }
     _ensure_nonce_table()
     with STORE.connect() as db:
@@ -365,7 +378,9 @@ async def forward_agent_events(connection: ServerConnection, claims: dict[str, o
             if len(message.data) > 262144:
                 await message.term()
                 continue
-            await asyncio.wait_for(connection.send(message.data.decode("utf-8")), timeout=5)
+            envelope = {"cursor": int(message.metadata.sequence.stream),
+                        "event": json.loads(message.data)}
+            await asyncio.wait_for(connection.send(json.dumps(envelope, separators=(",", ":"))), timeout=5)
             await message.ack()
     finally:
         await nc.close()

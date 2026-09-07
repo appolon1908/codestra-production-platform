@@ -172,7 +172,7 @@ systems:
 
 service_accounts:
   odoo-integration-service: {system: odoo, scopes: [odoo.intent.submit, odoo.result.read]}
-  n8n-automation-service: {system: n8n, scopes: [automation.execute, middleware.action.request]}
+  n8n-automation-service: {system: n8n, scopes: [automation.execute, automation.result.write, middleware.action.request]}
   klyrow-provider-service: {system: klyrow, scopes: [email.event.submit]}
   telnexa-provider-service: {system: telnexa, scopes: [sms.event.submit]}
   vicidial-event-service: {system: vicidial, scopes: [voice.event.submit]}

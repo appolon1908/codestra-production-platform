@@ -13,6 +13,7 @@ services:
       REALTIME_NATS_URL: tls://codestra-nats:4222
       REALTIME_EVENT_DELIVERY_ENABLED: "false"
       REALTIME_SESSION_TTL_SECONDS: "60"
+      CALLING_CONTRACT_DIGEST: ${CALLING_CONTRACT_DIGEST:?set canonical calling contract digest}
     ports:
       - "127.0.0.1:18102:18102"
       - "127.0.0.1:18103:18103"
