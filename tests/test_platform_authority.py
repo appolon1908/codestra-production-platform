@@ -342,3 +342,52 @@ def test_production_acceptance_requires_every_evidence_class(
     }
     with pytest.raises(ValidationError):
         Draft202012Validator(schema).validate(manifest)
+
+
+def _accepted_production_candidate():
+    from hashlib import sha256
+    manifest = _release_manifest()
+    manifest['promotion']['production'] = {
+        'status': 'accepted',
+        'evidence': {kind: {'environment': 'production',
+                           'path': f'evidence/production/{kind}.json',
+                           'sha256': sha256(f'production-{kind}'.encode()).hexdigest()}
+                     for kind in ('integration', 'backup', 'restore', 'monitoring', 'rollback', 'approval')},
+    }
+    return manifest
+
+
+def test_semantic_release_gate_accepts_distinct_production_artifacts():
+    from scripts.validate_platform_authority import validate_release_manifest
+    validate_release_manifest(_accepted_production_candidate())
+
+
+@pytest.mark.parametrize('kind', ['integration', 'backup', 'restore', 'monitoring', 'rollback', 'approval'])
+@pytest.mark.parametrize('reuse', ['path', 'sha256'])
+def test_production_cannot_relabel_any_staging_evidence(kind, reuse):
+    from scripts.validate_platform_authority import validate_release_manifest
+    manifest = _accepted_production_candidate()
+    manifest['promotion']['production']['evidence'][kind][reuse] = manifest['promotion']['staging']['evidence']['integration'][reuse]
+    with pytest.raises(ValueError, match='schema rejected' if reuse == 'path' else 'reuse staging'):
+        validate_release_manifest(manifest)
+
+
+def test_release_candidate_cli_rejects_relabelled_staging_artifact(tmp_path):
+    manifest = _accepted_production_candidate()
+    manifest['promotion']['production']['evidence']['backup']['sha256'] = manifest['promotion']['staging']['evidence']['backup']['sha256']
+    path = tmp_path / 'candidate.json'
+    path.write_text(json.dumps(manifest))
+    result = subprocess.run([sys.executable, '-O', 'scripts/validate_platform_authority.py', '--manifest', str(path)], cwd=ROOT, text=True, capture_output=True)
+    assert result.returncode != 0
+    assert 'reuse staging artifact bytes' in result.stderr
+
+
+def test_default_source_gate_validates_central_release_records(tmp_path, monkeypatch):
+    import scripts.validate_platform_authority as authority
+    folder = tmp_path / 'release/manifests'
+    folder.mkdir(parents=True)
+    (folder / 'candidate.json').write_text('{"schema_version":"wrong"}')
+    monkeypatch.setattr(authority, 'ROOT', tmp_path)
+    monkeypatch.setattr(authority, 'load', lambda _: json.loads((ROOT / 'release/platform-release-manifest.v1.schema.json').read_text()))
+    with pytest.raises(ValueError, match='schema rejected'):
+        authority.validate_release_records()

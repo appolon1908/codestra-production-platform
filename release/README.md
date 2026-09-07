@@ -35,3 +35,19 @@ pending or rejected.
 Release records belong on short-lived `release/<change-id>` branches and merge
 into `release/production-activation`. They must never contain private keys,
 tokens, credentials, customer payloads, or secret values.
+
+
+## Mandatory semantic release gate
+
+JSON Schema alone cannot compare sibling environment artifact references.
+Run `python scripts/validate_platform_authority.py --manifest <candidate.json>`
+for every central release candidate; a schema-only result is not acceptance.
+The source gate also validates every `release/manifests/*.json` record. Accepted
+production evidence cannot reuse any staging evidence path or content digest,
+even after an environment label or evidence class is changed. References must
+not traverse parent directories. The CLI rejects duplicate JSON object keys.
+
+This gate validates the record, not the authenticity of remote evidence. Signed
+artifact verification, actual environment read-back, independent approval and
+runtime acceptance remain separate requirements. No environment is certified
+by adding a new path, recomputing a label, or merging this validator.

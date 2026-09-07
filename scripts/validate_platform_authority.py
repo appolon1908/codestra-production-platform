@@ -136,12 +136,68 @@ def validate_caddy_home() -> None:
     require('reverse_proxy keycloak:8080' in auth, 'platform authority invariant failed')
     require(re.search('\\(security_headers\\)\\s*\\{', snippets), 'platform authority invariant failed')
 
+def validate_release_manifest(manifest: dict) -> None:
+    """Schema plus cross-environment invariants; not runtime certification."""
+    from jsonschema import Draft202012Validator, ValidationError
+    from pathlib import PurePosixPath
+    try:
+        Draft202012Validator(load('release/platform-release-manifest.v1.schema.json')).validate(manifest)
+    except ValidationError as exc:
+        raise ValueError('platform release manifest schema rejected') from exc
+    promotion = manifest['promotion']
+    if promotion['production']['status'] != 'accepted':
+        return
+    staging = promotion['staging']['evidence']
+    production = promotion['production']['evidence']
+    staging_paths: set[str] = set()
+    staging_digests: set[str] = set()
+    for evidence in staging.values():
+        path = PurePosixPath(evidence['path'])
+        require(not path.is_absolute() and '..' not in path.parts,
+                'staging evidence path rejected')
+        staging_paths.add(str(path))
+        staging_digests.add(evidence['sha256'])
+    for evidence in production.values():
+        path = PurePosixPath(evidence['path'])
+        require(not path.is_absolute() and '..' not in path.parts,
+                'production evidence path rejected')
+        require(str(path) not in staging_paths,
+                'production evidence must not reuse staging artifact paths')
+        require(evidence['sha256'] not in staging_digests,
+                'production evidence must not reuse staging artifact bytes')
+
+
+def validate_release_records(explicit: Path | None = None) -> None:
+    """Gate every committed central release record and an optional CLI candidate."""
+    paths = sorted((ROOT / 'release/manifests').glob('*.json'))
+    if explicit is not None:
+        paths.append(explicit)
+    for path in paths:
+        require(path.is_file() and not path.is_symlink(), 'release record path rejected')
+        def unique_pairs(pairs):
+            result = {}
+            for key, value in pairs:
+                require(key not in result, 'duplicate release record key')
+                result[key] = value
+            return result
+        def invalid_constant(value):
+            raise ValueError('non-finite release record value')
+        manifest = json.loads(path.read_text(encoding='utf-8'),
+                              object_pairs_hook=unique_pairs, parse_constant=invalid_constant)
+        validate_release_manifest(manifest)
+
+
 def main() -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--manifest', type=Path, help='validate an additional central release candidate')
+    args = parser.parse_args()
     validate_catalog()
     validate_composition()
     validate_release_schema()
     validate_caddy_bundle()
     validate_caddy_home()
+    validate_release_records(args.manifest)
     print('Platform authority validation passed: contract catalog, runtime composition, release manifest, Caddy home, and Kyqra source are canonical.')
     return 0
 if __name__ == '__main__':
