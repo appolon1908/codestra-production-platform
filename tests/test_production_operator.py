@@ -106,6 +106,9 @@ EXPECTED_ACTIONS = {
     "rollback-control-plane",
     "rollout-middleware",
     "rollback-middleware",
+    "status-email-reseller",
+    "rollout-email-reseller",
+    "rollback-email-reseller",
     "activate-control-plane",
     "enable-production-web-traffic",
     "disable-production-web-traffic",
@@ -120,6 +123,185 @@ def test_action_set_is_exact() -> None:
         "backup": "codestra-readiness-backup.service",
         "restore-test": "codestra-readiness-restore.service",
     }
+
+
+def test_email_reseller_candidate_is_bound_to_attested_release_files() -> None:
+    result = OPERATOR.validate_email_reseller_release(ROOT)
+    assert result == {
+        "candidate_evidence": "PASS",
+        "candidate_lock_sha256": "3a87ddff91c00c283a9fe97df8f176c2f44e00808b1ccc06328ce352eb30b605",
+    }
+
+
+def _email_reseller_rendered_config() -> dict[str, object]:
+    return {
+        "services": {
+            "api": {
+                "image": OPERATOR.EMAIL_RESELLER_SUBJECT,
+                "environment": dict(OPERATOR.EMAIL_RESELLER_REQUIRED_ENV),
+                "read_only": True,
+                "cap_drop": ["ALL"],
+                "security_opt": ["no-new-privileges:true"],
+                "entrypoint": [
+                    "/opt/venv/bin/python", "-m", "email_reseller_service.admission"
+                ],
+                "command": [
+                    "/opt/venv/bin/python", "-m", "email_reseller_service.server"
+                ],
+                "ports": [{
+                    "target": 8080, "published": "18181",
+                    "host_ip": "127.0.0.1", "protocol": "tcp",
+                }],
+            }
+        }
+    }
+
+
+def test_email_reseller_compose_requires_fail_closed_loopback_runtime(monkeypatch) -> None:
+    rendered = _email_reseller_rendered_config()
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_bytes",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, json.dumps(rendered).encode(), b""
+        ),
+    )
+    OPERATOR.validate_email_reseller_compose(["docker", "compose"], OPERATOR.EMAIL_RESELLER_SUBJECT)
+    rendered["services"]["api"]["environment"]["LIVE_EMAIL_DELIVERY"] = "true"
+    with pytest.raises(OPERATOR.OperatorError, match="not fail-closed"):
+        OPERATOR.validate_email_reseller_compose(["docker", "compose"], OPERATOR.EMAIL_RESELLER_SUBJECT)
+
+
+def test_email_reseller_runtime_readback_proves_identity_safety_and_backlog(monkeypatch) -> None:
+    image_id = "sha256:" + "7" * 64
+    current = {
+        "Image": image_id,
+        "State": {"Running": True, "Health": {"Status": "healthy"}},
+        "Config": {
+            "Image": OPERATOR.EMAIL_RESELLER_SUBJECT,
+            "Env": [f"{name}={value}" for name, value in OPERATOR.EMAIL_RESELLER_REQUIRED_ENV.items()],
+            "Entrypoint": [
+                "/opt/venv/bin/python", "-m", "email_reseller_service.admission"
+            ],
+            "Cmd": [
+                "/opt/venv/bin/python", "-m", "email_reseller_service.server"
+            ],
+        },
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "CapDrop": ["ALL"],
+            "SecurityOpt": ["no-new-privileges:true"],
+            "Tmpfs": {"/tmp": ""},
+            "RestartPolicy": {"Name": "unless-stopped"},
+        },
+        "NetworkSettings": {
+            "Ports": {"8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": "18181"}]},
+            "Networks": {"codestra_edge": {}, "codestra_backend": {}},
+        },
+    }
+    responses = {
+        "/version": {
+            "service": "email-reseller",
+            "migration_revision": OPERATOR.EMAIL_RESELLER_MIGRATION_REVISION,
+            "environment": "production",
+            "git_sha": OPERATOR.EMAIL_RESELLER_SOURCE_SHA,
+            "application_version": OPERATOR.EMAIL_RESELLER_SOURCE_SHA,
+            "image_digest": OPERATOR.EMAIL_RESELLER_IMAGE_DIGEST,
+            "build_timestamp": OPERATOR.EMAIL_RESELLER_BUILD_TIMESTAMP,
+        },
+        "/readyz": {"status": "ready", "postgresql": "ok"},
+        "/health": {
+            "status": "ok", "submission_mode": "synthetic",
+            "klyrow": {"reachable": True, "safe_mode": True, "production_gate_approved": False},
+        },
+        "/capabilities": {
+            "business_writes_enabled": False,
+            "external_delivery_enabled": False,
+            "live_email_enabled": False,
+            "live_sms_enabled": False,
+            "live_pstn_enabled": False,
+            "simulation_enabled": True,
+        },
+    }
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda _name: current)
+    monkeypatch.setattr(OPERATOR, "email_reseller_endpoint", lambda path: responses[path])
+    monkeypatch.setattr(
+        OPERATOR, "email_reseller_callback_backlog",
+        lambda: {"messages_total": 11, "callback_backlog": 2, "delivery_events_total": 9},
+    )
+    result = OPERATOR.validate_email_reseller_runtime(
+        expected_image=OPERATOR.EMAIL_RESELLER_SUBJECT,
+        expected_image_id=image_id,
+    )
+    assert result["email_reseller_health"] == "PASS"
+    assert result["email_reseller_delivery"] == "DISABLED"
+    assert result["klyrow_link"]["reachable"] is True
+    assert result["callback_backlog"] == 2
+
+
+def test_email_reseller_runtime_rejects_non_loopback_exposure(monkeypatch) -> None:
+    current = {
+        "Image": "sha256:" + "7" * 64,
+        "State": {"Running": True, "Health": {"Status": "healthy"}},
+        "Config": {
+            "Image": OPERATOR.EMAIL_RESELLER_SUBJECT,
+            "Env": [f"{name}={value}" for name, value in OPERATOR.EMAIL_RESELLER_REQUIRED_ENV.items()],
+            "Entrypoint": [
+                "/opt/venv/bin/python", "-m", "email_reseller_service.admission"
+            ],
+            "Cmd": [
+                "/opt/venv/bin/python", "-m", "email_reseller_service.server"
+            ],
+        },
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "CapDrop": ["ALL"],
+            "SecurityOpt": ["no-new-privileges:true"],
+            "Tmpfs": {"/tmp": ""},
+            "RestartPolicy": {"Name": "unless-stopped"},
+        },
+        "NetworkSettings": {
+            "Ports": {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "18181"}]},
+            "Networks": {"codestra_edge": {}, "codestra_backend": {}},
+        },
+    }
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda _name: current)
+    with pytest.raises(OPERATOR.OperatorError, match="hardening readback"):
+        OPERATOR.validate_email_reseller_runtime(expected_image=OPERATOR.EMAIL_RESELLER_SUBJECT)
+
+
+def test_email_reseller_snapshot_preserves_exact_old_image_metadata(
+    monkeypatch, tmp_path
+) -> None:
+    image_id = "sha256:" + "8" * 64
+    old_digest = "sha256:" + "9" * 64
+    current = {
+        "Image": image_id,
+        "Config": {"Env": [
+            *[f"{name}={value}" for name, value in OPERATOR.EMAIL_RESELLER_SAFETY_ENV.items()],
+            f"CODESTRA_IMAGE_DIGEST={old_digest}",
+            "CODESTRA_BUILD_TIMESTAMP=2026-09-01T01:02:03Z",
+        ]},
+    }
+    calls = []
+    monkeypatch.setattr(OPERATOR, "EMAIL_RESELLER_BACKUP_ROOT", tmp_path)
+    monkeypatch.setattr(OPERATOR, "EMAIL_RESELLER_ROLLBACK_MARKER", tmp_path / "LAST_SUCCESS")
+    monkeypatch.setattr(OPERATOR, "docker_inspect", lambda _name: current)
+    monkeypatch.setattr(OPERATOR, "validate_email_reseller_runtime", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        OPERATOR,
+        "run_bytes",
+        lambda command, **_kwargs: calls.append(command)
+        or subprocess.CompletedProcess(command, 0, b"", b""),
+    )
+    config = OPERATOR.load_release_config()
+    stamp = OPERATOR.snapshot_email_reseller(config)
+    override = (tmp_path / stamp / "rollback.override.yaml").read_text()
+    assert f"image: codestra/email-reseller-api:rollback-{stamp}" in override
+    assert f"CODESTRA_IMAGE_DIGEST: {old_digest}" in override
+    assert 'CODESTRA_BUILD_TIMESTAMP: "2026-09-01T01:02:03Z"' in override
+    assert (tmp_path / "LAST_SUCCESS").read_text().strip() == stamp
+    assert ["/usr/bin/docker", "tag", image_id, f"codestra/email-reseller-api:rollback-{stamp}"] in calls
 
 
 def test_klyrow_authorization_requires_exact_tuple(monkeypatch) -> None:
