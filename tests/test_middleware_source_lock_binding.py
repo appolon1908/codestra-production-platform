@@ -9,6 +9,7 @@ import copy
 import hashlib
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -98,6 +99,14 @@ def test_signed_manifest_snapshot_and_all_selected_bindings():
     assert candidate['derived_openvex_sha256'] == 'sha256:' + document('config/production-release-tuple.json')['middleware_openvex_sha256']
     assert_binding(lock, document('config/production-release-tuple.json'),
                    document('deploy/middleware/approved-release-lock.json'), json.loads(manifest_bytes))
+
+
+def test_source_lock_generation_is_not_older_than_selected_release():
+    lock = document('PRODUCTION-SOURCE-LOCK.yaml')
+    manifest = document(MANIFEST)
+    generated_at = datetime.fromisoformat(lock['generated_at'].replace('Z', '+00:00'))
+    built_at = datetime.fromisoformat(manifest['build']['built_at'].replace('Z', '+00:00'))
+    assert generated_at >= built_at
 
 
 @pytest.mark.parametrize('section', ['protected_production_tuple', 'appolon_n8n_gap_candidate'])
