@@ -1,6 +1,38 @@
 # Codestra Production Platform
 
-This repository is the **source authority for the Codestra application platform**. It contains reviewed contracts, deployment definitions, security policy, recovery tooling, monitoring, and the integration control plane used by Odoo, middleware, n8n, Keycloak, Kong, Redis, PostgreSQL, VICIdial, Klyrow, Telnexa, and Kyqra.
+## Integration and release authority
+
+This repository is the protected integration and release authority for the
+Codestra platform. Its long-lived baseline is
+`release/production-activation`; application repositories continue to own
+their service source, while this repository owns the cross-service contract
+catalog, runtime composition, immutable multi-service release manifests,
+integrated edge configuration, preflight, promotion, rollback orchestration,
+and release evidence.
+
+Canonical control locations:
+
+| Responsibility | Canonical path |
+|---|---|
+| Cross-service contract catalog | `contracts/catalog.v1.json` |
+| Runtime composition | `composition/runtime-composition.v1.json` and the referenced files under `deploy/` |
+| Multi-service release manifest contract | `release/platform-release-manifest.v1.schema.json` |
+| Release-manifest operating rules | `release/README.md` |
+| Caddy desired state | `operations/caddy/` |
+| Kong desired state | `deploy/kong/` |
+| Release evidence and go/no-go records | `evidence/` and approved release artifacts |
+
+`operations/caddy/` is Caddy's Git home. Host files under `/etc/caddy` are a
+deployed projection and must not become an unreviewed source of truth. The
+Middleware `platform/caddy` branch remains a review and compatibility
+workstream; it does not own production Caddy deployment files.
+
+The canonical crawler source is
+[`appolon1908-hue/kyqra-crawler`](https://github.com/appolon1908-hue/kyqra-crawler).
+The legacy `appolon1908-hue/kyqra` name is retired and must not be introduced
+into contracts, composition, release manifests, or deployment documentation.
+
+This repository also contains reviewed platform contracts, deployment definitions, security policy, recovery tooling, monitoring, and the integration control plane used by Odoo, Middleware, n8n, Keycloak, Kong, Redis, PostgreSQL, VICIdial, Klyrow, Telnexa, and Kyqra.
 
 A merged source change is **not** proof that the corresponding production runtime is active. Production deployment requires an immutable image or package built from the protected merged SHA, a current change record, recovery evidence, an approved maintenance window, canary/rollback evidence, and live-versus-Git reconciliation.
 
@@ -38,6 +70,8 @@ Business APIs must not bypass Kong. Explicit exceptions are limited to reviewed 
 
 ## Canonical catalogs
 
+- Cross-service contract catalog: `contracts/catalog.v1.json`
+- Runtime composition: `composition/runtime-composition.v1.json`
 - System boundaries and allowed connections: `config/integration-policy.yaml`
 - Connectors, endpoints, webhooks, and protocols: `config/integration-registries.yaml`
 - Platform features, critical API surface, and known gaps: `config/platform-catalog.yaml`
