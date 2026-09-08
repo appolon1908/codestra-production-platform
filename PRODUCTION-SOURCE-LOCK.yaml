@@ -15,24 +15,33 @@ protected_platform:
 middleware_authorities:
   protected_production_tuple:
     repository: appolon1908-hue/Middleware-
-    source_sha: 63b6c0c8bca5168a1178895bd12858d0b1e8086e
+    source_sha: 4668de7d7ddc6f98968c06b7dc02d7650ff5e88a
     image: ghcr.io/appolon1908-hue/codestra-middleware
-    image_digest: sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a
-    migration_head: 0056_klyrow_delivery_events
+    image_digest: sha256:41ae78d368b5e2db2e9fe9be50fd5041b3f1a07ae4837170a76a68889be565e6
+    migration_head: 0057_platform_service_catalog
     authority_state: SELECTED_SIGNED_AUTHORITY_PENDING_STAGING_CERTIFICATION
   appolon_n8n_gap_candidate:
     repository: appolon1908-hue/Middleware-
-    source_sha: 63b6c0c8bca5168a1178895bd12858d0b1e8086e
+    source_sha: 4668de7d7ddc6f98968c06b7dc02d7650ff5e88a
     image: ghcr.io/appolon1908-hue/codestra-middleware
-    image_digest: sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a
-    migration_head: 0056_klyrow_delivery_events
-    release_id: 63b6c0c8bca5-bca7a220b9ce
-    release_run: 34035226830
-    production_promotion_gate_run: null
-    release_artifact_digest: sha256:e3af11436039c9812d0e0af4e82a5b3efdfd1736c300f6a6c6f1cfb7ff103e9f
-    sbom_sha256: sha256:c870828a291e924cb0ca4604c37f95b9c93aee4bda9623f685eb679552f8bc9f
-    contracts_sha256: sha256:b72199383dccc19472bc8fbce76b3bb65fd3ba706a2fa6ac82d12cf74bad6a5d
-    migrations_sha256: sha256:ed3b8e7132c5501ce8f4ff7c15a7867903ea4a70e06960669e8b267d4834a844
+    image_digest: sha256:41ae78d368b5e2db2e9fe9be50fd5041b3f1a07ae4837170a76a68889be565e6
+    migration_head: 0057_platform_service_catalog
+    release_id: 4668de7d7ddc-41ae78d368b5
+    release_run: 34173524024
+    release_run_attempt: 1
+    release_artifact: signed-middleware-release-4668de7d7ddc6f98968c06b7dc02d7650ff5e88a-34173524024-1
+    release_artifact_id: 10036514846
+    release_manifest: evidence/server65/middleware-4668de7-release-manifest.v1.json
+    release_manifest_sha256: sha256:64564dfb72fea44a14e24dddbdfbfb069d7c1543b1005575a5a0d89ccb8a4232
+    release_manifest_sigstore_sha256: sha256:2f8a0de014a06d5a3c4b522de8a28e8a422a19877d23124d43da4fc1fe3eadd4
+    derived_provenance_sha256: sha256:6916ea33905dd145669a5f853fefd15d256eb33040620e218528b5f75c892fd3
+    derived_openvex_sha256: sha256:211f47dd39ee3272112663b118b49466d27dc578e9c4c2f1176cf0a9abaa6fad
+    production_promotion_gate_run: 34173672590
+    production_promotion_gate_scope: SIGNED_RELEASE_ADMISSION_ONLY_NOT_RUNTIME_DEPLOYMENT
+    release_artifact_digest: sha256:0a678bdb2d8796bb2d09d3203bb92a5eefeac447c76e49156917c5e5c5bf7adf
+    sbom_sha256: sha256:2ab69f32336a37b4f44990b31b108e3be79eea2c938e4b8079d3446f253b3a8a
+    contracts_sha256: sha256:13270da3d5d687364725aa244242283c372ade1ce1c050f1049ff31a1b0d61d2
+    migrations_sha256: sha256:0a488e5700e5df2f71552bb6a703d5a248bdde3c8a2bb3b611dd12ee58b7629d
     runtime_profiles_sha256: sha256:c46c2bf17e955de663c271b33b95e2256fbecea9607ee5fcb29422605a799b84
     vulnerability_matches: 0
     runtime_state: SIGNED_IMMUTABLE_CANDIDATE_NOT_DEPLOYED
