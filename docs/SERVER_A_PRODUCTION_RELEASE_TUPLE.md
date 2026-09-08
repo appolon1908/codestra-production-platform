@@ -6,20 +6,26 @@ repositories. It is an ownership contract, not production activation.
 | Element | Authority | Candidate identity | Runtime artifact |
 | --- | --- | --- | --- |
 | Orchestration, JetStream definitions, host policy and evidence tooling | `appolon1908-hue/codestra-production-platform` | PR 15 exact protected merge SHA | signed deployment/configuration bundle |
-| Middleware executable source | `Codestra-SRL/codestra-middleware` | PR 219 exact protected merge SHA | `ghcr.io/codestra-srl/codestra-middleware@sha256:<production-approved-digest>` |
+| Middleware executable source | `appolon1908-hue/Middleware-` | protected source-lock exact SHA | `ghcr.io/appolon1908-hue/codestra-middleware@sha256:<production-approved-digest>` |
 | Database migrations | canonical middleware image and its Alembic revision | read from the exact image | migration owner executes; runtime roles never own schemas |
 | JetStream server contract | production-platform `eventing/jetstream_contract.json` | checksum from protected configuration bundle | applied and read back by `tools/apply_jetstream_contract.py` |
-| JetStream publisher and DLQ worker | canonical middleware image | PR 219 protected merge SHA | `app.eventing.jetstream` and `app.entrypoints.jetstream_dlq_worker` |
+| JetStream publisher and DLQ worker | canonical middleware image | exact protected Appolon Middleware SHA | `app.eventing.jetstream` and `app.entrypoints.jetstream_dlq_worker` |
 | Keycloak production middleware contract | `config/keycloak-production-contract.env.example` | checksum from the protected configuration bundle | production middleware issuer/client; not a webphone credential |
 | Keycloak internal staging contract | `config/keycloak-staging-contract.env.example` | checksum from the protected configuration bundle | internal staging issuer/client/secret only; production delivery prohibited |
 | Canonical TEST_SYN webphone machine contract | `config/keycloak-webphone-machine-contract.env.example`, `config/keycloak-webphone-machine-client.json`, and `config/keycloak-webphone-allowed-tenants.json` | checksums from the protected configuration bundle | canonical `.co` issuer, `codestra-provisioning-service-staging`, least-privilege service account, no production delivery |
 | Odoo and n8n integration logic | canonical middleware image | exact protected middleware SHA | versioned image digest |
 | Callback adapter contract | production-platform policy plus canonical middleware image | exact checksums and image digest | private authenticated adapter only |
 
-The existing signed middleware digest
-`sha256:2e15399387967c02d78cc56565157412f0cc2cb9ad6393695d17c39a88cdd2ff`
-is authorized for isolated staging only. It is not a production artifact and
-must not be entered as the production digest.
+The protected source lock currently selects Appolon Middleware source
+`63b6c0c8bca5168a1178895bd12858d0b1e8086e` and signed digest
+`sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a`.
+That tuple is not deployed and remains pending protected staging, restore,
+rollback and canary certification. Selection as forward authority is not
+production authorization.
+
+`Codestra-SRL/codestra-middleware` remains former rollback evidence only. Its
+source, image and migration lineage must not populate a forward candidate or be
+combined with the Appolon tuple.
 
 Production deployment requires a generated manifest in which every placeholder
 below is replaced by an exact protected merge SHA, digest or checksum. The

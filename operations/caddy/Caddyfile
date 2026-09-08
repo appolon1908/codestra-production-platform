@@ -1,0 +1,5 @@
+# Reviewed Codestra edge import root. Secret-bearing global options remain in
+# the host-owned bootstrap configuration and are not committed here.
+import snippets/*.caddy
+import api.codestra.co.caddy
+import auth.codestra.co.caddy

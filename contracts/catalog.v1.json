@@ -1,0 +1,110 @@
+{
+  "schema_version": "contract-catalog.v1",
+  "authority": {
+    "repository": "appolon1908-hue/codestra-production-platform",
+    "branch": "release/production-activation"
+  },
+  "compatibility_policy": "additive-with-explicit-versioning; breaking changes require a new contract id",
+  "contracts": [
+    {
+      "id": "codestra.integration-event-envelope.v1",
+      "kind": "json-schema",
+      "source": {
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "path": "schemas/integration-event-envelope-v1.schema.json"
+      },
+      "consumers": ["Middleware", "Odoo", "N8N", "Keycloak", "kyqra-crawler"],
+      "activation": "required"
+    },
+    {
+      "id": "codestra.jetstream.v1",
+      "kind": "transport-contract",
+      "source": {
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "path": "eventing/jetstream_contract.json"
+      },
+      "consumers": ["Middleware", "control-plane", "monitoring"],
+      "activation": "required"
+    },
+    {
+      "id": "codestra.control-plane.openapi.v1",
+      "kind": "openapi",
+      "source": {
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "path": "docs/openapi/control-plane-v1.yaml"
+      },
+      "consumers": ["Odoo", "N8N", "Middleware", "operator tooling"],
+      "activation": "fail-closed"
+    },
+    {
+      "id": "codestra.middleware.event-envelope.v1",
+      "kind": "json-schema",
+      "source": {
+        "repository": "Codestra-SRL/codestra-middleware",
+        "path": "contracts/platform/event-envelope.v1.schema.json"
+      },
+      "consumers": ["codestra-production-platform", "Odoo", "N8N", "kyqra-crawler"],
+      "activation": "required"
+    },
+    {
+      "id": "codestra.middleware.command-envelope.v1",
+      "kind": "json-schema",
+      "source": {
+        "repository": "Codestra-SRL/codestra-middleware",
+        "path": "contracts/platform/command-envelope.v1.schema.json"
+      },
+      "consumers": ["codestra-production-platform", "N8N", "trusted adapters"],
+      "activation": "fail-closed"
+    },
+    {
+      "id": "codestra.middleware.release-manifest.v1",
+      "kind": "json-schema",
+      "source": {
+        "repository": "Codestra-SRL/codestra-middleware",
+        "path": "contracts/release-manifest.v1.schema.json"
+      },
+      "consumers": ["codestra-production-platform release assembler"],
+      "activation": "required"
+    },
+    {
+      "id": "codestra.kyqra.job-api.v1",
+      "kind": "http-and-callback-contract",
+      "source": {
+        "repository": "appolon1908-hue/kyqra-crawler",
+        "path": "src/main.ts"
+      },
+      "consumers": ["Middleware", "codestra-production-platform"],
+      "activation": "source-only-until-runtime-verified"
+    },
+    {
+      "id": "codestra.telephony.calling-api.v1",
+      "kind": "openapi",
+      "source": {
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "path": "contracts/telephony/codestra-calling-api.v1.openapi.yaml"
+      },
+      "consumers": ["Middleware", "Odoo", "VICIdial adapter", "operator tooling"],
+      "activation": "fail-closed"
+    },
+    {
+      "id": "codestra.telephony.calling-events.v1",
+      "kind": "asyncapi",
+      "source": {
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "path": "contracts/telephony/codestra-calling-events.v1.asyncapi.yaml"
+      },
+      "consumers": ["Middleware", "WebSocket gateway", "NATS JetStream"],
+      "activation": "fail-closed"
+    },
+    {
+      "id": "codestra.telephony.calling-ecosystem.v1",
+      "kind": "runtime-contract",
+      "source": {
+        "repository": "appolon1908-hue/codestra-production-platform",
+        "path": "contracts/telephony/codestra-calling-ecosystem.v1.yaml"
+      },
+      "consumers": ["platform release assembler", "Middleware", "Odoo", "WebSocket gateway", "VICIdial adapter"],
+      "activation": "fail-closed"
+    }
+  ]
+}
