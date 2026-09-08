@@ -44,6 +44,16 @@ CONFIRMATIONS = {
     "canary": "START_PORTFOLIO_READONLY_CANARY",
     "production": "PROMOTE_PORTFOLIO_TO_100_PERCENT",
 }
+SAFETY_KEYS = {
+    "external_effects_enabled",
+    "live_email_delivery",
+    "live_sms_delivery",
+    "live_pstn_dialing",
+    "odoo_write",
+    "n8n_external_delivery",
+    "live_trading",
+    "payment_execution",
+}
 ZERO40 = "0" * 40
 ZERO64 = "0" * 64
 
@@ -96,6 +106,33 @@ def validate_catalog(catalog: dict[str, Any]) -> None:
     require(catalog.get("contract_path") == ".codestra/production-orchestrator-contract.v1.json", "unexpected contract path")
     require(catalog.get("release_intent_workflow") == INTENT_WORKFLOW, "unexpected release-intent workflow")
 
+    authority = catalog.get("authority_policy")
+    require(isinstance(authority, dict), "catalog authority_policy must be an object")
+    require(
+        authority.get("controller") == "appolon1908-hue/codestra-production-platform",
+        "controller authority mismatch",
+    )
+    require(
+        authority.get("infrastructure_runtime") == "appolon1908-hue/Infustruction-repo",
+        "infrastructure runtime authority mismatch",
+    )
+    require(
+        authority.get("canonical_middleware") == "appolon1908-hue/Middleware-",
+        "canonical Middleware authority mismatch",
+    )
+    require(
+        authority.get("legacy_middleware_rollback_only") == "Codestra-SRL/codestra-middleware",
+        "legacy Middleware rollback authority mismatch",
+    )
+
+    check_policy = catalog.get("check_policy")
+    require(isinstance(check_policy, dict), "catalog check_policy must be an object")
+    require(check_policy.get("default_app_id") == 15368, "required check app must remain GitHub Actions")
+    require(
+        check_policy.get("require_protected_branch_binding") is True,
+        "required checks must remain bound by branch protection",
+    )
+
     repositories = catalog.get("repositories")
     require(isinstance(repositories, list) and len(repositories) == 12, "catalog must contain exactly 12 repositories")
     names: list[str] = []
@@ -118,9 +155,24 @@ def validate_catalog(catalog: dict[str, Any]) -> None:
     require(len(names) == len(set(names)), "catalog repositories must be unique")
     require(len(ids) == len(set(ids)), "catalog repository IDs must be unique")
     require(len(orders) == len(set(orders)), "catalog orders must be unique")
-    require("appolon1908-hue/Middleware-" in names, "canonical Middleware authority missing")
-    require("appolon1908-hue/Middleware-" in names, "transitional Middleware evidence repository missing")
-    require("appolon1908-hue/Infustruction-repo" in names, "infrastructure authority missing")
+    roles = {record["repository"]: record.get("role") for record in repositories}
+    require(
+        roles.get(authority["canonical_middleware"]) == "canonical-middleware",
+        "canonical Middleware catalog role mismatch",
+    )
+    require(
+        sum(role == "canonical-middleware" for role in roles.values()) == 1,
+        "catalog must declare exactly one canonical Middleware authority",
+    )
+    require(
+        authority["legacy_middleware_rollback_only"] not in names,
+        "legacy Middleware rollback authority must remain outside the forward catalog",
+    )
+    require(
+        roles.get(authority["infrastructure_runtime"]) == "infrastructure",
+        "infrastructure authority catalog role mismatch",
+    )
+    require(roles.get(authority["controller"]) == "controller", "controller catalog role mismatch")
 
     safety = catalog.get("safety")
     require(isinstance(safety, dict), "catalog safety must be an object")
@@ -216,6 +268,7 @@ def validate_candidate(
 
     safety = candidate.get("safety")
     require(isinstance(safety, dict), "candidate safety must be an object")
+    require(set(safety) == SAFETY_KEYS, "candidate safety controls are incomplete or unexpected")
     for key, value in safety.items():
         require(value is False, f"candidate safety control {key} must be false")
 
@@ -238,10 +291,21 @@ def validate_candidate(
         require(all(isinstance(item, str) and IMAGE.fullmatch(item) for item in previous), f"{repository}: invalid rollback image reference")
         require(len(images) == len(set(images)), f"{repository}: duplicate candidate image")
         require(len(previous) == len(set(previous)), f"{repository}: duplicate rollback image")
-        if not template and images:
-            require(images != previous, f"{repository}: rollback image set must differ from candidate image set")
+        if not template:
+            require(len(previous) == len(images), f"{repository}: rollback image count mismatch")
+            require(set(images).isdisjoint(previous), f"{repository}: rollback images must differ from candidate images")
+            require(
+                sorted(item.split("@sha256:", 1)[0] for item in images)
+                == sorted(item.split("@sha256:", 1)[0] for item in previous),
+                f"{repository}: rollback images must cover the same immutable image names",
+            )
         candidate_by_repo[repository] = record
     require(set(candidate_by_repo) == set(catalog_by_repo), "candidate must cover the exact catalog repository set")
+    controller_repository = catalog["authority_policy"]["controller"]
+    require(
+        candidate_by_repo[controller_repository]["source_sha"] == candidate["controller_sha"],
+        "controller component source_sha must equal the reviewed controller policy base",
+    )
 
 
 class GitHub:
@@ -284,13 +348,15 @@ class GitHub:
         return self.request("POST", path, payload)
 
 
-def latest_check_conclusions(checks: list[dict[str, Any]]) -> dict[str, str | None]:
+def latest_check_conclusions(checks: list[dict[str, Any]]) -> dict[tuple[str, int], str | None]:
     ordered = sorted(checks, key=lambda item: item.get("completed_at") or item.get("started_at") or "")
-    result: dict[str, str | None] = {}
+    result: dict[tuple[str, int], str | None] = {}
     for item in ordered:
         name = item.get("name")
-        if isinstance(name, str):
-            result[name] = item.get("conclusion")
+        app = item.get("app")
+        app_id = app.get("id") if isinstance(app, dict) else None
+        if isinstance(name, str) and isinstance(app_id, int):
+            result[(name, app_id)] = item.get("conclusion")
     return result
 
 
@@ -312,21 +378,25 @@ def verify_github(
     candidate: dict[str, Any],
     *,
     phase: str,
+    candidate_file_sha256: str,
     output: Path,
 ) -> dict[str, Any]:
+    require_digest(candidate_file_sha256, "candidate_file_sha256")
     github = GitHub(os.environ.get("CODESTRA_ORCHESTRATOR_TOKEN", ""))
     candidate_by_repo = {item["repository"]: item for item in candidate["components"]}
     evidence: dict[str, Any] = {
         "schema_version": "codestra.manual-production-preflight.v1",
         "release_id": candidate["release_id"],
         "phase": phase,
-        "candidate_sha256": sha256_bytes(json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode()),
+        "candidate_sha256": candidate_file_sha256,
         "status": "PASS",
         "repositories": [],
         "secret_values_recorded": False,
         "runtime_contacted": False,
         "production_changed": False,
     }
+    controller_repository = catalog["authority_policy"]["controller"]
+    expected_check_app_id = catalog["check_policy"]["default_app_id"]
     for expected in sorted(catalog["repositories"], key=lambda item: item["order"]):
         repository = expected["repository"]
         candidate_record = candidate_by_repo[repository]
@@ -338,13 +408,37 @@ def verify_github(
         branch_name = urllib.parse.quote(expected["default_branch"], safe="")
         branch = github.get(f"/repos/{repository}/branches/{branch_name}")
         require(branch.get("protected") is True, f"{repository}: default branch is not protected")
+        status_policy = github.get(
+            f"/repos/{repository}/branches/{branch_name}/protection/required_status_checks"
+        )
         observed_sha = branch.get("commit", {}).get("sha")
-        require(observed_sha == candidate_record["source_sha"], f"{repository}: candidate SHA is not the exact protected branch head")
+        require_sha(observed_sha, f"{repository}: protected branch head")
+        if repository == controller_repository:
+            require(
+                candidate_record["source_sha"] == candidate["controller_sha"],
+                f"{repository}: controller policy-base binding mismatch",
+            )
+            comparison = github.get(
+                f"/repos/{repository}/compare/{candidate_record['source_sha']}...{observed_sha}"
+            )
+            require(
+                comparison.get("status") in {"ahead", "identical"},
+                f"{repository}: controller policy base is not an ancestor of the protected workflow head",
+            )
+            contract_ref = observed_sha
+            validation_sha = observed_sha
+        else:
+            require(
+                observed_sha == candidate_record["source_sha"],
+                f"{repository}: candidate SHA is not the exact protected branch head",
+            )
+            contract_ref = candidate_record["source_sha"]
+            validation_sha = candidate_record["source_sha"]
 
         contract, contract_sha = fetch_contract(
             github,
             repository,
-            candidate_record["source_sha"],
+            contract_ref,
             catalog["contract_path"],
         )
         require(contract_sha == candidate_record["contract_sha256"], f"{repository}: contract SHA-256 mismatch")
@@ -358,34 +452,42 @@ def verify_github(
         )
         require(len(candidate_record["previous_images"]) == image_count, f"{repository}: rollback image count mismatch")
 
-        branch_required = (
-            branch.get("protection", {})
-            .get("required_status_checks", {})
-            .get("contexts", [])
+        branch_contexts = status_policy.get("contexts", [])
+        branch_checks = status_policy.get("checks", [])
+        require(isinstance(branch_contexts, list), f"{repository}: invalid branch-protection context list")
+        require(isinstance(branch_checks, list), f"{repository}: invalid branch-protection check list")
+        require(
+            all(isinstance(name, str) and name for name in branch_contexts),
+            f"{repository}: invalid required status context",
         )
-        require(isinstance(branch_required, list), f"{repository}: invalid branch-protection check list")
-        required_checks = sorted(set(branch_required) | set(contract["required_checks"]))
+        branch_required = set(branch_contexts)
+        required_apps: dict[str, int] = {}
+        for item in branch_checks:
+            require(isinstance(item, dict), f"{repository}: invalid branch-protection check binding")
+            name = item.get("context")
+            app_id = item.get("app_id")
+            require(isinstance(name, str) and name, f"{repository}: invalid required check context")
+            require(app_id == expected_check_app_id, f"{repository}: required check {name} is bound to the wrong app")
+            required_apps[name] = app_id
+            branch_required.add(name)
+        contract_checks = set(contract["required_checks"])
+        required_checks = sorted(branch_required | contract_checks)
+        if catalog["check_policy"]["require_protected_branch_binding"] is True:
+            unbound = sorted(set(required_checks) - set(required_apps))
+            require(not unbound, f"{repository}: contract checks are not bound by branch protection: {unbound}")
         require(required_checks, f"{repository}: protected branch has no required exact-head checks")
         checks_response = github.get(
-            f"/repos/{repository}/commits/{candidate_record['source_sha']}/check-runs?per_page=100"
+            f"/repos/{repository}/commits/{validation_sha}/check-runs?per_page=100"
         )
         checks = latest_check_conclusions(checks_response.get("check_runs", []))
-        status_response = github.get(
-            f"/repos/{repository}/commits/{candidate_record['source_sha']}/status"
-        )
-        statuses = {
-            item.get("context"): item.get("state")
-            for item in status_response.get("statuses", [])
-            if isinstance(item.get("context"), str)
-        }
         missing = [
             name
             for name in required_checks
-            if checks.get(name) != "success" and statuses.get(name) != "success"
+            if checks.get((name, required_apps[name])) != "success"
         ]
         require(not missing, f"{repository}: required exact-head checks not successful: {missing}")
 
-        commit = github.get(f"/repos/{repository}/commits/{candidate_record['source_sha']}")
+        commit = github.get(f"/repos/{repository}/commits/{validation_sha}")
         if contract.get("require_verified_commit") is True:
             require(
                 commit.get("commit", {}).get("verification", {}).get("verified") is True,
@@ -401,8 +503,13 @@ def verify_github(
                 "repository_id": expected["repository_id"],
                 "role": expected["role"],
                 "source_sha": candidate_record["source_sha"],
+                "validated_head_sha": validation_sha,
                 "contract_sha256": contract_sha,
                 "required_checks": required_checks,
+                "required_check_apps": {
+                    name: required_apps[name]
+                    for name in required_checks
+                },
                 "phase_supported": supported,
                 "deployment_authority": contract.get("deployment_authority") is True,
                 "images": candidate_record["images"],
@@ -488,10 +595,40 @@ def dispatch_intents(
         "runtime_contacted_by_controller": False,
         "production_changed_by_controller": False,
     }
+    controller_repository = catalog["authority_policy"]["controller"]
     for expected in sorted(catalog["repositories"], key=lambda item: item["order"]):
         repository = expected["repository"]
         record = candidate_by_repo[repository]
-        contract, _ = fetch_contract(github, repository, record["source_sha"], catalog["contract_path"])
+        intent_source_sha = record["source_sha"]
+        if repository == controller_repository:
+            branch_name = urllib.parse.quote(expected["default_branch"], safe="")
+            branch = github.get(f"/repos/{repository}/branches/{branch_name}")
+            require(branch.get("protected") is True, f"{repository}: controller branch is not protected")
+            intent_source_sha = require_sha(
+                branch.get("commit", {}).get("sha"),
+                f"{repository}: controller intent head",
+            )
+            workflow_sha = require_sha(
+                os.environ.get("GITHUB_SHA", ""),
+                f"{repository}: controller workflow SHA",
+            )
+            require(
+                intent_source_sha == workflow_sha,
+                f"{repository}: protected controller head moved after candidate validation",
+            )
+            comparison = github.get(
+                f"/repos/{repository}/compare/{record['source_sha']}...{intent_source_sha}"
+            )
+            require(
+                comparison.get("status") in {"ahead", "identical"},
+                f"{repository}: controller policy base is not an ancestor of the intent head",
+            )
+        contract, _ = fetch_contract(
+            github,
+            repository,
+            intent_source_sha,
+            catalog["contract_path"],
+        )
         if contract.get("deployment_authority") is not True and phase != "plan":
             evidence["runs"].append(
                 {
@@ -508,7 +645,7 @@ def dispatch_intents(
             "ref": expected["default_branch"],
             "inputs": {
                 "phase": phase,
-                "source_sha": record["source_sha"],
+                "source_sha": intent_source_sha,
                 "release_id": candidate["release_id"],
                 "candidate_sha256": candidate_file_sha256,
                 "images_json": json.dumps(record["images"], separators=(",", ":")),
@@ -524,18 +661,21 @@ def dispatch_intents(
             repository,
             INTENT_WORKFLOW,
             expected["default_branch"],
-            record["source_sha"],
+            intent_source_sha,
             started_after,
             timeout_seconds,
         )
         artifacts = github.get(f"/repos/{repository}/actions/runs/{run['id']}/artifacts?per_page=100").get("artifacts", [])
-        prefix = f"codestra-release-intent-{phase}-{record['source_sha']}"
+        prefix = f"codestra-release-intent-{phase}-{intent_source_sha}"
         matches = [artifact for artifact in artifacts if artifact.get("name") == prefix and not artifact.get("expired")]
         require(len(matches) == 1, f"{repository}: normalized release-intent artifact missing or ambiguous")
         evidence["runs"].append(
             {
                 "repository": repository,
-                "source_sha": record["source_sha"],
+                "source_sha": intent_source_sha,
+                "controller_policy_base_sha": (
+                    record["source_sha"] if repository == controller_repository else None
+                ),
                 "run_id": run["id"],
                 "run_attempt": run.get("run_attempt"),
                 "artifact_id": matches[0]["id"],
@@ -708,7 +848,13 @@ def command_github_preflight(arguments: argparse.Namespace) -> int:
     candidate = load_json(Path(arguments.candidate))
     validate_catalog(catalog)
     validate_candidate(catalog, candidate, phase=arguments.phase)
-    verify_github(catalog, candidate, phase=arguments.phase, output=Path(arguments.output))
+    verify_github(
+        catalog,
+        candidate,
+        phase=arguments.phase,
+        candidate_file_sha256=sha256_bytes(Path(arguments.candidate).read_bytes()),
+        output=Path(arguments.output),
+    )
     print(f"manual production GitHub preflight: PASS: {arguments.output}")
     return 0
 

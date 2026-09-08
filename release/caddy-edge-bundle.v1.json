@@ -1,0 +1,31 @@
+{
+  "schema_version": "caddy-edge-bundle.v1",
+  "authority_repository": "appolon1908-hue/codestra-production-platform",
+  "files": [
+    {
+      "path": "operations/caddy/Caddyfile",
+      "deployment_target": "container-caddy",
+      "sha256": "66c1ec08b7b2cac132485e5c912376ef5b50e646e04b0919a11b6da5d02f0b7c"
+    },
+    {
+      "path": "operations/caddy/api.codestra.co.caddy",
+      "deployment_target": "container-caddy",
+      "sha256": "55187b20f42d9dc2f1371e14b7ff59ab32edf27c1abd29b0253de02e8dbafce1"
+    },
+    {
+      "path": "operations/caddy/auth.codestra.co.caddy",
+      "deployment_target": "container-caddy",
+      "sha256": "cb6281a6dd09c6b577fb1c99cdf0fc9a274ce122377ec33f5beff7bf030f0fc9"
+    },
+    {
+      "path": "operations/caddy/klyrow-events.caddy",
+      "deployment_target": "host-caddy-pending",
+      "sha256": "da62c5270eab8f75272bb8eeb1763947441d4ffb4b0623bc9cac2517a2727c6a"
+    },
+    {
+      "path": "operations/caddy/snippets/security-headers.caddy",
+      "deployment_target": "container-caddy",
+      "sha256": "6d1c509d85e11d30726ddada58d682502cfd4c0e2993fc7cdb5ca306cb16b195"
+    }
+  ]
+}

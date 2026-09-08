@@ -24,7 +24,6 @@ The catalog contains these required repositories:
 
 - `appolon1908-hue/Infustruction-repo`
 - `appolon1908-hue/Keycloak`
-- `Codestra-SRL/codestra-middleware`
 - `appolon1908-hue/Middleware-`
 - `appolon1908-hue/codestra`
 - `appolon1908-hue/beyvra-backend`
@@ -37,15 +36,20 @@ The catalog contains these required repositories:
 - `appolon1908-hue/codestra-production-platform`
 
 Every repository is bound by stable GitHub repository ID, exact default branch,
-exact source SHA, a versioned repository-owned contract, required checks, and
-immutable candidate/rollback image identities.
+a versioned repository-owned contract, required checks, and immutable
+candidate/rollback image identities. Non-controller components bind their exact
+protected source heads. The controller uses the non-self-referential policy-base
+binding described below and separately validates the exact workflow head.
 
-`Codestra-SRL/codestra-middleware` remains the canonical Middleware authority.
-`appolon1908-hue/Middleware-` is present for required source/evidence
-verification but its contract must remain non-deployment-authoritative until a
-separate protected authority migration changes that decision. Likewise,
-`appolon1908-hue/scrapper` remains migration evidence only while
-`kyqra-crawler` owns crawler production deployment.
+`appolon1908-hue/Middleware-` is the canonical forward Middleware source
+authority selected by the protected migration decision. Its repository-owned
+contract must use the catalog role `canonical-middleware` before a candidate can
+pass preflight. `Codestra-SRL/codestra-middleware` is legacy rollback evidence
+only: it is deliberately outside the candidate catalog and has no forward
+deployment authority. Candidate source, image, migration, or evidence values
+must never mix those two lineages. Likewise, `appolon1908-hue/scrapper` remains
+migration evidence only while `kyqra-crawler` owns crawler production
+deployment.
 
 ## Repository release contract
 
@@ -149,15 +153,21 @@ repositories in the catalog and these repository permissions:
 
 ```text
 Actions: read and write
+Administration: read
 Checks: read
 Contents: read
 Metadata: read
 ```
 
-The token must also be installed for the organization-owned
-`Codestra-SRL/codestra-middleware` repository. Do not grant repository
-administration, secret write, branch write, package delete, or environment
-bypass permission to the orchestration token.
+`Administration: read` is required only to read the protected branch's
+authoritative `required_status_checks.checks[].app_id` bindings. A same-name
+commit status or a check run from a different GitHub App is not accepted.
+
+The token must cover exactly the protected catalog repositories. The legacy
+`Codestra-SRL/codestra-middleware` rollback repository is not a catalog member
+and must not receive forward orchestration authority. Do not grant repository
+administration write, secret write, branch write, package delete, or
+environment bypass permission to the orchestration token.
 
 ## Infrastructure authority
 
@@ -185,19 +195,34 @@ checksummed traffic controller.
 
 ## Canonical Middleware unblock
 
-The canonical `Codestra-SRL/codestra-middleware` contract requires
-`codestra/required-ci` on the exact source head. The controller never fabricates
-or manually posts that status.
+The canonical `appolon1908-hue/Middleware-` protected head must provide a
+repository contract whose repository ID, branch, role, phase support, artifact
+policy, required checks, and safety controls match the protected catalog. Every
+required check must be successful on that exact head from the GitHub Actions app
+bound by branch protection. The controller never fabricates or manually posts a
+passing status.
 
-The repository must provide a `workflow_dispatch` exact-head CI path that runs
-inside `Codestra-SRL/codestra-middleware` and therefore produces the required
-GitHub Actions check from the correct app. The source SHA, tests, image digest,
-SBOM/provenance, and signed release evidence must all match before its release
-intent can pass.
+The source SHA, migration lineage, immutable image and rollback image, SBOM,
+provenance, signature, vulnerability result, and release evidence must all
+describe the same Appolon release before its release intent can pass. The
+former `Codestra-SRL/codestra-middleware` lineage remains usable only as
+explicit, separately verified rollback evidence; it cannot satisfy a forward
+candidate field.
 
 An account billing or Actions-usage block is not converted to PASS. It remains
 an external blocker until GitHub permits the required workflow to create and
 complete its jobs.
+
+## Controller-source binding
+
+The candidate's `controller_sha` and controller component `source_sha` bind the
+reviewed controller policy base. They cannot contain the merge commit that
+introduces their own candidate file, because that would require a commit to
+embed its as-yet-unknown hash. At plan time, the orchestrator separately proves
+that the workflow commit is the exact protected controller head, that the
+candidate is read from that commit, and that the recorded controller policy
+base is its ancestor. Exact-head validation and the workflow-run identity bind
+the final candidate revision without a self-referential field.
 
 ## Full-traffic boundary
 
