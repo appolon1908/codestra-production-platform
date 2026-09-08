@@ -127,14 +127,14 @@ class BackupOperationsTests(unittest.TestCase):
             / "codestra-isolated-restore-rehearsal.sh"
         ).read_text()
         self.assertIn(
-            "middleware_source_sha=63b6c0c8bca5168a1178895bd12858d0b1e8086e",
+            "middleware_source_sha=4668de7d7ddc6f98968c06b7dc02d7650ff5e88a",
             source,
         )
         self.assertIn(
             "middleware_repository=ghcr.io/appolon1908-hue/codestra-middleware",
             source,
         )
-        self.assertIn("middleware_required_head=0056_klyrow_delivery_events", source)
+        self.assertIn("middleware_required_head=0057_platform_service_catalog", source)
         self.assertIn('middleware_image="${middleware_repository}@${release_values[0]}"', source)
         self.assertIn('"${middleware_container_args[@]}"', source)
         self.assertIn("command.upgrade(c,'head')", source)

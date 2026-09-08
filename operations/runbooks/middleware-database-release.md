@@ -46,7 +46,7 @@ dump after the restored services have resumed writes.
 Run `stage` before `restore-test`. The restore service accepts only the
 root-owned backup named by the backup `LAST_SUCCESS` marker, uses the exact
 staged digest to run `alembic upgrade head` on the internal-only restored
-database, reads back `0056_klyrow_delivery_events` and both delivery inbox
+database, reads back `0057_platform_service_catalog` and both delivery inbox
 tables, and only then atomically publishes checksum-bound restore evidence.
 
 ## Authorization authority

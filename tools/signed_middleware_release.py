@@ -239,7 +239,7 @@ def _validate_manifest(
         {"schema_or_migration_head", "runtime_profile_ids", "external_effects_default"},
         "runtime",
     )
-    if runtime["schema_or_migration_head"] != "0056_klyrow_delivery_events":
+    if runtime["schema_or_migration_head"] != "0057_platform_service_catalog":
         raise SignedReleaseError("manifest migration head is not the certified candidate head")
     _require_constant(
         runtime["runtime_profile_ids"],

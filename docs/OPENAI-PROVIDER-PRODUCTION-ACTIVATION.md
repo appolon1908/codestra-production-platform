@@ -10,7 +10,7 @@ The exact bound release is:
 
 - source SHA: `f199b6c40f4e467979e9a8b255a0e686321a182d`
 - image: `ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b`
-- required database head: `0056_klyrow_delivery_events`
+- required database head: `0057_platform_service_catalog`
 - worker: `codestra-openai-01`
 - service identity: `openai-responses-provider`
 - maximum concurrency: `1`

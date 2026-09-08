@@ -1,11 +1,11 @@
 {
   "change_id": "CHG-20260821-CODESTRA-PRODUCTION-ACTIVATION-01",
-  "middleware_artifact": "signed-middleware-release-63b6c0c8bca5168a1178895bd12858d0b1e8086e-34035226830-1",
-  "middleware_digest": "sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a",
-  "middleware_openvex_sha256": "8b2fa0b83596be8c4863c70709b709600c2937a552f7e1f0ef8bfca4b83eb97a",
-  "middleware_provenance_sha256": "169b7f51c8d262bb94c1e5d856aac9344b62bdf51437522d42600c1683f2e773",
-  "middleware_run_id": "34035226830",
-  "middleware_sbom_sha256": "c870828a291e924cb0ca4604c37f95b9c93aee4bda9623f685eb679552f8bc9f",
-  "middleware_source_sha": "63b6c0c8bca5168a1178895bd12858d0b1e8086e",
-  "release_version": "codestra-production-2026.09.06.1"
+  "middleware_artifact": "signed-middleware-release-4668de7d7ddc6f98968c06b7dc02d7650ff5e88a-34173524024-1",
+  "middleware_digest": "sha256:41ae78d368b5e2db2e9fe9be50fd5041b3f1a07ae4837170a76a68889be565e6",
+  "middleware_openvex_sha256": "211f47dd39ee3272112663b118b49466d27dc578e9c4c2f1176cf0a9abaa6fad",
+  "middleware_provenance_sha256": "6916ea33905dd145669a5f853fefd15d256eb33040620e218528b5f75c892fd3",
+  "middleware_run_id": "34173524024",
+  "middleware_sbom_sha256": "2ab69f32336a37b4f44990b31b108e3be79eea2c938e4b8079d3446f253b3a8a",
+  "middleware_source_sha": "4668de7d7ddc6f98968c06b7dc02d7650ff5e88a",
+  "release_version": "codestra-production-2026.09.08.1"
 }
