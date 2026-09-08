@@ -17,7 +17,9 @@ The platform wrapper performs one fail-closed sequence:
 1. Verify that the exact checked-out `release/production-activation` SHA is still the protected branch head.
 2. Require `PRODUCTION-SOURCE-LOCK.yaml` to be `PASS`, contain no blockers, and agree with `config/production-release-tuple.json`.
 3. Require every custom candidate recorded in the source lock to be deployment-authorized.
-4. Verify the canonical `Codestra-SRL/codestra-middleware` source has successful `codestra/required-ci`.
+4. Verify the canonical `appolon1908-hue/Middleware-` source has every
+   catalog- and branch-required check successful on the exact protected head
+   from the bound GitHub Actions app.
 5. Reuse a checksummed successful `exact-main-production-release.yml` artifact for the exact source and digest, or dispatch that existing signed-release workflow when a new build is genuinely required.
 6. Dispatch `appolon1908-hue/Infustruction-repo/.github/workflows/one-click-go-live.yml`.
 7. Wait for isolated exact-digest staging, recovery-point creation, rollback rehearsal, and a production **GET/HEAD-only canary no greater than 1%**.
@@ -33,8 +35,8 @@ Create the following secret in `appolon1908-hue/codestra-production-platform`:
 
 Use a fine-grained token or GitHub App installation token that can:
 
-- read repository content and workflow runs in `Codestra-SRL/codestra-middleware`;
-- dispatch and read Actions in `Codestra-SRL/codestra-middleware`;
+- read repository content and workflow runs in `appolon1908-hue/Middleware-`;
+- dispatch and read Actions in `appolon1908-hue/Middleware-`;
 - dispatch and read Actions in `appolon1908-hue/Infustruction-repo`.
 
 Do not grant administration, secrets-write, ruleset-write, branch-delete, or force-push permissions.
@@ -63,7 +65,12 @@ Missing configuration fails the run before promotion.
 
 ## Current gate
 
-At the time this workflow was authored, `PRODUCTION-SOURCE-LOCK.yaml` was `FAIL`. Therefore the button is installed for review, but it cannot deploy until the canonical Middleware authority split, Actions execution blocker, remaining immutable replacements, and isolated staging evidence are resolved in the protected repositories.
+`PRODUCTION-SOURCE-LOCK.yaml` remains `FAIL`. Therefore the button is installed
+for review, but it cannot deploy until the Appolon canonical Middleware
+contract agrees with the protected catalog, every catalog repository has its
+required protected contract and exact-head checks, complete immutable candidate
+and rollback identities exist, and isolated staging and recovery evidence is
+approved in the protected repositories.
 
 ## Effects that remain disabled
 
