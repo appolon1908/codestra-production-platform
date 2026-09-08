@@ -3,20 +3,73 @@ name: Platform source validation
 # Mandatory CI must run even for README-only or unclassified file changes.
 on:
   pull_request:
+  push:
+    branches:
+      - release/production-activation
+  workflow_dispatch:
+    inputs:
+      expected_head_sha:
+        description: Exact current protected-branch head SHA to validate
+        required: true
+        type: string
+      comparison_base_sha:
+        description: Optional reviewed ancestor SHA; blank/zero uses the first parent
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
-  statuses: write
 
 jobs:
   validate:
+    name: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Check out complete PR history
+      - name: Check out exact validation target with complete history
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+
+      - name: Resolve exact validation target and comparison range
+        id: source-context
+        env:
+          PROTECTED_BRANCH: release/production-activation
+        run: |
+          set -euo pipefail
+          python tools/resolve_platform_source_gate.py \
+            --event-name "${GITHUB_EVENT_NAME}" \
+            --event-path "${GITHUB_EVENT_PATH}" \
+            --github-sha "${GITHUB_SHA}" \
+            --github-ref "${GITHUB_REF}" \
+            --checked-out-sha "$(git rev-parse HEAD)" \
+            --protected-branch "${PROTECTED_BRANCH}" \
+            --repository . \
+            --output "${RUNNER_TEMP}/source-validation-context.json" \
+            --github-output "${GITHUB_OUTPUT}"
+          target="$(jq -r .target_sha "${RUNNER_TEMP}/source-validation-context.json")"
+          mode="$(jq -r .comparison_mode "${RUNNER_TEMP}/source-validation-context.json")"
+          {
+            echo "### Platform source validation"
+            echo "- Event: ${GITHUB_EVENT_NAME}"
+            echo "- Target: ${target}"
+            echo "- Comparison: ${mode}"
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Verify intended protected branch head
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.source-context.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          observed="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/branches/release%2Fproduction-activation" \
+            --jq .commit.sha)"
+          test "${observed}" = "${TARGET_SHA}"
+          test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
 
       - name: Set up repository-supported Python
         uses: actions/setup-python@v5
@@ -129,13 +182,15 @@ jobs:
             --evidence "${RUNNER_TEMP}/integration-architecture.json"
 
       - name: Validate Git whitespace
-        run: git diff --check "${{ github.event.pull_request.base.sha }}..HEAD"
+        env:
+          DIFF_SPEC: ${{ steps.source-context.outputs.diff_spec }}
+        run: git diff --check "${DIFF_SPEC}"
 
       - name: Reject forbidden artifacts and customer-data paths
         env:
-          BASE_SHA: "${{ github.event.pull_request.base.sha }}"
+          DIFF_SPEC: ${{ steps.source-context.outputs.diff_spec }}
         run: |
-          changed="$(git diff --name-only "${BASE_SHA}..HEAD")"
+          changed="$(git diff --name-only "${DIFF_SPEC}")"
           if grep -E \
             '(^|/)(secrets?|private[-_]?keys?|recordings?|backups?|runtime|spool|logs?|dumps?|customer[-_]?data|call[-_]?recordings?)(/|$)|[.](pem|key|p12|pfx|dump|backup|sqlite3|db|wav|gsm|mp3|ogg|log)$' \
             <<<"${changed}"
@@ -146,9 +201,9 @@ jobs:
 
       - name: Confirm production feature defaults remain fail closed
         env:
-          BASE_SHA: "${{ github.event.pull_request.base.sha }}"
+          DIFF_SPEC: ${{ steps.source-context.outputs.diff_spec }}
         run: |
-          if git diff --unified=0 "${BASE_SHA}..HEAD" |
+          if git diff --unified=0 "${DIFF_SPEC}" |
             grep -E '^\+[^+].*(ENABLE_[A-Z0-9_]+[=:][[:space:]]*(true|True|TRUE)|ENABLE_[A-Z0-9_]+["'\'']?[[:space:]]*:[[:space:]]*true)'
           then
             echo "A production-capability feature default was changed to true."
@@ -192,26 +247,9 @@ jobs:
           fi
           exit "${status}"
 
-      - name: Gitleaks pull-request commit range
+      - name: Gitleaks resolved commit range
+        env:
+          GITLEAKS_LOG_OPTS: ${{ steps.source-context.outputs.gitleaks_log_opts }}
         run: |
           "${RUNNER_TEMP}/gitleaks-bin" git --no-banner --redact --exit-code 1 \
-            --log-opts="${{ github.event.pull_request.base.sha }}..HEAD"
-
-      - name: Publish protected-branch validate status
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VALIDATION_RESULT: ${{ job.status }}
-          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          if [[ "${VALIDATION_RESULT}" == "success" ]]; then
-            state=success
-          else
-            state=failure
-          fi
-          gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
-            -f state="${state}" -f context=validate \
-            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            -f description="Platform source validation ${state}"
+            --log-opts="${GITLEAKS_LOG_OPTS}"
