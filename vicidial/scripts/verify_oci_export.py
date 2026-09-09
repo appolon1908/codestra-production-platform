@@ -57,6 +57,17 @@ IMAGE_CONFIG_MEDIA_TYPES = {
     "application/vnd.oci.image.config.v1+json",
     "application/vnd.docker.container.image.v1+json",
 }
+GZIP_LAYER_MEDIA_TYPES = {
+    "application/vnd.oci.image.layer.v1.tar+gzip",
+    "application/vnd.oci.image.layer.nondistributable.v1.tar+gzip",
+    "application/vnd.docker.image.rootfs.diff.tar.gzip",
+    "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip",
+}
+UNCOMPRESSED_LAYER_MEDIA_TYPES = {
+    "application/vnd.oci.image.layer.v1.tar",
+    "application/vnd.oci.image.layer.nondistributable.v1.tar",
+    "application/vnd.docker.image.rootfs.diff.tar",
+}
 
 
 def require_media_type(descriptor: dict, allowed: set[str], label: str) -> None:
@@ -83,15 +94,12 @@ def require_document_shape(document: dict, descriptor: dict) -> None:
 
 
 def layer_diff_id(raw: bytes, media_type: str) -> str:
-    if media_type.endswith("+gzip"):
+    if media_type in GZIP_LAYER_MEDIA_TYPES:
         try:
             payload = gzip.GzipFile(fileobj=io.BytesIO(raw)).read()
         except (OSError, EOFError) as exc:
             raise ValueError("OCI layer gzip compression is invalid") from exc
-    elif media_type in {
-        "application/vnd.oci.image.layer.v1.tar",
-        "application/vnd.docker.image.rootfs.diff.tar",
-    }:
+    elif media_type in UNCOMPRESSED_LAYER_MEDIA_TYPES:
         payload = raw
     else:
         raise ValueError(f"unsupported OCI layer media type: {media_type}")
