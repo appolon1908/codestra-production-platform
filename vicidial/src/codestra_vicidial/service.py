@@ -64,6 +64,30 @@ class AdapterService:
         if not enabled:
             raise PermissionError(f"{name} is disabled")
 
+    def _agent_recovery_identity(self, user_id: str) -> dict | None:
+        """Read only the identity fields needed before a recovery mutation.
+
+        The production repository exposes an ACL-independent disable view because
+        legacy campaign ACLs may be malformed. The in-memory repository used by
+        offline tests stores the same identity fields directly. Any other
+        repository fails closed rather than authorizing a recovery mutation from
+        an unverifiable identity.
+        """
+        reader = getattr(self.repository, "_agent_disable_view", None)
+        if callable(reader):
+            row = reader(user_id)
+        else:
+            agents = getattr(self.repository, "agents", None)
+            row = agents.get(user_id) if isinstance(agents, dict) else None
+        if row is None:
+            return None
+        return {
+            "user_id": row.get("user_id"),
+            "full_name": row.get("full_name"),
+            "user_group": row.get("user_group"),
+            "active": row.get("active"),
+        }
+
     @staticmethod
     def _comparison(resource_type: str, resource_id: str | int, desired: dict,
                     actual: dict | None, fields: tuple[str, ...],
@@ -340,11 +364,22 @@ class AdapterService:
             except Exception as exc:
                 if intent is None:
                     raise
-                # A matching durable intent may survive a MyISAM commit. Keep
-                # the agent disabled through the ACL-independent readback path;
-                # never clear intent or repeat sync when normalization fails.
+                identity = self._agent_recovery_identity(command.agent.user_id)
+                if (identity is None
+                        or identity.get("user_id") != desired["user_id"]
+                        or identity.get("full_name") != desired["full_name"]
+                        or identity.get("user_group") != desired["user_group"]
+                        or identity.get("active") not in (False, "N")):
+                    raise CollisionError("agent recovery identity mismatch") from exc
+                # The durable intent may survive a committed MyISAM update whose
+                # ACL readback is malformed. Only after the ACL-independent
+                # identity is proven to be the already-desired disabled agent
+                # may recovery reassert disablement. Never disable a merely
+                # matching user_id whose ownership identity cannot be verified.
                 disabled = self.repository.disable_agent(command.agent.user_id)
-                if (disabled.get("user_id") != command.agent.user_id
+                if (disabled.get("user_id") != desired["user_id"]
+                        or disabled.get("full_name") != desired["full_name"]
+                        or disabled.get("user_group") != desired["user_group"]
                         or disabled.get("active") not in (False, "N")):
                     raise RuntimeError("agent recovery disable read-back failed") from exc
                 raise RuntimeError("agent adoption reconciliation required; intent retained") from exc
