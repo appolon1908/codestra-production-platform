@@ -17,12 +17,12 @@ api.codestra.co {
 	# Middleware and therefore falls through to the canonical API backend below.
 	@realtime path /ws/agent /healthz /readyz /version
 	handle @realtime {
-		reverse_proxy 127.0.0.1:18102 {
+		reverse_proxy codestra-websocket-gateway-gateway-1:8080 {
 			header_up X-Real-IP {remote_host}
 		}
 	}
 	handle {
-		reverse_proxy 127.0.0.1:18101 {
+		reverse_proxy codestra-kong-kong-gateway-1:8000 {
 			header_up X-Real-IP {remote_host}
 		}
 	}

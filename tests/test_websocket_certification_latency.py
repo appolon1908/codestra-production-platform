@@ -76,7 +76,7 @@ def test_timeout_does_not_drop_slow_sample():
     async def publish(value):
         await asyncio.sleep(1)
         return 1
-    with pytest.raises(TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         asyncio.run(measure_delivery_batch([Socket(doc) for doc in values], values, publish, timeout=0.001))
 
 
@@ -128,4 +128,15 @@ def test_canonical_business_unit_matches_schema_before_publish(business_unit):
                     type="agent.ready", tenant_id="synthetic", campaign_id="TEST_SYN", agent_id="TEST_AGENT",
                     business_unit_id=business_unit, timestamp="2026-09-07T20:00:00Z", sequence=1, payload={})
     with pytest.raises(ValueError, match="business unit"):
+        canonical_calling_envelope(document)
+
+
+@pytest.mark.parametrize("token", ["_agent", "-agent", "agent.one", "agent.*", "agent>", "", "a" * 129])
+def test_canonical_envelope_rejects_noncanonical_subject_tokens(token):
+    import uuid
+    from websocket_gateway.certification_latency import canonical_calling_envelope
+    document = dict(event_id=str(uuid.uuid4()), call_id=str(uuid.uuid4()), correlation_id=str(uuid.uuid4()),
+                    type="agent.ready", tenant_id="tenant-a", campaign_id="campaign-a", agent_id=token,
+                    business_unit_id="unit-a", timestamp="2026-09-09T00:00:00Z", sequence=1)
+    with pytest.raises(ValueError, match="subject token"):
         canonical_calling_envelope(document)

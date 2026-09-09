@@ -96,7 +96,7 @@ def canonical_calling_envelope(document: dict[str, Any]) -> tuple[str, dict[str,
         if not isinstance(document[name], str) or str(uuid.UUID(document[name])) != document[name]:
             raise ValueError('canonical calling event requires UUID identities')
     for name in SCOPE_FIELDS:
-        if not isinstance(document[name], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', document[name]):
+        if not isinstance(document[name], str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}', document[name]):
             raise ValueError('invalid scoped JetStream subject token')
     business_unit = document.get('business_unit_id')
     if not isinstance(business_unit, str) or not 1 <= len(business_unit) <= 128:

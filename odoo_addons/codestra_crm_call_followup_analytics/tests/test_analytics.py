@@ -1,13 +1,63 @@
 from datetime import timedelta
 
 from odoo import fields
-from odoo.exceptions import AccessError
+from odoo.exceptions import AccessError, ValidationError
 from odoo.fields import Command
 from odoo.tests import TransactionCase, tagged
 
 
 @tagged("post_install", "-at_install")
 class TestCodestraCallFollowupAnalytics(TransactionCase):
+    def test_analytics_filters_are_bounded_before_query(self):
+        analytics = self.env(user=self.manager)["codestra.crm.call.followup.analytics.api"]
+        today = fields.Date.context_today(self.manager)
+        start = today - timedelta(days=365)
+        self.assertEqual(analytics._scope(start, today)[0], start)
+        for method in (analytics.summary_v1, analytics.agent_scorecards_v1):
+            with self.assertRaises(ValidationError):
+                method(date_from=today - timedelta(days=366), date_to=today)
+            for values in ([True], [1.5], ["1"], [-1], "1", list(range(1, 502))):
+                with self.subTest(values_type=type(values).__name__, size=len(values)):
+                    with self.assertRaises(ValidationError):
+                        method(agent_ids=values)
+            with self.assertRaises(AccessError):
+                method(company_ids=[])
+            with self.assertRaises(ValidationError):
+                method(date_to="0001-01-01")
+            with self.assertRaises(ValidationError):
+                method(date_from="9999-12-31", date_to="9999-12-31")
+
+    def test_query_budget_preserves_stricter_operator_timeout(self):
+        analytics = self.env(user=self.manager)["codestra.crm.call.followup.analytics.api"]
+        self.env.cr.execute("SELECT setting FROM pg_settings WHERE name='statement_timeout'")
+        original = self.env.cr.fetchone()[0]
+        try:
+            for setting, expected in (("0", "5000"), ("25", "25"), ("10000", "5000")):
+                self.env.cr.execute("SELECT set_config('statement_timeout', %s, true)", [setting])
+                rows = analytics._aggregate_query(
+                    "SELECT setting AS timeout FROM pg_settings WHERE name='statement_timeout'", []
+                )
+                self.assertEqual(rows[0]["timeout"], expected)
+                self.env.cr.execute("SELECT setting FROM pg_settings WHERE name='statement_timeout'")
+                self.assertEqual(self.env.cr.fetchone()[0], setting)
+        finally:
+            self.env.cr.execute("SELECT set_config('statement_timeout', %s, true)", [original])
+
+    def test_cancelled_query_restores_transaction_and_timeout(self):
+        analytics = self.env(user=self.manager)["codestra.crm.call.followup.analytics.api"]
+        self.env.cr.execute("SELECT setting FROM pg_settings WHERE name='statement_timeout'")
+        original = self.env.cr.fetchone()[0]
+        try:
+            self.env.cr.execute("SELECT set_config('statement_timeout', '25', true)")
+            with self.assertRaises(ValidationError):
+                analytics._aggregate_query("SELECT pg_sleep(0.1)", [])
+            self.env.cr.execute("SELECT setting FROM pg_settings WHERE name='statement_timeout'")
+            self.assertEqual(self.env.cr.fetchone()[0], "25")
+            self.env.cr.execute("SELECT 1")
+            self.assertEqual(self.env.cr.fetchone()[0], 1)
+        finally:
+            self.env.cr.execute("SELECT set_config('statement_timeout', %s, true)", [original])
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()

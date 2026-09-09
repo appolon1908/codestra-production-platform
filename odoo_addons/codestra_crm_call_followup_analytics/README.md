@@ -27,6 +27,12 @@ Dashboards, pivots, graphs, and aggregate APIs can become expensive at scale. Th
 - `agent_scorecards_v1(date_from=None, date_to=None, company_ids=None, agent_ids=None, limit=100)`
 
 The APIs are read-only and manager-restricted. Requested companies are intersected with the current user's allowed companies.
+An explicit empty company list is denied. Filters accept at most 500 positive integer
+IDs per list and an inclusive date window of at most 366 days. The default remains
+30 days. Each aggregate SQL query has a five-second timeout, preserving any stricter
+operator timeout. A cancelled query rolls back its savepoint and restores the prior
+timeout without aborting the surrounding transaction. These limits are exposed by
+`capabilities_v1()`; they are query bounds, not a production latency guarantee.
 
 ## Metric definitions
 

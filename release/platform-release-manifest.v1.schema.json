@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.codestra.co/platform/platform-release-manifest.v1.schema.json",
+  "title": "Codestra Platform Release Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release_id", "created_at", "authority", "contracts", "runtime", "services", "edge", "promotion", "evidence"],
+  "properties": {
+    "schema_version": {"const": "platform-release-manifest.v1"},
+    "release_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{7,127}$"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "git_sha"],
+      "properties": {
+        "repository": {"const": "appolon1908-hue/codestra-production-platform"},
+        "git_sha": {"$ref": "#/$defs/git_sha"}
+      }
+    },
+    "contracts": {
+      "allOf": [
+        {"$ref": "#/$defs/pinned_file"},
+        {"properties": {"path": {"const": "contracts/catalog.v1.json"}}}
+      ]
+    },
+    "runtime": {
+      "allOf": [
+        {"$ref": "#/$defs/pinned_file"},
+        {"properties": {"path": {"const": "composition/runtime-composition.v1.json"}}}
+      ]
+    },
+    "services": {
+      "type": "array",
+      "minItems": 34,
+      "maxItems": 34,
+      "allOf": [
+        {"contains": {"properties": {"service_id": {"const": "caddy"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "kong"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "middleware"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "odoo-19"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "n8n"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "keycloak"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "kyqra-crawler"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "prometheus"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "alertmanager"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "node-exporter"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "postgres-exporter"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "redis-exporter"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "cadvisor"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "blackbox-exporter"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "postgresql"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "redis"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "nats-jetstream"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "temporal"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "telnexa"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "klyrow"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "middleware-external-webhook-worker"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "middleware-breero-odoo-worker"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "sms-event-worker"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "email-reseller-api"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "sms-api"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "mail-api"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "stalwart"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "kong-standby-auth"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "kong-identity-certification"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "beyvra-email-api"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "reseller-portal"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "private-vicidial-ingress"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "websocket-gateway"}}, "required": ["service_id"]}},
+        {"contains": {"properties": {"service_id": {"const": "integration-control-plane"}}, "required": ["service_id"]}}
+      ],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["service_id", "repository", "git_sha", "image", "service_manifest_sha256"],
+        "allOf": [
+          {
+            "if": {"properties": {"service_id": {"enum": ["caddy", "kong", "prometheus", "alertmanager", "node-exporter", "postgres-exporter", "redis-exporter", "cadvisor", "blackbox-exporter", "postgresql", "redis", "sms-event-worker", "email-reseller-api", "sms-api", "mail-api", "stalwart", "kong-standby-auth", "kong-identity-certification", "beyvra-email-api", "reseller-portal", "private-vicidial-ingress", "websocket-gateway", "integration-control-plane"]}}},
+            "then": {"properties": {"repository": {"const": "appolon1908-hue/codestra-production-platform"}}}
+          },
+          {
+            "if": {"properties": {"service_id": {"enum": ["middleware", "nats-jetstream", "temporal", "middleware-external-webhook-worker", "middleware-breero-odoo-worker"]}}},
+            "then": {"properties": {"repository": {"const": "Codestra-SRL/codestra-middleware"}}}
+          },
+          {"if": {"properties": {"service_id": {"const": "odoo-19"}}}, "then": {"properties": {"repository": {"const": "appolon1908-hue/Odoo"}}}},
+          {"if": {"properties": {"service_id": {"const": "n8n"}}}, "then": {"properties": {"repository": {"const": "appolon1908-hue/N8N"}}}},
+          {"if": {"properties": {"service_id": {"const": "keycloak"}}}, "then": {"properties": {"repository": {"const": "appolon1908-hue/Keycloak"}}}},
+          {"if": {"properties": {"service_id": {"const": "kyqra-crawler"}}}, "then": {"properties": {"repository": {"const": "appolon1908-hue/kyqra-crawler"}}}},
+          {"if": {"properties": {"service_id": {"const": "telnexa"}}}, "then": {"properties": {"repository": {"const": "appolon1908-hue/telnexa"}}}},
+          {"if": {"properties": {"service_id": {"const": "klyrow"}}}, "then": {"properties": {"repository": {"const": "appolon1908-hue/klyrow.com"}}}},
+          {"oneOf": [
+            {"properties":{"service_id":{"const":"caddy"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/caddy"}}}}},
+            {"properties":{"service_id":{"const":"kong"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/kong"}}}}},
+            {"properties":{"service_id":{"const":"middleware"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-middleware"}}}}},
+            {"properties":{"service_id":{"const":"odoo-19"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-odoo"}}}}},
+            {"properties":{"service_id":{"const":"n8n"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/n8n"}}}}},
+            {"properties":{"service_id":{"const":"keycloak"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/keycloak"}}}}},
+            {"properties":{"service_id":{"const":"kyqra-crawler"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/kyqra-crawler"}}}}},
+            {"properties":{"service_id":{"const":"prometheus"},"image":{"properties":{"reference":{"const":"prom/prometheus"}}}}},
+            {"properties":{"service_id":{"const":"alertmanager"},"image":{"properties":{"reference":{"const":"prom/alertmanager"}}}}},
+            {"properties":{"service_id":{"const":"node-exporter"},"image":{"properties":{"reference":{"const":"prom/node-exporter"}}}}},
+            {"properties":{"service_id":{"const":"postgres-exporter"},"image":{"properties":{"reference":{"const":"docker.io/prometheuscommunity/postgres-exporter"}}}}},
+            {"properties":{"service_id":{"const":"redis-exporter"},"image":{"properties":{"reference":{"const":"docker.io/oliver006/redis_exporter"}}}}},
+            {"properties":{"service_id":{"const":"cadvisor"},"image":{"properties":{"reference":{"const":"gcr.io/cadvisor/cadvisor"}}}}},
+            {"properties":{"service_id":{"const":"blackbox-exporter"},"image":{"properties":{"reference":{"const":"prom/blackbox-exporter"}}}}},
+            {"properties":{"service_id":{"const":"postgresql"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/postgresql"}}}}},
+            {"properties":{"service_id":{"const":"redis"},"image":{"properties":{"reference":{"const":"redis"}}}}},
+            {"properties":{"service_id":{"const":"nats-jetstream"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-middleware"}}}}},
+            {"properties":{"service_id":{"const":"temporal"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-middleware"}}}}},
+            {"properties":{"service_id":{"const":"telnexa"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/telnexa"}}}}},
+            {"properties":{"service_id":{"const":"klyrow"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/klyrow"}}}}},
+            {"properties":{"service_id":{"const":"middleware-external-webhook-worker"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-middleware"}}}}},
+            {"properties":{"service_id":{"const":"middleware-breero-odoo-worker"},"image":{"properties":{"reference":{"const":"ghcr.io/codestra-srl/codestra-middleware"}}}}},
+            {"properties":{"service_id":{"const":"sms-event-worker"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/sms-event-worker"}}}}},
+            {"properties":{"service_id":{"const":"email-reseller-api"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/email-reseller"}}}}},
+            {"properties":{"service_id":{"const":"sms-api"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/sms-api"}}}}},
+            {"properties":{"service_id":{"const":"mail-api"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/mail-api"}}}}},
+            {"properties":{"service_id":{"const":"stalwart"},"image":{"properties":{"reference":{"const":"stalwartlabs/stalwart"}}}}},
+            {"properties":{"service_id":{"const":"kong-standby-auth"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/kong-standby-auth"}}}}},
+            {"properties":{"service_id":{"const":"kong-identity-certification"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/kong-identity-certification"}}}}},
+            {"properties":{"service_id":{"const":"beyvra-email-api"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/beyvra-email-api"}}}}},
+            {"properties":{"service_id":{"const":"reseller-portal"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/reseller-portal"}}}}},
+            {"properties":{"service_id":{"const":"private-vicidial-ingress"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/private-vicidial-ingress"}}}}},
+            {"properties":{"service_id":{"const":"websocket-gateway"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/websocket-gateway"}}}}},
+            {"properties":{"service_id":{"const":"integration-control-plane"},"image":{"properties":{"reference":{"const":"ghcr.io/appolon1908-hue/integration-control-plane"}}}}}
+          ]}
+        ],
+        "properties": {
+          "service_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"},
+          "repository": {"type": "string", "pattern": "^(appolon1908-hue|Codestra-SRL)/[A-Za-z0-9._-]+$"},
+          "git_sha": {"$ref": "#/$defs/git_sha"},
+          "image": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reference", "digest"],
+            "properties": {
+              "reference": {"type": "string", "pattern": "^(?:[a-z0-9.-]+/)?[a-z0-9._/-]+$"},
+              "digest": {"$ref": "#/$defs/image_digest"}
+            }
+          },
+          "service_manifest_sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caddy", "kong"],
+      "properties": {
+        "caddy": {
+          "allOf": [
+            {"$ref": "#/$defs/pinned_file"},
+            {"properties": {"path": {"const": "release/caddy-edge-bundle.v1.json"}}}
+          ]
+        },
+        "kong": {
+          "allOf": [
+            {"$ref": "#/$defs/pinned_file"},
+            {"properties": {"path": {"const": "deploy/kong/control-plane.yml"}}}
+          ]
+        }
+      }
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["staging", "production", "identical_digests_required"],
+      "properties": {
+        "identical_digests_required": {"const": true},
+        "staging": {"$ref": "#/$defs/staging_gate"},
+        "production": {"$ref": "#/$defs/production_gate"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "production": {
+                "properties": {"status": {"const": "accepted"}},
+                "required": ["status"]
+              }
+            },
+            "required": ["production"]
+          },
+          "then": {
+            "properties": {
+              "staging": {
+                "properties": {"status": {"const": "accepted"}},
+                "required": ["status"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/pinned_file"}
+    }
+  },
+  "$defs": {
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "image_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "pinned_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]+$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "environment": {"enum": ["staging", "production"]}
+      }
+    },
+    "environment_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence"],
+      "properties": {
+        "status": {"enum": ["pending", "accepted", "rejected"]},
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "integration": {"$ref": "#/$defs/pinned_file"},
+            "backup": {"$ref": "#/$defs/pinned_file"},
+            "restore": {"$ref": "#/$defs/pinned_file"},
+            "monitoring": {"$ref": "#/$defs/pinned_file"},
+            "rollback": {"$ref": "#/$defs/pinned_file"},
+            "approval": {"$ref": "#/$defs/pinned_file"}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "accepted"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "required": ["integration", "backup", "restore", "monitoring", "rollback"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "production_gate": {
+      "allOf": [
+        {"$ref": "#/$defs/environment_gate"},
+        {"$ref": "#/$defs/production_evidence_environment"},
+        {
+          "if": {
+            "properties": {"status": {"const": "accepted"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "evidence": {"required": ["approval"]}
+            }
+          }
+        }
+      ]
+    },
+    "staging_gate": {
+      "allOf": [
+        {"$ref": "#/$defs/environment_gate"},
+        {"$ref": "#/$defs/staging_evidence_environment"}
+      ]
+    },
+    "staging_evidence_environment": {
+      "properties": {"evidence": {"properties": {
+        "integration": {"properties": {"path": {"pattern": "^evidence/staging/"}, "environment": {"const": "staging"}}, "required": ["environment"]},
+        "backup": {"properties": {"path": {"pattern": "^evidence/staging/"}, "environment": {"const": "staging"}}, "required": ["environment"]},
+        "restore": {"properties": {"path": {"pattern": "^evidence/staging/"}, "environment": {"const": "staging"}}, "required": ["environment"]},
+        "monitoring": {"properties": {"path": {"pattern": "^evidence/staging/"}, "environment": {"const": "staging"}}, "required": ["environment"]},
+        "rollback": {"properties": {"path": {"pattern": "^evidence/staging/"}, "environment": {"const": "staging"}}, "required": ["environment"]}
+      }}}
+    },
+    "production_evidence_environment": {
+      "properties": {"evidence": {"properties": {
+        "integration": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]},
+        "backup": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]},
+        "restore": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]},
+        "monitoring": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]},
+        "rollback": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]},
+        "approval": {"properties": {"path": {"pattern": "^evidence/production/"}, "environment": {"const": "production"}}, "required": ["environment"]}
+      }}}
+    }
+  }
+}

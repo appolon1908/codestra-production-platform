@@ -1,6 +1,7 @@
-# Private Klyrow delivery-event ingress. The application origin is loopback-only;
-# this listener is the sole private-network entry point and requires a client
-# certificate rooted in the Codestra platform provider trust chain.
+# Host-Caddy-only private Klyrow delivery-event ingress. Do not import this file
+# into the container Caddy root: both 10.40.0.1 and host loopback belong to the
+# host namespace. Installation requires the separately reviewed host-Caddy
+# procedure and must remain absent until that service and its mTLS files exist.
 https://middleware-email-events.internal.codestra.agency:18080 {
 	bind 10.40.0.1
 	tls /etc/caddy/private/klyrow-events/tls-fullchain.crt /etc/caddy/private/klyrow-events/tls.key {
