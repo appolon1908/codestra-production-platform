@@ -262,6 +262,28 @@ def consume_token(token: str) -> dict[str, object]:
     return payload
 
 
+def validate_session_request(value: object) -> tuple[str, int | None]:
+    if not isinstance(value, dict) or set(value) - {"campaign_id", "resume_cursor"}:
+        raise ValueError("invalid_session_request")
+    campaign = value.get("campaign_id")
+    cursor = value.get("resume_cursor")
+    if not isinstance(campaign, str) or not SUBJECT_TOKEN.fullmatch(campaign):
+        raise ValueError("invalid_campaign_id")
+    # JetStream sequences are unsigned 64-bit; reserve room for cursor + 1.
+    if cursor is not None and (type(cursor) is not int or not 0 <= cursor < 2**64 - 1):
+        raise ValueError("invalid_resume_cursor")
+    return campaign, cursor
+
+
+def session_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate_request_field")
+        result[key] = value
+    return result
+
+
 class SessionHandler(BaseHTTPRequestHandler):
     server_version = "CodestraRealtimeSession/1.0"
 
@@ -312,12 +334,13 @@ class SessionHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             if length < 2 or length > 8192:
                 raise ValueError("invalid_body")
-            value = json.loads(self.rfile.read(length))
-            campaign_id = str(value["campaign_id"]).strip()
-            resume_cursor = value.get("resume_cursor")
-            if not campaign_id or (resume_cursor is not None and
-                                   (not isinstance(resume_cursor, int) or resume_cursor < 0)):
-                raise ValueError("invalid_identity")
+            if self.headers.get("Transfer-Encoding"):
+                raise ValueError("unsupported_transfer_encoding")
+            raw = self.rfile.read(length)
+            if len(raw) != length:
+                raise ValueError("incomplete_body")
+            value = json.loads(raw, object_pairs_hook=session_json_object)
+            campaign_id, resume_cursor = validate_session_request(value)
             agent_id = resolve_agent_membership(tenant, campaign_id, subject)
             if not agent_id:
                 return self._json(403, {"error": "active_agent_membership_required"})
@@ -325,8 +348,8 @@ class SessionHandler(BaseHTTPRequestHandler):
                 tenant, agent_id, campaign_id, client, subject,
                 idempotency_key, resume_cursor
             )
-        except (KeyError, ValueError, json.JSONDecodeError) as exc:
-            return self._json(422, {"error": str(exc)})
+        except (KeyError, ValueError, UnicodeError):
+            return self._json(422, {"error": "invalid_session_request"})
         return self._json(201, response)
 
 

@@ -79,3 +79,47 @@ def test_realtime_compose_declares_every_secret_and_network():
     assert '"127.0.0.1:18103:18103"' in compose
     assert "name: codestra_edge" in compose
     assert "name: codestra_backend" in compose
+
+
+@pytest.mark.parametrize('value', [None, [], True, 'campaign',
+    {'campaign_id': None}, {'campaign_id': 123}, {'campaign_id': 'a.b'},
+    {'campaign_id': 'a', 'tenant_id': 'other'}, {'campaign_id': 'a', 'resume_cursor': True},
+    {'campaign_id': 'a', 'resume_cursor': -1}, {'campaign_id': 'a', 'resume_cursor': 1.5},
+    {'campaign_id': 'a', 'resume_cursor': 2**64 - 1}, {'campaign_id': 'a' * 129}])
+def test_session_request_rejects_invalid_scope_and_cursor(value):
+    with pytest.raises(ValueError):
+        realtime_gateway.validate_session_request(value)
+
+
+def test_session_request_accepts_canonical_scope_and_bounded_cursor():
+    assert realtime_gateway.validate_session_request({'campaign_id': 'campaign-1'}) == ('campaign-1', None)
+    assert realtime_gateway.validate_session_request({'campaign_id': 'campaign-1', 'resume_cursor': 0}) == ('campaign-1', 0)
+
+
+def test_duplicate_session_fields_rejected():
+    import json
+    with pytest.raises(ValueError, match='duplicate_request_field'):
+        json.loads('{"campaign_id":"one","campaign_id":"two"}',
+                   object_pairs_hook=realtime_gateway.session_json_object)
+
+
+@pytest.mark.parametrize('raw', [b'[]', b'null', b'{"campaign_id":false}',
+    b'{"campaign_id":"a","resume_cursor":true}',
+    b'{"campaign_id":"a","campaign_id":"b"}', b'\xff'])
+def test_invalid_http_session_body_never_queries_membership(monkeypatch, raw):
+    from io import BytesIO
+    from unittest.mock import Mock
+    handler = object.__new__(realtime_gateway.SessionHandler)
+    handler.path = '/api/v1/realtime/sessions'
+    handler.headers = {'X-Codestra-Gateway-Secret': 'synthetic-gateway',
+        'X-Authenticated-Tenant': 'tenant', 'X-Authenticated-Client': 'client',
+        'X-Authenticated-Subject': 'subject', 'Idempotency-Key': 'request-1',
+        'Content-Length': str(len(raw))}
+    handler.rfile = BytesIO(raw)
+    handler._json = Mock()
+    membership = Mock()
+    monkeypatch.setattr(realtime_gateway, '_read_secret', lambda _: 'synthetic-gateway')
+    monkeypatch.setattr(realtime_gateway, 'resolve_agent_membership', membership)
+    handler.do_POST()
+    handler._json.assert_called_once_with(422, {'error': 'invalid_session_request'})
+    membership.assert_not_called()
