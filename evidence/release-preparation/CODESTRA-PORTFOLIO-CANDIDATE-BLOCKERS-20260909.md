@@ -26,10 +26,10 @@ or current-portfolio recovery result was inferred.
 ## Repository-first observation boundary
 
 - Evidence refreshed through repository and GitHub read APIs on
-  `2026-09-09T23:40:23+02:00` without contacting Server A or Server B.
+  `2026-09-10T01:15:34+02:00` without contacting Server A or Server B.
 - Controller: `appolon1908-hue/codestra-production-platform`
 - Protected branch: `release/production-activation`
-- Protected head: `f5af543359a40afade4dd6a1a74276ac00b22183`
+- Protected head: `dec1ed221ecf8247ecace106f19987fe40247481`
 - Controller contract SHA-256:
   `d23a708fc026cf8416b86689bbe56d88dec2309daa1e2dbfb2606c1b36f907ef`
 - Catalog SHA-256:
@@ -182,7 +182,8 @@ and remove/rotate real material or add a narrowly reviewed false-positive
 decision. This report does neither.
 
 Controller local validation from an isolated environment completed with
-`1966 passed, 3 skipped, 374 subtests passed`; the three skips are NATS runtime
+`2197 passed, 9 skipped, 378 subtests passed`; the skips are environment-bound
+NATS/runtime integration tests unavailable in this isolated checkout
 tests because the local checkout has no `nats-server`. The separately invoked
 auth-middleware suite completed with `12 passed`, and the focused source-gate,
 authority, manual-orchestrator, and operations suite completed with `79 passed,
