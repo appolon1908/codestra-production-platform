@@ -1,0 +1,105 @@
+x-n8n-common: &n8n-common
+  image: ${N8N_IMAGE:?N8N_IMAGE must be an approved n8n image pinned with @sha256}
+  restart: unless-stopped
+  entrypoint: [/bin/sh, -ec]
+  env_file: ${N8N_ENV_FILE:-/etc/codestra/secrets/n8n.env}
+  environment: &n8n-environment
+    EXECUTIONS_MODE: queue
+    OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS: "true"
+    QUEUE_BULL_REDIS_HOST: codestra-redis-1
+    QUEUE_BULL_REDIS_PORT: "6379"
+    QUEUE_BULL_REDIS_DB: "4"
+    QUEUE_BULL_REDIS_TIMEOUT_THRESHOLD: "10000"
+    N8N_CONCURRENCY_PRODUCTION_LIMIT: ${N8N_CONCURRENCY_PRODUCTION_LIMIT:-40}
+    EXECUTIONS_DATA_PRUNE: "true"
+    EXECUTIONS_DATA_MAX_AGE: ${N8N_EXECUTIONS_MAX_AGE_HOURS:-168}
+    EXECUTIONS_DATA_PRUNE_MAX_COUNT: ${N8N_EXECUTIONS_MAX_COUNT:-250000}
+    EXECUTIONS_DATA_SAVE_ON_ERROR: all
+    EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+    EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "false"
+    N8N_METRICS: "true"
+    N8N_METRICS_INCLUDE_QUEUE_METRICS: "true"
+    N8N_LOG_LEVEL: info
+    N8N_LOG_OUTPUT: console
+    N8N_DIAGNOSTICS_ENABLED: "false"
+    N8N_PERSONALIZATION_ENABLED: "false"
+    N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+    N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+    N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+    GENERIC_TIMEZONE: America/Santo_Domingo
+  secrets: &n8n-secrets
+    - n8n_db_password
+    - n8n_encryption_key
+    - n8n_redis_password
+  read_only: true
+  tmpfs: [/tmp, /home/node/.n8n]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  networks: [backend]
+
+services:
+  n8n-main:
+    <<: *n8n-common
+    command:
+      - >-
+        export DB_POSTGRESDB_PASSWORD="$$(cat /run/secrets/n8n_db_password)";
+        export N8N_ENCRYPTION_KEY="$$(cat /run/secrets/n8n_encryption_key)";
+        export QUEUE_BULL_REDIS_PASSWORD="$$(cat /run/secrets/n8n_redis_password)";
+        exec n8n start
+    ports: ["127.0.0.1:5678:5678"]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:5678/healthz/readiness]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  n8n-webhook:
+    <<: *n8n-common
+    command:
+      - >-
+        export DB_POSTGRESDB_PASSWORD="$$(cat /run/secrets/n8n_db_password)";
+        export N8N_ENCRYPTION_KEY="$$(cat /run/secrets/n8n_encryption_key)";
+        export QUEUE_BULL_REDIS_PASSWORD="$$(cat /run/secrets/n8n_redis_password)";
+        exec n8n webhook
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:5678/healthz]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: ${N8N_WEBHOOK_REPLICAS:-2}
+      resources:
+        limits: {cpus: "1.0", memory: 1G}
+        reservations: {cpus: "0.10", memory: 192M}
+
+  n8n-worker:
+    <<: *n8n-common
+    command:
+      - >-
+        export DB_POSTGRESDB_PASSWORD="$$(cat /run/secrets/n8n_db_password)";
+        export N8N_ENCRYPTION_KEY="$$(cat /run/secrets/n8n_encryption_key)";
+        export QUEUE_BULL_REDIS_PASSWORD="$$(cat /run/secrets/n8n_redis_password)";
+        exec n8n worker --concurrency=$${N8N_WORKER_CONCURRENCY:-10}
+    deploy:
+      replicas: ${N8N_WORKER_REPLICAS:-2}
+      resources:
+        limits: {cpus: "2.0", memory: 2G}
+        reservations: {cpus: "0.25", memory: 256M}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:5678/healthz]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+secrets:
+  n8n_db_password:
+    file: /etc/codestra/runtime-secrets/n8n/postgres-password
+  n8n_encryption_key:
+    file: /etc/codestra/runtime-secrets/n8n/encryption-key
+  n8n_redis_password:
+    file: /etc/codestra/runtime-secrets/n8n/redis-password
+
+networks:
+  backend:
+    name: codestra_backend
+    external: true

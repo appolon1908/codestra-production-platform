@@ -38,9 +38,20 @@ services:
             config: {allowed_payload_size: 1, size_unit: megabytes, require_content_length: true}
       - name: control-plane-reconciliation
         hosts: [api.codestra.co]
-        paths: [/api/v1/reconciliation]
-        methods: [GET, POST]
+        paths: [/api/v1/reconciliation/run]
+        methods: [POST]
         strip_path: false
+      - name: control-plane-automation
+        hosts: [api.codestra.co]
+        paths:
+          - /api/v1/automation/authorize
+          - /api/v1/automation/execute
+          - /api/v1/automation/results
+        methods: [POST]
+        strip_path: false
+        plugins:
+          - name: request-size-limiting
+            config: {allowed_payload_size: 1, size_unit: megabytes, require_content_length: true}
       - name: control-plane-health
         hosts: [api.codestra.co]
         paths: [/api/v1/health]
@@ -48,7 +59,11 @@ services:
         strip_path: false
       - name: control-plane-system-admin
         hosts: [api.codestra.co]
-        paths: [/v1/admin/system]
+        paths:
+          - /v1/admin/system/health
+          - /v1/admin/system/readiness
+          - /v1/admin/system/databases
+          - /v1/admin/system/calling-readiness
         methods: [GET]
         strip_path: false
     plugins:
@@ -84,6 +99,9 @@ services:
               elseif path:find("^/api/v1/messages/") then required = "communications.message.read"
               elseif path:find("^/api/v1/reconciliation/") and method == "POST" then required = "communications.reconciliation.execute"
               elseif path:find("^/api/v1/reconciliation/") then required = "communications.reconciliation.read"
+              elseif path == "/api/v1/automation/authorize" then required = "automation.execute"
+              elseif path == "/api/v1/automation/execute" then required = "automation.execute"
+              elseif path == "/api/v1/automation/results" then required = "automation.result.write"
               elseif path:find("^/api/v1/results/") then required = "sync.result.write"
               elseif path:find("^/api/v1/control/campaigns") then required = method == "GET" and "mapping.read" or "campaign.write"
               elseif path:find("^/api/v1/control/agents") then required = method == "GET" and "mapping.read" or "agent.write"
@@ -110,4 +128,53 @@ services:
               if not gateway_secret or gateway_secret == "" then
                 return kong.response.exit(503,{error="gateway_identity_unavailable"})
               end
+              kong.service.request.set_header("X-Codestra-Gateway-Secret",gateway_secret)
+  - name: codestra-agent-realtime-sessions
+    url: http://realtime:18103
+    connect_timeout: 3000
+    read_timeout: 5000
+    write_timeout: 5000
+    routes:
+      - name: agent-realtime-session-create
+        hosts: [api.codestra.co]
+        paths: [/api/v1/realtime/sessions]
+        methods: [POST]
+        strip_path: false
+        plugins:
+          - name: request-size-limiting
+            config: {allowed_payload_size: 8, size_unit: kilobytes, require_content_length: true}
+    plugins:
+      - name: openid-connect
+        config:
+          issuer: https://auth.codestra.co/realms/codestra/.well-known/openid-configuration
+          auth_methods: [bearer]
+          audience: [codestra-control-plane]
+          scopes_required: [openid]
+          consumer_claim: [azp]
+      - name: rate-limiting
+        config: {minute: 30, policy: local, fault_tolerant: false, hide_client_headers: false}
+      - name: correlation-id
+        config: {header_name: X-Correlation-ID, generator: uuid, echo_downstream: true}
+      - name: pre-function
+        config:
+          access:
+            - |
+              local token = kong.ctx.shared.authenticated_jwt_token
+              local claims = token and token.claims or {}
+              local scopes = {}
+              for value in string.gmatch(claims.scope or "", "%S+") do scopes[value] = true end
+              if not scopes["realtime:session:create"] then
+                return kong.response.exit(403,{error="insufficient_scope",required_scope="realtime:session:create"})
+              end
+              if not claims.tenant or claims.tenant == "" then
+                return kong.response.exit(403,{error="tenant_claim_required"})
+              end
+              local gateway_secret = os.getenv("KONG_CONTROL_PLANE_GATEWAY_SECRET")
+              if not gateway_secret or gateway_secret == "" then
+                return kong.response.exit(503,{error="gateway_identity_unavailable"})
+              end
+              kong.service.request.set_header("X-Authenticated-Client",claims.azp or "unknown")
+              kong.service.request.set_header("X-Authenticated-Subject",claims.sub or "")
+              kong.service.request.set_header("X-Authenticated-Tenant",claims.tenant)
+              kong.service.request.set_header("X-Authenticated-Role","agent")
               kong.service.request.set_header("X-Codestra-Gateway-Secret",gateway_secret)

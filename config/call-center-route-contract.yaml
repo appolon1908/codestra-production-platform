@@ -1,0 +1,24 @@
+version: 1
+canonical_host: api.codestra.co
+identity_issuer: https://auth.codestra.co/realms/codestra
+routes:
+  - {method: POST, path: "/api/v1/events/{source}", boundary: kong, upstream: "codestra-control-plane:8096", scope: event.submit}
+  - {method: POST, path: /api/v1/reconciliation/run, boundary: kong, upstream: codestra-control-plane:8096, scope: communications.reconciliation.execute}
+  - {method: POST, path: /api/v1/automation/authorize, boundary: kong, upstream: codestra-control-plane:8096, scope: automation.execute}
+  - {method: POST, path: /api/v1/automation/execute, boundary: kong, upstream: codestra-control-plane:8096, scope: automation.execute}
+  - {method: POST, path: /api/v1/automation/results, boundary: kong, upstream: codestra-control-plane:8096, scope: automation.result.write}
+  - {method: POST, path: /api/v1/realtime/sessions, boundary: kong, upstream: codestra-control-plane-realtime:18103, scope: 'realtime:session:create'}
+  - {method: GET, path: /ws/agent, boundary: caddy_one_time_token, upstream: 127.0.0.1:18102, scope: realtime.connect}
+  - {method: GET, path: /v1/admin/system/health, boundary: kong, upstream: codestra-control-plane:8096, scope: platform.admin}
+  - {method: GET, path: /v1/admin/system/readiness, boundary: kong, upstream: codestra-control-plane:8096, scope: platform.admin}
+  - {method: GET, path: /v1/admin/system/databases, boundary: kong, upstream: codestra-control-plane:8096, scope: platform.admin}
+providers:
+  telnexa: {endpoint: https://10.40.0.4:8443/v1/sms/, kong_prefix: /v1/sms/, enabled: false}
+  klyrow: {endpoint: https://10.40.0.4:18000/v1/email/, kong_prefix: /v1/email/, enabled: false}
+  kyqra: {endpoint: http://10.40.0.4:3100, enabled: false}
+invariants:
+  - session_creation_must_traverse_kong
+  - websocket_upgrade_requires_one_time_token
+  - websocket_upgrade_never_traverses_n8n
+  - providers_never_receive_public_browser_traffic
+  - production_delivery_flags_default_false
