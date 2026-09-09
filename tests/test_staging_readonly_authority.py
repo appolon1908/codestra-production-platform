@@ -89,7 +89,7 @@ class StagingReadonlyAuthorityTests(unittest.TestCase):
         }
         manifest["database"] = {
             "migration_evidence_endpoint": "https://api-staging.codestra.co/internal/readiness/migrations",
-            "expected_heads": ["0056_klyrow_delivery_events"],
+            "expected_heads": ["0057_platform_service_catalog"],
         }
         manifest["backups"]["off_host_uri"] = "s3://codestra-staging-backups/candidate"
         return manifest
