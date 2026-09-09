@@ -218,3 +218,26 @@ def test_first_attempt_mapping_is_backfilled_for_legacy_operations(prepared):
         db.execute("DELETE FROM automation_execution_attempts")
     automation.execute_automation(store, event("exec-2"), "tenant-a")
     automation.record_execution_result(store, result(), "tenant-a")
+
+
+@pytest.mark.parametrize('field,bad_value', [
+    ('status', []), ('status', {}), ('execution_id', 123), ('execution_id', ''),
+    ('event_id', None), ('correlation_id', 'x\ny'), ('idempotency_key', 'x' * 2049),
+    ('actions', [None]), ('actions', [{'type': []}]),
+    ('actions', [{'type': 'x'}, {'type': 'x'}]), ('actions', 'not-a-list'),
+    ('completed_at', 'yesterday'), ('completed_at', '2026-09-07T00:00:01'),
+])
+def test_invalid_result_rejected_without_state_change(prepared, field, bad_value):
+    store, calls = prepared
+    automation.execute_automation(store, event(), 'tenant-a')
+    with store.connect() as db:
+        before = dict(db.execute('SELECT * FROM automation_executions').fetchone())
+        count = db.execute('SELECT count(*) AS n FROM events').fetchone()['n']
+    malformed = result()
+    malformed[field] = bad_value
+    with pytest.raises(ControlPlaneError):
+        automation.record_execution_result(store, malformed, 'tenant-a')
+    with store.connect() as db:
+        assert dict(db.execute('SELECT * FROM automation_executions').fetchone()) == before
+        assert db.execute('SELECT count(*) AS n FROM events').fetchone()['n'] == count
+    assert len(calls) == 1

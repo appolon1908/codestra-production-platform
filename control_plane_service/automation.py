@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -281,14 +282,36 @@ def execute_automation(store: Store, value: dict[str, Any], tenant: str) -> dict
     }
 
 
-def record_execution_result(store: Store, value: dict[str, Any], tenant: str):
-    """Atomically record one attempt result; late failures never undo success."""
+def validate_execution_result(value: object) -> None:
     if not isinstance(value, dict) or RESULT_FIELDS - set(value):
         raise ControlPlaneError("invalid_execution_result")
+    for name in RESULT_FIELDS - {"actions"}:
+        item = value[name]
+        if (not isinstance(item, str) or not item.strip() or len(item) > 2048
+                or any(ord(char) < 32 for char in item)):
+            raise ControlPlaneError("invalid_execution_result")
     if value["status"] not in {"COMPLETED", "FAILED", "RETRY_PENDING", "DEAD_LETTER"}:
         raise ControlPlaneError("invalid_execution_status")
-    if not isinstance(value["actions"], list):
+    actions = value["actions"]
+    if not isinstance(actions, list) or len(actions) > 100:
         raise ControlPlaneError("invalid_execution_result")
+    for action in actions:
+        if (not isinstance(action, dict) or not isinstance(action.get("type"), str)
+                or not action["type"].strip() or len(action["type"]) > 128):
+            raise ControlPlaneError("invalid_execution_result")
+    if len({action["type"] for action in actions}) != len(actions):
+        raise ControlPlaneError("invalid_execution_result")
+    try:
+        timestamp = datetime.fromisoformat(value["completed_at"].replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            raise ValueError("timezone required")
+    except ValueError:
+        raise ControlPlaneError("invalid_completion_timestamp") from None
+
+
+def record_execution_result(store: Store, value: dict[str, Any], tenant: str):
+    """Atomically record one attempt result; late failures never undo success."""
+    validate_execution_result(value)
     value = dict(value)
     envelope = None
     try:
