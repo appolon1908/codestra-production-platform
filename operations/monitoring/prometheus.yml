@@ -34,6 +34,35 @@ scrape_configs:
     static_configs:
       - targets: [cadvisor:8080]
 
+  - job_name: websocket_gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets: [codestra-websocket-gateway-gateway-1:8080]
+        labels:
+          websocket_role: primary
+      - targets: [websocket-standby:8080]
+        labels:
+          websocket_role: standby
+
+  - job_name: websocket_readiness
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: [https://api.codestra.agency/readyz]
+        labels:
+          websocket_role: primary
+      - targets: [http://websocket-standby:8080/readyz]
+        labels:
+          websocket_role: standby
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
   - job_name: operations-dashboard-middleware-staging
     metrics_path: /metrics
     oauth2:
