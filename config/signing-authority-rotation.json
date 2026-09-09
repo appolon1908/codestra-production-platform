@@ -9,7 +9,7 @@
   "independent_approval": "PENDING",
   "replacement_release_url": null,
   "production_delivery_authorized": false,
-  "production_operator_sha256": "292128d6c80f52ef1397511e7a758531a82e334d5ed555ff25683124d1ad308a",
+  "production_operator_sha256": "658be8c3be0b1ff0727e2543057438990e732c9b88cf0ce86da347132e0b641e",
   "installed_tuple": {
     "protected_sha": "01f2676772b11919e1d79cc74d36bc5eeaa682cd",
     "image_digest": "sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b",
