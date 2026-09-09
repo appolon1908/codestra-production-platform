@@ -371,17 +371,10 @@ class AdapterService:
                         or identity.get("user_group") != desired["user_group"]
                         or identity.get("active") not in (False, "N")):
                     raise CollisionError("agent recovery identity mismatch") from exc
-                # The durable intent may survive a committed MyISAM update whose
-                # ACL readback is malformed. Only after the ACL-independent
-                # identity is proven to be the already-desired disabled agent
-                # may recovery reassert disablement. Never disable a merely
-                # matching user_id whose ownership identity cannot be verified.
-                disabled = self.repository.disable_agent(command.agent.user_id)
-                if (disabled.get("user_id") != desired["user_id"]
-                        or disabled.get("full_name") != desired["full_name"]
-                        or disabled.get("user_group") != desired["user_group"]
-                        or disabled.get("active") not in (False, "N")):
-                    raise RuntimeError("agent recovery disable read-back failed") from exc
+                # The ACL-independent read proves this is already the desired
+                # disabled identity. Do not issue a second write while ACL
+                # readback is unusable; preserve the intent until complete
+                # reconciliation can prove all requested permissions.
                 raise RuntimeError("agent adoption reconciliation required; intent retained") from exc
             controlled_match = bool(existing) and (
                 existing.get("user_id") == desired["user_id"]

@@ -125,3 +125,29 @@ def test_entrypoint_guards_all_canonical_runtime_effect_toggles():
         "ENABLE_WARM_TRANSFER",
     ):
         assert flag in source
+
+
+@pytest.mark.parametrize("field,value", [("full_name", "Other"), ("user_group", "OTHER"), ("active", True), (None, None)])
+def test_unreadable_acl_recovery_never_writes_or_finalizes(tmp_path, monkeypatch, field, value):
+    from unittest.mock import Mock
+    repo = MemoryRepository()
+    state = StateStore(tmp_path / "state.sqlite3")
+    service = AdapterService(repo, state, FeatureFlags(writes=True, agent_sync=True))
+    command = _agent_command("a" * 64)
+    desired = command.agent.model_dump(mode="json") | {"active": False}
+    desired["adopt_existing_sha256"] = None
+    state.put_agent_adoption_intent(command.agent.user_id, "a" * 64, state.digest(desired))
+    repo.agents[command.agent.user_id] = dict(desired)
+    if field: repo.agents[command.agent.user_id][field] = value
+    monkeypatch.setattr(repo, "agent", Mock(side_effect=CollisionError("malformed ACL")))
+    disable = Mock()
+    sync = Mock()
+    monkeypatch.setattr(repo, "disable_agent", disable)
+    monkeypatch.setattr(repo, "sync_agent_disabled", sync)
+    error = CollisionError if field else RuntimeError
+    with pytest.raises(error):
+        service.sync_agent("test-unreadable-acl", command)
+    disable.assert_not_called()
+    sync.assert_not_called()
+    assert state.agent_adoption_intent(command.agent.user_id) is not None
+    assert state.mapping("agent", command.agent.user_id) is None
