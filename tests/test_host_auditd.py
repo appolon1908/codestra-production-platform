@@ -1253,9 +1253,14 @@ def test_validator_rejects_unsafe_lock_before_validation(tmp_path, monkeypatch, 
         lock.touch(mode=0o600)
         if kind == "hardlink": os.link(lock, tmp_path / "alias")
         elif kind == "writable": lock.chmod(0o666)
-        elif kind == "group": os.chown(lock, 0, 12345)
     validate = Mock()
     persist = Mock()
+    real_fstat = os.fstat
+    def lock_metadata(fd):
+        info = real_fstat(fd)
+        return SimpleNamespace(st_mode=info.st_mode, st_nlink=info.st_nlink,
+                               st_uid=0, st_gid=12345 if kind == "group" else 0)
+    monkeypatch.setattr(VALIDATOR.os, "fstat", lock_metadata)
     monkeypatch.setattr(VALIDATOR, "MUTATION_LOCK", lock)
     monkeypatch.setattr(VALIDATOR, "validate", validate)
     monkeypatch.setattr(VALIDATOR, "durable_evidence", persist)
