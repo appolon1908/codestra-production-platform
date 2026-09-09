@@ -322,13 +322,13 @@ class ManualProductionOrchestratorTests(unittest.TestCase):
                         "encoding": "base64",
                         "content": base64.b64encode(contract_bytes).decode(),
                     }
-                if "/check-runs" in path:
-                    return {"check_runs": checks}
                 if "/commits/" in path:
                     return {"commit": {"verification": {"verified": True}}}
                 raise AssertionError(f"unexpected GitHub path: {path}")
 
-            def get_paginated(self, path: str):
+            def get_paginated(self, path: str, *, items_key=None):
+                if "/check-runs" in path and items_key == "check_runs":
+                    return checks
                 if "/rules/branches/" in path:
                     return [] if rules_policy is None else rules_policy
                 raise AssertionError(f"unexpected paginated GitHub path: {path}")
@@ -718,11 +718,6 @@ class ManualProductionOrchestratorTests(unittest.TestCase):
             evidence["runs"][0]["controller_policy_base_sha"], policy_base
         )
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GitHubOriginSecurityTests(unittest.TestCase):
     def test_rejects_untrusted_absolute_pagination_before_network(self):
         for url in ["https://attacker.invalid/page", "https://api.github.com.attacker.invalid/",
@@ -743,3 +738,31 @@ class GitHubOriginSecurityTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.PolicyError, 'pagination limit'):
                 MODULE.GitHub('synthetic-token').get_paginated('/rules')
             self.assertEqual(request.call_count, 100)
+
+
+    def test_check_runs_on_later_pages_are_included(self):
+        later_check = {"name": "validate", "app": {"id": 15368}, "conclusion": "success"}
+        pages = [({"check_runs": []}, "https://api.github.com/check-runs?page=2"),
+                 ({"check_runs": [later_check]}, None)]
+        with mock.patch.object(MODULE.GitHub, "_request_page", side_effect=pages):
+            checks = MODULE.GitHub("synthetic-token").get_paginated(
+                "/check-runs?per_page=100", items_key="check_runs"
+            )
+        self.assertEqual(MODULE.latest_check_conclusions(checks), {("validate", 15368): "success"})
+
+    def test_malformed_check_run_pages_are_rejected(self):
+        for page in [[], {}, {"check_runs": None}, {"check_runs": {}}]:
+            with self.subTest(page=page), mock.patch.object(
+                MODULE.GitHub, "_request_page", return_value=(page, None)
+            ), self.assertRaises(MODULE.PolicyError):
+                MODULE.GitHub("synthetic-token").get_paginated("/check-runs", items_key="check_runs")
+
+    def test_pagination_loop_is_rejected(self):
+        with mock.patch.object(MODULE.GitHub, "_request_page", return_value=([], "/rules")) as request:
+            with self.assertRaisesRegex(MODULE.PolicyError, "pagination loop"):
+                MODULE.GitHub("synthetic-token").get_paginated("/rules")
+            self.assertEqual(request.call_count, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

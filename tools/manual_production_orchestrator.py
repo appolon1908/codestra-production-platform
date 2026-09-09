@@ -396,7 +396,7 @@ class GitHub:
     def get_optional(self, path: str) -> Any:
         return self.request("GET", path, allow_not_found=True)
 
-    def get_paginated(self, path: str) -> list[Any]:
+    def get_paginated(self, path: str, *, items_key: str | None = None) -> list[Any]:
         items: list[Any] = []
         next_path: str | None = path
         visited: set[str] = set()
@@ -405,6 +405,9 @@ class GitHub:
             require(len(visited) < 100, "GitHub API pagination limit exceeded")
             visited.add(next_path)
             page, next_path = self._request_page("GET", next_path)
+            if items_key is not None:
+                require(isinstance(page, dict), f"GitHub API paginated response is not an object: {path}")
+                page = page.get(items_key)
             require(isinstance(page, list), f"GitHub API paginated response is not a list: {path}")
             items.extend(page)
         return items
@@ -587,10 +590,12 @@ def verify_github(
             unbound = sorted(set(required_checks) - set(required_apps))
             require(not unbound, f"{repository}: contract checks are not bound by branch protection: {unbound}")
         require(required_checks, f"{repository}: protected branch has no required exact-head checks")
-        checks_response = github.get(
-            f"/repos/{repository}/commits/{validation_sha}/check-runs?per_page=100"
+        check_runs = github.get_paginated(
+            f"/repos/{repository}/commits/{validation_sha}/check-runs?per_page=100",
+            items_key="check_runs",
         )
-        checks = latest_check_conclusions(checks_response.get("check_runs", []))
+        require(all(isinstance(check, dict) for check in check_runs), f"{repository}: invalid check run")
+        checks = latest_check_conclusions(check_runs)
         missing = [
             name
             for name in required_checks
