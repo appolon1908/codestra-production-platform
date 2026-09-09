@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "template": true,
+  "status": "NOT_EXECUTED",
+  "candidate_id": null,
+  "source_lock_sha256": null,
+  "candidate_matrix_sha256": null,
+  "staging_host": {
+    "status": "NOT_CREATED",
+    "workflow_run_id": null,
+    "workflow_source_sha": null,
+    "provider_resource_id": null,
+    "private_ip": null,
+    "ssh_host_key_fingerprint": null,
+    "configuration_checksum": null
+  },
+  "artifacts": {
+    "status": "NOT_BUILT",
+    "all_exact_digest": false,
+    "all_signed": false,
+    "all_sbom_verified": false,
+    "all_provenance_verified": false,
+    "all_vulnerability_gates_pass": false
+  },
+  "workloads": [],
+  "business_apis": [],
+  "gateway": {
+    "expected_route_count": 29,
+    "routes": []
+  },
+  "staging": {
+    "status": "NOT_EXECUTED",
+    "candidate_unchanged": false,
+    "cross_business_denial": "NOT_EXECUTED",
+    "secrets_in_logs": null,
+    "high_cardinality_sensitive_labels": null,
+    "unhealthy_containers": null,
+    "restarting_containers": null,
+    "down_prometheus_targets": null,
+    "actionable_alerts": null,
+    "failed_systemd_units": null
+  },
+  "backup_restore": {
+    "status": "NOT_EXECUTED",
+    "database_backup": "NOT_EXECUTED",
+    "off_host_copy": "NOT_EXECUTED",
+    "odoo_filestore_backup": "NOT_EXECUTED",
+    "configuration_backup": "NOT_EXECUTED",
+    "openbao_snapshot": "NOT_EXECUTED",
+    "isolated_restore": "NOT_EXECUTED",
+    "data_integrity": "NOT_EXECUTED",
+    "rto_seconds": null,
+    "rpo_seconds": null,
+    "residual_resources": null
+  },
+  "rollback": {
+    "status": "NOT_EXECUTED",
+    "previous_candidate_id": null,
+    "source_and_digest_verified": false,
+    "health_readback": "NOT_EXECUTED",
+    "readiness_readback": "NOT_EXECUTED",
+    "version_readback": "NOT_EXECUTED",
+    "data_integrity": "NOT_EXECUTED",
+    "rto_seconds": null
+  },
+  "production_canary": {
+    "status": "NOT_EXECUTED",
+    "traffic_percent": 0,
+    "allowed_methods": ["GET", "HEAD"],
+    "observed_write_requests": null,
+    "source_mismatch": null,
+    "digest_mismatch": null,
+    "unexpected_404": null,
+    "unexpected_5xx": null,
+    "cross_business_leaks": null,
+    "call_delta": null,
+    "email_delta": null,
+    "sms_delta": null,
+    "provider_effect_delta": null,
+    "automatic_rollback_ready": false
+  },
+  "soak": {
+    "status": "NOT_EXECUTED",
+    "duration_seconds": 0,
+    "minimum_duration_seconds": null,
+    "unhealthy_containers": null,
+    "restarting_containers": null,
+    "down_prometheus_targets": null,
+    "actionable_alerts": null,
+    "failed_systemd_units": null,
+    "disk_headroom_pass": false,
+    "wal_backlog_bounded": false,
+    "source_runtime_drift": null
+  },
+  "safety": {
+    "business_writes_enabled": false,
+    "external_delivery_enabled": false,
+    "email_delivery_enabled": false,
+    "sms_delivery_enabled": false,
+    "pstn_dialing_enabled": false,
+    "provider_effects_enabled": false,
+    "payment_execution_enabled": false,
+    "financial_trading_enabled": false,
+    "admin_bypass_used": false,
+    "ssh_configuration_changed": false
+  },
+  "production_certified": false
+}
