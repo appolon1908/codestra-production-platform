@@ -63,6 +63,7 @@ services:
           - /v1/admin/system/health
           - /v1/admin/system/readiness
           - /v1/admin/system/databases
+          - /v1/admin/system/calling-readiness
         methods: [GET]
         strip_path: false
     plugins:
