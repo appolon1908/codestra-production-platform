@@ -1,0 +1,401 @@
+import importlib.util
+import json
+from pathlib import Path
+
+import pytest
+import yaml
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MANIFEST_PATH = ROOT / "config/kong-canonical-middleware-routes.json"
+RECONCILER_PATH = ROOT / "scripts/reconcile_kong_canonical_routes.py"
+EXPORTER_PATH = ROOT / "scripts/export_kong_public_route_contracts.py"
+CONTROL_PLANE_PATH = ROOT / "deploy/kong/control-plane.yml"
+SCOPE_POLICY_PATH = ROOT / "deploy/kong/scope-policy.lua"
+
+
+def _load(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _module():
+    return _load(RECONCILER_PATH, "reconcile_kong_canonical_routes")
+
+
+def _exporter():
+    return _load(EXPORTER_PATH, "export_kong_public_route_contracts")
+
+
+def _inline_scope_policy() -> str:
+    document = yaml.safe_load(CONTROL_PLANE_PATH.read_text())
+    plugins = document["services"][0]["plugins"]
+    pre_function = next(plugin for plugin in plugins if plugin["name"] == "pre-function")
+    return pre_function["config"]["access"][0].strip()
+
+
+def test_public_route_manifest_disables_legacy_and_name_only_trust():
+    manifest = json.loads(MANIFEST_PATH.read_text())
+    assert manifest["schema"] == "codestra.kong.canonical-routes.v2"
+    assert manifest["legacyHost"] == "api.codestra.agency"
+    assert manifest["legacyHostEnabled"] is False
+    assert "allowedExistingRouteNames" not in manifest
+    assert manifest["unverifiedExistingRouteNames"]
+    approved = {
+        item["name"] for item in manifest["routes"] + manifest["contractRoutes"]
+    }
+    assert approved.isdisjoint(manifest["unverifiedExistingRouteNames"])
+
+
+def test_contract_routes_bind_exact_dedicated_security_authority():
+    manifest = json.loads(MANIFEST_PATH.read_text())
+    for route in manifest["contractRoutes"]:
+        authority = ROOT / route["securityAuthority"]
+        assert authority.is_file()
+        assert route["hosts"] == ["api.codestra.co"]
+        assert route["serviceHost"] == "codestra-middleware-integration-api-1"
+        assert route["servicePort"] == 8095
+        assert {"jwt", "correlation-id", "rate-limiting", "request-size-limiting"} <= set(
+            route["requiredPlugins"]
+        )
+        assert {"pre-function", "post-function"} & set(route["requiredPlugins"])
+
+
+def test_callback_contract_rejects_security_plugin_config_drift():
+    module = _module()
+    canonical = json.loads(MANIFEST_PATH.read_text())
+    expected = next(
+        row for row in canonical["contractRoutes"] if row["name"] == "codestra-callback-control"
+    )
+    authority_path, spec, route = module.security_authority(ROOT, expected)
+    callback = module.security_module(ROOT, "reconcile_kong_callback_routes")
+    plugins = {
+        "jwt": {
+            "enabled": True,
+            "config": {
+                "header_names": ["authorization"],
+                "uri_param_names": [],
+                "cookie_names": [],
+                "claims_to_verify": ["exp"],
+                "key_claim_name": "azp",
+                "run_on_preflight": False,
+                "secret_is_base64": False,
+                "anonymous": None,
+            },
+        },
+        "pre-function": {
+            "enabled": True,
+            "config": {"access": [callback.claim_guard(spec, route["requiredScope"])]},
+        },
+        "request-size-limiting": {
+            "enabled": True,
+            "config": {"allowed_payload_size": route["maxBodyMb"]},
+        },
+        "rate-limiting": {
+            "enabled": True,
+            "config": {
+                "minute": route["ratePerMinute"],
+                "policy": "local",
+                "limit_by": "ip",
+            },
+        },
+        "correlation-id": {
+            "enabled": True,
+            "config": {
+                "header_name": "X-Correlation-ID",
+                "generator": "uuid",
+                "echo_downstream": True,
+            },
+        },
+    }
+    module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+    plugins["jwt"]["config"]["key_claim_name"] = "sub"
+    with pytest.raises(RuntimeError, match="jwt_key_claim"):
+        module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+
+
+def test_campaign_contract_rejects_scope_guard_drift():
+    module = _module()
+    canonical = json.loads(MANIFEST_PATH.read_text())
+    expected = next(
+        row for row in canonical["contractRoutes"] if row["name"] == "codestra-campaign-policy-check"
+    )
+    authority_path, spec, route = module.security_authority(ROOT, expected)
+    campaign = module.security_module(ROOT, "reconcile_kong_campaign_automation")
+    plugins = {
+        "jwt": {
+            "enabled": True,
+            "config": {
+                "key_claim_name": "azp",
+                "claims_to_verify": ["exp"],
+                "header_names": ["authorization"],
+                "uri_param_names": [],
+                "cookie_names": [],
+                "run_on_preflight": True,
+            },
+        },
+        "post-function": {
+            "enabled": True,
+            "config": {"access": [campaign.claim_guard(spec, route["scope"])]},
+        },
+        "request-size-limiting": {
+            "enabled": True,
+            "config": {"allowed_payload_size": route["max_body_mb"]},
+        },
+        "rate-limiting": {
+            "enabled": True,
+            "config": {
+                "minute": route["rate_per_minute"],
+                "policy": "local",
+                "limit_by": "consumer",
+            },
+        },
+        "correlation-id": {
+            "enabled": True,
+            "config": {
+                "header_name": "X-Correlation-ID",
+                "generator": "uuid",
+                "echo_downstream": True,
+            },
+        },
+    }
+    module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+    plugins["jwt"]["config"]["uri_param_names"] = ["jwt"]
+    with pytest.raises(RuntimeError, match="uri_param_names"):
+        module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+    plugins["jwt"]["config"]["uri_param_names"] = []
+    plugins["jwt"]["config"]["cookie_names"] = ["jwt"]
+    with pytest.raises(RuntimeError, match="cookie_names"):
+        module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+    plugins["jwt"]["config"]["cookie_names"] = []
+    plugins["post-function"]["config"]["access"] = ["return true"]
+    with pytest.raises(RuntimeError, match="claim_guard"):
+        module.verify_security_plugins(ROOT, authority_path, spec, route, plugins, expected)
+
+
+def test_reconciler_pagination_cannot_leave_the_selected_admin_origin():
+    module = _module()
+    assert module.safe_next("http://127.0.0.1:8001", "/routes?offset=next") == (
+        "http://127.0.0.1:8001/routes?offset=next"
+    )
+    assert module.safe_next(
+        "http://127.0.0.1:8001", "http://127.0.0.1:8001/routes?offset=next"
+    ) == "http://127.0.0.1:8001/routes?offset=next"
+    with pytest.raises(RuntimeError, match="unsafe Kong pagination URL"):
+        module.safe_next(
+            "http://127.0.0.1:8001", "https://attacker.invalid/routes?offset=next"
+        )
+
+
+def test_reconciler_is_exact_and_never_unions_legacy_hosts():
+    source = RECONCILER_PATH.read_text()
+    assert "name-only public route allowlists are forbidden" in source
+    assert "name-only public routes require exact source contracts" in source
+    assert "unsafe Kong pagination URL" in source
+    assert 'desired_hosts = [manifest["canonicalHost"]]' in source
+    assert "original_hosts +" not in source
+    assert "LEGACY_PUBLIC_ROUTE_NAMES" in source
+    assert "duplicate enabled route plugins" in source
+    assert "securityAuthority" in source
+    assert "verify_security_plugins" in source
+    assert "correlation-id" in source
+    assert 'return "true" if value else "false"' in source
+    assert "is_http_route(route)" in source
+    assert 'for field, value in authority_manifest["service"].items()' in source
+
+
+def test_contract_route_rejects_additional_match_predicates(monkeypatch):
+    module = _module()
+    canonical = json.loads(MANIFEST_PATH.read_text())
+    expected = next(row for row in canonical["contractRoutes"] if row["name"] == "codestra-callback-control")
+    _, authority, _ = module.security_authority(ROOT, expected)
+    service = {**authority["service"], "id": "service-1"}
+    route = {
+        "id": "route-1", "name": expected["name"], "service": {"id": "service-1"},
+        "hosts": expected["hosts"], "paths": expected["paths"],
+        "methods": expected["methods"], "protocols": expected["protocols"],
+        "strip_path": expected["stripPath"], "preserve_host": expected["preserveHost"],
+        "https_redirect_status_code": 426, "headers": {"x-hidden": ["required"]},
+        "snis": [], "sources": [], "destinations": [],
+    }
+    monkeypatch.setattr(module, "enabled_plugins", lambda *_args: {})
+    with pytest.raises(RuntimeError, match="headers drift"):
+        module.verify_contract_route("http://kong", ROOT, expected, [route], {"service-1": service})
+
+
+def test_contract_route_rejects_callback_timeout_drift(monkeypatch):
+    module = _module()
+    canonical = json.loads(MANIFEST_PATH.read_text())
+    expected = next(row for row in canonical["contractRoutes"] if row["name"] == "codestra-callback-control")
+    _, authority, _ = module.security_authority(ROOT, expected)
+    service = {**authority["service"], "id": "service-1", "read_timeout": 1}
+    route = {
+        "id": "route-1", "name": expected["name"], "service": {"id": "service-1"},
+        "hosts": expected["hosts"], "paths": expected["paths"],
+        "methods": expected["methods"], "protocols": expected["protocols"],
+        "strip_path": expected["stripPath"], "preserve_host": expected["preserveHost"],
+        "https_redirect_status_code": 426, "headers": {}, "snis": [],
+        "sources": [], "destinations": [],
+    }
+    monkeypatch.setattr(module, "enabled_plugins", lambda *_args: {})
+    with pytest.raises(RuntimeError, match="service.read_timeout drift"):
+        module.verify_contract_route("http://kong", ROOT, expected, [route], {"service-1": service})
+
+
+def test_contract_route_rejects_unexpected_service_path(monkeypatch):
+    module = _module()
+    canonical = json.loads(MANIFEST_PATH.read_text())
+    expected = next(row for row in canonical["contractRoutes"] if row["name"] == "codestra-callback-control")
+    _, authority, _ = module.security_authority(ROOT, expected)
+    service = {**authority["service"], "id": "service-1", "path": "/unexpected"}
+    route = {
+        "id": "route-1", "name": expected["name"], "service": {"id": "service-1"},
+        "hosts": expected["hosts"], "paths": expected["paths"],
+        "methods": expected["methods"], "protocols": expected["protocols"],
+        "strip_path": expected["stripPath"], "preserve_host": expected["preserveHost"],
+        "https_redirect_status_code": 426, "headers": {}, "snis": [],
+        "sources": [], "destinations": [],
+    }
+    monkeypatch.setattr(module, "enabled_plugins", lambda *_args: {})
+    with pytest.raises(RuntimeError, match="service.path drift"):
+        module.verify_contract_route("http://kong", ROOT, expected, [route], {"service-1": service})
+
+
+def test_stream_routes_are_not_part_of_the_http_public_surface():
+    module = _module()
+    assert module.is_http_route({"protocols": ["http", "https"]})
+    assert not module.is_http_route({"protocols": ["tcp"]})
+    assert not module.is_http_route({"protocols": ["tls_passthrough"]})
+
+
+def test_read_only_route_exporter_redacts_secret_values_without_exporting_credentials():
+    module = _exporter()
+    source = EXPORTER_PATH.read_text()
+    value = {
+        "client_secret": "do-not-export",
+        "nested": {"password": "do-not-export", "secret_is_base64": True},
+        "key_claim_name": "azp",
+        "allowed_payload_size": 2,
+        "headers": [
+            "Authorization: Bearer do-not-export-token",
+            "X-API-Key: do-not-export-key",
+            "X-Safe-Header: safe-value",
+        ],
+        "upstream_url": "https://user:do-not-export@example.invalid/path",
+        "token_url": "https://hooks.example.invalid/path?token=do-not-export-query",
+        "api_key_url": (
+            "https://hooks.example.invalid/path?safe=value&api_key=do-not-export-query"
+        ),
+        "safe_url": "https://hooks.example.invalid/path?offset=next",
+        "aws_url": (
+            "https://bucket.example.invalid/object?X-Amz-Credential=credential"
+            "&X-Amz-Signature=signature"
+        ),
+        "azure_url": "https://blob.example.invalid/object?sig=signature",
+        "gcs_url": (
+            "https://storage.example.invalid/object?X-Goog-Credential=credential"
+            "&X-Goog-Signature=signature"
+        ),
+        "access": ["local expected='p4sscode'"],
+    }
+    sanitized = module.sanitize(value)
+    assert sanitized["client_secret"]["redacted"] is True
+    assert sanitized["nested"]["password"]["redacted"] is True
+    assert sanitized["nested"]["secret_is_base64"] is True
+    assert sanitized["key_claim_name"] == "azp"
+    assert sanitized["headers"][0]["redacted"] is True
+    assert sanitized["headers"][1]["redacted"] is True
+    assert sanitized["headers"][2] == "X-Safe-Header: safe-value"
+    assert sanitized["upstream_url"]["redacted"] is True
+    assert sanitized["token_url"]["redacted"] is True
+    assert sanitized["api_key_url"]["redacted"] is True
+    assert sanitized["safe_url"] == "https://hooks.example.invalid/path?offset=next"
+    assert sanitized["aws_url"]["redacted"] is True
+    assert sanitized["azure_url"]["redacted"] is True
+    assert sanitized["gcs_url"]["redacted"] is True
+    assert sanitized["access"] == {"redacted": True}
+    rendered = json.dumps(sanitized)
+    assert "do-not-export" not in rendered
+    assert "method=\"GET\"" in source
+    assert "credentials_exported" in source
+    assert "consumers" not in source.lower()
+    assert "unsafe Kong pagination URL" in source
+
+
+def test_exporter_pagination_cannot_leave_the_selected_admin_origin():
+    module = _exporter()
+    with pytest.raises(RuntimeError, match="unsafe Kong pagination URL"):
+        module.safe_next(
+            "http://127.0.0.1:8001", "http://attacker.invalid/routes?offset=next"
+        )
+
+
+def test_kong_wildcard_host_matches_public_subdomains():
+    module = _module()
+    assert module.host_matches("*.codestra.agency", "api.codestra.agency")
+    assert module.host_matches("api.codestra.*", "api.codestra.agency")
+    assert not module.host_matches("*.codestra.agency", "codestra.agency")
+    assert not module.host_matches("*.codestra.agency", "api.codestra.co")
+    exporter = _exporter()
+    assert exporter.host_matches("*.codestra.co", "api.codestra.co")
+    assert exporter.host_matches("api.codestra.*", "api.codestra.co")
+
+
+def test_exporter_admin_origin_strips_basic_auth_credentials():
+    module = _exporter()
+    assert (
+        module.sanitized_origin("http://admin:password@127.0.0.1:8001/routes?q=1")
+        == "http://127.0.0.1:8001"
+    )
+
+
+def test_exporter_redacts_credentials_embedded_in_route_paths():
+    module = _exporter()
+    secret = "company-signing-token-0123456789"
+    sanitized = module.sanitize_route_path(f"/webhook/{secret}/events")
+    assert secret not in sanitized
+    assert sanitized == "/webhook/<redacted>/events"
+    assert module.sanitize_route_path("/api/v1/events") == "/api/v1/events"
+
+
+def test_exporter_redacts_credentials_in_upstream_service_paths(monkeypatch):
+    module = _exporter()
+    monkeypatch.setattr(module, "all_rows", lambda *_args: [])
+    secret = "upstream-signing-token-0123456789"
+    service = {"id": "service-1", "name": "service", "path": f"/hooks/{secret}"}
+    route = {"id": "route-1", "service": {"id": "service-1"}, "paths": ["/public"], "name": "route"}
+    record = module.route_record("http://127.0.0.1:8001", route, {"service-1": service})
+    assert secret not in record["service"]["path"]
+
+
+def test_exporter_includes_hostless_routes_in_public_evidence():
+    source = EXPORTER_PATH.read_text()
+    assert "if route_hosts and not any(" in source
+    assert "for pattern in route_hosts for host in public_hosts" in source
+
+
+def test_inline_and_standalone_control_plane_scope_policies_are_identical():
+    assert _inline_scope_policy() == SCOPE_POLICY_PATH.read_text().strip()
+
+
+def test_control_plane_scope_policy_covers_exact_admin_and_message_roots():
+    policy = SCOPE_POLICY_PATH.read_text()
+    assert 'path == "/v1/admin/system" or path:find("^/v1/admin/system/")' in policy
+    assert 'required = "platform.admin"' in policy
+    assert 'path == "/api/v1/messages" or path:find("^/api/v1/messages/")' in policy
+    assert 'required = "communications.message.read"' in policy
+    assert 'error="route_scope_undefined"' in policy
+    assert 'path == "/api/v1/health"' in policy
+    for root in ("events", "results", "reconciliation"):
+        assert f'path == "/api/v1/{root}"' in policy
+    assert 'X-Authenticated-Role", "platform_admin"' in policy
+
+
+def test_undefined_control_plane_paths_are_denied_before_proxy_identity_headers():
+    policy = SCOPE_POLICY_PATH.read_text()
+    deny = policy.index('return kong.response.exit(403,{error="route_scope_undefined"})')
+    identity = policy.index('kong.service.request.set_header("X-Authenticated-Client"')
+    assert deny < identity
