@@ -308,14 +308,36 @@ def validate_candidate(
     )
 
 
+class NoGitHubRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise PolicyError("GitHub API redirects are forbidden")
+
+
 class GitHub:
     def __init__(self, token: str):
         require(bool(token), "CODESTRA_ORCHESTRATOR_TOKEN is required")
         self.token = token
         self.base = "https://api.github.com"
 
-    def request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+    @staticmethod
+    def _open(request, timeout):
+        return urllib.request.build_opener(NoGitHubRedirect()).open(request, timeout=timeout)
+
+    def _request_page(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        allow_not_found: bool = False,
+    ) -> tuple[Any, str | None]:
         url = path if path.startswith("https://") else self.base + path
+        parsed = urllib.parse.urlsplit(url)
+        require(
+            parsed.scheme == "https" and parsed.netloc == "api.github.com"
+            and not parsed.fragment and not any(ord(c) <= 32 for c in url),
+            "GitHub API URL must remain on the trusted origin",
+        )
         data = None if payload is None else json.dumps(payload).encode()
         request = urllib.request.Request(
             url,
@@ -330,19 +352,62 @@ class GitHub:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with self._open(request, timeout=60) as response:
                 content = response.read()
+                next_link = self._next_link(response.headers.get("Link", ""))
                 if not content:
-                    return None
-                return json.loads(content)
+                    return None, next_link
+                return json.loads(content), next_link
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", "replace")
+            if allow_not_found and error.code == 404:
+                return None, None
             raise PolicyError(f"GitHub API {method} {path} failed with HTTP {error.code}: {body[:500]}") from error
         except urllib.error.URLError as error:
             raise PolicyError(f"GitHub API {method} {path} failed: {error}") from error
 
+    @staticmethod
+    def _next_link(header: str) -> str | None:
+        for item in header.split(","):
+            match = re.fullmatch(r'\s*<([^>]+)>;\s*rel="next"\s*', item)
+            if match is not None:
+                return match.group(1)
+        return None
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        allow_not_found: bool = False,
+    ) -> Any:
+        value, _ = self._request_page(
+            method,
+            path,
+            payload,
+            allow_not_found=allow_not_found,
+        )
+        return value
+
     def get(self, path: str) -> Any:
         return self.request("GET", path)
+
+    def get_optional(self, path: str) -> Any:
+        return self.request("GET", path, allow_not_found=True)
+
+    def get_paginated(self, path: str) -> list[Any]:
+        items: list[Any] = []
+        next_path: str | None = path
+        visited: set[str] = set()
+        while next_path is not None:
+            require(next_path not in visited, "GitHub API pagination loop detected")
+            require(len(visited) < 100, "GitHub API pagination limit exceeded")
+            visited.add(next_path)
+            page, next_path = self._request_page("GET", next_path)
+            require(isinstance(page, list), f"GitHub API paginated response is not a list: {path}")
+            items.extend(page)
+        return items
 
     def post(self, path: str, payload: dict[str, Any]) -> Any:
         return self.request("POST", path, payload)
@@ -358,6 +423,67 @@ def latest_check_conclusions(checks: list[dict[str, Any]]) -> dict[tuple[str, in
         if isinstance(name, str) and isinstance(app_id, int):
             result[(name, app_id)] = item.get("conclusion")
     return result
+
+
+def required_check_bindings(
+    github: GitHub,
+    repository: str,
+    branch_name: str,
+    expected_app_id: int,
+) -> tuple[set[str], dict[str, int]]:
+    """Resolve app-bound checks from classic protection and effective rulesets."""
+
+    required: set[str] = set()
+    bindings: dict[str, int] = {}
+
+    def add_binding(name: object, app_id: object, authority: str) -> None:
+        require(isinstance(name, str) and name, f"{repository}: invalid required check context from {authority}")
+        required.add(name)
+        if app_id is None:
+            return
+        require(isinstance(app_id, int), f"{repository}: invalid app binding for required check {name}")
+        prior = bindings.get(name)
+        require(
+            prior is None or prior == app_id,
+            f"{repository}: conflicting app bindings for required check {name}",
+        )
+        require(
+            app_id == expected_app_id,
+            f"{repository}: required check {name} is bound to the wrong app",
+        )
+        bindings[name] = app_id
+
+    classic = github.get_optional(
+        f"/repos/{repository}/branches/{branch_name}/protection/required_status_checks"
+    )
+    if classic is not None:
+        require(isinstance(classic, dict), f"{repository}: invalid classic required-status policy")
+        contexts = classic.get("contexts", [])
+        checks = classic.get("checks", [])
+        require(isinstance(contexts, list), f"{repository}: invalid branch-protection context list")
+        require(isinstance(checks, list), f"{repository}: invalid branch-protection check list")
+        for name in contexts:
+            add_binding(name, None, "classic branch protection")
+        for item in checks:
+            require(isinstance(item, dict), f"{repository}: invalid branch-protection check binding")
+            add_binding(item.get("context"), item.get("app_id"), "classic branch protection")
+
+    effective_rules = github.get_paginated(
+        f"/repos/{repository}/rules/branches/{branch_name}?per_page=100"
+    )
+    for rule in effective_rules:
+        require(isinstance(rule, dict), f"{repository}: invalid effective branch rule")
+        if rule.get("type") != "required_status_checks":
+            continue
+        parameters = rule.get("parameters")
+        require(isinstance(parameters, dict), f"{repository}: invalid ruleset status policy")
+        checks = parameters.get("required_status_checks")
+        require(isinstance(checks, list), f"{repository}: invalid ruleset required-check list")
+        for item in checks:
+            require(isinstance(item, dict), f"{repository}: invalid ruleset check binding")
+            add_binding(item.get("context"), item.get("integration_id"), "effective ruleset")
+
+    return required, bindings
 
 
 def fetch_contract(github: GitHub, repository: str, source_sha: str, path: str) -> tuple[dict[str, Any], str]:
@@ -408,9 +534,6 @@ def verify_github(
         branch_name = urllib.parse.quote(expected["default_branch"], safe="")
         branch = github.get(f"/repos/{repository}/branches/{branch_name}")
         require(branch.get("protected") is True, f"{repository}: default branch is not protected")
-        status_policy = github.get(
-            f"/repos/{repository}/branches/{branch_name}/protection/required_status_checks"
-        )
         observed_sha = branch.get("commit", {}).get("sha")
         require_sha(observed_sha, f"{repository}: protected branch head")
         if repository == controller_repository:
@@ -452,24 +575,12 @@ def verify_github(
         )
         require(len(candidate_record["previous_images"]) == image_count, f"{repository}: rollback image count mismatch")
 
-        branch_contexts = status_policy.get("contexts", [])
-        branch_checks = status_policy.get("checks", [])
-        require(isinstance(branch_contexts, list), f"{repository}: invalid branch-protection context list")
-        require(isinstance(branch_checks, list), f"{repository}: invalid branch-protection check list")
-        require(
-            all(isinstance(name, str) and name for name in branch_contexts),
-            f"{repository}: invalid required status context",
+        branch_required, required_apps = required_check_bindings(
+            github,
+            repository,
+            branch_name,
+            expected_check_app_id,
         )
-        branch_required = set(branch_contexts)
-        required_apps: dict[str, int] = {}
-        for item in branch_checks:
-            require(isinstance(item, dict), f"{repository}: invalid branch-protection check binding")
-            name = item.get("context")
-            app_id = item.get("app_id")
-            require(isinstance(name, str) and name, f"{repository}: invalid required check context")
-            require(app_id == expected_check_app_id, f"{repository}: required check {name} is bound to the wrong app")
-            required_apps[name] = app_id
-            branch_required.add(name)
         contract_checks = set(contract["required_checks"])
         required_checks = sorted(branch_required | contract_checks)
         if catalog["check_policy"]["require_protected_branch_binding"] is True:
