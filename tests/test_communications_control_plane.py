@@ -6,6 +6,7 @@ from control_plane_service.core import ControlPlaneError, Store, normalize_desti
 from control_plane_service.providers import ProviderError, submit, submit_crawler
 from control_plane_service.server import projection_for_exact_replay
 from control_plane_service.worker import dispatch_messages
+from control_plane_service.leasing import WORKER_ID, claim_messages
 from control_plane_service.routing import select_channel
 
 
@@ -59,6 +60,27 @@ class CommunicationsTests(unittest.TestCase):
         self.assertTrue(self.store.transition_message(message["message_id"],"tenant-a","sent","SENT",event_id="late-sent"))
         self.assertEqual(self.store.get_message(message["message_id"],"tenant-a")["status"],"delivered")
         self.assertEqual(len(self.store.message_events(message["message_id"],"tenant-a")),3)
+
+    def test_worker_transition_is_atomic_and_fenced_by_current_lease(self):
+        message,_ = self.store.create_message(request())
+        leased = claim_messages(self.store)
+        self.assertEqual(len(leased), 1)
+        lease_token = leased[0]["lease_token"]
+        before = len(self.store.message_events(message["message_id"], "tenant-a"))
+        self.assertFalse(self.store.transition_leased_message(
+            message["message_id"], "tenant-a", "worker-stale", "token-stale",
+            "accepted", "submitted", provider_message_id="provider-stale",
+        ))
+        self.assertEqual(len(self.store.message_events(message["message_id"], "tenant-a")), before)
+        self.assertTrue(self.store.transition_leased_message(
+            message["message_id"], "tenant-a", WORKER_ID, lease_token,
+            "accepted", "submitted", provider_message_id="provider-current",
+        ))
+        current = self.store.get_message(message["message_id"], "tenant-a")
+        self.assertEqual(current["provider_message_id"], "provider-current")
+        self.assertEqual(current["status"], "accepted")
+        self.assertIsNone(current["lease_owner"])
+        self.assertEqual(len(self.store.message_events(message["message_id"], "tenant-a")), before + 1)
 
     def test_late_telnexa_rejection_projects_to_originating_message(self):
         message,_=self.store.create_message(request())

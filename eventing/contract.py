@@ -51,9 +51,14 @@ def validate_contract(contract: dict[str, Any]) -> None:
             ) and subject.startswith(
                 "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.CODESTRA_"
             ) and "*" not in subject and ">" not in subject
+            allowed_calling_subject = (
+                stream["name"] == "CODESTRA_CALLING_AGENT_EVENTS"
+                and subject in {"telephony.agent.*.*.*", "telephony.supervisor.*.*"}
+            )
             if (
                 not subject.startswith("codestra.v1.*.*.events.")
                 and not allowed_system_advisory
+                and not allowed_calling_subject
             ) or subject in subjects:
                 raise ContractError("subjects must be tenant/campaign scoped and non-overlapping")
             subjects.add(subject)
