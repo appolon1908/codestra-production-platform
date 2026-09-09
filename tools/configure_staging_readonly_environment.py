@@ -96,6 +96,8 @@ def api_request(
 def extract_protection_settings(environment: dict[str, Any]) -> dict[str, Any]:
     """Preserve existing supported wait/reviewer protection configuration."""
 
+    has_wait_timer = False
+    has_reviewers = False
     wait_timer = 0
     prevent_self_review = False
     reviewers: list[dict[str, Any]] = []
@@ -105,17 +107,21 @@ def extract_protection_settings(environment: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(rule, dict):
                 continue
             if rule.get("type") == "wait_timer":
+                has_wait_timer = True
                 value = rule.get("wait_timer")
                 if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                     wait_timer = value
+                else:
+                    raise ConfigurationError("cannot preserve malformed wait-timer protection")
             elif rule.get("type") == "required_reviewers":
+                has_reviewers = True
                 prevent_self_review = bool(rule.get("prevent_self_review", False))
                 raw_reviewers = rule.get("reviewers")
-                if not isinstance(raw_reviewers, list):
-                    continue
+                if not isinstance(raw_reviewers, list) or not raw_reviewers:
+                    raise ConfigurationError("cannot preserve malformed reviewer protection")
                 for item in raw_reviewers:
                     if not isinstance(item, dict):
-                        continue
+                        raise ConfigurationError("cannot preserve malformed reviewer protection")
                     reviewer = item.get("reviewer")
                     if not isinstance(reviewer, dict):
                         reviewer = item
@@ -129,15 +135,23 @@ def extract_protection_settings(environment: dict[str, Any]) -> dict[str, Any]:
                         reviewers.append(
                             {"type": reviewer_type, "id": reviewer_id}
                         )
-    return {
-        "wait_timer": wait_timer,
-        "prevent_self_review": prevent_self_review,
-        "reviewers": reviewers or None,
+                    else:
+                        raise ConfigurationError("cannot preserve malformed reviewer protection")
+    payload: dict[str, Any] = {
         "deployment_branch_policy": {
             "protected_branches": False,
             "custom_branch_policies": True,
         },
     }
+    # Even null/false reviewer fields trigger plan entitlement validation on
+    # private repositories. Omit absent rules; never retry by removing an
+    # existing rule after an API error.
+    if has_wait_timer:
+        payload["wait_timer"] = wait_timer
+    if has_reviewers:
+        payload["prevent_self_review"] = prevent_self_review
+        payload["reviewers"] = reviewers
+    return payload
 
 
 def upsert_environment_variable(token: str, name: str, value: str) -> None:
