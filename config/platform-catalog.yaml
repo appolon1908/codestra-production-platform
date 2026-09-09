@@ -1,0 +1,368 @@
+version: 1
+owner: codestra-platform-architecture
+purpose: Canonical service, feature, critical API, and pre-deployment gap catalog.
+
+canonical_sources:
+  systems_and_edges: config/integration-policy.yaml
+  connectors_endpoints_webhooks: config/integration-registries.yaml
+  control_plane_openapi: docs/openapi/control-plane-v1.yaml
+  kong_control_plane: deploy/kong/control-plane.yml
+  middleware_public_routes: config/kong-canonical-middleware-routes.json
+
+systems:
+  - system_id: caddy-edge
+    owner: platform-operations
+    class: public_tls_edge
+    source_roots: [operations/caddy]
+    runtime_boundary: host
+  - system_id: upstream-gateway
+    owner: platform-operations
+    class: internal_router
+    source_roots: [operations/caddy, deploy]
+    runtime_boundary: docker_private
+  - system_id: kong
+    owner: platform-security
+    class: api_gateway
+    source_roots: [deploy/kong, config]
+    runtime_boundary: docker_private
+  - system_id: control-plane
+    owner: middleware-platform
+    class: integration_control_plane
+    source_roots: [control_plane_service, deploy/control-plane]
+    runtime_boundary: docker_private
+  - system_id: middleware
+    owner: middleware-platform
+    class: integration_authority
+    source_roots: [external:Codestra-SRL/codestra-middleware]
+    runtime_boundary: docker_private
+  - system_id: odoo
+    owner: business-applications
+    class: business_system_of_record
+    source_roots: [odoo_addons, external:Codestra-SRL/codestra-odoo-addons]
+    runtime_boundary: docker_private
+  - system_id: n8n
+    owner: automation-platform
+    class: asynchronous_orchestration
+    source_roots: [n8n]
+    runtime_boundary: docker_private
+  - system_id: keycloak
+    owner: identity-platform
+    class: identity
+    source_roots: [identity]
+    runtime_boundary: docker_private
+  - system_id: shared-postgresql
+    owner: platform-database
+    class: durable_database
+    source_roots: [operations/shared-postgresql]
+    runtime_boundary: docker_private
+  - system_id: redis
+    owner: platform-operations
+    class: reconstructible_state
+    source_roots: [operations/monitoring]
+    runtime_boundary: docker_private
+  - system_id: provisioning
+    owner: identity-platform
+    class: identity_provisioning
+    source_roots: [external:appolon1908-hue/codestra-provisioning-service]
+    runtime_boundary: docker_private
+  - system_id: vicidial
+    owner: voice-platform
+    class: telephony_execution
+    source_roots: [integrations, external:vicidial-host]
+    runtime_boundary: private_host
+  - system_id: klyrow
+    owner: communications-platform
+    class: email_execution
+    source_roots: [external:klyrow]
+    runtime_boundary: private_provider_host
+  - system_id: telnexa
+    owner: communications-platform
+    class: sms_execution
+    source_roots: [external:telnexa]
+    runtime_boundary: private_provider_host
+  - system_id: kyqra
+    owner: data-acquisition-platform
+    class: crawler_execution
+    source_roots: [external:kyqra]
+    runtime_boundary: private_provider_host
+
+features:
+  - feature_id: public-api-edge
+    owner: platform-security
+    system_id: kong
+    lifecycle: active
+    runtime_default: enabled
+    side_effects: none
+    deployment_candidate: true
+    dependencies: [caddy-edge, upstream-gateway, keycloak]
+    contracts: [deploy/kong/control-plane.yml, config/kong-canonical-middleware-routes.json]
+  - feature_id: middleware-health
+    owner: middleware-platform
+    system_id: middleware
+    lifecycle: active
+    runtime_default: enabled
+    side_effects: read_only
+    deployment_candidate: true
+    dependencies: [caddy-edge, middleware]
+    contracts: [external:Codestra-SRL/codestra-middleware]
+  - feature_id: middleware-callback-api
+    owner: middleware-platform
+    system_id: middleware
+    lifecycle: active
+    runtime_default: enabled
+    side_effects: internal_writes
+    deployment_candidate: true
+    dependencies: [kong, keycloak, shared-postgresql]
+    contracts: [config/kong-callback-routes.json]
+  - feature_id: middleware-campaign-automation
+    owner: middleware-platform
+    system_id: middleware
+    lifecycle: source_ready
+    runtime_default: disabled
+    side_effects: internal_writes
+    deployment_candidate: false
+    dependencies: [kong, keycloak, n8n, shared-postgresql]
+    contracts: [config/kong-campaign-automation-routes.json]
+  - feature_id: middleware-webhook-ingress
+    owner: middleware-platform
+    system_id: middleware
+    lifecycle: active
+    runtime_default: enabled
+    side_effects: internal_writes
+    deployment_candidate: true
+    dependencies: [kong, shared-postgresql]
+    contracts: [config/kong-canonical-middleware-routes.json]
+  - feature_id: control-plane-core
+    owner: middleware-platform
+    system_id: control-plane
+    lifecycle: source_ready
+    runtime_default: disabled
+    side_effects: internal_writes
+    deployment_candidate: true
+    dependencies: [kong, keycloak, shared-postgresql]
+    contracts: [docs/openapi/control-plane-v1.yaml, deploy/kong/control-plane.yml]
+  - feature_id: control-plane-crm
+    owner: business-applications
+    system_id: control-plane
+    lifecycle: source_ready
+    runtime_default: disabled
+    side_effects: internal_writes
+    deployment_candidate: false
+    dependencies: [kong, odoo, shared-postgresql]
+    contracts: [control_plane_service/crm.py, control_plane_service/server.py]
+  - feature_id: odoo-crm-browser
+    owner: business-applications
+    system_id: odoo
+    lifecycle: active
+    runtime_default: enabled
+    side_effects: internal_writes
+    deployment_candidate: true
+    dependencies: [caddy-edge, upstream-gateway, keycloak, shared-postgresql]
+    contracts: [external:Codestra-SRL/codestra-odoo-addons]
+  - feature_id: odoo-post-call-followup
+    owner: business-applications
+    system_id: odoo
+    lifecycle: planned
+    runtime_default: disabled
+    side_effects: internal_writes
+    deployment_candidate: false
+    dependencies: [middleware, odoo, shared-postgresql]
+    contracts: [pr:114, pr:119, pr:120, pr:121, pr:122, pr:123, pr:124, pr:125, pr:126]
+  - feature_id: n8n-production-workflows
+    owner: automation-platform
+    system_id: n8n
+    lifecycle: source_ready
+    runtime_default: disabled
+    side_effects: external_writes
+    deployment_candidate: false
+    dependencies: [middleware, redis]
+    contracts: [n8n]
+  - feature_id: websocket-agent-runtime
+    owner: voice-platform
+    system_id: middleware
+    lifecycle: staging
+    runtime_default: disabled
+    side_effects: telephony
+    deployment_candidate: false
+    dependencies: [kong, keycloak, redis, vicidial]
+    contracts: [pr:17]
+  - feature_id: provisioning-production
+    owner: identity-platform
+    system_id: provisioning
+    lifecycle: source_ready
+    runtime_default: disabled
+    side_effects: external_writes
+    deployment_candidate: true
+    dependencies: [keycloak, middleware, odoo, vicidial]
+    contracts: [external:appolon1908-hue/codestra-provisioning-service]
+  - feature_id: shared-postgresql-pitr
+    owner: platform-database
+    system_id: shared-postgresql
+    lifecycle: source_ready
+    runtime_default: disabled
+    side_effects: none
+    deployment_candidate: true
+    dependencies: [shared-postgresql]
+    contracts: [operations/shared-postgresql]
+  - feature_id: redis-monitoring
+    owner: platform-operations
+    system_id: redis
+    lifecycle: active
+    runtime_default: enabled
+    side_effects: read_only
+    deployment_candidate: true
+    dependencies: [redis]
+    contracts: [operations/monitoring]
+  - feature_id: klyrow-email-delivery
+    owner: communications-platform
+    system_id: klyrow
+    lifecycle: source_ready
+    runtime_default: disabled
+    side_effects: external_writes
+    deployment_candidate: false
+    dependencies: [middleware, klyrow]
+    contracts: [external:klyrow]
+  - feature_id: telnexa-sms-delivery
+    owner: communications-platform
+    system_id: telnexa
+    lifecycle: source_ready
+    runtime_default: disabled
+    side_effects: external_writes
+    deployment_candidate: false
+    dependencies: [middleware, telnexa]
+    contracts: [external:telnexa]
+  - feature_id: kyqra-crawler
+    owner: data-acquisition-platform
+    system_id: kyqra
+    lifecycle: staging
+    runtime_default: disabled
+    side_effects: external_writes
+    deployment_candidate: false
+    dependencies: [middleware, kyqra]
+    contracts: [external:kyqra]
+  - feature_id: vicidial-write-and-dialing
+    owner: voice-platform
+    system_id: vicidial
+    lifecycle: source_ready
+    runtime_default: disabled
+    side_effects: telephony
+    deployment_candidate: false
+    dependencies: [middleware, vicidial]
+    contracts: [pr:111]
+
+apis:
+  - {api_id: middleware-healthz, feature_id: middleware-health, method: GET, host: api.codestra.co, path: /healthz, exposure: public_health, ingress: caddy_health, auth: none, scope: none, idempotency: not_required, owner: middleware-platform, lifecycle: active, contract: external:Codestra-SRL/codestra-middleware}
+  - {api_id: middleware-readyz, feature_id: middleware-health, method: GET, host: api.codestra.co, path: /readyz, exposure: public_health, ingress: caddy_health, auth: none, scope: none, idempotency: not_required, owner: middleware-platform, lifecycle: active, contract: external:Codestra-SRL/codestra-middleware}
+  - {api_id: callback-read, feature_id: middleware-callback-api, method: GET, host: api.codestra.co, path: /api/v1/callbacks, exposure: public_api, ingress: kong, auth: jwt, scope: callbacks.read, idempotency: not_required, owner: middleware-platform, lifecycle: active, contract: config/kong-callback-routes.json}
+  - {api_id: callback-control, feature_id: middleware-callback-api, method: POST, host: api.codestra.co, path: /api/v1/control/callbacks, exposure: public_api, ingress: kong, auth: jwt, scope: callbacks.write, idempotency: required, owner: middleware-platform, lifecycle: active, contract: config/kong-callback-routes.json}
+  - {api_id: campaign-policy-check, feature_id: middleware-campaign-automation, method: POST, host: api.codestra.co, path: /api/v1/automation/policy-check, exposure: public_api, ingress: kong, auth: jwt, scope: n8n.policy.check, idempotency: required, owner: middleware-platform, lifecycle: source_ready, contract: config/kong-campaign-automation-routes.json}
+  - {api_id: campaign-results, feature_id: middleware-campaign-automation, method: POST, host: api.codestra.co, path: /api/v1/integrations/n8n/results, exposure: public_api, ingress: kong, auth: jwt, scope: n8n.results.submit, idempotency: required, owner: middleware-platform, lifecycle: source_ready, contract: config/kong-campaign-automation-routes.json}
+  - {api_id: provider-webhooks, feature_id: middleware-webhook-ingress, method: POST, host: api.codestra.co, path: /v1/webhooks, exposure: public_api, ingress: kong, auth: key-auth, scope: provider.webhook.submit, idempotency: required, owner: middleware-platform, lifecycle: active, contract: config/kong-canonical-middleware-routes.json}
+  - {api_id: control-plane-control-post, feature_id: control-plane-core, method: POST, host: api.codestra.co, path: /api/v1/control, exposure: public_api, ingress: kong, auth: oidc, scope: route_policy, idempotency: required, owner: middleware-platform, lifecycle: source_ready, contract: deploy/kong/control-plane.yml}
+  - {api_id: control-plane-control-patch, feature_id: control-plane-core, method: PATCH, host: api.codestra.co, path: /api/v1/control, exposure: public_api, ingress: kong, auth: oidc, scope: route_policy, idempotency: required, owner: middleware-platform, lifecycle: source_ready, contract: deploy/kong/control-plane.yml}
+  - {api_id: control-plane-messages, feature_id: control-plane-core, method: GET, host: api.codestra.co, path: /api/v1/messages, exposure: public_api, ingress: kong, auth: oidc, scope: communications.message.read, idempotency: not_required, owner: middleware-platform, lifecycle: source_ready, contract: deploy/kong/control-plane.yml}
+  - {api_id: control-plane-events, feature_id: control-plane-core, method: POST, host: api.codestra.co, path: /api/v1/events, exposure: public_api, ingress: kong, auth: oidc, scope: event.submit, idempotency: required, owner: middleware-platform, lifecycle: source_ready, contract: deploy/kong/control-plane.yml}
+  - {api_id: control-plane-results, feature_id: control-plane-core, method: POST, host: api.codestra.co, path: /api/v1/results, exposure: public_api, ingress: kong, auth: oidc, scope: sync.result.write, idempotency: required, owner: middleware-platform, lifecycle: source_ready, contract: deploy/kong/control-plane.yml}
+  - {api_id: control-plane-reconciliation-read, feature_id: control-plane-core, method: GET, host: api.codestra.co, path: /api/v1/reconciliation, exposure: public_api, ingress: kong, auth: oidc, scope: communications.reconciliation.read, idempotency: not_required, owner: middleware-platform, lifecycle: source_ready, contract: deploy/kong/control-plane.yml}
+  - {api_id: control-plane-reconciliation-run, feature_id: control-plane-core, method: POST, host: api.codestra.co, path: /api/v1/reconciliation, exposure: public_api, ingress: kong, auth: oidc, scope: communications.reconciliation.execute, idempotency: required, owner: middleware-platform, lifecycle: source_ready, contract: deploy/kong/control-plane.yml}
+  - {api_id: control-plane-system-admin, feature_id: control-plane-core, method: GET, host: api.codestra.co, path: /v1/admin/system, exposure: public_api, ingress: kong, auth: oidc, scope: platform.admin, idempotency: not_required, owner: middleware-platform, lifecycle: source_ready, contract: deploy/kong/control-plane.yml}
+  - {api_id: odoo-browser, feature_id: odoo-crm-browser, method: ANY, host: crm.codestra.agency, path: /web/*, exposure: browser_application, ingress: caddy_browser, auth: odoo_session, scope: session, idempotency: exempt, idempotency_exemption: browser_session_workflow, owner: business-applications, lifecycle: active, contract: external:Codestra-SRL/codestra-odoo-addons}
+  - {api_id: odoo-realtime, feature_id: odoo-crm-browser, method: GET, host: crm.codestra.agency, path: /websocket, exposure: browser_application, ingress: caddy_browser, auth: odoo_session, scope: session, idempotency: not_required, owner: business-applications, lifecycle: active, contract: external:Codestra-SRL/codestra-odoo-addons}
+  - {api_id: odoo-reseller, feature_id: odoo-crm-browser, method: ANY, host: crm.codestra.agency, path: /reseller/*, exposure: browser_application, ingress: caddy_browser, auth: oidc_gateway, scope: reseller.portal, idempotency: exempt, idempotency_exemption: browser_session_workflow, owner: business-applications, lifecycle: active, contract: external:Codestra-SRL/codestra-odoo-addons}
+  - {api_id: odoo-integration-results, feature_id: odoo-crm-browser, method: POST, host: odoo.internal.codestra.agency, path: /api/v1/integration/results, exposure: private_mtls, ingress: caddy_private_mtls, auth: mtls_hmac, scope: odoo.integration.result.write, idempotency: required, owner: business-applications, lifecycle: active, contract: external:Codestra-SRL/codestra-odoo-addons}
+  - {api_id: odoo-call-events, feature_id: odoo-crm-browser, method: POST, host: odoo.internal.codestra.agency, path: /codestra/api/v1/call-events, exposure: private_mtls, ingress: caddy_private_mtls, auth: mtls_hmac, scope: odoo.call_event.write, idempotency: required, owner: business-applications, lifecycle: active, contract: external:Codestra-SRL/codestra-odoo-addons}
+  - {api_id: klyrow-private-events, feature_id: klyrow-email-delivery, method: POST, host: middleware-email-events.internal.codestra.agency, path: /internal/provider-events/klyrow, exposure: private_mtls, ingress: caddy_private_mtls, auth: mtls_hmac, scope: email.event.submit, idempotency: required, owner: communications-platform, lifecycle: planned, contract: pr:110}
+  - {api_id: agent-websocket, feature_id: websocket-agent-runtime, method: GET, host: dialer.codestra.agency, path: /ws/agent, exposure: public_api, ingress: kong, auth: one_time_token, scope: realtime.connect, idempotency: not_required, owner: voice-platform, lifecycle: staging, contract: pr:17}
+
+known_gaps:
+  - gap_id: kong-route-authority-duplication
+    severity: critical
+    status: in_progress
+    owner: platform-security
+    required_before_server_push: true
+    affected_features: [public-api-edge, middleware-callback-api, middleware-campaign-automation]
+    remediation: Finish PR 130 and retain one exact route registry referencing dedicated security profiles.
+  - gap_id: campaign-lifecycle-entrypoints
+    severity: critical
+    status: open
+    owner: middleware-platform
+    required_before_server_push: true
+    affected_features: [middleware-campaign-automation]
+    remediation: Implement campaign-design preview, owner approval, disabled provisioning, durable outbox execution, status/readback, and separately gated activation before deployment candidacy.
+  - gap_id: control-plane-openapi-coverage
+    severity: high
+    status: open
+    owner: middleware-platform
+    required_before_server_push: true
+    affected_features: [control-plane-core, control-plane-crm]
+    remediation: Document every implemented route and reconcile OpenAPI, Kong, registry, and handler coverage.
+  - gap_id: control-plane-handler-monolith
+    severity: high
+    status: open
+    owner: middleware-platform
+    required_before_server_push: false
+    affected_features: [control-plane-core, control-plane-crm]
+    remediation: Apply the staged decomposition in docs/architecture/CODE_STRUCTURE.md before adding further large feature families.
+  - gap_id: generated-container-service-identities
+    severity: high
+    status: open
+    owner: platform-operations
+    required_before_server_push: true
+    affected_features: [middleware-callback-api, middleware-campaign-automation, public-api-edge]
+    remediation: Add stable Compose service/network aliases and migrate contracts away from generated container names.
+  - gap_id: feature-flag-authority-sprawl
+    severity: high
+    status: in_progress
+    owner: codestra-platform-architecture
+    required_before_server_push: true
+    affected_features: [n8n-production-workflows, klyrow-email-delivery, telnexa-sms-delivery, vicidial-write-and-dialing, websocket-agent-runtime]
+    remediation: Bind every capability to this catalog and one authoritative runtime mapping with fail-closed defaults.
+  - gap_id: compose-layer-sprawl
+    severity: high
+    status: open
+    owner: platform-operations
+    required_before_server_push: true
+    affected_features: [control-plane-core, odoo-crm-browser, provisioning-production]
+    remediation: Publish one base manifest plus an ordered minimal override list and semantic drift test per project.
+  - gap_id: shared-postgresql-runtime-pitr
+    severity: critical
+    status: open
+    owner: platform-database
+    required_before_server_push: true
+    affected_features: [shared-postgresql-pitr, middleware-callback-api, middleware-campaign-automation, odoo-crm-browser]
+    remediation: Activate reviewed WAL archiving, physical base backup, isolated PITR, and the coherent HA decision in an approved window.
+  - gap_id: provisioning-runtime-authorities
+    severity: critical
+    status: open
+    owner: identity-platform
+    required_before_server_push: true
+    affected_features: [provisioning-production]
+    remediation: Complete production Keycloak client, secret bundle, monitoring, timers, readiness, DR, rollback, and soak.
+  - gap_id: kong-database-ha-runtime
+    severity: critical
+    status: open
+    owner: platform-database
+    required_before_server_push: false
+    affected_features: [public-api-edge]
+    remediation: Provision replica, private DNS, fencing, protected role secrets, and telephony-safe canary under a separate change.
+  - gap_id: api-error-envelope-inconsistency
+    severity: medium
+    status: open
+    owner: middleware-platform
+    required_before_server_push: false
+    affected_features: [control-plane-core, control-plane-crm, middleware-callback-api]
+    remediation: Adopt one versioned error envelope and request/correlation ID contract.
+  - gap_id: generated-client-sdks-missing
+    severity: medium
+    status: open
+    owner: middleware-platform
+    required_before_server_push: false
+    affected_features: [control-plane-core, middleware-callback-api, middleware-campaign-automation]
+    remediation: Generate typed clients only from merged validated OpenAPI contracts.
+  - gap_id: historical-pr-lineage-sprawl
+    severity: medium
+    status: open
+    owner: codestra-platform-architecture
+    required_before_server_push: false
+    affected_features: [public-api-edge, control-plane-core, odoo-post-call-followup, websocket-agent-runtime]
+    remediation: Close superseded PRs after accepted evidence is preserved and retain one current-base merge candidate per feature.
