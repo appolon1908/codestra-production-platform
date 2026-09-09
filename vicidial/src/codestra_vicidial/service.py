@@ -28,6 +28,7 @@ class FeatureFlags:
     provisioning: bool = False
     agent_sync: bool = False
     lead_publication: bool = False
+    allowed_lead_list_ids: frozenset[int] = frozenset()
     callback_writes: bool = False
     transfer_policy_sync: bool = False
     production_dialing: bool = False
@@ -63,6 +64,30 @@ class AdapterService:
         if not enabled:
             raise PermissionError(f"{name} is disabled")
 
+    def _agent_recovery_identity(self, user_id: str) -> dict | None:
+        """Read only the identity fields needed before a recovery mutation.
+
+        The production repository exposes an ACL-independent disable view because
+        legacy campaign ACLs may be malformed. The in-memory repository used by
+        offline tests stores the same identity fields directly. Any other
+        repository fails closed rather than authorizing a recovery mutation from
+        an unverifiable identity.
+        """
+        reader = getattr(self.repository, "_agent_disable_view", None)
+        if callable(reader):
+            row = reader(user_id)
+        else:
+            agents = getattr(self.repository, "agents", None)
+            row = agents.get(user_id) if isinstance(agents, dict) else None
+        if row is None:
+            return None
+        return {
+            "user_id": row.get("user_id"),
+            "full_name": row.get("full_name"),
+            "user_group": row.get("user_group"),
+            "active": row.get("active"),
+        }
+
     @staticmethod
     def _comparison(resource_type: str, resource_id: str | int, desired: dict,
                     actual: dict | None, fields: tuple[str, ...],
@@ -95,6 +120,8 @@ class AdapterService:
             "local_call_time": spec.call_time,
             "campaign_recording": spec.recording_policy,
             "scheduled_callbacks": "Y" if spec.callback_enabled else "N",
+            "hopper_level": 0,
+            "auto_dial_level": "0",
         }
         results.append(self._comparison(
             "campaign", spec.actual_id, campaign_desired, campaign,
@@ -200,13 +227,8 @@ class AdapterService:
         return actual, results
 
     def validate_campaign(self, command: CampaignCommand) -> dict:
-        actual = self.repository.campaign(command.campaign.actual_id)
-        compatible = actual is None or (
-            actual.get("campaign_name") == command.campaign.name
-            and actual.get("active") == "N"
-            and actual.get("dial_method") == command.campaign.dial_method
-        )
-        return {"valid": compatible, "collision": actual is not None,
+        preflight = self.repository.validate_campaign(command.campaign)
+        return {"valid": True, "collision": preflight["collision"],
                 "actual_id": command.campaign.actual_id,
                 "canonical_id": command.campaign.canonical_id}
 
@@ -327,10 +349,120 @@ class AdapterService:
         self._require(self.flags.agent_sync, "agent sync")
 
         def apply() -> dict:
-            actual = self.repository.sync_agent_disabled(command.agent)
-            if actual.get("active") not in (False, "N"):
-                raise RuntimeError("agent read-back is not disabled")
-            return {"status": "disabled", "actual": actual}
+            desired = command.agent.model_dump(mode="json") | {"active": False}
+            desired["adopt_existing_sha256"] = None
+            desired_hash = self.state.digest(desired)
+            mapping = self.state.mapping("agent", command.agent.user_id)
+            intent = self.state.agent_adoption_intent(command.agent.user_id) if mapping is None else None
+            if intent is not None and (
+                command.agent.adopt_existing_sha256 != intent["original_hash"]
+                or desired_hash != intent["desired_hash"]
+            ):
+                raise CollisionError("agent adoption intent mismatch")
+            try:
+                existing = self.repository.agent(command.agent.user_id)
+            except Exception as exc:
+                if intent is None:
+                    raise
+                identity = self._agent_recovery_identity(command.agent.user_id)
+                if (identity is None
+                        or identity.get("user_id") != desired["user_id"]
+                        or identity.get("full_name") != desired["full_name"]
+                        or identity.get("user_group") != desired["user_group"]
+                        or identity.get("active") not in (False, "N")):
+                    raise CollisionError("agent recovery identity mismatch") from exc
+                # The durable intent may survive a committed MyISAM update whose
+                # ACL readback is malformed. Only after the ACL-independent
+                # identity is proven to be the already-desired disabled agent
+                # may recovery reassert disablement. Never disable a merely
+                # matching user_id whose ownership identity cannot be verified.
+                disabled = self.repository.disable_agent(command.agent.user_id)
+                if (disabled.get("user_id") != desired["user_id"]
+                        or disabled.get("full_name") != desired["full_name"]
+                        or disabled.get("user_group") != desired["user_group"]
+                        or disabled.get("active") not in (False, "N")):
+                    raise RuntimeError("agent recovery disable read-back failed") from exc
+                raise RuntimeError("agent adoption reconciliation required; intent retained") from exc
+            controlled_match = bool(existing) and (
+                existing.get("user_id") == desired["user_id"]
+                and existing.get("full_name") == desired["full_name"]
+                and existing.get("user_group") == desired["user_group"]
+                and existing.get("active") in (False, "N")
+                and set(desired["campaigns"]).issubset(set(existing.get("campaigns", [])))
+                and set(existing.get("inbound_groups", [])) == set(desired["inbound_groups"])
+            )
+            if mapping is not None:
+                if mapping["actual_id"] != command.agent.user_id:
+                    raise CollisionError("agent ownership mapping collision")
+                stored = self.state.agent_desired(command.agent.user_id)
+                if (mapping["payload_hash"] == desired_hash and stored is not None
+                        and stored["desired_hash"] == desired_hash and controlled_match):
+                    return {"status": "disabled", "actual": existing}
+            if mapping is None and existing is not None:
+                adoption_hash = command.agent.adopt_existing_sha256
+                intent = self.state.agent_adoption_intent(command.agent.user_id)
+                if intent is None:
+                    if existing.get("active") not in (False, "N"):
+                        raise CollisionError("active existing agent cannot be adopted")
+                    if adoption_hash is None or adoption_hash != self.state.digest(existing):
+                        raise CollisionError("existing agent requires exact adoption proof")
+                    self.state.put_agent_adoption_intent(
+                        command.agent.user_id, adoption_hash, desired_hash
+                    )
+                elif (adoption_hash != intent["original_hash"]
+                      or desired_hash != intent["desired_hash"]):
+                    raise CollisionError("agent adoption intent mismatch")
+                if intent is not None and controlled_match:
+                    self.state.finalize_agent_adoption(
+                        command.agent.user_id, command.agent.user_id,
+                        desired_hash, desired,
+                    )
+                    return {"status": "disabled", "actual": existing}
+            try:
+                actual = self.repository.sync_agent_disabled(command.agent)
+            except CollisionError:
+                # A collision from the locked compare/update path means no
+                # MyISAM row was changed. Discard the now-stale unused intent
+                # so a caller can retry with a fresh observed-state proof.
+                if mapping is None and command.agent.adopt_existing_sha256:
+                    self.state.clear_agent_adoption_intent(command.agent.user_id)
+                raise
+            try:
+                mismatches = []
+                for field in ("user_id", "full_name", "user_group"):
+                    if actual.get(field) != desired[field]:
+                        mismatches.append(field)
+                if actual.get("active") not in (False, "N"):
+                    mismatches.append("active")
+                if not set(desired["campaigns"]).issubset(
+                    set(actual.get("campaigns", []))
+                ):
+                    mismatches.append("campaigns")
+                if set(actual.get("inbound_groups", [])) != set(
+                    desired["inbound_groups"]
+                ):
+                    mismatches.append("inbound_groups")
+                if mismatches:
+                    raise RuntimeError(
+                        "agent read-back mismatch: " + ",".join(mismatches)
+                    )
+                if command.agent.adopt_existing_sha256:
+                    self.state.finalize_agent_adoption(
+                        command.agent.user_id, command.agent.user_id,
+                        desired_hash, desired,
+                    )
+                else:
+                    self.state.put_agent_mapping(
+                        command.agent.user_id, command.agent.user_id, desired_hash
+                    )
+                    self.state.put_agent_desired(command.agent.user_id, desired)
+                return {"status": "disabled", "actual": actual}
+            finally:
+                release_lock = getattr(
+                    self.repository, "release_agent_adoption_lock", None
+                )
+                if command.agent.adopt_existing_sha256 and release_lock:
+                    release_lock()
 
         return self._execute("agent.sync", key, command, command.agent.user_id, apply)
 
@@ -347,6 +479,9 @@ class AdapterService:
 
     def publish_lead(self, key: str, command: LeadCommand) -> dict:
         self._require(self.flags.lead_publication, "lead publication")
+
+        if command.lead.list_id not in self.flags.allowed_lead_list_ids:
+            raise PermissionError("lead list is not authorized")
 
         def apply() -> dict:
             actual = self.repository.publish_lead(command.lead)
@@ -382,7 +517,7 @@ class AdapterService:
             owner = self.repository.campaign_owner(command.policy.campaign_id)
             if owner is None:
                 raise ValueError("campaign ownership marker missing")
-            business_unit = owner.split("-", 1)[0]
+            business_unit = "TEST" if owner == "TEST_SYN" else owner.split("-", 1)[0]
             for target in command.policy.allowed_targets:
                 group = self.repository.transfer_target(target)
                 state_owner = self.state.group_owner(target)
@@ -450,3 +585,23 @@ class AdapterService:
             "status": status, "inventory": self.repository.inventory(),
             "resources": resources,
         }
+
+    def start_reconciliation(self, idempotency_key: str) -> dict:
+        request_hash = self.state.digest({"operation": "reconciliation.run"})
+        prior = self.state.prior(
+            "reconciliation.run", idempotency_key, request_hash
+        )
+        if prior is not None:
+            return prior | {"idempotent_replay": True}
+        run_id = str(uuid.uuid4())
+        result = self.reconciliation()
+        response = {"run_id": run_id, **result}
+        concurrent_prior = self.state.persist_reconciliation_run(
+            run_id, result, idempotency_key, request_hash
+        )
+        if concurrent_prior is not None:
+            return concurrent_prior | {"idempotent_replay": True}
+        return response | {"idempotent_replay": False}
+
+    def reconciliation_run(self, run_id: str) -> dict | None:
+        return self.state.reconciliation_run(run_id)
