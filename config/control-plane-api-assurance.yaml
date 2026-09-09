@@ -7,6 +7,10 @@ handlers:
   crm_mutation: [POST, PATCH]
 
 endpoints:
+  admin-calling-readiness:
+    gateway_auth:
+      status: gap
+      remediation: Reconcile the global platform-admin contract with Kong's current tenant-claim requirement; direct handler authorization is covered by tests/test_calling_readiness.py.
   admin-system-health:
     gateway_auth:
       status: gap
