@@ -4,6 +4,9 @@
 issues #257, #258, #259 and #262. It uses the existing platform-admin authentication
 and Kong `/v1/admin/system` policy. Anonymous, tenant-admin, and auditor requests
 receive 403. Query parameters receive 400; callers cannot select files or hosts.
+The API assurance inventory retains the existing gateway gap: Kong currently
+requires a tenant claim even for global platform administrators. The direct HTTP
+authorization tests do not certify this public gateway path.
 
 HTTP 200 / `READBACK_MATCHES` means the supplied evidence matches the expected
 readonly release. HTTP 503 / `BLOCKED` includes stable component/code blockers.
