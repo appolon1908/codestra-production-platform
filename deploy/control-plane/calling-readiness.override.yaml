@@ -1,0 +1,20 @@
+# Optional overlay for the existing API service; no calling/provider permissions.
+# Mount directories so atomic collector file replacement remains visible.
+services:
+  api:
+    environment:
+      CALLING_EXPECTED_EVIDENCE_FILE: /run/calling-release/expected.json
+      CALLING_OBSERVED_EVIDENCE_FILE: /run/calling-readback/observed.json
+    volumes:
+      - type: bind
+        source: ${CALLING_RELEASE_DIRECTORY:?trusted release directory required}
+        target: /run/calling-release
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${CALLING_READBACK_DIRECTORY:?trusted collector directory required}
+        target: /run/calling-readback
+        read_only: true
+        bind:
+          create_host_path: false

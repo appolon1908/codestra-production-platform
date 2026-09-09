@@ -1237,3 +1237,28 @@ def test_validation_pass_is_emitted_only_after_durable_evidence() -> None:
     assert durable < result < output
     assert "complete environment" not in source.lower()
     assert "os.environ" not in source
+
+
+@pytest.mark.parametrize("kind", ["fifo", "symlink", "hardlink", "writable", "group"])
+def test_validator_rejects_unsafe_lock_before_validation(tmp_path, monkeypatch, kind):
+    from unittest.mock import Mock
+    lock = tmp_path / "lock"
+    if kind == "fifo":
+        os.mkfifo(lock, 0o600)
+    elif kind == "symlink":
+        target = tmp_path / "target"
+        target.touch(mode=0o600)
+        lock.symlink_to(target)
+    else:
+        lock.touch(mode=0o600)
+        if kind == "hardlink": os.link(lock, tmp_path / "alias")
+        elif kind == "writable": lock.chmod(0o666)
+        elif kind == "group": os.chown(lock, 0, 12345)
+    validate = Mock()
+    persist = Mock()
+    monkeypatch.setattr(VALIDATOR, "MUTATION_LOCK", lock)
+    monkeypatch.setattr(VALIDATOR, "validate", validate)
+    monkeypatch.setattr(VALIDATOR, "durable_evidence", persist)
+    assert VALIDATOR.main(["--expected-source-sha", "a" * 40]) == 1
+    validate.assert_not_called()
+    persist.assert_not_called()

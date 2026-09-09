@@ -600,11 +600,14 @@ def main(argv: list[str]) -> int:
     try:
         lock_fd = os.open(
             MUTATION_LOCK,
-            os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW,
+            os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
             0o600,
         )
         lock_info = os.fstat(lock_fd)
-        if lock_info.st_uid != 0 or stat.S_IMODE(lock_info.st_mode) != 0o600:
+        if (not stat.S_ISREG(lock_info.st_mode)
+                or lock_info.st_uid != 0 or lock_info.st_gid != 0
+                or lock_info.st_nlink != 1
+                or stat.S_IMODE(lock_info.st_mode) != 0o600):
             raise ValidationError("unsafe mutation lock")
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
         record = validate(args.expected_source_sha)

@@ -1,9 +1,15 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytz
+from psycopg2.errors import QueryCanceled
 
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, ValidationError
+
+
+MAX_WINDOW_DAYS = 366
+MAX_FILTER_IDS = 500
+QUERY_TIMEOUT_MS = 5000
 
 
 class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
@@ -30,7 +36,18 @@ class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
                 "email-queue-health",
             ],
             "default_window_days": 30,
+            "maximum_window_days": MAX_WINDOW_DAYS,
+            "maximum_filter_ids": MAX_FILTER_IDS,
+            "query_timeout_ms": QUERY_TIMEOUT_MS,
         }
+
+    @api.model
+    def _filter_ids(self, values):
+        if (not isinstance(values, (list, tuple, set))
+                or len(values) > MAX_FILTER_IDS
+                or any(type(value) is not int or value <= 0 for value in values)):
+            raise ValidationError(_("Filters require at most 500 positive integer IDs."))
+        return set(values)
 
     @api.model
     def _scope(self, date_from=None, date_to=None, company_ids=None, agent_ids=None):
@@ -43,19 +60,42 @@ class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
                 if date_from
                 else date_to - timedelta(days=29)
             )
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValidationError(_("date_from and date_to must be valid dates.")) from exc
         if date_from > date_to:
             raise ValidationError(_("date_from cannot be after date_to."))
+        if (date_to - date_from).days >= MAX_WINDOW_DAYS:
+            raise ValidationError(_("Analytics date windows cannot exceed 366 days."))
+        if date_to == date.max:
+            raise ValidationError(_("date_to must permit an exclusive next-day boundary."))
         # Respect the active company selector, not every company the user could
         # activate in another session.
         allowed = set(self.env.companies.ids)
-        requested = set(int(item) for item in (company_ids or allowed))
+        requested = self._filter_ids(company_ids if company_ids is not None else allowed)
         companies = sorted(allowed & requested)
         if not companies:
             raise AccessError(_("No permitted company was selected."))
-        agents = sorted({int(item) for item in (agent_ids or [])})
+        agents = sorted(self._filter_ids(agent_ids if agent_ids is not None else []))
         return date_from, date_to, companies, agents
+
+    @api.model
+    def _aggregate_query(self, query, params):
+        # A savepoint restores the prior timeout even after PostgreSQL cancels
+        # the statement, leaving the caller's transaction usable. Do not relax
+        # a stricter timeout already selected by the operator.
+        try:
+            with self.env.cr.savepoint(flush=False):
+                self.env.cr.execute("SELECT setting FROM pg_settings WHERE name = 'statement_timeout'")
+                previous = int(self.env.cr.fetchone()[0])
+                budget = min(previous, QUERY_TIMEOUT_MS) if previous else QUERY_TIMEOUT_MS
+                self.env.cr.execute("SELECT set_config('statement_timeout', %s, true)", [str(budget)])
+                self.env.cr.execute(query, params)
+                columns = [description.name for description in self.env.cr.description]
+                rows = self.env.cr.fetchall()
+                self.env.cr.execute("SELECT set_config('statement_timeout', %s, true)", [str(previous)])
+                return [dict(zip(columns, row)) for row in rows]
+        except QueryCanceled as exc:
+            raise ValidationError(_("Analytics query was cancelled or exceeded its time budget. Narrow the filters and retry.")) from exc
 
     @api.model
     def _where(self, date_from, date_to, company_ids, agent_ids):
@@ -87,7 +127,7 @@ class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
         )
         where, params = self._where(date_from, date_to, companies, agents)
         self._flush_report_sources()
-        self.env.cr.execute(
+        rows = self._aggregate_query(
             f"""
                 SELECT
                     COUNT(*)::integer AS total_calls,
@@ -123,9 +163,7 @@ class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
             """,
             params,
         )
-        columns = [description.name for description in self.env.cr.description]
-        values = self.env.cr.fetchone()
-        metrics = dict(zip(columns, values))
+        metrics = rows[0]
         for key, value in list(metrics.items()):
             if hasattr(value, "as_tuple"):
                 metrics[key] = float(value)
@@ -157,7 +195,7 @@ class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
             limit = 100
         where, params = self._where(date_from, date_to, companies, agents)
         self._flush_report_sources()
-        self.env.cr.execute(
+        rows = self._aggregate_query(
             f"""
                 SELECT
                     agent_id,
@@ -181,8 +219,6 @@ class CodestraCrmCallFollowupAnalyticsApi(models.AbstractModel):
             """,
             params + [limit],
         )
-        columns = [description.name for description in self.env.cr.description]
-        rows = [dict(zip(columns, row)) for row in self.env.cr.fetchall()]
         users = self.env["res.users"].browse([row["agent_id"] for row in rows]).exists()
         names = {user.id: user.display_name for user in users}
         for row in rows:
