@@ -15,7 +15,7 @@ import json
 import re
 from pathlib import Path
 from urllib.parse import parse_qsl, urljoin, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 
 SENSITIVE_KEYS = {
@@ -84,19 +84,30 @@ def host_matches(pattern: str, host: str) -> bool:
     )
 
 
+MAX_PAGES = 100
+
+
+class NoAdminRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise RuntimeError("Kong Admin API redirect rejected")
+
+
 def request(base: str, path: str) -> dict:
     url = path if path.startswith(("http://", "https://")) else base.rstrip("/") + path
-    with urlopen(Request(url, method="GET"), timeout=10) as response:
+    with build_opener(NoAdminRedirect()).open(Request(url, method="GET"), timeout=10) as response:
         raw = response.read()
         return json.loads(raw) if raw else {}
 
 
 def safe_next(base: str, value: str | None) -> str | None:
-    if not value:
+    if value is None or value == "":
         return None
+    if not isinstance(value, str) or any(ord(char) < 33 or ord(char) == 127 for char in value):
+        raise RuntimeError("unsafe Kong pagination URL")
     base_url = urlsplit(base)
     resolved = urlsplit(urljoin(base.rstrip("/") + "/", value))
-    if (resolved.scheme, resolved.netloc) != (base_url.scheme, base_url.netloc):
+    if (resolved.fragment or resolved.username is not None
+            or (resolved.scheme, resolved.netloc) != (base_url.scheme, base_url.netloc)):
         raise RuntimeError("unsafe Kong pagination URL")
     return resolved.geturl()
 
@@ -104,13 +115,18 @@ def safe_next(base: str, value: str | None) -> str | None:
 def all_rows(base: str, path: str) -> list[dict]:
     rows: list[dict] = []
     seen: set[str] = set()
-    next_url: str | None = path
+    next_url: str | None = safe_next(base, path)
     while next_url:
         if next_url in seen:
             raise RuntimeError("Kong pagination loop detected")
+        if len(seen) >= MAX_PAGES:
+            raise RuntimeError("Kong pagination limit exceeded")
         seen.add(next_url)
         page = request(base, next_url)
-        rows.extend(page.get("data", []))
+        if (not isinstance(page, dict) or not isinstance(page.get("data"), list)
+                or any(not isinstance(row, dict) for row in page["data"])):
+            raise RuntimeError("malformed Kong collection response")
+        rows.extend(page["data"])
         next_url = safe_next(base, page.get("next"))
     return rows
 

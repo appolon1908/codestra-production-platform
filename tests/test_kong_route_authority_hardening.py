@@ -399,3 +399,43 @@ def test_undefined_control_plane_paths_are_denied_before_proxy_identity_headers(
     deny = policy.index('return kong.response.exit(403,{error="route_scope_undefined"})')
     identity = policy.index('kong.service.request.set_header("X-Authenticated-Client"')
     assert deny < identity
+
+
+@pytest.mark.parametrize("factory", [_module, _exporter])
+@pytest.mark.parametrize("page", [None, [], {}, {"data": None}, {"data": {}}, {"data": [None]}])
+def test_collection_shape_is_required(monkeypatch, factory, page):
+    module = factory()
+    monkeypatch.setattr(module, "request", lambda *args: page)
+    with pytest.raises(RuntimeError, match="malformed Kong collection"):
+        module.all_rows("http://127.0.0.1:8001", "/routes")
+
+
+@pytest.mark.parametrize("factory", [_module, _exporter])
+def test_pagination_is_bounded_and_retains_all_valid_pages(monkeypatch, factory):
+    module = factory()
+    calls = []
+    def request(*args):
+        calls.append(args)
+        return {"data": [{"id": len(calls)}], "next": "/routes?offset=" + str(len(calls))}
+    monkeypatch.setattr(module, "request", request)
+    monkeypatch.setattr(module, "MAX_PAGES", 2)
+    with pytest.raises(RuntimeError, match="pagination limit"):
+        module.all_rows("http://127.0.0.1:8001", "/routes")
+    assert len(calls) == 2
+    pages = iter([{"data": [{"id": "one"}], "next": "/routes?offset=2"},
+                  {"data": [{"id": "two"}], "next": None}])
+    monkeypatch.setattr(module, "request", lambda *args: next(pages))
+    assert module.all_rows("http://127.0.0.1:8001", "/routes") == [{"id": "one"}, {"id": "two"}]
+
+
+@pytest.mark.parametrize("factory", [_module, _exporter])
+@pytest.mark.parametrize("target", ["https://outside.invalid/routes", "/routes#fragment", "/routes\n", False, 1])
+def test_unsafe_page_link_rejected(factory, target):
+    with pytest.raises(RuntimeError, match="unsafe Kong pagination"):
+        factory().safe_next("http://127.0.0.1:8001", target)
+
+
+@pytest.mark.parametrize("factory", [_module, _exporter])
+def test_http_redirects_are_rejected(factory):
+    with pytest.raises(RuntimeError, match="redirect rejected"):
+        factory().NoAdminRedirect().redirect_request(None, None, 302, "Found", {}, "https://outside.invalid/")
