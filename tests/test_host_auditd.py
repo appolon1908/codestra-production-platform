@@ -460,7 +460,8 @@ def test_validation_pass_is_bound_to_installed_validator_bytes(monkeypatch, meta
     rollback = json.dumps({"schema": "codestra.host-auditd.rollback.v1",
                            "stamp": stamp, "source_sha": source_sha,
                            "service_before": {"enabled": True, "active": True},
-                           "files": []}, sort_keys=True).encode()
+                           "files": [{"path": str(path), "present": False} for path in
+                                     [rule_path, Path("/etc/audit/audit.rules"), validator_path, launcher_path, record_path]]}, sort_keys=True).encode()
     digest = "b" * 64
     record = json.dumps(
         {
@@ -1267,3 +1268,24 @@ def test_validator_rejects_unsafe_lock_before_validation(tmp_path, monkeypatch, 
     assert VALIDATOR.main(["--expected-source-sha", "a" * 40]) == 1
     validate.assert_not_called()
     persist.assert_not_called()
+
+
+@pytest.mark.parametrize("damage", ["missing", "duplicate", "digest", "path", "mode", "service"])
+def test_validator_rejects_incomplete_rollback_snapshots(monkeypatch, damage):
+    targets = dict(INSTALLER.SNAPSHOT_NAMES)
+    data = b"synthetic rollback data"
+    files = [{"path": str(path), "present": True, "snapshot": name,
+              "sha256": hashlib.sha256(data).hexdigest(), "mode": 0o600, "uid": 0, "gid": 0}
+             for path, name in targets.items()]
+    record = {"schema": "codestra.host-auditd.rollback.v1", "stamp": "20260901T120000Z",
+              "source_sha": "a" * 40, "service_before": {"enabled": True, "active": True}, "files": files}
+    monkeypatch.setattr(VALIDATOR, "checked_regular", lambda *args: data)
+    VALIDATOR.validate_rollback_files(Path("/synthetic"), record)
+    if damage == "missing": files.pop()
+    elif damage == "duplicate": files[-1] = files[0]
+    elif damage == "digest": files[0]["sha256"] = "0" * 64
+    elif damage == "path": files[0]["snapshot"] = "../outside"
+    elif damage == "mode": files[0]["mode"] = True
+    elif damage == "service": record["service_before"]["active"] = "true"
+    with pytest.raises(VALIDATOR.ValidationError):
+        VALIDATOR.validate_rollback_files(Path("/synthetic"), record)

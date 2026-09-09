@@ -403,6 +403,47 @@ def command_runtime_identities() -> dict[str, tuple[Path, str]]:
     return identities
 
 
+def validate_rollback_files(checkpoint: Path, rollback: dict) -> None:
+    expected = {str(RULE_TARGET): "rules.managed", "/etc/audit/audit.rules": "rules.aggregate",
+                str(VALIDATOR_TARGET): "validator.installed",
+                str(VALIDATOR_LAUNCHER): "validator.launcher",
+                str(INSTALLATION_RECORD): "installation.record"}
+    if set(rollback) != {"schema", "stamp", "source_sha", "service_before", "files"}:
+        raise ValidationError("rollback schema rejected")
+    service = rollback.get("service_before")
+    if (not isinstance(service, dict) or set(service) != {"enabled", "active"}
+            or any(type(value) is not bool for value in service.values())):
+        raise ValidationError("rollback service state rejected")
+    files = rollback.get("files")
+    if not isinstance(files, list) or len(files) != len(expected):
+        raise ValidationError("rollback file set rejected")
+    seen = set()
+    for item in files:
+        if not isinstance(item, dict):
+            raise ValidationError("rollback file entry rejected")
+        target = item.get("path")
+        if not isinstance(target, str) or target not in expected or target in seen:
+            raise ValidationError("rollback target rejected")
+        seen.add(target)
+        if type(item.get("present")) is not bool:
+            raise ValidationError("rollback presence rejected")
+        if not item["present"]:
+            if set(item) != {"path", "present"}:
+                raise ValidationError("rollback absent entry rejected")
+            continue
+        if set(item) != {"path", "present", "snapshot", "sha256", "mode", "uid", "gid"}:
+            raise ValidationError("rollback snapshot schema rejected")
+        if (item["snapshot"] != expected[target]
+                or not isinstance(item["sha256"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])
+                or type(item["mode"]) is not int or not 0 <= item["mode"] <= 0o7777
+                or any(type(item[key]) is not int or item[key] < 0 for key in ("uid", "gid"))):
+            raise ValidationError("rollback snapshot metadata rejected")
+        value = checked_regular(checkpoint / item["snapshot"])
+        if hashlib.sha256(value).hexdigest() != item["sha256"]:
+            raise ValidationError("rollback snapshot checksum mismatch")
+
+
 def installed_release_binding(
     expected_source_sha: str,
 ) -> tuple[bytes, str, str, str]:
@@ -497,6 +538,7 @@ def installed_release_binding(
             or rollback.get("stamp") != stamp
             or rollback.get("source_sha") != expected_source_sha):
         raise ValidationError("installation rollback checkpoint rejected")
+    validate_rollback_files(checkpoint, rollback)
     return installed_rule, rule_sha, validator_sha, launcher_sha
 
 
