@@ -394,6 +394,7 @@ def test_retained_agent_intent_handles_normalization_failure_before_retry(tmp_pa
     assert retained is not None
     disabled = []
     original_disable = repository.disable_agent
+    original_agent = repository.agent
     def disable(user):
         disabled.append(user)
         return original_disable(user)
@@ -409,7 +410,16 @@ def test_retained_agent_intent_handles_normalization_failure_before_retry(tmp_pa
     else:
         with pytest.raises(RuntimeError, match="reconciliation required; intent retained"):
             service.sync_agent("retry-normalization", command)
-        assert disabled == ["COD1001"]
+        assert disabled == []
         assert repository.agents["COD1001"]["active"] is False
     assert service.state.agent_adoption_intent("COD1001") == retained
     assert service.state.mapping("agent", "COD1001") is None
+    if not mismatch:
+        # Once authoritative ACL readback is available, the same recovery
+        # intent finalizes ownership without repeating the committed sync.
+        monkeypatch.setattr(repository, "agent", original_agent)
+        result = service.sync_agent("retry-after-acl-readback", command)
+        assert result["status"] == "disabled"
+        assert service.state.agent_adoption_intent("COD1001") is None
+        assert service.state.mapping("agent", "COD1001")["actual_id"] == "COD1001"
+        assert disabled == []
