@@ -232,6 +232,27 @@ def registry_operations(registry: dict[str, Any]) -> set[tuple[str, str]]:
     }
 
 
+def effective_route_plugins(service: dict[str, Any], route: dict[str, Any]) -> list[dict[str, Any]]:
+    """Never credit a service plugin shadowed by a route-level instance.
+
+    Disabled or conditionally executed instances cannot prove unconditional auth.
+    Duplicate declarations at one scope are ambiguous and provide no proof.
+    """
+    effective: dict[str, dict[str, Any] | None] = {}
+    for scope in (service, route):
+        declarations: dict[str, list[dict[str, Any]]] = {}
+        for plugin in scope.get("plugins") or []:
+            if not isinstance(plugin, dict) or not isinstance(plugin.get("name"), str):
+                continue
+            declarations.setdefault(plugin["name"], []).append(plugin)
+        for name, entries in declarations.items():
+            plugin = entries[0]
+            effective[name] = plugin if (len(entries) == 1
+                and plugin.get("enabled", True) is True
+                and not plugin.get("condition")) else None
+    return [plugin for plugin in effective.values() if plugin is not None]
+
+
 def kong_routes(kong: dict[str, Any]) -> list[dict[str, Any]]:
     routes: list[dict[str, Any]] = []
     for service in kong.get("services", []):
@@ -241,7 +262,7 @@ def kong_routes(kong: dict[str, Any]) -> list[dict[str, Any]]:
                 routes.append({
                     "methods": methods,
                     "prefix": str(path).rstrip("/") or "/",
-                    "plugins": [*(service.get("plugins") or []), *(route.get("plugins") or [])],
+                    "plugins": effective_route_plugins(service, route),
                 })
     return routes
 

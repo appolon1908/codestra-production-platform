@@ -374,3 +374,34 @@ def test_invalid_endpoint_cli_emits_fail_without_traceback(tmp_path, endpoints):
     assert result.returncode == 1
     assert "CONTROL_PLANE_API_SURFACE=FAIL" in result.stdout
     assert "Traceback" not in result.stderr
+
+
+def test_route_plugin_override_cannot_borrow_service_scope_proof():
+    service_plugin = {"name": "pre-function", "config": {"access": ["required.scope"]}}
+    for override in [
+        {"name": "pre-function", "config": {"access": ["different.scope"]}},
+        {"name": "pre-function", "enabled": False, "config": {"access": ["required.scope"]}},
+        {"name": "pre-function", "condition": "false", "config": {"access": ["required.scope"]}},
+    ]:
+        routes = kong_routes({"services": [{"plugins": [service_plugin], "routes": [
+            {"paths": ["/protected"], "methods": ["POST"], "plugins": [override]},
+        ]}]})
+        assert "required.scope" not in str(routes[0]["plugins"])
+
+
+def test_duplicate_plugin_instances_cannot_certify_scope():
+    plugin = {"name": "pre-function", "config": {"access": ["required.scope"]}}
+    routes = kong_routes({"services": [{"plugins": [plugin], "routes": [
+        {"paths": ["/protected"], "plugins": [plugin, plugin]},
+    ]}]})
+    assert routes[0]["plugins"] == []
+
+
+def test_route_override_preserves_other_service_plugin_types():
+    routes = kong_routes({"services": [{"plugins": [
+        {"name": "jwt"}, {"name": "pre-function", "config": {"access": ["old.scope"]}},
+    ], "routes": [{"paths": ["/protected"], "plugins": [
+        {"name": "pre-function", "config": {"access": ["new.scope"]}},
+    ]}]}]})
+    assert {p["name"] for p in routes[0]["plugins"]} == {"jwt", "pre-function"}
+    assert "old.scope" not in str(routes[0]["plugins"])
