@@ -353,6 +353,26 @@ class SessionHandler(BaseHTTPRequestHandler):
         return self._json(201, response)
 
 
+def validate_realtime_delivery(message, claims: dict[str, object], expected_subject: str) -> dict:
+    digest = os.getenv("CALLING_CONTRACT_DIGEST", "")
+    if (not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or message.subject != expected_subject
+            or (message.headers or {}).get("Codestra-Contract-Digest") != digest):
+        raise ValueError("realtime_delivery_binding_mismatch")
+    event = json.loads(message.data, object_pairs_hook=session_json_object)
+    if not isinstance(event, dict):
+        raise ValueError("invalid_realtime_event")
+    if any(event.get(key) != claims.get(key) for key in ("tenant_id", "campaign_id", "agent_id")):
+        raise ValueError("realtime_event_scope_mismatch")
+    if (type(event.get("schema_version")) is not int or event["schema_version"] != 1
+            or type(event.get("sequence")) is not int or event["sequence"] < 1):
+        raise ValueError("invalid_realtime_event_version")
+    cursor = message.metadata.sequence.stream
+    if type(cursor) is not int or not 1 <= cursor < 2**64:
+        raise ValueError("invalid_realtime_stream_cursor")
+    return {"cursor": cursor, "event": event}
+
+
 async def forward_agent_events(connection: ServerConnection, claims: dict[str, object]) -> None:
     tokens = [str(claims[key]) for key in ("tenant_id", "campaign_id", "agent_id")]
     if not all(SUBJECT_TOKEN.fullmatch(value) for value in tokens):
@@ -401,8 +421,11 @@ async def forward_agent_events(connection: ServerConnection, claims: dict[str, o
             if len(message.data) > 262144:
                 await message.term()
                 continue
-            envelope = {"cursor": int(message.metadata.sequence.stream),
-                        "event": json.loads(message.data)}
+            try:
+                envelope = validate_realtime_delivery(message, claims, subject)
+            except (ValueError, TypeError, UnicodeError):
+                await connection.close(code=4403, reason="realtime_event_rejected")
+                return
             await asyncio.wait_for(connection.send(json.dumps(envelope, separators=(",", ":"))), timeout=5)
             await message.ack()
     finally:

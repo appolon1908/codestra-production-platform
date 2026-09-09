@@ -70,11 +70,12 @@ async def _publish_calling_event(envelope: dict) -> None:
         "telephony.call.completed.v1", "telephony.call.missed.v1",
         "telephony.call.dispositioned.v1", "telephony.agent.status-changed.v1",
     }
-    if (not credentials or len(digest) != 64 or not isinstance(payload, dict)
+    if (not credentials or not re.fullmatch(r"[0-9a-f]{64}", digest) or not isinstance(payload, dict)
             or required - set(payload)):
         raise RuntimeError("calling_publication_contract_missing")
-    if (payload["type"] not in allowed_types or payload["schema_version"] != 1
-            or not isinstance(payload["sequence"], int) or payload["sequence"] < 1
+    if (not isinstance(payload["type"], str) or payload["type"] not in allowed_types
+            or type(payload["schema_version"]) is not int or payload["schema_version"] != 1
+            or type(payload["sequence"]) is not int or payload["sequence"] < 1
             or str(payload["event_id"]) != str(envelope.get("event_id"))
             or str(payload["type"]) != str(envelope.get("event_type"))
             or str(payload["tenant_id"]) != str(envelope.get("tenant_id"))

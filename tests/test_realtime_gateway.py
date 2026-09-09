@@ -123,3 +123,51 @@ def test_invalid_http_session_body_never_queries_membership(monkeypatch, raw):
     handler.do_POST()
     handler._json.assert_called_once_with(422, {'error': 'invalid_session_request'})
     membership.assert_not_called()
+
+
+@pytest.mark.parametrize('mismatch', ['tenant_id', 'campaign_id', 'agent_id', 'digest',
+                                     'subject', 'schema_version', 'sequence', 'cursor', 'json'])
+def test_mismatched_nats_event_never_reaches_socket(monkeypatch, mismatch):
+    import asyncio
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    claims = dict(tenant_id='tenant-a', campaign_id='campaign-a', agent_id='agent-a',
+                  authenticated_subject='subject-a')
+    event = {**claims, 'schema_version': 1, 'sequence': 2}
+    subject = 'telephony.agent.tenant-a.campaign-a.agent-a'
+    message = SimpleNamespace(subject=subject, headers={'Codestra-Contract-Digest': 'a' * 64},
+                              metadata=SimpleNamespace(sequence=SimpleNamespace(stream=19)), ack=AsyncMock())
+    if mismatch in ('tenant_id', 'campaign_id', 'agent_id'):
+        event[mismatch] = 'other'
+    elif mismatch == 'digest': message.headers['Codestra-Contract-Digest'] = 'b' * 64
+    elif mismatch == 'subject': message.subject = 'telephony.agent.other.campaign-a.agent-a'
+    elif mismatch == 'cursor': message.metadata.sequence.stream = True
+    elif mismatch in ('schema_version', 'sequence'): event[mismatch] = True
+    message.data = b'[]' if mismatch == 'json' else json.dumps(event).encode()
+    subscription = SimpleNamespace(next_msg=AsyncMock(return_value=message))
+    jetstream = SimpleNamespace(subscribe=AsyncMock(return_value=subscription))
+    client = SimpleNamespace(jetstream=lambda: jetstream, close=AsyncMock())
+    socket = SimpleNamespace(send=AsyncMock(), close=AsyncMock())
+    monkeypatch.setenv('REALTIME_EVENT_DELIVERY_ENABLED', 'true')
+    monkeypatch.setenv('REALTIME_NATS_CREDENTIALS_FILE', '/synthetic/test-only')
+    monkeypatch.setenv('CALLING_CONTRACT_DIGEST', 'a' * 64)
+    monkeypatch.setattr(realtime_gateway.nats, 'connect', AsyncMock(return_value=client))
+    monkeypatch.setattr(realtime_gateway, 'authorized_agent_membership', lambda *args: True)
+    asyncio.run(realtime_gateway.forward_agent_events(socket, claims))
+    socket.send.assert_not_called()
+    socket.close.assert_awaited_once_with(code=4403, reason='realtime_event_rejected')
+    message.ack.assert_not_called()
+    client.close.assert_awaited_once()
+
+
+def test_bound_event_preserves_operation_sequence_and_stream_cursor(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    claims = dict(tenant_id='tenant-a', campaign_id='campaign-a', agent_id='agent-a')
+    event = {**claims, 'schema_version': 1, 'sequence': 2}
+    subject = 'telephony.agent.tenant-a.campaign-a.agent-a'
+    monkeypatch.setenv('CALLING_CONTRACT_DIGEST', 'a' * 64)
+    message = SimpleNamespace(subject=subject, headers={'Codestra-Contract-Digest': 'a' * 64},
+        data=json.dumps(event).encode(), metadata=SimpleNamespace(sequence=SimpleNamespace(stream=19)))
+    assert realtime_gateway.validate_realtime_delivery(message, claims, subject) == {'cursor': 19, 'event': event}

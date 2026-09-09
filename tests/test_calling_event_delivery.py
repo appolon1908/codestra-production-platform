@@ -181,3 +181,33 @@ def test_postgres_startup_registers_calling_without_resetting_state(monkeypatch)
     calling = [(sql, args) for sql, args in statements if args and args[0] == "calling"]
     assert len(calling) == 2
     assert all("ON CONFLICT DO NOTHING" in sql for sql, _ in calling)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema_version", True), ("schema_version", 1.0),
+    ("sequence", True), ("sequence", 1.0), ("sequence", 0),
+    ("type", []), ("type", {}),
+])
+def test_malformed_calling_event_rejected_before_broker_connection(monkeypatch, field, value):
+    from unittest.mock import AsyncMock
+    envelope = calling_event()
+    envelope["payload"][field] = value
+    connect = AsyncMock()
+    monkeypatch.setattr(worker.nats, "connect", connect)
+    monkeypatch.setenv("REALTIME_NATS_PUBLISH_CREDENTIALS_FILE", "/synthetic/test-only")
+    monkeypatch.setenv("CALLING_CONTRACT_DIGEST", "a" * 64)
+    with pytest.raises(RuntimeError, match="calling_publication_contract_mismatch"):
+        asyncio.run(worker._publish_calling_event(envelope))
+    connect.assert_not_called()
+
+
+@pytest.mark.parametrize("digest", ["z" * 64, "A" * 64, "a" * 63, "a" * 63 + "\n"])
+def test_invalid_contract_digest_rejected_before_broker_connection(monkeypatch, digest):
+    from unittest.mock import AsyncMock
+    connect = AsyncMock()
+    monkeypatch.setattr(worker.nats, "connect", connect)
+    monkeypatch.setenv("REALTIME_NATS_PUBLISH_CREDENTIALS_FILE", "/synthetic/test-only")
+    monkeypatch.setenv("CALLING_CONTRACT_DIGEST", digest)
+    with pytest.raises(RuntimeError, match="calling_publication_contract_missing"):
+        asyncio.run(worker._publish_calling_event(calling_event()))
+    connect.assert_not_called()
