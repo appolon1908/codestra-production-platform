@@ -33,6 +33,7 @@ from .forms import FormService, ORIGINS
 from .mapping_registry import MappingRegistry
 from .postal_runtime import PostalInbox, production_adapter
 from .automation import authorize_automation, execute_automation, record_execution_result
+from .calling_readiness import snapshot as calling_readiness_snapshot
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
 STORE = Store(DB)
@@ -327,6 +328,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/admin/system/calling-readiness":
+            if not self.auth_operator({"platform_admin"}):
+                return
+            if parsed.query:
+                return self.send_json(400, {"error": "query_not_allowed"})
+            result = calling_readiness_snapshot()
+            return self.send_json(200 if result["status"] == "READBACK_MATCHES" else 503, result)
         if parsed.path in {"/health", "/healthz", "/v1/health", "/api/v1/health", "/livez"}:
             return self.send_json(200, {"status": "alive"})
         if parsed.path == "/version":

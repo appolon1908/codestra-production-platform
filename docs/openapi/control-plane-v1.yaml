@@ -7,6 +7,27 @@ servers:
   - url: http://127.0.0.1:8096
     description: Private/local deployment
 paths:
+  /v1/admin/system/calling-readiness:
+    get:
+      operationId: getCallingReadiness
+      security: [{operatorToken: []}]
+      description: >-
+        Platform administrator only. Compare trusted operator-mounted expected release
+        and observed read-back evidence. Query parameters are rejected. This endpoint
+        does not collect live state, verify signatures itself, or authorize activation.
+      responses:
+        "200":
+          description: Supplied read-back matches the expected readonly release
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CallingReadiness"}
+        "503":
+          description: Missing, malformed, stale, unsafe, or mismatching evidence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CallingReadiness"}
+        "400": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
   /v1/crawler/jobs:
     post:
       operationId: createCrawlerJob
@@ -281,6 +302,24 @@ components:
         status: {type: string, enum: [COMPLETED, FAILED, RETRY_PENDING, DEAD_LETTER]}
         actions: {type: array, items: {type: object}}
         completed_at: {type: string, format: date-time}
+    CallingReadiness:
+      type: object
+      additionalProperties: false
+      required: [schema_version, status, production_activation_authorized, live_state_collected, blockers]
+      properties:
+        schema_version: {const: calling-readiness.v1}
+        status: {type: string, enum: [BLOCKED, READBACK_MATCHES]}
+        production_activation_authorized: {const: false}
+        live_state_collected: {const: false}
+        blockers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [component, code]
+            properties:
+              component: {type: string}
+              code: {type: string}
     CrawlerJobRequest:
       type: object
       required: [tenant_id, target_url]
