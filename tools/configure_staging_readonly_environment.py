@@ -101,12 +101,16 @@ def extract_protection_settings(environment: dict[str, Any]) -> dict[str, Any]:
     wait_timer = 0
     prevent_self_review = False
     reviewers: list[dict[str, Any]] = []
-    rules = environment.get("protection_rules")
+    rules = environment.get("protection_rules", [])
+    if not isinstance(rules, list):
+        raise ConfigurationError("cannot preserve malformed protection rules")
     if isinstance(rules, list):
         for rule in rules:
-            if not isinstance(rule, dict):
-                continue
+            if not isinstance(rule, dict) or not isinstance(rule.get("type"), str):
+                raise ConfigurationError("cannot preserve malformed protection rule")
             if rule.get("type") == "wait_timer":
+                if has_wait_timer:
+                    raise ConfigurationError("duplicate wait-timer protection")
                 has_wait_timer = True
                 value = rule.get("wait_timer")
                 if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
@@ -114,8 +118,12 @@ def extract_protection_settings(environment: dict[str, Any]) -> dict[str, Any]:
                 else:
                     raise ConfigurationError("cannot preserve malformed wait-timer protection")
             elif rule.get("type") == "required_reviewers":
+                if has_reviewers:
+                    raise ConfigurationError("duplicate reviewer protection")
                 has_reviewers = True
-                prevent_self_review = bool(rule.get("prevent_self_review", False))
+                prevent_self_review = rule.get("prevent_self_review", False)
+                if type(prevent_self_review) is not bool:
+                    raise ConfigurationError("malformed self-review protection")
                 raw_reviewers = rule.get("reviewers")
                 if not isinstance(raw_reviewers, list) or not raw_reviewers:
                     raise ConfigurationError("cannot preserve malformed reviewer protection")
@@ -130,6 +138,7 @@ def extract_protection_settings(environment: dict[str, Any]) -> dict[str, Any]:
                     if (
                         isinstance(reviewer_id, int)
                         and not isinstance(reviewer_id, bool)
+                        and reviewer_id > 0
                         and reviewer_type in {"User", "Team"}
                     ):
                         reviewers.append(
@@ -256,6 +265,8 @@ def configure(token: str) -> dict[str, Any]:
     _, after = api_request("GET", environment_path, token, expected={200})
     if not isinstance(after, dict):
         raise ConfigurationError("GitHub returned a malformed post-update environment")
+    if extract_protection_settings(after) != payload:
+        raise ConfigurationError("environment reviewer/timer protection was not preserved")
     branch_policy = after.get("deployment_branch_policy")
     if branch_policy != {
         "protected_branches": False,

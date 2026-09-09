@@ -103,6 +103,32 @@ class ConfigureStagingReadonlyEnvironmentTests(unittest.TestCase):
                 {"protection_rules": [{"type": "wait_timer", "wait_timer": "17"}]}
             )
 
+    def test_malformed_rules_fail_before_any_mutation(self) -> None:
+        from unittest.mock import patch
+        cases = [None, {}, [None], [{}],
+                 [{"type": "wait_timer", "wait_timer": 17}, {"type": "wait_timer", "wait_timer": 0}],
+                 [{"type": "required_reviewers", "prevent_self_review": "false",
+                   "reviewers": [{"type": "User", "id": 1}]}],
+                 [{"type": "required_reviewers", "reviewers": [{"type": "User", "id": -1}]}]]
+        for rules in cases:
+            with self.subTest(rules=rules), patch.object(CONFIGURATOR, "api_request", return_value=(200, {"protection_rules": rules})) as api:
+                with self.assertRaises(CONFIGURATOR.ConfigurationError):
+                    CONFIGURATOR.configure("synthetic-test-only")
+                self.assertEqual(api.call_count, 1)
+                self.assertEqual(api.call_args.args[0], "GET")
+
+    def test_lost_timer_in_readback_cannot_report_pass(self) -> None:
+        from unittest.mock import patch
+        before = {"protection_rules": [{"type": "wait_timer", "wait_timer": 17}]}
+        after = {"protection_rules": [], "deployment_branch_policy": {
+            "protected_branches": False, "custom_branch_policies": True}}
+        policies = {"branch_policies": [{"id": 1, "name": CONFIGURATOR.ALLOWED_BRANCH, "type": "branch"}]}
+        with patch.object(CONFIGURATOR, "api_request", side_effect=[
+            (200, before), (200, {}), (200, policies), (200, after)
+        ]), patch.object(CONFIGURATOR, "upsert_environment_variable"):
+            with self.assertRaisesRegex(CONFIGURATOR.ConfigurationError, "not preserved"):
+                CONFIGURATOR.configure("synthetic-test-only")
+
     def test_admin_token_is_never_exposed_to_feature_branch_pushes(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("\n  pull_request:\n", workflow)
