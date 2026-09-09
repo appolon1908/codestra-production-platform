@@ -234,6 +234,8 @@ def adapter_command(row: dict[str, str], state: dict | None = None, *,
             "campaign_recording": current["recording"],
             "scheduled_callbacks": current["callbacks"],
             "campaign_description": current["description"],
+            "hopper_level": int(current["hopper"]),
+            "auto_dial_level": current["auto"],
         }
         campaign["adopt_existing_sha256"] = hashlib.sha256(
             json.dumps(observed, sort_keys=True, separators=(",", ":")).encode()
