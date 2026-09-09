@@ -171,3 +171,67 @@ def test_bound_event_preserves_operation_sequence_and_stream_cursor(monkeypatch)
     message = SimpleNamespace(subject=subject, headers={'Codestra-Contract-Digest': 'a' * 64},
         data=json.dumps(event).encode(), metadata=SimpleNamespace(sequence=SimpleNamespace(stream=19)))
     assert realtime_gateway.validate_realtime_delivery(message, claims, subject) == {'cursor': 19, 'event': event}
+
+
+@pytest.mark.parametrize("raw,code", [
+    ('[]', 4403), ('null', 4403), ('true', 4403), ('42', 4403),
+    ('{"type":"command"}', 4403), ('{"type":"ping","command":"start"}', 4403),
+    ('{"type":"command","type":"ping"}', 4400), (b"\xff", 4400),
+])
+def test_invalid_socket_message_is_rejected_without_transport_error(monkeypatch, raw, code):
+    import asyncio
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    class Socket:
+        request = SimpleNamespace(headers={"Sec-WebSocket-Protocol": "session.test"})
+        send = AsyncMock()
+        close = AsyncMock()
+
+        async def messages(self):
+            yield raw
+
+        def __aiter__(self):
+            return self.messages()
+
+    async def idle_events(*args):
+        await asyncio.Event().wait()
+
+    socket = Socket()
+    monkeypatch.setattr(realtime_gateway, "consume_token", lambda _: dict(
+        tenant_id="tenant-a", agent_id="agent-a", campaign_id="campaign-a"))
+    monkeypatch.setattr(realtime_gateway, "forward_agent_events", idle_events)
+    asyncio.run(realtime_gateway.agent_socket(socket))
+    assert socket.close.await_args.kwargs["code"] == code
+    socket.close.assert_awaited_once()
+    assert [json.loads(call.args[0])["event_type"] for call in socket.send.await_args_list] == ["agent.session.ready"]
+
+
+@pytest.mark.parametrize("cursor", [None, 0, 19])
+def test_replay_policy_and_revoked_authorization_prevent_delivery(monkeypatch, cursor):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    claims = dict(tenant_id="tenant-a", agent_id="agent-a", campaign_id="campaign-a",
+                  authenticated_subject="subject-a", resume_cursor=cursor)
+    subscription = SimpleNamespace(next_msg=AsyncMock())
+    jetstream = SimpleNamespace(subscribe=AsyncMock(return_value=subscription))
+    client = SimpleNamespace(jetstream=lambda: jetstream, close=AsyncMock())
+    socket = SimpleNamespace(send=AsyncMock(), close=AsyncMock())
+    monkeypatch.setenv("REALTIME_EVENT_DELIVERY_ENABLED", "true")
+    monkeypatch.setenv("REALTIME_NATS_CREDENTIALS_FILE", "/synthetic/test-only")
+    monkeypatch.setattr(realtime_gateway.nats, "connect", AsyncMock(return_value=client))
+    monkeypatch.setattr(realtime_gateway, "authorized_agent_membership", lambda *args: False)
+    asyncio.run(realtime_gateway.forward_agent_events(socket, claims))
+    options = jetstream.subscribe.await_args.kwargs
+    if cursor is None:
+        assert options["deliver_policy"] == realtime_gateway.nats_api.DeliverPolicy.NEW
+        assert "opt_start_seq" not in options
+    else:
+        assert options["deliver_policy"] == realtime_gateway.nats_api.DeliverPolicy.BY_START_SEQUENCE
+        assert options["opt_start_seq"] == cursor + 1
+    subscription.next_msg.assert_not_called()
+    socket.send.assert_not_called()
+    socket.close.assert_awaited_once_with(code=4403, reason="realtime_authorization_revoked")
+    client.close.assert_awaited_once()

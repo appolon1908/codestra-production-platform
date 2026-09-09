@@ -451,11 +451,11 @@ async def agent_socket(connection: ServerConnection) -> None:
     async def receive_client() -> None:
         async for raw in connection:
             try:
-                value = json.loads(raw)
-            except (TypeError, json.JSONDecodeError):
+                value = json.loads(raw, object_pairs_hook=session_json_object)
+            except (TypeError, ValueError, UnicodeError):
                 await connection.close(code=4400, reason="invalid_json")
                 return
-            if value.get("type") != "ping":
+            if not isinstance(value, dict) or value != {"type": "ping"}:
                 await connection.close(code=4403, reason="client_message_not_allowed")
                 return
             await connection.send(json.dumps({"type": "pong", "at": int(time.time())}))
