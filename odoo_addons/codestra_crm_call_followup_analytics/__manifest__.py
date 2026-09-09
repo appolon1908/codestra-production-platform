@@ -1,6 +1,6 @@
 {
     "name": "Codestra CRM Call Follow-up Analytics",
-    "version": "19.0.1.0.0",
+    "version": "19.0.1.0.1",
     "summary": "Read-only operational KPIs for post-call outcomes and callbacks",
     "author": "Codestra",
     "website": "https://codestra.co",
