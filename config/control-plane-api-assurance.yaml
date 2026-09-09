@@ -1,0 +1,216 @@
+version: 1
+owner: middleware-platform
+purpose: Method-bound implementation and behavioral assurance for the control-plane API inventory.
+
+handlers:
+  crm_get: [GET]
+  crm_mutation: [POST, PATCH]
+
+endpoints:
+  admin-system-health:
+    gateway_auth:
+      status: gap
+      remediation: Reconcile the global platform-admin contract with Kong's current tenant-claim requirement.
+  admin-system-readiness:
+    gateway_auth:
+      status: gap
+      remediation: Reconcile the global platform-admin contract with Kong's current tenant-claim requirement.
+  admin-system-databases:
+    gateway_auth:
+      status: gap
+      remediation: Reconcile the global platform-admin contract with Kong's current tenant-claim requirement.
+  api-health:
+    gateway_auth:
+      status: gap
+      remediation: Add a plugin-exempt public-health route or explicitly require and document OIDC plus tenant authentication for this endpoint.
+  crm-account:
+    handler: crm_get
+  crm-lead-read:
+    handler: crm_get
+  crm-lead-create:
+    handler: crm_mutation
+    tokens: ['method == "POST"']
+    idempotency:
+      status: present
+      implementation_tokens:
+        - 'self.headers.get("Idempotency-Key", "")'
+        - 'STORE.crm_idempotency('
+        - 'STORE.crm_save_idempotency('
+      test_path: tests/test_crm_api.py
+      test_tokens:
+        - 'def test_idempotency_returns_original_and_rejects_conflict'
+        - 'idempotency_conflict'
+  crm-activity-create:
+    handler: crm_mutation
+    tokens: ['method == "POST"']
+    idempotency:
+      status: gap
+      remediation: Add an endpoint-level duplicate and conflict contract test for activity creation.
+  crm-lead-update:
+    handler: crm_mutation
+    tokens: ['method == "PATCH"']
+    idempotency:
+      status: gap
+      remediation: Add an endpoint-level duplicate and conflict contract test for lead updates.
+
+  messages-api-detail:
+    tokens: ['else STORE.get_message(message_id,tenant)']
+    gateway_auth: &public_gateway_auth_gap
+      status: gap
+      remediation: Bind the exact public route to its declared Kong scope and add behavioral allow/deny tests.
+  messages-api-events:
+    tokens: ['event_request=parts[-1]=="events"', 'STORE.message_events(message_id,tenant)']
+    gateway_auth: *public_gateway_auth_gap
+  messages-detail:
+    tokens: ['else STORE.get_message(message_id,tenant)']
+  messages-events:
+    tokens: ['event_request=parts[-1]=="events"', 'STORE.message_events(message_id,tenant)']
+  messages-api-list:
+    gateway_auth:
+      status: gap
+      remediation: Enforce communications.message.read on the exact /api/v1/messages path in Kong before claiming authorization coverage.
+
+  crawler-create:
+    idempotency:
+      status: present
+      implementation_tokens:
+        - 'value.setdefault("idempotency_key",self.headers.get("Idempotency-Key"))'
+        - 'STORE.create_crawler_job('
+      test_path: tests/test_communications_control_plane.py
+      test_tokens:
+        - 'def test_safe_crawler_job_idempotency_and_target_policy'
+        - 'self.assertTrue(replayed)'
+        - 'self.assertEqual(first["job_id"],second["job_id"])'
+  crawler-read:
+    tokens: ['result=crawler_action("status",job)']
+  crawler-results:
+    tokens: ['parts[4]=="results"']
+  crawler-cancel:
+    idempotency:
+      status: gap
+      remediation: Persist a command idempotency key before invoking the provider cancel action.
+  crawler-retry:
+    idempotency:
+      status: gap
+      remediation: Persist a command idempotency key before invoking the provider retry action.
+
+  postal-inbound:
+    idempotency:
+      status: present
+      implementation_tokens:
+        - 'provider_event_id=event_id'
+        - 'POSTAL_INBOX.run('
+      test_path: tests/test_postal_runtime.py
+      test_tokens:
+        - 'def test_completed_event_replays_stored_result_without_downstream_call'
+        - 'adapter.calls == 1'
+        - 'inbound_idempotency_conflict'
+  form-submit:
+    idempotency:
+      status: present
+      implementation_tokens:
+        - 'FormService(STORE).submit('
+      test_path: tests/test_website_forms.py
+      test_tokens:
+        - 'def test_valid_idempotent_duplicate_and_conflict'
+        - 'self.assertTrue(replay["duplicate"])'
+        - 'idempotency_conflict'
+  source-event-ingest:
+    idempotency:
+      status: present
+      implementation_tokens:
+        - 'result = STORE.ingest('
+        - 'reject_event_replay=source in {"odoo", "telnexa", "klyrow"}'
+      test_path: tests/test_integration_control_plane.py
+      test_tokens:
+        - 'def test_idempotency_replay_and_conflict'
+        - 'self.assertTrue(self.store.ingest(item).duplicate)'
+        - 'idempotency_conflict'
+    gateway_auth:
+      status: gap
+      remediation: Add a dedicated HMAC-authenticated Kong route or a reviewed OIDC-to-service-HMAC translation; the current service-level OIDC plugin rejects HMAC-only callers.
+  source-event-generic:
+    idempotency:
+      status: present
+      implementation_tokens:
+        - 'result = STORE.ingest('
+      test_path: tests/test_integration_control_plane.py
+      test_tokens:
+        - 'def test_idempotency_replay_and_conflict'
+        - 'self.assertTrue(self.store.ingest(item).duplicate)'
+        - 'idempotency_conflict'
+
+  mapping-campaign-create:
+    gateway_auth: *public_gateway_auth_gap
+    idempotency:
+      status: present
+      implementation_tokens:
+        - 'value.setdefault("idempotency_key", self.headers.get("Idempotency-Key"))'
+        - 'MAPPINGS.create_campaign('
+      test_path: tests/test_mapping_registry.py
+      test_tokens:
+        - 'def test_idempotent_replay_does_not_duplicate'
+        - 'assert duplicate and second["job_id"] == first["job_id"]'
+        - 'idempotency_conflict'
+
+  message-create-sms:
+    idempotency:
+      status: present
+      implementation_tokens:
+        - 'value.setdefault("idempotency_key",self.headers.get("Idempotency-Key"))'
+        - 'STORE.create_message('
+      test_path: tests/test_communications_control_plane.py
+      test_tokens:
+        - 'def test_idempotency_and_conflict'
+        - 'self.assertTrue(duplicate)'
+        - 'idempotency_conflict'
+  message-create-email:
+    idempotency:
+      status: present
+      implementation_tokens:
+        - 'value.setdefault("idempotency_key",self.headers.get("Idempotency-Key"))'
+        - 'STORE.create_message('
+      test_path: tests/test_communications_control_plane.py
+      test_tokens:
+        - 'def test_idempotency_and_conflict'
+        - 'self.assertTrue(duplicate)'
+        - 'idempotency_conflict'
+  message-create-public:
+    gateway_auth: *public_gateway_auth_gap
+    idempotency:
+      status: present
+      implementation_tokens:
+        - 'value.setdefault("idempotency_key",self.headers.get("Idempotency-Key"))'
+        - 'STORE.create_message('
+      test_path: tests/test_communications_control_plane.py
+      test_tokens:
+        - 'def test_idempotency_and_conflict'
+        - 'self.assertTrue(duplicate)'
+        - 'idempotency_conflict'
+
+  mapping-job-read:
+    gateway_auth: *public_gateway_auth_gap
+  ops-summary:
+    gateway_auth: *public_gateway_auth_gap
+  ops-events:
+    gateway_auth: *public_gateway_auth_gap
+  ops-correlation:
+    gateway_auth: *public_gateway_auth_gap
+  ops-event-replay:
+    gateway_auth: *public_gateway_auth_gap
+  ops-integration-pause:
+    gateway_auth: *public_gateway_auth_gap
+  ops-integration-resume:
+    gateway_auth: *public_gateway_auth_gap
+  mapping-job-result:
+    gateway_auth: *public_gateway_auth_gap
+  reconciliation-run:
+    gateway_auth: *public_gateway_auth_gap
+  message-dispatch:
+    gateway_auth: *public_gateway_auth_gap
+  message-result:
+    gateway_auth: *public_gateway_auth_gap
+  preferences-write:
+    gateway_auth: *public_gateway_auth_gap
+  preferences-check:
+    gateway_auth: *public_gateway_auth_gap
