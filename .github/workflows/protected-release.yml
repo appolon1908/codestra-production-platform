@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      EXPECTED_MIGRATION_REVISION: 0056_klyrow_delivery_events
+      EXPECTED_MIGRATION_REVISION: 0057_platform_service_catalog
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -93,7 +93,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.MIDDLEWARE_RELEASE_TOKEN || secrets.CODESTRA_MIDDLEWARE_RELEASE_READ_TOKEN || secrets.PRODUCTION_RELEASE_GITHUB_TOKEN || secrets.GHCR_TOKEN }}
           MIDDLEWARE_REPOSITORY: appolon1908-hue/Middleware-
-          EXPECTED_ARTIFACT_DIGEST: sha256:e3af11436039c9812d0e0af4e82a5b3efdfd1736c300f6a6c6f1cfb7ff103e9f
+          EXPECTED_ARTIFACT_DIGEST: sha256:0a678bdb2d8796bb2d09d3203bb92a5eefeac447c76e49156917c5e5c5bf7adf
         run: |
           set -Eeuo pipefail
           test -n "${GH_TOKEN}"
