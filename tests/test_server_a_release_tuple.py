@@ -73,7 +73,7 @@ def test_protected_release_gate_requires_current_signed_middleware_tuple() -> No
     assert "tools/detect_alembic_head.py" in workflow
     assert "/app/migrations/versions" in workflow
     assert 'test "${#migration_heads[@]}" -eq 1' in workflow
-    assert "EXPECTED_MIGRATION_REVISION: 0056_klyrow_delivery_events" in workflow
+    assert "EXPECTED_MIGRATION_REVISION: 0057_platform_service_catalog" in workflow
     assert 'test "$MIDDLEWARE_MIGRATION_REVISION" = "$EXPECTED_MIGRATION_REVISION"' in workflow
     assert 'test "${migration_heads[0]}" = "$EXPECTED_MIGRATION_REVISION"' in workflow
     assert 'test "${migration_heads[0]}" = "$MIDDLEWARE_MIGRATION_REVISION"' in workflow
