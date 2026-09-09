@@ -209,3 +209,33 @@ def test_cod_web_out_email_requires_exact_contact_policy(tmp_path, monkeypatch):
     try: authorize_automation(store, held, "COD")
     except ControlPlaneError as exc: assert str(exc) == "contact_policy_denied"
     else: raise AssertionError("held contact was allowed")
+
+
+@pytest.mark.parametrize("endpoint", ["authorize", "execute", "results"])
+@pytest.mark.parametrize("raw,error", [
+    (b"[]", "object_required"), (b"null", "object_required"),
+    (b"true", "object_required"), (b"42", "object_required"),
+    (b'"text"', "object_required"), (b"\xff", "invalid_json"),
+])
+@pytest.mark.parametrize("authenticated_tenant", [None, "tenant-a"])
+def test_invalid_automation_http_body_has_no_effects(monkeypatch, endpoint, raw, error, authenticated_tenant):
+    from unittest.mock import Mock
+    from control_plane_service import server
+    handler = object.__new__(server.Handler)
+    handler.path = "/api/v1/automation/" + endpoint
+    handler.headers = {}
+    handler.body = Mock(return_value=raw)
+    handler.auth_operator = Mock(return_value=("operator", "operations", authenticated_tenant))
+    handler.send_json = Mock()
+    store = Mock()
+    monkeypatch.setattr(server, "STORE", store)
+    actions = []
+    for name in ["authorize_automation", "execute_automation", "record_execution_result"]:
+        action = Mock()
+        actions.append(action)
+        monkeypatch.setattr(server, name, action)
+    handler.do_POST()
+    handler.send_json.assert_called_once_with(422, {"error": error})
+    assert store.mock_calls == []
+    for action in actions:
+        action.assert_not_called()

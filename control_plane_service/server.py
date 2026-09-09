@@ -529,7 +529,10 @@ class Handler(BaseHTTPRequestHandler):
         op = self.auth_operator({"platform_admin", "operations", "support", "tenant_admin"})
         if not op: return
         try: value = json.loads(body)
-        except json.JSONDecodeError: return self.send_json(422, {"error": "invalid_json"})
+        except (json.JSONDecodeError, UnicodeError):
+            return self.send_json(422, {"error": "invalid_json"})
+        if not isinstance(value, dict):
+            return self.send_json(422, {"error": "object_required"})
         tenant = op[2] or value.get("tenant_id")
         if parsed.path == "/api/v1/automation/authorize":
             if not tenant: return self.send_json(422, {"error": "tenant_required"})
