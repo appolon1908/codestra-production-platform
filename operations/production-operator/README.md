@@ -46,7 +46,7 @@ date, and the current time must be 00:00 through 03:59 America/New_York.
 
 | Repository artifact | SHA-256 |
 |---|---|
-| `codestra-production-operator` | `292128d6c80f52ef1397511e7a758531a82e334d5ed555ff25683124d1ad308a` |
+| `codestra-production-operator` | `658be8c3be0b1ff0727e2543057438990e732c9b88cf0ce86da347132e0b641e` |
 | `codestra-production-forced-command` | `af3c013fd7d7504eb19d4484038337b334786c6a18b4a67100a6ca9c788b4307` |
 | `codestra-production-operator.sudoers` | `c3a9d1445c1681a9cb631b1effa1ce1d6c170a3c6f176b63157199f533744203` |
 | `codestra-production-operator.sshd` | `2a6d448ee5abc3cfcd4db5d99392e0459aa7cfec63a6851ccd71c959eb528b6c` |
@@ -232,7 +232,7 @@ root-owned backup stamp published in `LAST_SUCCESS`, and publishes its own
 atomic `LAST_SUCCESS` marker after checksum validation. The operator validates
 that restore result and requires it to bind the same backup stamp, immutable
 image digest, Middleware source SHA, schema tables, and Alembic head
-`0056_klyrow_delivery_events`. The migration runs as the production migration
+`0057_platform_service_catalog`. The migration runs as the production migration
 identity `middleware_app`, while the runtime remains `mw_integration_api` and its restored grant graph is compared byte for
 byte to production, on an internal-only disposable network. The exact candidate
 then starts without a host port and must return healthy `/healthz` and
@@ -306,7 +306,7 @@ image record, database dump, checksum, owner/head record, Compose
 override, and target manifest is also atomically written and read back; the
 bundle directory is fsynced before `LAST_SUCCESS` can advertise it.
 It then reads back health, the immutable digest, all delivery-disable flags,
-and database head `0056_klyrow_delivery_events`. A failure restores the three
+and database head `0057_platform_service_catalog`. A failure restores the three
 captured image IDs. Control-plane validation failure invokes the bounded
 control-plane rollback. The Web/API traffic actions update only a root-owned
 core traffic pointer after validating the active tuple and core dependencies;
