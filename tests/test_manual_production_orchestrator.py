@@ -4,10 +4,12 @@ import copy
 import base64
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -294,8 +296,9 @@ class ManualProductionOrchestratorTests(unittest.TestCase):
         catalog: dict,
         contract_bytes: bytes,
         branch: dict,
-        status_policy: dict,
+        status_policy: dict | None,
         checks: list[dict],
+        rules_policy: list[dict] | None = None,
     ) -> dict:
         repository = catalog["repositories"][0]["repository"]
 
@@ -312,8 +315,6 @@ class ManualProductionOrchestratorTests(unittest.TestCase):
                         "disabled": False,
                         "default_branch": expected["default_branch"],
                     }
-                if path.endswith("/protection/required_status_checks"):
-                    return status_policy
                 if "/branches/" in path:
                     return branch
                 if "/contents/" in path:
@@ -321,11 +322,21 @@ class ManualProductionOrchestratorTests(unittest.TestCase):
                         "encoding": "base64",
                         "content": base64.b64encode(contract_bytes).decode(),
                     }
-                if "/check-runs" in path:
-                    return {"check_runs": checks}
                 if "/commits/" in path:
                     return {"commit": {"verification": {"verified": True}}}
                 raise AssertionError(f"unexpected GitHub path: {path}")
+
+            def get_paginated(self, path: str, *, items_key=None):
+                if "/check-runs" in path and items_key == "check_runs":
+                    return checks
+                if "/rules/branches/" in path:
+                    return [] if rules_policy is None else rules_policy
+                raise AssertionError(f"unexpected paginated GitHub path: {path}")
+
+            def get_optional(self, path: str):
+                if path.endswith("/protection/required_status_checks"):
+                    return status_policy
+                raise AssertionError(f"unexpected optional GitHub path: {path}")
 
         output = tmp_path / "preflight.json"
         with mock.patch.object(MODULE, "GitHub", FakeGitHub), mock.patch.dict(
@@ -371,6 +382,133 @@ class ManualProductionOrchestratorTests(unittest.TestCase):
             evidence["repositories"][0]["required_check_apps"],
             {"validate": 15368},
         )
+
+    def test_preflight_accepts_ruleset_only_app_bound_status_policy(self) -> None:
+        catalog, candidate, _, branch, _, contract_bytes, check = self.preflight_fixture()
+        rules_policy = [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": "validate", "integration_id": 15368}
+                    ]
+                },
+            }
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = self.run_preflight(
+                Path(directory),
+                candidate=candidate,
+                catalog=catalog,
+                contract_bytes=contract_bytes,
+                branch=branch,
+                status_policy=None,
+                checks=[check],
+                rules_policy=rules_policy,
+            )
+
+        self.assertEqual(
+            evidence["repositories"][0]["required_check_apps"],
+            {"validate": 15368},
+        )
+
+    def test_preflight_rejects_wrong_ruleset_check_app(self) -> None:
+        catalog, candidate, _, branch, _, contract_bytes, check = self.preflight_fixture()
+        rules_policy = [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": "validate", "integration_id": 999}
+                    ]
+                },
+            }
+        ]
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            MODULE.PolicyError, "bound to the wrong app"
+        ):
+            self.run_preflight(
+                Path(directory),
+                candidate=candidate,
+                catalog=catalog,
+                contract_bytes=contract_bytes,
+                branch=branch,
+                status_policy=None,
+                checks=[check],
+                rules_policy=rules_policy,
+            )
+
+    def test_preflight_rejects_conflicting_classic_and_ruleset_apps(self) -> None:
+        catalog, candidate, _, branch, status_policy, contract_bytes, check = self.preflight_fixture()
+        rules_policy = [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": "validate", "integration_id": 999}
+                    ]
+                },
+            }
+        ]
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            MODULE.PolicyError, "conflicting app bindings"
+        ):
+            self.run_preflight(
+                Path(directory),
+                candidate=candidate,
+                catalog=catalog,
+                contract_bytes=contract_bytes,
+                branch=branch,
+                status_policy=status_policy,
+                checks=[check],
+                rules_policy=rules_policy,
+            )
+
+    def test_optional_github_read_only_swallows_not_found(self) -> None:
+        error = urllib.error.HTTPError(
+            "https://api.github.test/missing", 404, "not found", {}, io.BytesIO(b"{}")
+        )
+        with mock.patch.object(MODULE.GitHub, "_open", side_effect=error):
+            self.assertIsNone(MODULE.GitHub("token").get_optional("/missing"))
+
+    def test_optional_github_read_fails_on_forbidden(self) -> None:
+        error = urllib.error.HTTPError(
+            "https://api.github.test/forbidden", 403, "forbidden", {}, io.BytesIO(b"{}")
+        )
+        with mock.patch.object(MODULE.GitHub, "_open", side_effect=error), self.assertRaisesRegex(
+            MODULE.PolicyError, "HTTP 403"
+        ):
+            MODULE.GitHub("token").get_optional("/forbidden")
+
+    def test_github_paginated_read_includes_later_required_rules(self) -> None:
+        class Response(io.BytesIO):
+            def __init__(self, value: object, link: str = ""):
+                super().__init__(json.dumps(value).encode())
+                self.headers = {"Link": link}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        later_rule = {
+            "type": "required_status_checks",
+            "parameters": {
+                "required_status_checks": [
+                    {"context": "page-two-check", "integration_id": 15368}
+                ]
+            },
+        }
+        first = Response([], '<https://api.github.com/rules?page=2>; rel="next"')
+        second = Response([later_rule])
+        with mock.patch.object(
+            MODULE.GitHub, "_open", side_effect=[first, second]
+        ) as request:
+            rules = MODULE.GitHub("token").get_paginated("/rules?per_page=100")
+
+        self.assertEqual(rules, [later_rule])
+        self.assertEqual(request.call_count, 2)
 
     def test_preflight_rejects_wrong_required_check_app(self) -> None:
         catalog, candidate, _, branch, status_policy, contract_bytes, check = self.preflight_fixture()
@@ -579,6 +717,51 @@ class ManualProductionOrchestratorTests(unittest.TestCase):
         self.assertEqual(
             evidence["runs"][0]["controller_policy_base_sha"], policy_base
         )
+
+class GitHubOriginSecurityTests(unittest.TestCase):
+    def test_rejects_untrusted_absolute_pagination_before_network(self):
+        for url in ["https://attacker.invalid/page", "https://api.github.com.attacker.invalid/",
+                    "https://user@api.github.com/", "https://api.github.com:444/",
+                    "https://api.github.com/path#fragment"]:
+            with self.subTest(url=url), mock.patch.object(MODULE.GitHub, '_open') as request:
+                with self.assertRaises(MODULE.PolicyError):
+                    MODULE.GitHub('synthetic-token').get(url)
+                request.assert_not_called()
+
+    def test_redirects_are_rejected(self):
+        with self.assertRaisesRegex(MODULE.PolicyError, 'redirects are forbidden'):
+            MODULE.NoGitHubRedirect().redirect_request(None, None, 302, '', {}, 'https://attacker.invalid')
+
+    def test_pagination_is_bounded(self):
+        pages = [([], f'https://api.github.com/rules?page={n}') for n in range(2, 103)]
+        with mock.patch.object(MODULE.GitHub, '_request_page', side_effect=pages) as request:
+            with self.assertRaisesRegex(MODULE.PolicyError, 'pagination limit'):
+                MODULE.GitHub('synthetic-token').get_paginated('/rules')
+            self.assertEqual(request.call_count, 100)
+
+
+    def test_check_runs_on_later_pages_are_included(self):
+        later_check = {"name": "validate", "app": {"id": 15368}, "conclusion": "success"}
+        pages = [({"check_runs": []}, "https://api.github.com/check-runs?page=2"),
+                 ({"check_runs": [later_check]}, None)]
+        with mock.patch.object(MODULE.GitHub, "_request_page", side_effect=pages):
+            checks = MODULE.GitHub("synthetic-token").get_paginated(
+                "/check-runs?per_page=100", items_key="check_runs"
+            )
+        self.assertEqual(MODULE.latest_check_conclusions(checks), {("validate", 15368): "success"})
+
+    def test_malformed_check_run_pages_are_rejected(self):
+        for page in [[], {}, {"check_runs": None}, {"check_runs": {}}]:
+            with self.subTest(page=page), mock.patch.object(
+                MODULE.GitHub, "_request_page", return_value=(page, None)
+            ), self.assertRaises(MODULE.PolicyError):
+                MODULE.GitHub("synthetic-token").get_paginated("/check-runs", items_key="check_runs")
+
+    def test_pagination_loop_is_rejected(self):
+        with mock.patch.object(MODULE.GitHub, "_request_page", return_value=([], "/rules")) as request:
+            with self.assertRaisesRegex(MODULE.PolicyError, "pagination loop"):
+                MODULE.GitHub("synthetic-token").get_paginated("/rules")
+            self.assertEqual(request.call_count, 1)
 
 
 if __name__ == "__main__":
