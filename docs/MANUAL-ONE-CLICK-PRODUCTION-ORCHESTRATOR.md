@@ -160,8 +160,11 @@ Metadata: read
 ```
 
 `Administration: read` is required only to read the protected branch's
-authoritative `required_status_checks.checks[].app_id` bindings. A same-name
-commit status or a check run from a different GitHub App is not accepted.
+authoritative classic `required_status_checks.checks[].app_id` bindings and
+effective ruleset `required_status_checks[].integration_id` bindings. The
+preflight checks both authorities, supports ruleset-only repositories, and
+rejects conflicting or unbound declarations. A same-name commit status or a
+check run from a different GitHub App is not accepted.
 
 The token must cover exactly the protected catalog repositories. The legacy
 `Codestra-SRL/codestra-middleware` rollback repository is not a catalog member
