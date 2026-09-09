@@ -144,3 +144,54 @@ def test_binding_update_does_not_claim_recovery_or_runtime_admission():
     assert candidate['external_effects_default'] == 'DISABLED'
     assert candidate['production_promotion_gate_scope'] == 'SIGNED_RELEASE_ADMISSION_ONLY_NOT_RUNTIME_DEPLOYMENT'
     assert document('config/signing-authority-rotation.json')['production_delivery_authorized'] is False
+
+
+def validate_retained_manifest(manifest):
+    from tools.signed_middleware_release import _validate_manifest
+
+    retained = document(MANIFEST)
+    _validate_manifest(
+        manifest,
+        expected_repository=retained['repository'],
+        expected_image_repository=retained['image']['repository'],
+        expected_workflow_identity=retained['build']['workflow_identity'],
+        expected_source_sha=retained['source']['git_sha'],
+        expected_image_digest=retained['image']['digest'],
+        expected_run_id=str(retained['build']['run_id']),
+    )
+
+
+def test_retained_manifest_passes_runtime_structural_validator():
+    validate_retained_manifest(document(MANIFEST))
+
+
+@pytest.mark.parametrize('section,field,value', [
+    ('verification', 'transparency_log_required', 1),
+    ('verification', 'transparency_log_required', 1.0),
+    ('promotion', 'staging_and_production_same_digest', 1),
+    ('promotion', 'mutable_tags_authoritative', 0),
+    ('promotion', 'mutable_tags_authoritative', 0.0),
+])
+def test_manifest_policy_requires_json_booleans(section, field, value):
+    from tools.signed_middleware_release import SignedReleaseError
+
+    manifest = document(MANIFEST)
+    manifest[section][field] = value
+    with pytest.raises(SignedReleaseError, match='not canonical'):
+        validate_retained_manifest(manifest)
+
+
+@pytest.mark.parametrize('reference', [
+    'python:3.12@sha256:',
+    'python:3.12@sha256:1234',
+    'python:3.12@sha256:' + 'z' * 64,
+    '@sha256:' + 'a' * 64,
+    'python:3.12@sha256:' + 'a' * 64 + ':latest',
+])
+def test_manifest_base_image_requires_complete_immutable_reference(reference):
+    from tools.signed_middleware_release import SignedReleaseError
+
+    manifest = document(MANIFEST)
+    manifest['image']['base_image'] = reference
+    with pytest.raises(SignedReleaseError, match='base image is not immutable'):
+        validate_retained_manifest(manifest)

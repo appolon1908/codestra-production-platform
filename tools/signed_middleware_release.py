@@ -69,7 +69,7 @@ def _require_exact_keys(value: object, expected: set[str], label: str) -> dict[s
 
 
 def _require_constant(value: object, expected: object, label: str) -> None:
-    if value != expected:
+    if type(value) is not type(expected) or value != expected:
         raise SignedReleaseError(f"{label} is not canonical")
 
 
@@ -226,7 +226,9 @@ def _validate_manifest(
         "image reference",
     )
     _require_constant(image["platforms"], ["linux/amd64"], "image platforms")
-    if not isinstance(image["base_image"], str) or "@sha256:" not in image["base_image"]:
+    if not isinstance(image["base_image"], str) or re.fullmatch(
+        r"[^\s@]+@sha256:[0-9a-f]{64}", image["base_image"]
+    ) is None:
         raise SignedReleaseError("base image is not immutable")
     _require_constant(
         root["release_id"],
