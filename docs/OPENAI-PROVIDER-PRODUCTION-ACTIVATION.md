@@ -8,13 +8,20 @@ package adds that missing runtime contract without activating the provider.
 
 The exact bound release is:
 
-- source SHA: `f199b6c40f4e467979e9a8b255a0e686321a182d`
-- image: `ghcr.io/codestra-srl/codestra-middleware@sha256:ec2cf4ca73ff072fbdd48bda108a60f103526cb3e97a721abdf38435b010908b`
-- required database head: `0056_klyrow_delivery_events`
+- source SHA: `4668de7d7ddc6f98968c06b7dc02d7650ff5e88a`
+- image: `ghcr.io/appolon1908-hue/codestra-middleware@sha256:41ae78d368b5e2db2e9fe9be50fd5041b3f1a07ae4837170a76a68889be565e6`
+- required database head: `0057_platform_service_catalog`
 - worker: `codestra-openai-01`
 - service identity: `openai-responses-provider`
 - maximum concurrency: `1`
 - allowed project: `codestra-ai-console`
+
+These candidate values match `deploy/middleware/openai-provider-release-lock.json`
+and `config/production-release-tuple.json`. The source-locked Middleware manifest
+is retained at `evidence/server65/middleware-4668de7-release-manifest.v1.json`;
+its signed release is run `34173524024:1`. This evidence binds the candidate;
+it does not activate the provider or prove runtime deployment. Historical
+Codestra-SRL release records retain their original source/image/schema tuple.
 
 Merging this package has no production effect. The service is behind the
 `openai-provider` Compose profile, uses `restart: "no"`, and all provider,

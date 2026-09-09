@@ -34,6 +34,7 @@ def test_contract_is_durable_bounded_and_non_replaying():
         "CODESTRA_INGRESS_V1", "CODESTRA_PROCESSING_V1", "CODESTRA_RESULTS_V1",
         "CODESTRA_CALLBACKS_V1", "CODESTRA_RETRY_V1", "CODESTRA_DEAD_LETTER_V1",
         "CODESTRA_DLQ_ADVISORIES_V1",
+        "CODESTRA_CALLING_AGENT_EVENTS",
     }
     assert all(item["ack_policy"] == "explicit" for item in contract["consumers"])
     assert {item["deliver_policy"] for item in contract["consumers"]} == {"all", "new"}
@@ -53,6 +54,9 @@ def test_contract_is_durable_bounded_and_non_replaying():
         "CODESTRA_DLQ_ADVISORIES_V1" not in subject
         for subject in streams["CODESTRA_DLQ_ADVISORIES_V1"]["subjects"]
     )
+    assert streams["CODESTRA_CALLING_AGENT_EVENTS"]["subjects"] == [
+        "telephony.agent.*.*.*", "telephony.supervisor.*.*"
+    ]
 
 
 def test_contract_rejects_missing_dead_letter_metadata_headroom():

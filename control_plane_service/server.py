@@ -32,6 +32,7 @@ from .crm import ACTIVITY_FIELDS, CREATE_FIELDS, PATCH_FIELDS, CrmService, reque
 from .forms import FormService, ORIGINS
 from .mapping_registry import MappingRegistry
 from .postal_runtime import PostalInbox, production_adapter
+from .automation import authorize_automation, execute_automation, record_execution_result
 from .calling_readiness import snapshot as calling_readiness_snapshot
 
 DB = os.getenv("CONTROL_PLANE_DB", "/data/control-plane.db")
@@ -402,6 +403,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/internal/v1/adapters/vicidial/events":
+            from .calling_ingress import handle
+            handle(self, STORE)
+            return
         if parsed.path == "/api/v1/integrations/postal/inbound":
             if os.getenv("POSTAL_INBOUND_ENABLED", "false") != "true":
                 return self.send_json(503, {"error": "postal_inbound_disabled"})
@@ -524,8 +529,39 @@ class Handler(BaseHTTPRequestHandler):
         op = self.auth_operator({"platform_admin", "operations", "support", "tenant_admin"})
         if not op: return
         try: value = json.loads(body)
-        except json.JSONDecodeError: return self.send_json(422, {"error": "invalid_json"})
+        except (json.JSONDecodeError, UnicodeError):
+            return self.send_json(422, {"error": "invalid_json"})
+        if not isinstance(value, dict):
+            return self.send_json(422, {"error": "object_required"})
         tenant = op[2] or value.get("tenant_id")
+        if parsed.path == "/api/v1/automation/authorize":
+            if not tenant: return self.send_json(422, {"error": "tenant_required"})
+            try: result = authorize_automation(STORE, value, tenant)
+            except ControlPlaneError as exc: return self.send_json(403, {"error": str(exc)})
+            STORE.audit(op[0], op[1], "automation.authorized", "automation", str(value.get("event_id")),
+                        tenant, str(value.get("correlation_id")), {"workflow_key": value.get("automation_key")})
+            return self.send_json(200, result)
+        if parsed.path == "/api/v1/automation/execute":
+            if not tenant: return self.send_json(422, {"error": "tenant_required"})
+            try: result = execute_automation(STORE, value, tenant)
+            except ControlPlaneError as exc:
+                return self.send_json(409 if str(exc) == "idempotency_conflict" else 403,
+                                      {"error": str(exc)})
+            STORE.audit(op[0], op[1], "automation.executed", "automation",
+                        str(value.get("event_id")), tenant, str(value.get("correlation_id")),
+                        {"workflow_key": value.get("automation_key"),
+                         "actions": result.get("executed_actions")})
+            return self.send_json(202, result)
+        if parsed.path == "/api/v1/automation/results":
+            if not tenant: return self.send_json(422, {"error": "tenant_required"})
+            try: result = record_execution_result(STORE, value, tenant)
+            except ControlPlaneError as exc:
+                return self.send_json(409 if str(exc) == "idempotency_conflict" else 422,
+                                      {"error": str(exc)})
+            STORE.audit(op[0], op[1], "automation.result.recorded", "automation",
+                        str(value.get("execution_id")), tenant, str(value.get("correlation_id")),
+                        {"workflow_key": value.get("workflow_key"), "status": value.get("status")})
+            return self.send_json(200 if result.duplicate else 202, result.__dict__)
         if parsed.path == "/api/v1/control/campaigns":
             if not tenant: return self.send_json(422,{"error":"tenant_required"})
             value["tenant_id"] = tenant

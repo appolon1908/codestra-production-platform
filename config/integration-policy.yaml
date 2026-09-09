@@ -172,7 +172,7 @@ systems:
 
 service_accounts:
   odoo-integration-service: {system: odoo, scopes: [odoo.intent.submit, odoo.result.read]}
-  n8n-automation-service: {system: n8n, scopes: [automation.execute, middleware.action.request]}
+  n8n-automation-service: {system: n8n, scopes: [automation.execute, automation.result.write, middleware.action.request]}
   klyrow-provider-service: {system: klyrow, scopes: [email.event.submit]}
   telnexa-provider-service: {system: telnexa, scopes: [sms.event.submit]}
   vicidial-event-service: {system: vicidial, scopes: [voice.event.submit]}
@@ -192,7 +192,7 @@ source_scan:
 
 runtime:
   prohibited_public_ports: [5432, 6379, 4222, 3306, 8001, 8444]
-  approved_destinations: [10.40.0.1, 10.40.0.2, 10.40.0.3, 10.40.0.4, 127.0.0.1, api.codestra.co, auth.codestra.co, authorization.internal.codestra.agency, codestra-integration-control-plane-api-1, codestra-n8n-1, codestra-odoo-1, codestra-odoo19-module-staging-odoo-1, codestra-postgres-1, dialer.codestra.agency, edge.internal.codestra.agency, gateway, host.docker.internal, keycloak, klyrow.internal.codestra.agency, kong-db, localhost, middleware, n8n, n8n.codestra.agency, n8n.internal.codestra.agency, odoo, odoo-provisioning-callback, odoo.internal.codestra.agency, postgres, provisioning-service, scraper.internal.codestra.agency, sms-postgres, telnexa.internal.codestra.agency, turns, webhook, wss.codestra.agency]
+  approved_destinations: [10.40.0.1, 10.40.0.2, 10.40.0.3, 10.40.0.4, 127.0.0.1, api.codestra.co, auth.codestra.co, authorization.internal.codestra.agency, codestra-integration-control-plane-api-1, n8n-main, n8n-webhook, n8n-worker, codestra-n8n-1, codestra-odoo-1, codestra-odoo19-module-staging-odoo-1, codestra-postgres-1, dialer.codestra.agency, edge.internal.codestra.agency, gateway, host.docker.internal, keycloak, klyrow.internal.codestra.agency, kong-db, localhost, middleware, n8n, n8n.codestra.agency, n8n.internal.codestra.agency, odoo, odoo-provisioning-callback, odoo.internal.codestra.agency, postgres, provisioning-service, scraper.internal.codestra.agency, sms-postgres, telnexa.internal.codestra.agency, turns, webhook, wss.codestra.agency]
   approved_service_accounts: [cod-web-out-email-production, codestra-agent-auth-gateway, codestra-middleware-odoo-results, codestra-middleware-production, codestra-n8n-production, codestra-odoo-callback-service, codestra-provisioning-service-staging, codestra-reseller-portal]
   connector_destination_rules:
     - {variable_pattern: 'KLYROW.*(URL|HOST)', allowed: [10.40.0.4, klyrow.internal.codestra.agency, auth.codestra.co]}
@@ -212,6 +212,7 @@ runtime:
   forbidden_network_peers:
     - {left: '^codestra-odoo-(1|internal-proxy)$', right: '^codestra-(beyvra-email-api-1|sms-api-(api|event-worker)-1|private-vicidial-ingress-1)$'}
     - {left: '^codestra-n8n-(1|internal-proxy)$', right: '^codestra-(beyvra-email-api-1|sms-api-(api|event-worker)-1|private-vicidial-ingress-1)$'}
+    - {left: '^n8n-(main|webhook|worker)$', right: '^codestra-(beyvra-email-api-1|sms-api-(api|event-worker)-1|private-vicidial-ingress-1)$'}
   forbidden_shared_networks:
     odoo: [klyrow, telnexa, vicidial]
     n8n: [odoo-db, middleware-db, klyrow-db, telnexa-db, vicidial-db]
