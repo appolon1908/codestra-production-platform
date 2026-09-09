@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "template": true,
+  "environment": "staging-readonly",
+  "candidate_id": null,
+  "allowed_hosts": [],
+  "request_policy": {
+    "timeout_seconds": 10,
+    "maximum_response_bytes": 1048576,
+    "follow_redirects": false,
+    "tls_verify": true,
+    "allowed_methods": ["GET", "HEAD"],
+    "forbidden_statuses": [404],
+    "forbid_5xx": true
+  },
+  "business_apis": [],
+  "gateway_routes": [],
+  "counter_endpoint": {
+    "url": null,
+    "credential_env": "CODESTRA_STAGING_READONLY_BEARER_TOKEN",
+    "expected_source_sha": null,
+    "expected_image_digest": null,
+    "fields": {
+      "calls": null,
+      "emails": null,
+      "sms": null,
+      "provider_effects": null
+    }
+  },
+  "safety": {
+    "live_write": false,
+    "odoo_write": false,
+    "external_delivery": false,
+    "n8n_delivery": false,
+    "email_delivery": false,
+    "sms_delivery": false,
+    "pstn_dialing": false,
+    "campaign_activation": false,
+    "provider_delivery": false,
+    "payment_execution": false,
+    "financial_trading": false
+  }
+}

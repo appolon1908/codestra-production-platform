@@ -1,0 +1,121 @@
+name: Validate production runtime certification evidence
+
+on:
+  pull_request:
+    branches:
+      - release/production-activation
+    paths:
+      - "config/production-runtime-certification.template.v1.json"
+      - "tools/validate_production_runtime_certification.py"
+      - "tests/test_production_runtime_certification.py"
+      - ".github/workflows/validate-production-runtime-certification.yml"
+  push:
+    branches:
+      - release/production-activation
+    paths:
+      - "config/production-runtime-certification.template.v1.json"
+      - "tools/validate_production_runtime_certification.py"
+      - "tests/test_production_runtime_certification.py"
+      - ".github/workflows/validate-production-runtime-certification.yml"
+  workflow_dispatch:
+    inputs:
+      evidence_path:
+        description: Repository-relative sanitized certification evidence JSON
+        required: true
+        type: string
+      require_complete:
+        description: Require all final production certification gates
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate-template:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Validate template and regression suite
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile tools/validate_production_runtime_certification.py
+          python3 tools/validate_production_runtime_certification.py \
+            --report "${RUNNER_TEMP}/production-runtime-template.json"
+          python3 tests/test_production_runtime_certification.py
+          git diff --check
+
+      - name: Upload bounded template evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-runtime-template-${{ github.sha }}
+          path: ${{ runner.temp }}/production-runtime-template.json
+          if-no-files-found: error
+          retention-days: 30
+
+  validate-executed-evidence:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.require_complete }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact protected source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require protected release authority
+        run: |
+          set -Eeuo pipefail
+          test "${GITHUB_REF}" = "refs/heads/release/production-activation"
+          case "${{ inputs.evidence_path }}" in
+            evidence/production-certification/*.json) ;;
+            *) echo "evidence must be a sanitized repository file under evidence/production-certification" >&2; exit 1 ;;
+          esac
+          test -f "${{ inputs.evidence_path }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Enforce complete final certification evidence
+        run: |
+          set -Eeuo pipefail
+          python3 tools/validate_production_runtime_certification.py \
+            --evidence "${{ inputs.evidence_path }}" \
+            --require-complete \
+            --report "${RUNNER_TEMP}/production-runtime-certification.json"
+
+      - name: Upload bounded final validation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-runtime-certification-${{ github.sha }}
+          path: ${{ runner.temp }}/production-runtime-certification.json
+          if-no-files-found: warn
+          retention-days: 90
