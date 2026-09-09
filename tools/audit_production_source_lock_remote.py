@@ -90,6 +90,11 @@ def extract_authorities(document: Any) -> list[dict[str, str]]:
     return authorities
 
 
+class NoGitHubRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        raise RuntimeError("GitHub redirect rejected")
+
+
 def github_request(path: str, token: str) -> Any:
     headers = {
         "Accept": "application/vnd.github+json",
@@ -100,13 +105,12 @@ def github_request(path: str, token: str) -> Any:
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(f"https://api.github.com{path}", headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.build_opener(NoGitHubRedirect()).open(request, timeout=30) as response:
             payload = response.read()
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:300]
-        raise RuntimeError(f"GitHub HTTP {exc.code}: {detail}") from exc
+        raise RuntimeError(f"GitHub HTTP {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
-        raise RuntimeError(f"GitHub transport failure: {exc}") from exc
+        raise RuntimeError("GitHub transport failure") from exc
     try:
         return json.loads(payload.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as exc:
@@ -118,7 +122,11 @@ def resolve_ref(repository: str, branch: str, token: str) -> str:
     payload = github_request(f"/repos/{repository}/git/ref/heads/{encoded}", token)
     if not isinstance(payload, dict):
         raise RuntimeError("GitHub ref response is not an object")
-    sha = ((payload.get("object") or {}).get("sha"))
+    obj = payload.get("object")
+    if (payload.get("ref") != f"refs/heads/{branch}" or not isinstance(obj, dict)
+            or obj.get("type") != "commit"):
+        raise RuntimeError("GitHub ref response does not match the requested branch commit")
+    sha = obj.get("sha")
     if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
         raise RuntimeError("GitHub ref response lacks a full commit SHA")
     return sha

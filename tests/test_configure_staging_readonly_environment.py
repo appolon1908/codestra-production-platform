@@ -33,9 +33,7 @@ class ConfigureStagingReadonlyEnvironmentTests(unittest.TestCase):
 
     def test_empty_environment_enables_only_custom_branch_policies(self) -> None:
         payload = CONFIGURATOR.extract_protection_settings({})
-        self.assertEqual(payload["wait_timer"], 0)
-        self.assertFalse(payload["prevent_self_review"])
-        self.assertIsNone(payload["reviewers"])
+        self.assertEqual(set(payload), {"deployment_branch_policy"})
         self.assertEqual(
             payload["deployment_branch_policy"],
             {
@@ -77,21 +75,59 @@ class ConfigureStagingReadonlyEnvironmentTests(unittest.TestCase):
         )
 
     def test_malformed_reviewers_are_not_forwarded(self) -> None:
+        with self.assertRaises(CONFIGURATOR.ConfigurationError):
+            CONFIGURATOR.extract_protection_settings(
+                {
+                    "protection_rules": [
+                        {
+                            "type": "required_reviewers",
+                            "reviewers": [
+                                {"type": "User", "reviewer": {"id": "not-an-int"}},
+                                {"type": "Unknown", "reviewer": {"id": 7}},
+                                "not-an-object",
+                            ],
+                        }
+                    ]
+                }
+            )
+
+    def test_branch_only_environment_does_not_request_paid_rules(self) -> None:
         payload = CONFIGURATOR.extract_protection_settings(
-            {
-                "protection_rules": [
-                    {
-                        "type": "required_reviewers",
-                        "reviewers": [
-                            {"type": "User", "reviewer": {"id": "not-an-int"}},
-                            {"type": "Unknown", "reviewer": {"id": 7}},
-                            "not-an-object",
-                        ],
-                    }
-                ]
-            }
+            {"protection_rules": [{"type": "branch_policy"}]}
         )
-        self.assertIsNone(payload["reviewers"])
+        self.assertEqual(set(payload), {"deployment_branch_policy"})
+
+    def test_malformed_timer_cannot_be_replaced_by_zero(self) -> None:
+        with self.assertRaises(CONFIGURATOR.ConfigurationError):
+            CONFIGURATOR.extract_protection_settings(
+                {"protection_rules": [{"type": "wait_timer", "wait_timer": "17"}]}
+            )
+
+    def test_malformed_rules_fail_before_any_mutation(self) -> None:
+        from unittest.mock import patch
+        cases = [None, {}, [None], [{}],
+                 [{"type": "wait_timer", "wait_timer": 17}, {"type": "wait_timer", "wait_timer": 0}],
+                 [{"type": "required_reviewers", "prevent_self_review": "false",
+                   "reviewers": [{"type": "User", "id": 1}]}],
+                 [{"type": "required_reviewers", "reviewers": [{"type": "User", "id": -1}]}]]
+        for rules in cases:
+            with self.subTest(rules=rules), patch.object(CONFIGURATOR, "api_request", return_value=(200, {"protection_rules": rules})) as api:
+                with self.assertRaises(CONFIGURATOR.ConfigurationError):
+                    CONFIGURATOR.configure("synthetic-test-only")
+                self.assertEqual(api.call_count, 1)
+                self.assertEqual(api.call_args.args[0], "GET")
+
+    def test_lost_timer_in_readback_cannot_report_pass(self) -> None:
+        from unittest.mock import patch
+        before = {"protection_rules": [{"type": "wait_timer", "wait_timer": 17}]}
+        after = {"protection_rules": [], "deployment_branch_policy": {
+            "protected_branches": False, "custom_branch_policies": True}}
+        policies = {"branch_policies": [{"id": 1, "name": CONFIGURATOR.ALLOWED_BRANCH, "type": "branch"}]}
+        with patch.object(CONFIGURATOR, "api_request", side_effect=[
+            (200, before), (200, {}), (200, policies), (200, after)
+        ]), patch.object(CONFIGURATOR, "upsert_environment_variable"):
+            with self.assertRaisesRegex(CONFIGURATOR.ConfigurationError, "not preserved"):
+                CONFIGURATOR.configure("synthetic-test-only")
 
     def test_admin_token_is_never_exposed_to_feature_branch_pushes(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

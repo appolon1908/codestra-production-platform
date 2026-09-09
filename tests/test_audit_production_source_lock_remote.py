@@ -14,6 +14,34 @@ SPEC.loader.exec_module(MODULE)
 
 
 class SourceLockRemoteAuditTests(unittest.TestCase):
+    def test_resolver_requires_exact_branch_and_commit_type(self) -> None:
+        from unittest.mock import patch
+        good = {"ref": "refs/heads/release/main", "object": {"type": "commit", "sha": "a" * 40}}
+        bad = [{**good, "ref": "refs/heads/other"},
+               {**good, "object": {"type": "tag", "sha": "a" * 40}},
+               {**good, "object": []}, {**good, "object": None}]
+        for payload in bad:
+            with self.subTest(payload=payload), patch.object(MODULE, "github_request", return_value=payload):
+                with self.assertRaises(RuntimeError):
+                    MODULE.resolve_ref("owner/repository", "release/main", "test-only")
+        with patch.object(MODULE, "github_request", return_value=good):
+            self.assertEqual(MODULE.resolve_ref("owner/repository", "release/main", "test-only"), "a" * 40)
+
+    def test_authenticated_requests_cannot_follow_redirects(self) -> None:
+        for target in ["https://attacker.invalid/", "https://api.github.com/other"]:
+            with self.assertRaisesRegex(RuntimeError, "redirect rejected"):
+                MODULE.NoGitHubRedirect().redirect_request(None, None, 302, "Found", {}, target)
+
+    def test_http_error_does_not_expose_response_body(self) -> None:
+        from unittest.mock import patch, MagicMock
+        import io
+        error = MODULE.urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, io.BytesIO(b"private-response-marker"))
+        opener = MagicMock()
+        opener.open.side_effect = error
+        with patch.object(MODULE.urllib.request, "build_opener", return_value=opener):
+            with self.assertRaisesRegex(RuntimeError, "^GitHub HTTP 403$"):
+                MODULE.github_request("/repos/owner/repository", "test-only")
+
     def test_extracts_repository_branch_and_sha(self) -> None:
         document = {
             "authority": {
