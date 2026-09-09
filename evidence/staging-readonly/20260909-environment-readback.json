@@ -1,0 +1,40 @@
+{
+  "allowed_refs": [
+    {
+      "name": "release/production-activation",
+      "type": "branch"
+    }
+  ],
+  "captured_at": "2026-09-09T02:17:17.878360+00:00",
+  "deployment_authorized": false,
+  "deployment_branch_policy": {
+    "custom_branch_policies": true,
+    "protected_branches": false
+  },
+  "environment": "staging-readonly",
+  "environment_configuration": "BRANCH_POLICY_VERIFIED",
+  "environment_secret_names": [],
+  "missing_prerequisites": [
+    "approved isolated staging host and identity",
+    "approved staging secret-manager references",
+    "eight host/candidate/endpoint/issuer/backup environment variables",
+    "seven staging secrets; release-signing public key exists at repository scope",
+    "source-lock PASS and deployment-eligible immutable candidate",
+    "healthy runtime, backup/restore and rollback certification"
+  ],
+  "protection_rule_types": [
+    "branch_policy"
+  ],
+  "pstn_calls_attempted": 0,
+  "repository": "appolon1908-hue/codestra-production-platform",
+  "required_reviewers_status": "BLOCKED_GITHUB_HTTP_422_PLAN_ENTITLEMENT",
+  "runtime_modified": false,
+  "safe_variables": {
+    "CODESTRA_STAGING_CANARY_MAX_PERCENT": "1",
+    "CODESTRA_STAGING_KONG_ROUTE_COUNT": "29"
+  },
+  "schema_version": "codestra.staging-environment-readback.v1",
+  "secret_values_read": false,
+  "secret_values_written": false,
+  "source_fix_pr": "https://github.com/appolon1908-hue/codestra-production-platform/pull/324"
+}
