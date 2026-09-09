@@ -8,6 +8,16 @@
   },
   "contract_path": ".codestra/production-orchestrator-contract.v1.json",
   "release_intent_workflow": ".github/workflows/manual-release-intent.yml",
+  "authority_policy": {
+    "controller": "appolon1908-hue/codestra-production-platform",
+    "infrastructure_runtime": "appolon1908-hue/Infustruction-repo",
+    "canonical_middleware": "appolon1908-hue/Middleware-",
+    "legacy_middleware_rollback_only": "Codestra-SRL/codestra-middleware"
+  },
+  "check_policy": {
+    "default_app_id": 15368,
+    "require_protected_branch_binding": true
+  },
   "environment_sequence": [
     "portfolio-release-plan",
     "portfolio-staging",

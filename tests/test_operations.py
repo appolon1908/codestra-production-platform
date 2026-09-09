@@ -242,17 +242,22 @@ class MonitoringGovernanceTests(unittest.TestCase):
         self.assertIn("check config /etc/prometheus/prometheus.yml", source)
         self.assertNotIn("promtool check config", source)
 
-    def test_platform_ci_publishes_required_legacy_status(self) -> None:
+    def test_platform_ci_uses_real_exact_head_validate_job(self) -> None:
         workflow = (ROOT / ".github/workflows/platform-source-gate.yml").read_text()
         definition = yaml.load(workflow, Loader=yaml.BaseLoader)
         self.assertIn("pull_request", definition["on"])
         self.assertIn(definition["on"]["pull_request"], (None, "", {}))
+        self.assertEqual(
+            definition["on"]["push"]["branches"],
+            ["release/production-activation"],
+        )
+        self.assertIn("workflow_dispatch", definition["on"])
         self.assertNotIn("if", definition["jobs"]["validate"])
-        self.assertIn("statuses: write", workflow)
-        self.assertIn("TARGET_SHA: ${{ github.event.pull_request.head.sha }}", workflow)
-        self.assertIn('statuses/${TARGET_SHA}', workflow)
-        self.assertIn("-f context=validate", workflow)
-        self.assertIn("if: always()", workflow)
+        self.assertEqual(definition["jobs"]["validate"]["name"], "validate")
+        self.assertIn("tools/resolve_platform_source_gate.py", workflow)
+        self.assertIn("Verify intended protected branch head", workflow)
+        self.assertNotIn("statuses: write", workflow)
+        self.assertNotIn("statuses/${TARGET_SHA}", workflow)
 
     def test_middleware_database_exporters_are_wired(self) -> None:
         compose = yaml.safe_load((MONITORING / "compose.monitoring.yaml").read_text())
