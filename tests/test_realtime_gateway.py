@@ -3,8 +3,6 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("websockets")
-
 from control_plane_service.core import Store
 from control_plane_service import realtime_gateway
 

@@ -40,12 +40,12 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install the repository source-test versions
-        run: python -m pip install pytest==9.0.2 PyYAML==6.0.3 'psycopg[binary]==3.2.9' 'PyJWT[crypto]==2.13.0' nats-py==2.15.0
+        run: python -m pip install pytest==9.0.2 PyYAML==6.0.3 'psycopg[binary]==3.2.9' 'PyJWT[crypto]==2.13.0' nats-py==2.15.0 websockets==17.0.1
       - name: Exercise signatures, TLS, receipts and retry contracts
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          python -m pytest -q tests/test_vicidial_event_ingress.py tests/test_automation_attempts.py tests/test_automation_gateway.py tests/test_calling_event_delivery.py
+          python -m pytest -q tests/test_vicidial_event_ingress.py tests/test_automation_attempts.py tests/test_automation_gateway.py tests/test_calling_event_delivery.py tests/test_realtime_gateway.py
       - name: Exercise limited-role PostgreSQL transactions and migration backfill
         env:
           CORPORATE_DISPOSABLE_DATABASE: 'YES'
