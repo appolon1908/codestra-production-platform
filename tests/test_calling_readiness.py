@@ -1,5 +1,7 @@
 import copy
 import json
+import re
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from threading import Thread
@@ -88,6 +90,29 @@ def test_flags_must_be_explicit_json_false(flag, value):
     expected, observed = evidence()
     observed["safety"][flag] = value
     assert "EFFECT_NOT_DISABLED:" + flag in codes(readiness.evaluate(expected, observed, now=NOW))
+
+
+@pytest.mark.parametrize("flag", readiness.FLAGS)
+def test_omitted_action_flag_is_not_assumed_disabled(flag):
+    expected, observed = evidence()
+    del observed["safety"][flag]
+    assert "EFFECT_NOT_DISABLED:" + flag in codes(readiness.evaluate(expected, observed, now=NOW))
+
+
+def test_readiness_flags_cover_platform_action_contracts():
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    ecosystem = yaml.safe_load((root / "contracts/telephony/codestra-calling-ecosystem.v1.yaml").read_text())
+    required = set(ecosystem["activation_defaults"])
+    mapping = (root / "specs/VICIDIAL_ODOO_MAPPING_SPEC.md").read_text()
+    required.update(re.findall(r"^\* `(ENABLE_[A-Z_]+)`$", mapping, re.MULTILINE))
+    adapter = (root / "vicidial/config/adapter.env.example").read_text()
+    required.update(re.findall(r"^(ENABLE_[A-Z_]+)=", adapter, re.MULTILINE))
+    defaults = (root / "config/preproduction-safety.env.example").read_text()
+    required.update(re.findall(r"^([A-Z_]+)=(?:false|DISABLED)$", defaults, re.MULTILINE))
+    assert required <= set(readiness.FLAGS)
+    assert len(readiness.FLAGS) == len(set(readiness.FLAGS))
 
 
 @pytest.mark.parametrize("value", [1, -1, False, "0", None])

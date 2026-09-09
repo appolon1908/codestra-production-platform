@@ -75,7 +75,16 @@ make stale component observations pass.
 Observed `safety` requires:
 
 - Literal `false` for `VICIDIAL_WRITES`, `LIVE_CALL_CONTROL`, `PRODUCTION_DIALING`,
-  `LIVE_PSTN_DIALING`, `TELEPHONY_ADMIN_WRITE`.
+  `LIVE_PSTN_DIALING`, `TELEPHONY_ADMIN_WRITE`, and every operational action flag:
+  `ENABLE_VICIDIAL_WRITES`, `ENABLE_CAMPAIGN_SYNC`, `ENABLE_AGENT_SYNC`,
+  `ENABLE_LEAD_PUBLICATION`, `ENABLE_LIVE_CALL_CONTROL`, `ENABLE_WARM_TRANSFER`,
+  `ENABLE_IVR_ROUTING`, `ENABLE_IVR_CALLBACKS`, `ENABLE_APPT_PREP`,
+  `ENABLE_PROVISIONING`, `ENABLE_PRODUCTION_DIALING`, `ENABLE_EMAIL_DELIVERY`,
+  `ENABLE_SMS_DELIVERY`, `ENABLE_AI_ACTIONS`, `SEND_EVENTS`,
+  `ENABLE_EXTERNAL_DELIVERY`, `LIVE_WRITE`, `ODOO_WRITE`, `N8N_DELIVERY_ENABLED`,
+  `GENERAL_AI_DIALING`, `CALLBACK_DISPATCH`. Every field must be present;
+  collectors normalize source values such as `DISABLED` to JSON `false` only
+  after authoritative read-back. Missing values are not disabled evidence.
 - Integer zero for `calls_placed_before`, `calls_placed_after`, `unexpected_writes`,
   `event_lag_seconds`, `reconciliation_depth`. These are counters for the named
   readonly certification window; do not reset lifetime provider counters.
