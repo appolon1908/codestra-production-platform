@@ -26,9 +26,9 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
                 "--workflow-ref",
                 "fixture-workflow",
                 "--middleware-sha",
-                "63b6c0c8bca5168a1178895bd12858d0b1e8086e",
+                "4668de7d7ddc6f98968c06b7dc02d7650ff5e88a",
                 "--middleware-image-digest",
-                "sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a",
+                "sha256:41ae78d368b5e2db2e9fe9be50fd5041b3f1a07ae4837170a76a68889be565e6",
                 "--middleware-signature-status",
                 "PASS",
                 "--middleware-provenance-status",
@@ -57,10 +57,10 @@ def test_release_bundle_is_reproducible_and_fail_closed(tmp_path: Path) -> None:
         "PRODUCTION_DIALING",
     } <= deployment["required_flags"].keys()
     assert deployment["release_tuple"]["middleware_protected_sha"] == (
-        "63b6c0c8bca5168a1178895bd12858d0b1e8086e"
+        "4668de7d7ddc6f98968c06b7dc02d7650ff5e88a"
     )
     assert deployment["release_tuple"]["middleware_image_digest"] == (
-        "sha256:bca7a220b9ce50411ae67e2115507329656c4ee351333d14568af3695e3c347a"
+        "sha256:41ae78d368b5e2db2e9fe9be50fd5041b3f1a07ae4837170a76a68889be565e6"
     )
     installation = deployment["operator_installation"]
     assert installation["mode"] == "preserve-existing-sudoers"
