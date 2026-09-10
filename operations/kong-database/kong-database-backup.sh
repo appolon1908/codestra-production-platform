@@ -7,6 +7,9 @@ backup_root=/opt/codestra/backups/kong-database
 recipient='Codestra Backup Recipient'
 restic_repository_file=/etc/codestra/backup/restic-repository
 restic_password_file=/etc/codestra/backup/restic-password
+object_access_key_file=/etc/codestra/backup/object-access-key-id
+object_secret_key_file=/etc/codestra/backup/object-secret-access-key
+object_region_file=/etc/codestra/backup/object-region
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 final_dir="$backup_root/$stamp"
 mkdir -p "$backup_root"
@@ -21,9 +24,9 @@ trap cleanup EXIT
 
 test "$(id -u)" -eq 0
 for path in "$restic_repository_file" "$restic_password_file" \
-  /etc/codestra/backup/b2-access-key-id \
-  /etc/codestra/backup/b2-secret-access-key \
-  /etc/codestra/backup/b2-region; do
+  "$object_access_key_file" \
+  "$object_secret_key_file" \
+  "$object_region_file"; do
   test -r "$path"
   test ! -L "$path"
 done
@@ -58,9 +61,9 @@ EOF
 export RESTIC_REPOSITORY="$(cat "$restic_repository_file")"
 export RESTIC_PASSWORD_FILE="$restic_password_file"
 export RESTIC_CACHE_DIR="$backup_root/.restic-cache"
-export AWS_ACCESS_KEY_ID="$(cat /etc/codestra/backup/b2-access-key-id)"
-export AWS_SECRET_ACCESS_KEY="$(cat /etc/codestra/backup/b2-secret-access-key)"
-export AWS_DEFAULT_REGION="$(cat /etc/codestra/backup/b2-region)"
+export AWS_ACCESS_KEY_ID="$(cat "$object_access_key_file")"
+export AWS_SECRET_ACCESS_KEY="$(cat "$object_secret_key_file")"
+export AWS_DEFAULT_REGION="$(cat "$object_region_file")"
 restic_retry() {
   local attempt
   for attempt in 1 2 3; do
