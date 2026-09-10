@@ -1,0 +1,24 @@
+name: Seccomp runtime diagnostic tests
+on:
+  pull_request:
+    paths:
+      - tools/diagnose_seccomp_runtime.py
+      - tests/test_diagnose_seccomp_runtime.py
+      - operations/runbooks/seccomp-errno-524-recovery.md
+      - .github/workflows/seccomp-runtime-diagnostics.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Run offline diagnostics regression tests
+        run: python3 -m unittest discover -s tests -p 'test_diagnose_seccomp_runtime.py' -v

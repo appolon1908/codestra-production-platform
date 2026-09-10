@@ -1,0 +1,188 @@
+rule_files:
+- ../rules/platform-integration.rules.yml
+evaluation_interval: 30s
+tests:
+- name: healthy endpoints do not alert
+  interval: 30s
+  input_series:
+  - &id008
+    series: up{job="blackbox_platform_services",application="odoo",service="odoo",environment="production"}
+    values: 1+0x10
+  - &id009
+    series: probe_success{job="blackbox_platform_services",application="odoo",service="odoo",environment="production"}
+    values: 1+0x10
+  - &id002
+    series: up{job="blackbox_platform_services",application="n8n",service="n8n",environment="production"}
+    values: 1+0x10
+  - &id003
+    series: probe_success{job="blackbox_platform_services",application="n8n",service="n8n",environment="production"}
+    values: 1+0x10
+  - &id004
+    series: up{job="blackbox_platform_services",application="middleware",service="middleware-api",environment="production"}
+    values: 1+0x10
+  - &id005
+    series: probe_success{job="blackbox_platform_services",application="middleware",service="middleware-api",environment="production"}
+    values: 1+0x10
+  - &id006
+    series: up{job="blackbox_platform_services",application="vicidial",service="vicidial-adapter",environment="production"}
+    values: 1+0x10
+  - &id007
+    series: probe_success{job="blackbox_platform_services",application="vicidial",service="vicidial-adapter",environment="production"}
+    values: 1+0x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: CodestraPlatformIntegrationProbeFailed
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: CodestraPlatformIntegrationProbeMissing
+    exp_alerts: []
+- name: application failure
+  interval: 30s
+  input_series:
+  - series: up{job="blackbox_platform_services",application="odoo",service="odoo",environment="production"}
+    values: 1+0x10
+  - series: probe_success{job="blackbox_platform_services",application="odoo",service="odoo",environment="production"}
+    values: 1+0x10
+  - series: up{job="blackbox_platform_services",application="n8n",service="n8n",environment="production"}
+    values: 1+0x10
+  - series: probe_success{job="blackbox_platform_services",application="n8n",service="n8n",environment="production"}
+    values: 0+0x10
+  - series: up{job="blackbox_platform_services",application="middleware",service="middleware-api",environment="production"}
+    values: 1+0x10
+  - series: probe_success{job="blackbox_platform_services",application="middleware",service="middleware-api",environment="production"}
+    values: 1+0x10
+  - series: up{job="blackbox_platform_services",application="vicidial",service="vicidial-adapter",environment="production"}
+    values: 1+0x10
+  - series: probe_success{job="blackbox_platform_services",application="vicidial",service="vicidial-adapter",environment="production"}
+    values: 1+0x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: CodestraPlatformIntegrationProbeFailed
+    exp_alerts:
+    - exp_labels:
+        job: blackbox_platform_services
+        application: n8n
+        service: n8n
+        environment: production
+        severity: critical
+        owner_ref: monitoring-owner-registry
+      exp_annotations: &id001
+        summary: Production integration health check is failing
+        runbook: operations/runbooks/alerts/platform-integration.md
+- name: exporter scrape failure
+  interval: 30s
+  input_series:
+  - series: up{job="blackbox_platform_services",application="odoo",service="odoo",environment="production"}
+    values: 1+0x10
+  - series: probe_success{job="blackbox_platform_services",application="odoo",service="odoo",environment="production"}
+    values: 1+0x10
+  - series: up{job="blackbox_platform_services",application="n8n",service="n8n",environment="production"}
+    values: 0+0x10
+  - series: probe_success{job="blackbox_platform_services",application="n8n",service="n8n",environment="production"}
+    values: 1+0x10
+  - series: up{job="blackbox_platform_services",application="middleware",service="middleware-api",environment="production"}
+    values: 1+0x10
+  - series: probe_success{job="blackbox_platform_services",application="middleware",service="middleware-api",environment="production"}
+    values: 1+0x10
+  - series: up{job="blackbox_platform_services",application="vicidial",service="vicidial-adapter",environment="production"}
+    values: 1+0x10
+  - series: probe_success{job="blackbox_platform_services",application="vicidial",service="vicidial-adapter",environment="production"}
+    values: 1+0x10
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: CodestraPlatformIntegrationProbeFailed
+    exp_alerts:
+    - exp_labels:
+        job: blackbox_platform_services
+        application: n8n
+        service: n8n
+        environment: production
+        severity: critical
+        owner_ref: monitoring-owner-registry
+      exp_annotations: *id001
+- name: missing odoo target is not silently healthy
+  interval: 30s
+  input_series:
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: CodestraPlatformIntegrationProbeMissing
+    exp_alerts:
+    - exp_labels:
+        job: blackbox_platform_services
+        application: odoo
+        service: odoo
+        environment: production
+        severity: critical
+        owner_ref: monitoring-owner-registry
+      exp_annotations: &id010
+        summary: Expected production integration health check is missing
+        runbook: operations/runbooks/alerts/platform-integration.md
+- name: missing n8n target is not silently healthy
+  interval: 30s
+  input_series:
+  - *id008
+  - *id009
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: CodestraPlatformIntegrationProbeMissing
+    exp_alerts:
+    - exp_labels:
+        job: blackbox_platform_services
+        application: n8n
+        service: n8n
+        environment: production
+        severity: critical
+        owner_ref: monitoring-owner-registry
+      exp_annotations: *id010
+- name: missing middleware target is not silently healthy
+  interval: 30s
+  input_series:
+  - *id008
+  - *id009
+  - *id002
+  - *id003
+  - *id006
+  - *id007
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: CodestraPlatformIntegrationProbeMissing
+    exp_alerts:
+    - exp_labels:
+        job: blackbox_platform_services
+        application: middleware
+        service: middleware-api
+        environment: production
+        severity: critical
+        owner_ref: monitoring-owner-registry
+      exp_annotations: *id010
+- name: missing vicidial target is not silently healthy
+  interval: 30s
+  input_series:
+  - *id008
+  - *id009
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: CodestraPlatformIntegrationProbeMissing
+    exp_alerts:
+    - exp_labels:
+        job: blackbox_platform_services
+        application: vicidial
+        service: vicidial-adapter
+        environment: production
+        severity: critical
+        owner_ref: monitoring-owner-registry
+      exp_annotations: *id010
