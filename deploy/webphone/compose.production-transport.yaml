@@ -1,0 +1,21 @@
+# Overlay the existing issuer deployment; preserve its pinned image and credentials.
+# This repairs transport only. Authentication and calling have separate readiness gates.
+services:
+  middleware-webphone-session-issuer:
+    environment:
+      PROVISIONING_SERVICE_URL: https://provisioning-service-production:8443
+      PROVISIONING_SERVICE_CA_FILE: /run/secrets/provisioning/production-ca-bundle.crt
+    volumes:
+      - type: bind
+        source: /etc/codestra/secrets/codestra-compose/provisioning/production-ca-bundle.crt
+        target: /run/secrets/provisioning/production-ca-bundle.crt
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      provisioning_production_private: {}
+
+networks:
+  provisioning_production_private:
+    external: true
+    name: codestra-provisioning-production_private

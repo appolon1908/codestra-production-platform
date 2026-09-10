@@ -1,0 +1,21 @@
+services:
+  realtime:
+    environment:
+      REALTIME_EVENT_DELIVERY_ENABLED: "true"
+      REALTIME_NATS_CREDENTIALS_FILE: /run/secrets/realtime_nats_credentials
+    secrets:
+      - realtime_nats_credentials
+  worker:
+    environment:
+      REALTIME_EVENT_DELIVERY_ENABLED: "true"
+      REALTIME_NATS_URL: tls://codestra-nats:4222
+      REALTIME_NATS_PUBLISH_CREDENTIALS_FILE: /run/secrets/realtime_nats_publish_credentials
+      CALLING_CONTRACT_DIGEST: ${CALLING_CONTRACT_DIGEST:?set canonical calling contract digest}
+    secrets:
+      - realtime_nats_publish_credentials
+
+secrets:
+  realtime_nats_credentials:
+    file: /etc/codestra/runtime-secrets/control-plane/realtime-nats.creds
+  realtime_nats_publish_credentials:
+    file: /etc/codestra/runtime-secrets/control-plane/realtime-nats-publish.creds

@@ -1,0 +1,53 @@
+groups:
+- name: platform-integration
+  rules:
+  - alert: CodestraPlatformIntegrationProbeFailed
+    expr: (up{job="blackbox_platform_services"} == 0) or (probe_success{job="blackbox_platform_services"}
+      == 0)
+    for: 2m
+    labels:
+      severity: critical
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Production integration health check is failing
+      runbook: operations/runbooks/alerts/platform-integration.md
+  - alert: CodestraPlatformIntegrationProbeMissing
+    expr: absent(up{job="blackbox_platform_services",application="odoo",environment="production"})
+    for: 2m
+    labels:
+      severity: critical
+      service: odoo
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Expected production integration health check is missing
+      runbook: operations/runbooks/alerts/platform-integration.md
+  - alert: CodestraPlatformIntegrationProbeMissing
+    expr: absent(up{job="blackbox_platform_services",application="n8n",environment="production"})
+    for: 2m
+    labels:
+      severity: critical
+      service: n8n
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Expected production integration health check is missing
+      runbook: operations/runbooks/alerts/platform-integration.md
+  - alert: CodestraPlatformIntegrationProbeMissing
+    expr: absent(up{job="blackbox_platform_services",application="middleware",environment="production"})
+    for: 2m
+    labels:
+      severity: critical
+      service: middleware-api
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Expected production integration health check is missing
+      runbook: operations/runbooks/alerts/platform-integration.md
+  - alert: CodestraPlatformIntegrationProbeMissing
+    expr: absent(up{job="blackbox_platform_services",application="vicidial",environment="production"})
+    for: 2m
+    labels:
+      severity: critical
+      service: vicidial-adapter
+      owner_ref: monitoring-owner-registry
+    annotations:
+      summary: Expected production integration health check is missing
+      runbook: operations/runbooks/alerts/platform-integration.md

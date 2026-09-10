@@ -4,13 +4,17 @@ local claims = kong.ctx.shared.authenticated_jwt_token and kong.ctx.shared.authe
 local scopes = {}
 for value in string.gmatch(claims.scope or "", "%S+") do scopes[value] = true end
 local required
-if path:find("^/api/v1/results/messages/") then required = "communications.result.write"
+if path:find("^/v1/admin/system/") then required = "platform.admin"
+elseif path:find("^/api/v1/results/messages/") then required = "communications.result.write"
 elseif path:find("^/api/v1/control/messages/.+/dispatch$") then required = "communications.message.dispatch"
 elseif path == "/api/v1/control/messages" then required = "communications.message.create"
 elseif path:find("^/api/v1/messages/.+/events$") then required = "communications.message.events.read"
 elseif path:find("^/api/v1/messages/") then required = "communications.message.read"
 elseif path:find("^/api/v1/reconciliation/") and method == "POST" then required = "communications.reconciliation.execute"
 elseif path:find("^/api/v1/reconciliation/") then required = "communications.reconciliation.read"
+elseif path == "/api/v1/automation/authorize" then required = "automation.execute"
+elseif path == "/api/v1/automation/execute" then required = "automation.execute"
+elseif path == "/api/v1/automation/results" then required = "automation.result.write"
 elseif path:find("^/api/v1/results/") then required = "sync.result.write"
 elseif path:find("^/api/v1/control/campaigns") then required = method == "GET" and "mapping.read" or "campaign.write"
 elseif path:find("^/api/v1/control/agents") then required = method == "GET" and "mapping.read" or "agent.write"
@@ -27,6 +31,7 @@ if tenant and tenant ~= claims.tenant then
 end
 kong.service.request.set_header("X-Authenticated-Client", claims.azp or "unknown")
 kong.service.request.set_header("X-Authenticated-Tenant", claims.tenant or "")
+kong.service.request.set_header("X-Authenticated-Role", required == "platform.admin" and "platform_admin" or "tenant_admin")
 local gateway_secret=os.getenv("KONG_CONTROL_PLANE_GATEWAY_SECRET")
 if not gateway_secret or gateway_secret=="" then return kong.response.exit(503,{error="gateway_identity_unavailable"}) end
 kong.service.request.set_header("X-Codestra-Gateway-Secret",gateway_secret)

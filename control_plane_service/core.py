@@ -13,7 +13,7 @@ from typing import Any
 
 from .database import Connection, IntegrityError, is_postgres
 
-SOURCES = {"kyqra", "telnexa", "klyrow", "n8n", "odoo", "crm"}
+SOURCES = {"kyqra", "telnexa", "klyrow", "n8n", "odoo", "crm", "vicidial"}
 EVENT_PREFIXES = {
     "kyqra": ("kyqra.",),
     "telnexa": ("telnexa.",),
@@ -21,6 +21,7 @@ EVENT_PREFIXES = {
     "n8n": ("workflow.",),
     "odoo": ("customer.", "campaign."),
     "crm": ("crm.",),
+    "vicidial": ("telephony.call.", "telephony.agent."),
 }
 CHANNEL_EVENTS = {
     "telnexa.sms.received": "sms",
@@ -135,7 +136,7 @@ class Store:
                 row=db.execute("SELECT to_regclass('public.events') present").fetchone()
                 if not row or not row["present"]:
                     raise RuntimeError("base control-plane migration is required")
-                for name in ("odoo", "n8n", "kyqra", "telnexa", "klyrow"):
+                for name in ("odoo", "n8n", "kyqra", "telnexa", "klyrow", "calling"):
                     db.execute("INSERT INTO integrations VALUES(?,0,?) ON CONFLICT DO NOTHING", (name, now_iso()))
                     db.execute("INSERT INTO circuits(name) VALUES(?) ON CONFLICT DO NOTHING", (name,))
                 return
@@ -222,7 +223,7 @@ class Store:
                 db.execute(
                     "ALTER TABLE messages ADD COLUMN provider_attempt INTEGER NOT NULL DEFAULT 0"
                 )
-            for name in ("odoo", "n8n", "kyqra", "telnexa", "klyrow"):
+            for name in ("odoo", "n8n", "kyqra", "telnexa", "klyrow", "calling"):
                 db.execute("INSERT INTO integrations VALUES(?,0,?) ON CONFLICT DO NOTHING", (name, now_iso()))
                 db.execute("INSERT INTO circuits(name) VALUES(?) ON CONFLICT DO NOTHING", (name,))
 
@@ -354,6 +355,8 @@ class Store:
             with self.connect() as db:
                 db.execute("INSERT INTO events(event_id,tenant_id,source,event_type,idempotency_key,correlation_id,envelope,created_at) VALUES(?,?,?,?,?,?,?,?)", (envelope["event_id"], envelope["tenant_id"], envelope["source"], envelope["event_type"], envelope["idempotency_key"], envelope["correlation_id"], raw, time.time()))
                 targets=("n8n",) if envelope["source"] in {"odoo", "crm"} else ("odoo",) if envelope["source"]=="n8n" else ("odoo","n8n")
+                if envelope["event_type"].startswith(("telephony.call.", "telephony.agent.")):
+                    targets = (*targets, "calling")
                 db.executemany("INSERT INTO event_deliveries(event_id,target) VALUES(?,?)",((envelope["event_id"],target) for target in targets))
             return IngestResult(envelope["event_id"], envelope["correlation_id"], False, "queued")
         except IntegrityError:
@@ -542,6 +545,50 @@ class Store:
             sql="UPDATE messages SET status=?,raw_provider_status=?,provider_message_id=COALESCE(?,provider_message_id),provider_error_code=?"; args:list[Any]=[status,raw_status,provider_message_id,error_code]
             if timestamp_col: sql+=f",{timestamp_col}=?"; args.append(stamp)
             sql+=" WHERE message_id=? AND tenant_id=?"; args.extend((message_id,tenant)); db.execute(sql,args)
+        return True
+
+    def transition_leased_message(
+        self, message_id: str, tenant: str, lease_owner: str, lease_token: str,
+        status: str, raw_status: str, *, provider_message_id: str | None = None,
+        error_code: str | None = None,
+    ) -> bool:
+        """Commit a worker result and its event only while its lease is current."""
+        if status not in MESSAGE_STATES:
+            raise ControlPlaneError("invalid_message_status")
+        stamp = now_iso()
+        timestamp_col = {
+            "accepted": "accepted_at", "sent": "sent_at", "delivered": "delivered_at",
+            "failed": "failed_at", "rejected": "failed_at", "bounced": "failed_at",
+        }.get(status)
+        with self.connect() as db:
+            if not is_postgres():
+                db.raw.execute("BEGIN IMMEDIATE")
+            locking = " FOR UPDATE" if is_postgres() else ""
+            message = db.execute(
+                "SELECT * FROM messages WHERE message_id=? AND tenant_id=? "
+                "AND status='leased' AND lease_owner=? AND lease_token=?" + locking,
+                (message_id, tenant, lease_owner, lease_token),
+            ).fetchone()
+            if not message:
+                return False
+            sql = (
+                "UPDATE messages SET status=?,raw_provider_status=?,"
+                "provider_message_id=COALESCE(?,provider_message_id),provider_error_code=?,"
+                "lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,next_attempt=0"
+            )
+            args: list[Any] = [status, raw_status, provider_message_id, error_code]
+            if timestamp_col:
+                sql += f",{timestamp_col}=?"
+                args.append(stamp)
+            sql += " WHERE message_id=? AND tenant_id=? AND status='leased' AND lease_owner=? AND lease_token=?"
+            args.extend((message_id, tenant, lease_owner, lease_token))
+            if db.execute(sql, args).rowcount != 1:
+                return False
+            if not self._append_message_event(
+                db, message_id, tenant, f'{message["channel"]}.{status}', status,
+                raw_status, message["correlation_id"], None, None,
+            ):
+                raise ControlPlaneError("message_event_collision")
         return True
 
     def cancel_message(self, message_id: str, tenant: str) -> dict[str, Any]:
