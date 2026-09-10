@@ -72,7 +72,8 @@ def run_error_code(payload):
     script = "const c=JSON.parse(process.argv[1]);try{console.log(JSON.stringify({ok:true,result:new Function('$json','$execution',c.code)(c.payload,{id:'error-workflow-id'})}));}catch(e){console.log(JSON.stringify({ok:false,error:e.message}));}"
     output = subprocess.run(
         [node, "-e", script, json.dumps({"code": code, "payload": payload})],
-        check=True, capture_output=True, text=True, timeout=5,
+        # Include Node startup on a shared CI runner; keep execution bounded.
+        check=True, capture_output=True, text=True, timeout=30,
     )
     return json.loads(output.stdout)
 
