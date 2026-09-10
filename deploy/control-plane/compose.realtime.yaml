@@ -1,0 +1,49 @@
+services:
+  realtime:
+    build:
+      context: ../..
+      dockerfile: deploy/control-plane/Dockerfile
+    command: [python, -m, control_plane_service.realtime_gateway]
+    restart: unless-stopped
+    env_file: ${CONTROL_PLANE_ENV_FILE:-/etc/codestra/secrets/control-plane.env}
+    environment:
+      CONTROL_PLANE_DATABASE_URL_FILE: /run/secrets/control_plane_database_url
+      REALTIME_TOKEN_SECRET_FILE: /run/secrets/realtime_token_secret
+      KONG_CONTROL_PLANE_GATEWAY_SECRET_FILE: /run/secrets/kong_gateway_secret
+      REALTIME_NATS_URL: tls://codestra-nats:4222
+      REALTIME_EVENT_DELIVERY_ENABLED: "false"
+      REALTIME_SESSION_TTL_SECONDS: "60"
+      CALLING_CONTRACT_DIGEST: ${CALLING_CONTRACT_DIGEST:?set canonical calling contract digest}
+    ports:
+      - "127.0.0.1:18102:18102"
+      - "127.0.0.1:18103:18103"
+    secrets:
+      - control_plane_database_url
+      - realtime_token_secret
+      - kong_gateway_secret
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [edge, backend]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18103/healthz')"]
+      interval: 20s
+      timeout: 3s
+      retries: 5
+
+secrets:
+  control_plane_database_url:
+    file: /etc/codestra/runtime-secrets/control-plane/database-url
+  realtime_token_secret:
+    file: /etc/codestra/runtime-secrets/control-plane/realtime-token-secret
+  kong_gateway_secret:
+    file: /etc/codestra/runtime-secrets/kong/control-plane-gateway-secret
+
+networks:
+  edge:
+    name: codestra_edge
+    external: true
+  backend:
+    name: codestra_backend
+    external: true

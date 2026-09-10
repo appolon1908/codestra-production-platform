@@ -69,7 +69,7 @@ def test_isolated_jetstream_dedup_redelivery_and_restart(tmp_path):
         server = start_server(port, tmp_path / "store", log)
         url = f"nats://127.0.0.1:{port}"
         try:
-            await apply_contract(url)
+            await apply_contract(url, replicas_override=1)
             client = await nats.connect(url)
             js = client.jetstream()
             subject = "codestra.v1.synthetic-tenant.TEST_SYN.events.ingress"
@@ -106,7 +106,7 @@ def test_existing_consumer_drift_fails_closed(tmp_path):
         server = start_server(port, tmp_path / "store-reconcile", log)
         url = f"nats://127.0.0.1:{port}"
         try:
-            await apply_contract(url)
+            await apply_contract(url, replicas_override=1)
             client = await nats.connect(url)
             js = client.jetstream()
             from nats.js import api
@@ -127,7 +127,7 @@ def test_existing_consumer_drift_fails_closed(tmp_path):
             import pytest
 
             with pytest.raises(RuntimeError, match="differs from contract"):
-                await apply_contract(url)
+                await apply_contract(url, replicas_override=1)
         finally:
             server.terminate()
             server.wait(timeout=5)
@@ -143,7 +143,7 @@ def test_max_delivery_advisory_is_forwarded_once_to_dlq(tmp_path):
         server = start_server(port, tmp_path / "store-dead-letter", log)
         url = f"nats://127.0.0.1:{port}"
         try:
-            await apply_contract(url)
+            await apply_contract(url, replicas_override=1)
             client = await nats.connect(url)
             js = client.jetstream()
             await js.delete_consumer("CODESTRA_INGRESS_V1", "middleware-ingress-v1")

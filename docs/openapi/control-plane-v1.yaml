@@ -160,6 +160,105 @@ paths:
       responses:
         "200": {description: Tenant-filtered events}
         "403": {$ref: "#/components/responses/Error"}
+  /api/v1/reconciliation/run:
+    post:
+      summary: Reconcile one tenant-scoped mapped entity
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: X-Tenant-ID, in: header, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [entity_type, entity_id, target_system, desired, actual, drift_code]}
+      responses:
+        "200": {description: Reconciliation result}
+        "403": {$ref: "#/components/responses/Error"}
+  /api/v1/automation/authorize:
+    post:
+      summary: Authorize a governed n8n business-process execution
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: X-Tenant-ID, in: header, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AutomationEnvelope"}
+      responses:
+        "200": {description: Policy-authorized envelope}
+        "403": {$ref: "#/components/responses/Error"}
+  /api/v1/automation/execute:
+    post:
+      summary: Execute idempotent allowlisted Middleware actions and retain receipts
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: X-Tenant-ID, in: header, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AutomationEnvelope"}
+      responses:
+        "202": {description: Every approved action completed with a durable exact receipt}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/v1/automation/results:
+    post:
+      summary: Record completion only after every approved action has completed
+      security: [{operatorToken: []}]
+      parameters:
+        - {name: X-Tenant-ID, in: header, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AutomationResult"}
+      responses:
+        "202": {description: Result accepted}
+        "409": {$ref: "#/components/responses/Error"}
+  /api/v1/realtime/sessions:
+    post:
+      summary: Mint a tenant/agent/campaign-bound one-time WebSocket session
+      security: [{operatorToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [campaign_id]
+              properties:
+                campaign_id: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$'}
+                resume_cursor: {type: integer, minimum: 0, maximum: 18446744073709551614}
+      responses:
+        "201":
+          description: Sixty-second one-time session
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [ticket, expires_at, websocket_url, contract_digest]
+                properties:
+                  ticket: {type: string, minLength: 32, maxLength: 512}
+                  expires_at: {type: string, format: date-time}
+                  websocket_url: {type: string, enum: ['wss://api.codestra.co/ws/agent']}
+                  contract_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        "403": {$ref: "#/components/responses/Error"}
+  /ws/agent:
+    get:
+      summary: Upgrade to the authenticated agent event stream
+      description: Requires Sec-WebSocket-Protocol values codestra-agent-v1 and session.<token>; the token is consumed atomically and never appears in the URL.
+      parameters:
+        - {name: Sec-WebSocket-Protocol, in: header, required: true, schema: {type: string, example: "codestra-agent-v1, session.<token>"}}
+      responses:
+        "101": {description: WebSocket protocol upgrade}
+        "401": {$ref: "#/components/responses/Error"}
 components:
   securitySchemes:
     serviceKey: {type: http, scheme: bearer}
@@ -172,6 +271,37 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    AutomationEnvelope:
+      type: object
+      required: [schema_version, event_id, event_type, correlation_id, idempotency_key, tenant_id, business_unit_id, campaign_id, entity_type, entity_id, actor_type, actor_id, occurred_at, automation_key, payload]
+      properties:
+        schema_version: {type: string, const: "1"}
+        event_id: {type: string}
+        event_type: {type: string}
+        correlation_id: {type: string}
+        idempotency_key: {type: string}
+        tenant_id: {type: string}
+        business_unit_id: {type: string}
+        campaign_id: {type: string}
+        entity_type: {type: string}
+        entity_id: {type: string}
+        actor_type: {type: string, enum: [HUMAN, AI, SYSTEM]}
+        actor_id: {type: string}
+        occurred_at: {type: string, format: date-time}
+        automation_key: {type: string}
+        payload: {type: object}
+    AutomationResult:
+      type: object
+      required: [event_id, correlation_id, idempotency_key, workflow_key, execution_id, status, actions, completed_at]
+      properties:
+        event_id: {type: string}
+        correlation_id: {type: string}
+        idempotency_key: {type: string}
+        workflow_key: {type: string}
+        execution_id: {type: string}
+        status: {type: string, enum: [COMPLETED, FAILED, RETRY_PENDING, DEAD_LETTER]}
+        actions: {type: array, items: {type: object}}
+        completed_at: {type: string, format: date-time}
     CallingReadiness:
       type: object
       additionalProperties: false

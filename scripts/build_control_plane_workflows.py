@@ -1,31 +1,21 @@
 #!/usr/bin/env python3
-"""Build deterministic governed n8n imports without embedding credentials."""
+"""Build inactive, governed n8n imports that call only Middleware APIs."""
 from __future__ import annotations
 
 import json
 import sys
 
 SPECS = [
-    (17, "sms.submitted", "telnexa.sms.submitted"),
-    (18, "sms.sent", "telnexa.sms.sent"),
-    (19, "sms.rejected", "telnexa.sms.rejected"),
-    (20, "sms.received", "telnexa.sms.received"),
-    (21, "sms.delivered", "telnexa.sms.delivered"),
-    (22, "sms.failed", "telnexa.sms.failed"),
-    (23, "sms.opted_out", "telnexa.sms.opted_out"),
-    (24, "email.delivered", "klyrow.email.delivered"),
-    (25, "email.bounced", "klyrow.email.bounced"),
-    (26, "email.complained", "klyrow.email.complained"),
-    (27, "email.unsubscribed", "klyrow.email.unsubscribed"),
-    (28, "crawler.result.created", "kyqra.record.created"),
-    (29, "crawler.job.completed", "kyqra.job.completed"),
-    (30, "crawler.job.failed", "kyqra.job.failed"),
-    (31, "customer.created", "customer.created"),
-    (32, "customer.updated", "customer.updated"),
-    (33, "email.deferred", "klyrow.email.deferred"),
-    (34, "crm.lead.created", "crm.lead.created"),
-    (35, "crm.lead.updated", "crm.lead.updated"),
-    (36, "crm.activity.created", "crm.activity.created"),
+    (17, "sms.submitted", "telnexa.sms.submitted"), (18, "sms.sent", "telnexa.sms.sent"),
+    (19, "sms.rejected", "telnexa.sms.rejected"), (20, "sms.received", "telnexa.sms.received"),
+    (21, "sms.delivered", "telnexa.sms.delivered"), (22, "sms.failed", "telnexa.sms.failed"),
+    (23, "sms.opted_out", "telnexa.sms.opted_out"), (24, "email.delivered", "klyrow.email.delivered"),
+    (25, "email.bounced", "klyrow.email.bounced"), (26, "email.complained", "klyrow.email.complained"),
+    (27, "email.unsubscribed", "klyrow.email.unsubscribed"), (28, "crawler.result.created", "kyqra.record.created"),
+    (29, "crawler.job.completed", "kyqra.job.completed"), (30, "crawler.job.failed", "kyqra.job.failed"),
+    (31, "customer.created", "customer.created"), (32, "customer.updated", "customer.updated"),
+    (33, "email.deferred", "klyrow.email.deferred"), (34, "crm.lead.created", "crm.lead.created"),
+    (35, "crm.lead.updated", "crm.lead.updated"), (36, "crm.activity.created", "crm.activity.created"),
     (37, "sms.expired", "telnexa.sms.expired"),
 ]
 
@@ -38,27 +28,61 @@ for(const key of ['event_id','correlation_id','tenant_id','idempotency_key']) {
   if(!b[key] && !(key==='event_id' && h['x-event-id'])) throw new Error(key+'_required');
 }
 const eventId=String(b.event_id||h['x-event-id']);
-const correlationId=String(b.correlation_id);
-const tenantId=String(b.tenant_id);
-const customerId=b.customer_id==null?null:String(b.customer_id);
-return [{json:{accepted:true,duplicate:false,event_id:eventId,event_type:b.event_type,correlation_id:correlationId,tenant_id:tenantId,customer_id:customerId,idempotency_key:String(b.idempotency_key),payload:b.payload||{},structured_error:null,structured_log:{level:'info',workflow:WORKFLOW,event_id:eventId,correlation_id:correlationId,tenant_id:tenantId,customer_id:customerId}}}];
+return [{json:{...b,event_id:eventId,customer_id:String(b.customer_id||b.entity_id||eventId),workflow_key:WORKFLOW,orchestration_execution_id:String($execution.id),actor_type:'SYSTEM',actor_id:'n8n',schema_version:'1',business_unit_id:String(b.business_unit_id||'default'),campaign_id:String(b.campaign_id||'none'),entity_type:String(b.entity_type||'event'),entity_id:String(b.entity_id||eventId),automation_key:String(b.automation_key||WORKFLOW),payload:b.payload||{}}}];
 """.replace("EVENT_TYPE", json.dumps(event_type)).replace("WORKFLOW", json.dumps(name))
+
+
+def result_code() -> str:
+    return """const b=$json;
+if(b.business_process_status!=='ACTIONS_COMPLETED') throw new Error('business_actions_incomplete');
+return [{json:{event_id:b.event_id,correlation_id:b.correlation_id,idempotency_key:'n8n:'+b.idempotency_key,workflow_key:b.workflow_key,execution_id:String($execution.id),status:'COMPLETED',actions:(b.executed_actions||[]).map(item=>({type:item.type})),completed_at:new Date().toISOString(),tenant_id:b.tenant_id}}];"""
+
+
+def middleware_request(
+    node_id: str, name: str, path: str, body: str, position: list[int],
+    *, include_tenant_header: bool = True,
+) -> dict:
+    # Error Trigger has no original tenant payload. For that callback only,
+    # Kong derives the tenant from the verified OAuth claim, not a fabricated
+    # header. Middleware still rejects an execution belonging to another tenant.
+    headers = [
+        {"name": "Idempotency-Key", "value": "={{$json.idempotency_key}}"},
+        {"name": "X-Correlation-ID", "value": "={{$json.correlation_id}}"},
+    ]
+    if include_tenant_header:
+        headers.insert(0, {"name": "X-Tenant-ID", "value": "={{$json.tenant_id}}"})
+    return {
+        "id": node_id, "name": name, "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2,
+        "position": position, "parameters": {
+            "method": "POST", "url": "=https://api.codestra.co" + path,
+            "authentication": "predefinedCredentialType", "nodeCredentialType": "oAuth2Api",
+            "sendHeaders": True, "headerParameters": {"parameters": headers}, "sendBody": True, "contentType": "raw", "rawContentType": "application/json",
+            "body": body, "options": {"timeout": 10000, "response": {"response": {"neverError": False}}},
+        },
+        "credentials": {"oAuth2Api": {"id": "codestraMiddlewareOAuth2", "name": "Codestra Middleware OAuth2"}},
+    }
 
 
 def event_workflow(index: int, name: str, event_type: str) -> dict:
     slug = name.replace(".", "-")
+    webhook = {"id": f"cp-{index:02d}-webhook", "name": "Authenticated middleware event", "type": "n8n-nodes-base.webhook", "typeVersion": 2,
+               "position": [0, 0], "webhookId": f"codestra-{slug}",
+               "parameters": {"httpMethod": "POST", "path": f"codestra-{slug}", "authentication": "headerAuth", "responseMode": "lastNode"},
+               "credentials": {"httpHeaderAuth": {"id": "codestraMiddlewareHeaderAuth", "name": "Codestra Middleware Header Auth"}}}
+    validate = {"id": f"cp-{index:02d}-validate", "name": "Validate and preserve context", "type": "n8n-nodes-base.code", "typeVersion": 2,
+                "position": [260, 0], "parameters": {"jsCode": validation_code(name, event_type)}}
+    authorize = middleware_request(f"cp-{index:02d}-authorize", "Authorize in Middleware", "/api/v1/automation/authorize", "={{JSON.stringify($json)}}", [520, 0])
+    execute = middleware_request(f"cp-{index:02d}-execute", "Execute governed business process", "/api/v1/automation/execute", "={{JSON.stringify($json)}}", [780, 0])
+    result = {"id": f"cp-{index:02d}-result", "name": "Build governed completion", "type": "n8n-nodes-base.code", "typeVersion": 2,
+              "position": [1040, 0], "parameters": {"jsCode": result_code()}}
+    callback = middleware_request(f"cp-{index:02d}-callback", "Record execution result", "/api/v1/automation/results", "={{JSON.stringify($json)}}", [1300, 0])
+    names = [node["name"] for node in (webhook, validate, authorize, execute, result, callback)]
     return {
         "id": f"CodestraCP{index:02d}", "name": f"CP-{index:02d}-{name.upper()}-V1", "active": False,
-        "nodes": [
-            {"id": f"cp-{index:02d}-webhook", "name": "Authenticated middleware event", "type": "n8n-nodes-base.webhook", "typeVersion": 2,
-             "position": [0, 0], "webhookId": f"codestra-{slug}",
-             "parameters": {"httpMethod": "POST", "path": f"codestra-{slug}", "authentication": "headerAuth", "responseMode": "lastNode"},
-             "credentials": {"httpHeaderAuth": {"id": "codestraMiddlewareHeaderAuth", "name": "Codestra Middleware Header Auth"}}},
-            {"id": f"cp-{index:02d}-validate", "name": "Validate, deduplicate and preserve context", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [280, 0],
-             "parameters": {"jsCode": validation_code(name, event_type)}},
-        ],
-        "connections": {"Authenticated middleware event": {"main": [[{"node": "Validate, deduplicate and preserve context", "type": "main", "index": 0}]]}},
-        "settings": {"executionOrder": "v1", "errorWorkflow": "CodestraCP90", "saveExecutionProgress": True, "saveManualExecutions": True, "timezone": "America/Santo_Domingo"},
+        "nodes": [webhook, validate, authorize, execute, result, callback],
+        "connections": {names[i]: {"main": [[{"node": names[i + 1], "type": "main", "index": 0}]]} for i in range(5)},
+        "settings": {"executionOrder": "v1", "errorWorkflow": "CodestraCP90", "saveExecutionProgress": True,
+                     "saveManualExecutions": False, "timezone": "America/Santo_Domingo"},
         "tags": [], "meta": {"templateCredsSetupCompleted": False},
     }
 
@@ -69,11 +93,15 @@ def error_workflow() -> dict:
         "nodes": [
             {"id": "cp-90-trigger", "name": "Workflow Error", "type": "n8n-nodes-base.errorTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {}},
             {"id": "cp-90-structure", "name": "Structure failure", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [280, 0],
-             "parameters": {"jsCode": "const e=$json.execution||{}; const w=$json.workflow||{}; return [{json:{ok:false,failure_path:'common_error_workflow',workflow_id:w.id||null,workflow_name:w.name||null,execution_id:e.id||null,correlation_id:$json.correlation_id||null,tenant_id:$json.tenant_id||null,customer_id:$json.customer_id||null,error:{name:e.error?.name||'WorkflowError',message:e.error?.message||'workflow_failed'},occurred_at:new Date().toISOString()}}];"}},
+             "parameters": {"jsCode": "const e=$json.execution||{}; if(e.id===undefined || e.id===null || String(e.id).trim()==='') throw new Error('source_execution_required'); const executionId=String(e.id); return [{json:{ok:false,status:'FAILED',workflow_key:'resolve-from-execution',execution_id:executionId,event_id:'resolve-from-execution',correlation_id:'resolve-from-execution',idempotency_key:'n8n-failure:'+executionId,actions:[],completed_at:new Date().toISOString(),error:{name:e.error?.name||'WorkflowError',message:e.error?.message||'workflow_failed'}}}];"}},
+            middleware_request("cp-90-callback", "Record governed failure", "/api/v1/automation/results", "={{JSON.stringify($json)}}", [560, 0], include_tenant_header=False),
         ],
-        "connections": {"Workflow Error": {"main": [[{"node": "Structure failure", "type": "main", "index": 0}]]}},
-        "settings": {"executionOrder": "v1", "saveExecutionProgress": True, "saveManualExecutions": True, "timezone": "America/Santo_Domingo"},
-        "tags": [], "meta": {"templateCredsSetupCompleted": False},
+        "connections": {
+            "Workflow Error": {"main": [[{"node": "Structure failure", "type": "main", "index": 0}]]},
+            "Structure failure": {"main": [[{"node": "Record governed failure", "type": "main", "index": 0}]]},
+        },
+        "settings": {"executionOrder": "v1", "saveExecutionProgress": True, "saveManualExecutions": False,
+                     "timezone": "America/Santo_Domingo"}, "tags": [], "meta": {"templateCredsSetupCompleted": False},
     }
 
 
