@@ -1,0 +1,42 @@
+{
+  "date": "2026-09-10",
+  "server": "65.109.65.169",
+  "keycloak_pull_request": "https://github.com/appolon1908-hue/Keycloak/pull/106",
+  "source_validation": {
+    "focused_tests_passed": 18,
+    "compose_render": "pass",
+    "changed_environment_keys": [
+      "PROVISIONING_SERVICE_CLIENT_ID",
+      "PROVISIONING_SERVICE_CLIENT_SECRET_FILE"
+    ],
+    "other_changed_service_fields": [
+      "volumes"
+    ],
+    "other_services_changed": []
+  },
+  "live_readback": {
+    "authentication_preflight": "blocked",
+    "reason": "production_client_id_mismatch",
+    "issuer_recreated": false,
+    "keycloak_changed": false,
+    "calls_placed": 0
+  },
+  "credential_preparation": {
+    "protected_environment": "production",
+    "secret_name": "KC_CLIENT_SECRET_CODESTRA_PROVISIONING_SERVICE",
+    "prepared": true,
+    "active": false,
+    "file_uid": 10001,
+    "file_mode": "0400",
+    "secret_material_in_evidence": false
+  },
+  "remaining_requirements": [
+    "protected Keycloak source review and production certification",
+    "independently reviewed client registration and view-users role/scope binding",
+    "successful authenticated preflight before applying the issuer overlay",
+    "separate session and controlled-call prerequisites"
+  ],
+  "source_commits": {
+    "identity_repository": "9b1e37dc4ec00eb330cc4290df8487f5eab4956c"
+  }
+}
