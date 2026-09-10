@@ -118,3 +118,17 @@ def test_root_signer_must_match_selected_ca(authority):
     _, root, issuer_key, _, _ = authority
     with pytest.raises(ValueError, match="does not match"):
         module.issue_root_crl(root, issuer_key, initialize=True)
+
+
+def test_renewal_preserves_revocations_from_unnumbered_crl(authority):
+    root_key, root, _, issuer, _ = authority
+    now = datetime.now(timezone.utc)
+    revoked = x509.RevokedCertificateBuilder().serial_number(issuer.serial_number).revocation_date(now).build()
+    previous = (
+        x509.CertificateRevocationListBuilder().issuer_name(root.subject)
+        .last_update(now - timedelta(minutes=1)).next_update(now + timedelta(days=1))
+        .add_revoked_certificate(revoked).sign(root_key, hashes.SHA256())
+    )
+    renewed = module.issue_root_crl(root, root_key, previous)
+    assert [item.serial_number for item in renewed] == [issuer.serial_number]
+    assert renewed.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number == 1

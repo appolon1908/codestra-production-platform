@@ -50,7 +50,10 @@ def issue_root_crl(root, signer, previous=None, *, initialize=False, now=None, d
     if previous is not None:
         if previous.issuer != root.subject or not previous.is_signature_valid(root.public_key()):
             raise ValueError("Previous root CRL has an invalid issuer or signature")
-        number = previous.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number + 1
+        try:
+            number = previous.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number + 1
+        except x509.ExtensionNotFound:
+            number = 1
     builder = (
         x509.CertificateRevocationListBuilder()
         .issuer_name(root.subject)
@@ -97,7 +100,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root-certificate", type=Path, required=True)
     parser.add_argument("--root-key-file", type=Path, required=True)
-    parser.add_argument("--expected-root-sha256", required=True)
+    parser.add_argument("--expected-root-file-sha256", required=True,
+                        help="SHA-256 checksum of the exact root certificate PEM file (not its DER fingerprint)")
     parser.add_argument("--previous-root-crl", type=Path)
     parser.add_argument("--initialize-root-crl", action="store_true")
     parser.add_argument("--provider-certificate", type=Path, required=True)
@@ -108,8 +112,8 @@ def main():
     if args.output_root_crl.exists() or args.output_bundle.exists():
         raise ValueError("Output candidate already exists")
     root_data = args.root_certificate.read_bytes()
-    if hashlib.sha256(root_data).hexdigest() != args.expected_root_sha256:
-        raise ValueError("Root certificate fingerprint differs from the selected authority")
+    if hashlib.sha256(root_data).hexdigest() != args.expected_root_file_sha256:
+        raise ValueError("Root certificate PEM file checksum differs from the selected authority")
     metadata = args.root_key_file.lstat()
     if args.root_key_file.is_symlink() or metadata.st_mode & 0o077 or metadata.st_uid not in (0, os.geteuid()):
         raise ValueError("Root signing key file has unsafe ownership or permissions")
