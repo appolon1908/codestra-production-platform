@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from control_plane_service import calling_readiness as readiness
+from control_plane_service import server_b_readiness
 
 
 NOW = datetime(2026, 9, 9, 12, tzinfo=timezone.utc)
@@ -48,6 +49,23 @@ def evidence(now=NOW):
         name: {"passed": True, "contract_digest": DIGEST, "evidence_digest": DIGEST,
                "release_digest": expected["release_digest"]}
         for name in readiness.PROOFS
+    }
+    observed["server_b"] = {
+        "schema_version": "server-b-readiness.v1", "captured_at": now.isoformat(),
+        "public_ip": "65.21.67.207", "private_ip": "10.40.0.2",
+        "source_sha": expected["components"]["vicidial"]["source_sha"],
+        "artifact_digest": expected["components"]["vicidial"]["artifact_digest"],
+        "release_digest": expected["release_digest"],
+        "deployment_profile": "production-candidate",
+        **{key: True for key in server_b_readiness.REQUIRED_CHECKS},
+        **{key: 0 for key in server_b_readiness.ZERO_COUNTERS},
+        "health_units": {name: {
+            "result": "success", "exit_status": 0, "last_success_age_seconds": 5,
+        } for name in server_b_readiness.HEALTH_UNITS},
+        "call_counters": {
+            "authority": "durable-cdr-and-call-ledger", "same_observation_window": True,
+            "calls_placed_before": 0, "calls_placed_after": 0,
+        },
     }
     return expected, observed
 
@@ -197,6 +215,11 @@ def test_http_route_authorization_and_readiness_status(monkeypatch, tmp_path):
             assert request(role)[0] == 403
         assert request("platform_admin")[0] == 200
         assert request("platform_admin", "?expected=/etc/passwd")[0] == 400
+        observed["server_b"]["outbox_depth"] = 87
+        (tmp_path / "OBSERVED.json").write_text(json.dumps(observed))
+        status, body = request("platform_admin")
+        assert status == 503
+        assert "SERVER_B_OUTBOX_DEPTH_NONZERO_OR_UNKNOWN" in codes(body)
         monkeypatch.delenv("CALLING_OBSERVED_EVIDENCE_FILE")
         status, body = request("platform_admin")
         assert status == 503
