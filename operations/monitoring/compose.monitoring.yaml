@@ -45,6 +45,16 @@ services:
       - /etc/codestra/secrets/monitoring/secondary_receiver_url:/run/secrets/alertmanager_secondary_receiver_url:ro
       - /etc/codestra/secrets/monitoring/recovery_receiver_url:/run/secrets/alertmanager_recovery_receiver_url:ro
       - /etc/codestra/secrets/monitoring/rejected_route_url:/run/secrets/alertmanager_rejected_route_url:ro
+      - type: bind
+        source: /etc/codestra/secrets/monitoring/receiver_bearer
+        target: /run/secrets/alertmanager_receiver_bearer
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: /etc/codestra/secrets/monitoring/social_staging_test_receiver_url
+        target: /run/secrets/alertmanager_social_staging_test_receiver_url
+        read_only: true
+        bind: {create_host_path: false}
       - alertmanager_data:/alertmanager
     networks:
       monitoring: {}
