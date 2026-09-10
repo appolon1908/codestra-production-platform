@@ -1,0 +1,88 @@
+name: Audit production source lock against protected refs
+
+on:
+  pull_request:
+    branches:
+      - release/production-activation
+    paths:
+      - "PRODUCTION-SOURCE-LOCK.yaml"
+      - "tools/audit_production_source_lock_remote.py"
+      - "tests/test_audit_production_source_lock_remote.py"
+      - ".github/workflows/audit-production-source-lock-remote.yml"
+  push:
+    branches:
+      - release/production-activation
+    paths:
+      - "PRODUCTION-SOURCE-LOCK.yaml"
+      - "tools/audit_production_source_lock_remote.py"
+      - "tests/test_audit_production_source_lock_remote.py"
+      - ".github/workflows/audit-production-source-lock-remote.yml"
+  workflow_dispatch:
+    inputs:
+      require_match:
+        description: Fail unless every recorded source ref matches GitHub
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned parser
+        run: python3 -m pip install --disable-pip-version-check --no-cache-dir PyYAML==6.0.3
+
+      - name: Run extraction regressions
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile tools/audit_production_source_lock_remote.py
+          python3 tests/test_audit_production_source_lock_remote.py
+          git diff --check
+
+      - name: Produce real remote source audit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          args=()
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.require_match }}" == "true" ]]; then
+            test "${GITHUB_REF}" = "refs/heads/release/production-activation"
+            args+=(--require-match)
+          fi
+          python3 tools/audit_production_source_lock_remote.py \
+            --output "${RUNNER_TEMP}/production-source-lock-remote-audit.json" \
+            "${args[@]}"
+
+      - name: Upload sanitized audit
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-source-lock-remote-audit-${{ github.sha }}
+          path: ${{ runner.temp }}/production-source-lock-remote-audit.json
+          if-no-files-found: error
+          retention-days: 30

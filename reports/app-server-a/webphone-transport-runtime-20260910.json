@@ -1,0 +1,53 @@
+{
+  "observed_at_utc": "2026-09-10T01:24:16.720206+00:00",
+  "server": "65.109.65.169",
+  "source_commit": "6e6e72abc84e1d18ebe1c9009eeabeff748fb8a7",
+  "container": "codestra-middleware-webphone-session-issuer-1",
+  "container_id": "99d88c2fe017f3622c12bf4357b852671d675bdbeb53530bbef756891cc6fad6",
+  "image_id": "sha256:48dbb4201b4cf8abee1600936a84da52a92969ab124fb44a0007059e75d57e85",
+  "image_revision": "80954a1ecb4eae49a57a9de245f78fd9a2f825a1",
+  "container_health": "healthy",
+  "image_unchanged": true,
+  "all_existing_boolean_flags_unchanged": true,
+  "runtime_applied": true,
+  "transport": {
+    "url": "https://provisioning-service-production:8443",
+    "legacy_url": "",
+    "keycloak_mode": true,
+    "client_id": "codestra-provisioning-service-staging",
+    "checks": {
+      "/health": {
+        "http_status": 200,
+        "status": "ok",
+        "degraded_capabilities": []
+      },
+      "/ready": {
+        "http_status": 200,
+        "status": "ready",
+        "degraded_capabilities": [
+          "agent_desktop",
+          "email_provider",
+          "keycloak",
+          "n8n_event",
+          "odoo",
+          "reconciliation",
+          "sip",
+          "verification",
+          "vicidial"
+        ]
+      }
+    },
+    "keycloak_tls_http_status": 200
+  },
+  "call_check": {
+    "returncode": 0,
+    "output": "0 active channels\n0 active calls\n0 calls processed"
+  },
+  "calls_placed_by_this_change": 0,
+  "backup_directory": "/var/backups/codestra/webphone-transport-20260910T012326Z",
+  "remaining_blockers": [
+    "issuer machine client is staging; production service expects codestra-provisioning-service",
+    "existing production credential returned HTTP 401 invalid_client",
+    "production readiness reports disabled or degraded session/call capabilities"
+  ]
+}

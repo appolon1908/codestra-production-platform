@@ -1,0 +1,30 @@
+name: Validate private platform monitoring
+on:
+  pull_request:
+    branches: [release/production-activation]
+    paths:
+      - operations/monitoring/**
+      - .github/workflows/platform-monitoring.yml
+  push:
+    branches: [release/production-activation]
+    paths:
+      - operations/monitoring/**
+      - .github/workflows/platform-monitoring.yml
+permissions:
+  contents: read
+jobs:
+  validate-platform-monitoring:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate configuration and failure semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=prom/prometheus@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893
+          args=(--rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=128m --cap-drop ALL --security-opt no-new-privileges:true --mount "type=bind,src=$PWD/operations/monitoring,dst=/work,readonly" --entrypoint /bin/promtool)
+          docker run "${args[@]}" "$image" check config --syntax-only /work/prometheus.yml
+          docker run "${args[@]}" "$image" test rules /work/tests/platform-integration.test.yml

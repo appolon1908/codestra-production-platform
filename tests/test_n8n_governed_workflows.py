@@ -36,14 +36,29 @@ def test_workflows_are_inactive_authenticated_idempotent_and_context_preserving(
     for item in workflows()[1:]:
         assert item["active"] is False
         assert item["settings"]["errorWorkflow"] == "CodestraCP90"
-        webhook, validation = item["nodes"]
+        assert len(item["nodes"]) == 6
+        webhook, validation, authorize, execute, result, callback = item["nodes"]
         assert webhook["parameters"]["authentication"] == "headerAuth"
         assert webhook["credentials"]["httpHeaderAuth"]["id"] == "codestraMiddlewareHeaderAuth"
         code = validation["parameters"]["jsCode"]
         for required in ("correlation_id", "tenant_id", "customer_id", "idempotency_key"):
             assert required in code
         assert "$getWorkflowStaticData" not in code
-        assert "httpRequest" not in json.dumps(item)
+        assert authorize["type"] == "n8n-nodes-base.httpRequest"
+        assert authorize["parameters"]["url"].endswith("/api/v1/automation/authorize")
+        assert execute["type"] == "n8n-nodes-base.httpRequest"
+        assert execute["parameters"]["url"].endswith("/api/v1/automation/execute")
+        assert callback["type"] == "n8n-nodes-base.httpRequest"
+        assert callback["parameters"]["url"].endswith("/api/v1/automation/results")
+        requests = json.dumps((authorize, execute, callback))
+        assert "https://api.codestra.co" in requests
+        assert "$env." not in requests
+        assert authorize["parameters"]["nodeCredentialType"] == "oAuth2Api"
+        assert execute["parameters"]["nodeCredentialType"] == "oAuth2Api"
+        assert callback["parameters"]["nodeCredentialType"] == "oAuth2Api"
+        assert "10.40.0.4" not in json.dumps(item)
+        assert result["name"] == "Build governed completion"
+        assert "executed_actions" in result["parameters"]["jsCode"]
 
 
 def test_manifest_matches_exports_and_contains_no_secrets():
@@ -75,3 +90,29 @@ def test_middleware_timeout_retries_are_bounded_and_end_in_dead_letter(monkeypat
             assert row["attempts"] == attempt
             assert row["state"] == ("dead_letter" if attempt == worker.MAX_ATTEMPTS else "retrying")
             db.execute("UPDATE event_deliveries SET next_attempt=? WHERE event_id=?", (time.time() - 1, event["event_id"]))
+
+
+def test_unconfigured_target_advances_parent_to_dead_letter(monkeypatch, tmp_path):
+    current = Store(str(tmp_path / "control-plane.db"))
+    event = validate_envelope({
+        "event_type": "customer.created", "event_version": "1.0",
+        "occurred_at": "2026-08-15T00:00:00Z", "tenant_id": "tenant",
+        "customer_id": "customer", "correlation_id": "correlation",
+        "idempotency_key": "missing-target", "payload": {"synthetic": True},
+    }, "odoo", "missing-target-event")
+    current.ingest(event)
+    monkeypatch.setattr(worker, "store", lambda: current)
+    monkeypatch.setenv("CONTROL_PLANE_OUTBOUND_ENABLED", "true")
+    monkeypatch.delenv("CONTROL_PLANE_N8N_URL", raising=False)
+    for _ in range(worker.MAX_ATTEMPTS):
+        worker.once()
+        with current.connect() as db:
+            db.execute(
+                "UPDATE event_deliveries SET next_attempt=? WHERE event_id=?",
+                (time.time() - 1, event["event_id"]),
+            )
+    with current.connect() as db:
+        parent = db.execute(
+            "SELECT state,last_error FROM events WHERE event_id=?", (event["event_id"],)
+        ).fetchone()
+    assert dict(parent) == {"state": "dead_letter", "last_error": "TargetNotConfigured"}

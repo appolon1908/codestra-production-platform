@@ -1,0 +1,26 @@
+{
+  "started_at": "20260910T124928Z",
+  "accepted_source": "385c0de9d877abe6c7fb00cbddf8179ecb85839e",
+  "image": "prom/blackbox-exporter@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc",
+  "old_container": "646b8cbdd6aaba1b3faa985497f8bcccd37a5f005bd0f52945a62ba586b39591",
+  "old_networks": [
+    "codestra-monitoring_monitoring"
+  ],
+  "config_backup_verified": true,
+  "config_check_exit": 0,
+  "new_container": "5173f21ced8473cd314d811889455805f26b292aa6154169bddba56341ce8daf",
+  "new_networks": [
+    "codestra-monitoring_monitoring",
+    "codestra_backend",
+    "codestra_edge"
+  ],
+  "no_published_ports": true,
+  "completed_at": "2026-09-10T12:49:29.696373+00:00",
+  "scope": "Existing core Blackbox network reconciliation; added integration probes await this PR deployment",
+  "verified_at": "2026-09-10T12:51:00Z",
+  "core_targets_up": 34,
+  "core_targets_total": 34,
+  "mail_api_probe_success": 1,
+  "reseller_portal_probe_success": 1,
+  "business_actions_triggered": false
+}

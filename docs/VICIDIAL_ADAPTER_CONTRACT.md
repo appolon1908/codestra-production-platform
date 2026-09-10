@@ -9,6 +9,17 @@
 - If the adapter must bind to a public interface, firewall it to the exact authorized source and require application-layer authentication.
 - Do not expose VICIdial MariaDB to the application server or the public Internet.
 
+## Routed readiness on Server B
+
+The paths below are backend paths. Through the accepted private Apache
+ingress on port 8443, prefix them with `/restricted-vicidial`; readiness is
+`GET https://edge.internal.codestra.agency:8443/restricted-vicidial/ready`.
+Use the existing Server A client certificate and CA. A root-level
+`/ready` request is outside this route and may correctly return 403.
+Readiness with `writes_enabled=false` certifies the read-only adapter,
+not live dialing. See [webphone transport readiness](WEBPHONE_TRANSPORT_READINESS.md)
+for the separate Keycloak session backend.
+
 ## Security
 
 - No general SQL endpoint.

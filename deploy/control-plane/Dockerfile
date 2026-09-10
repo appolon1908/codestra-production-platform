@@ -6,6 +6,8 @@ USER root
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/python -m pip install --no-cache-dir --disable-pip-version-check \
       'psycopg[binary]==3.3.4' \
+      'nats-py==2.15.0' \
+      'websockets==17.0.1' \
  && /opt/venv/bin/python -m pip uninstall -y pip setuptools wheel \
  && mkdir /data
 
