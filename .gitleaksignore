@@ -18,6 +18,7 @@ reports/github/SECRET_SCAN_FINDINGS.csv:generic-api-key:27
 7d2eda6f7f9cb81b1b713896bf03f585cb8c56bb:webphone_middleware/tests/test_telephony_command_client.py:generic-api-key:149
 7d2eda6f7f9cb81b1b713896bf03f585cb8c56bb:webphone_middleware/tests/test_telephony_command_client.py:generic-api-key:175
 70d28258ff9a3dd9a7eb5535e6998fca0e58e909:tests/test_campaign_email_provisioning.py:generic-api-key:64
+f99f26d2484e6cb215b827143bee73fcb2f35908:vicidial/tests/test_phase3b_security.py:generic-api-key:23
 # Synthetic idempotency labels introduced in the mail authority test commit;
 # neither value is a credential or accepted by an authentication path.
 590b0b7ca9a74215c1fbc25f5903497b0c85f23c:tests/test_mail_platform_authority.py:generic-api-key:29
