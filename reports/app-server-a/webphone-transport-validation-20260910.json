@@ -22,5 +22,7 @@
     "token_error": "invalid_client",
     "issuer_client_still_staging": true
   },
-  "scope": "transport only; session and call readiness not certified"
+  "scope": "transport only; session and call readiness not certified",
+  "phase": "pre-deployment validation",
+  "runtime_result": "webphone-transport-runtime-20260910.json"
 }
