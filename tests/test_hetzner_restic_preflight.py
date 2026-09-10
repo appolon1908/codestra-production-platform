@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -14,7 +16,16 @@ SPEC.loader.exec_module(preflight)
 
 
 @pytest.fixture
-def profile(tmp_path):
+def secure_directory():
+    # Use a private directory beneath this checkout; /tmp is intentionally
+    # rejected because another user can write to that ancestor.
+    with tempfile.TemporaryDirectory(prefix="hetzner-profile-", dir=SOURCE.parents[2]) as name:
+        yield Path(name)
+
+
+@pytest.fixture
+def profile(secure_directory):
+    tmp_path = secure_directory
     values = {"schema_version": 1, "region": "fsn1",
               "bucket": "codestra-test-backups", "prefix": "codestra/production"}
     for name in ("access_key_id_file", "secret_access_key_file", "restic_password_file"):
@@ -67,7 +78,8 @@ def test_duplicate_json_keys_are_rejected(profile):
 
 
 @pytest.mark.parametrize("kind", ["missing", "empty", "readable", "symlink", "directory"])
-def test_missing_or_unsafe_credentials_are_rejected(profile, kind, tmp_path):
+def test_missing_or_unsafe_credentials_are_rejected(profile, kind, secure_directory):
+    tmp_path = secure_directory
     path = Path(profile[1]["secret_access_key_file"])
     if kind == "missing":
         path.unlink()
@@ -100,6 +112,8 @@ def test_environment_is_isolated_and_metadata_is_not_printed(profile):
     args, kwargs = run.call_args
     assert args[0] == ["/usr/bin/restic", "--no-cache", "--no-lock", "snapshots", "--json"]
     assert kwargs["env"]["AWS_SECRET_ACCESS_KEY"] == secret
+    assert kwargs["env"]["RESTIC_PASSWORD"] == "synthetic-test-credential-restic_password_file"
+    assert "RESTIC_PASSWORD_FILE" not in kwargs["env"]
     assert set(kwargs["env"]).isdisjoint(poisoned)
     assert result["repository_access"] == "readable"
     assert result["snapshot_count"] == 1
@@ -135,3 +149,80 @@ def test_empty_initialized_repository_is_readable_but_not_restore_proof(profile)
     assert result["repository_access"] == "readable"
     assert result["snapshot_count"] == 0
     assert result["restore_verified"] is False
+
+
+@pytest.mark.parametrize("mode", [0o755, 0o770, 0o777])
+def test_public_or_writable_parent_directory_is_rejected(profile, mode):
+    directory = profile[0].parent
+    directory.chmod(mode)
+    try:
+        with patch.object(preflight.subprocess, "run") as run, pytest.raises(
+                preflight.ProfileError, match="unsafe_protected_directory"):
+            preflight.inspect_profile(profile[0], True)
+        run.assert_not_called()
+    finally:
+        directory.chmod(0o700)
+
+
+def test_writable_ancestor_is_rejected_even_when_immediate_parent_is_private(profile):
+    ancestor = profile[0].parent / "shared"
+    ancestor.mkdir(mode=0o777)
+    ancestor.chmod(0o777)
+    private = ancestor / "private"
+    private.mkdir(mode=0o700)
+    credential = private / "credential"
+    credential.write_text("synthetic-test-only")
+    credential.chmod(0o600)
+    path = update(profile, secret_access_key_file=str(credential))
+    with patch.object(preflight.subprocess, "run") as run, pytest.raises(
+            preflight.ProfileError, match="unsafe_protected_directory"):
+        preflight.inspect_profile(path, True)
+    run.assert_not_called()
+
+
+def test_symlink_ancestor_is_rejected(profile):
+    directory = profile[0].parent
+    real = directory / "real"
+    real.mkdir(mode=0o700)
+    link = directory / "alias"
+    link.symlink_to(real, target_is_directory=True)
+    credential = real / "credential"
+    credential.write_text("synthetic-test-only")
+    credential.chmod(0o600)
+    path = update(profile, secret_access_key_file=str(link / "credential"))
+    with patch.object(preflight.subprocess, "run") as run, pytest.raises(preflight.ProfileError):
+        preflight.inspect_profile(path, True)
+    run.assert_not_called()
+
+
+def test_foreign_owned_parent_is_rejected(profile):
+    directory_info = profile[0].parent.stat()
+    original_fstat = os.fstat
+
+    def foreign_owner(descriptor):
+        info = original_fstat(descriptor)
+        if (info.st_dev, info.st_ino) == (directory_info.st_dev, directory_info.st_ino):
+            return SimpleNamespace(st_mode=info.st_mode, st_uid=os.geteuid() + 100000)
+        return info
+
+    with patch.object(preflight.os, "fstat", side_effect=foreign_owner), patch.object(
+            preflight.subprocess, "run") as run, pytest.raises(
+                preflight.ProfileError, match="unsafe_protected_directory"):
+        preflight.inspect_profile(profile[0], True)
+    run.assert_not_called()
+
+
+def test_child_uses_validated_password_without_reopening_path(profile):
+    password_path = Path(profile[1]["restic_password_file"])
+    validated_password = password_path.read_text().strip()
+
+    def read_repository(args, **kwargs):
+        password_path.write_text("changed-after-validation")
+        assert kwargs["env"]["RESTIC_PASSWORD"] == validated_password
+        assert "RESTIC_PASSWORD_FILE" not in kwargs["env"]
+        return subprocess.CompletedProcess(args, 0, "[]", "")
+
+    with patch.object(preflight.subprocess, "run", side_effect=read_repository):
+        result = preflight.inspect_profile(profile[0], True)
+    assert result["repository_access"] == "readable"
+    assert validated_password not in json.dumps(result)

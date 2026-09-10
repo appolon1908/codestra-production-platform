@@ -16,10 +16,14 @@ Use a bucket name made of lowercase letters, digits and hyphens. Replace the
 uppercase bucket placeholder before validation.
 
 Install the profile as /etc/codestra/backup/hetzner-restic.json, owned by root,
-mode 0600, in a root-owned directory. The three referenced credential files
+mode 0600, in a root-owned 0700 directory. The three referenced credential files
 must also be root-owned regular files, mode 0600, in a root-owned 0700 directory.
 Inject their values through the approved secret manager or a private terminal.
 Keep credential values out of Git, shell arguments, logs and chat.
+The validator opens the full directory chain without following symlinks and
+rejects foreign owners and group/world-writable ancestors. Each immediate
+parent must also be private. The validated Restic password is passed only in
+the child environment, so Restic does not reopen its source path.
 
 The Restic password is a recovery secret. Preserve the existing password when
 copying the existing repository bytes. A new separately initialized repository

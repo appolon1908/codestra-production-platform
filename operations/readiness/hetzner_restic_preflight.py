@@ -25,11 +25,33 @@ class ProfileError(ValueError):
     """A bounded configuration error that contains no supplied values."""
 
 
+def protected_directory(descriptor: int, *, private: bool = False) -> None:
+    info = os.fstat(descriptor)
+    if (not stat.S_ISDIR(info.st_mode)
+            or info.st_uid not in {0, os.geteuid()}
+            or info.st_mode & (0o077 if private else 0o022)):
+        raise ProfileError("unsafe_protected_directory")
+
+
 def protected_text(path: Path) -> str:
-    if not path.is_absolute() or ".." in path.parts:
+    if not path.is_absolute() or ".." in path.parts or "\x00" in str(path):
         raise ProfileError("invalid_protected_path")
+    directory = None
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        directory = os.open("/", flags)
+        # Walk from the root using descriptors: no ancestor symlinks, foreign
+        # owners or group/world-writable directories may redirect the read.
+        for component in path.parts[1:-1]:
+            protected_directory(directory)
+            child = os.open(component, flags, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        protected_directory(directory, private=True)
+        descriptor = os.open(
+            path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=directory,
+        )
         with os.fdopen(descriptor, "rb") as source:
             info = os.fstat(source.fileno())
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
@@ -38,6 +60,9 @@ def protected_text(path: Path) -> str:
             content = source.read(16385)
     except OSError:
         raise ProfileError("protected_file_unavailable") from None
+    finally:
+        if directory is not None:
+            os.close(directory)
     if not content or len(content) > 16384:
         raise ProfileError("invalid_protected_file_size")
     try:
@@ -101,7 +126,7 @@ def credentials(profile: dict) -> dict:
     return {
         "PATH": os.defpath,
         "RESTIC_REPOSITORY": repository(profile),
-        "RESTIC_PASSWORD_FILE": profile["restic_password_file"],
+        "RESTIC_PASSWORD": values["restic_password_file"],
         "AWS_ACCESS_KEY_ID": values["access_key_id_file"],
         "AWS_SECRET_ACCESS_KEY": values["secret_access_key_file"],
         "AWS_DEFAULT_REGION": profile["region"],
