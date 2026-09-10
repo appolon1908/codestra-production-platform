@@ -33,8 +33,23 @@ client ID and selects a separate read-only secret mount; it refuses to
 create a missing host secret path. It is applied after the existing transport
 overlay. It changes neither the verifier nor the image, network or call flags.
 
-Use the existing container's Python dependencies to execute
-`scripts/webphone_auth_preflight.py` inside the issuer. It accepts optional
+Before replacing the running issuer, run the disposable candidate check from
+the reviewed checkout on Server A:
+
+```sh
+sudo python3 scripts/run_webphone_auth_candidate.py
+```
+
+The launcher renders the live Compose files plus the auth overlay, rejects
+unrelated changes or a different image, and runs only Python in a disposable
+container with the candidate credential mounted. It uses `--rm --no-deps -T
+--pull never --entrypoint python`, publishes no service ports, and does not
+replace or restart the running issuer. The source preflight is supplied on
+stdin. This resolves the otherwise circular requirement to validate a credential
+that the existing issuer cannot yet mount.
+
+After deployment, execute `scripts/webphone_auth_preflight.py` inside the issuer
+to validate its actual configuration. It accepts optional
 `--client-id` and `--secret-file` references for a candidate already delivered
 through the supported secret channel; it never accepts secret values as
 arguments. The default reads the issuer's actual settings.

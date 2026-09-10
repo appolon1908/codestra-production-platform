@@ -3,7 +3,7 @@
   "server": "65.109.65.169",
   "keycloak_pull_request": "https://github.com/appolon1908-hue/Keycloak/pull/106",
   "source_validation": {
-    "focused_tests_passed": 18,
+    "focused_tests_passed": 22,
     "compose_render": "pass",
     "changed_environment_keys": [
       "PROVISIONING_SERVICE_CLIENT_ID",
@@ -19,7 +19,15 @@
     "reason": "production_client_id_mismatch",
     "issuer_recreated": false,
     "keycloak_changed": false,
-    "calls_placed": 0
+    "calls_placed": 0,
+    "candidate_preflight": {
+      "calls_placed": 0,
+      "http_status": 401,
+      "reason": "client_authentication_rejected",
+      "running_issuer_replaced": false,
+      "status": "blocked"
+    },
+    "production_client_keycloak_event": "client_not_found"
   },
   "credential_preparation": {
     "protected_environment": "production",
