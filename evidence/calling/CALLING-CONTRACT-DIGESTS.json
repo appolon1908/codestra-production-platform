@@ -1,7 +1,7 @@
 {
   "contract_version": "1.0.0",
   "digest_algorithm": "sha256",
-  "canonical_digest": "b39cdffe56a8185c91174228f0423df68b1137f34875f6ee52f9914f904bf724",
+  "canonical_digest": "843314fea67c35911981203bec83b0bfe57386ce59034d8f4f26a1e5fc0bc438",
   "components": [
     {
       "path": "contracts/telephony/codestra-calling-api.v1.openapi.yaml",
@@ -13,7 +13,7 @@
     },
     {
       "path": "contracts/telephony/codestra-calling-events.v1.asyncapi.yaml",
-      "sha256": "368910d0caffdc2c24bb23014f6247588b814401fbfbe608684db4a34e6f089e"
+      "sha256": "945d6e0db218eecf0df9759a9f8922d79812d9cabe2b8b13c1ca4af06b215155"
     },
     {
       "path": "schemas/integration-event-envelope-v1.schema.json",

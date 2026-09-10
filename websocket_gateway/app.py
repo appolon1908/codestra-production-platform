@@ -1,0 +1,761 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import logging
+import os
+import secrets
+import socket
+import time
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import asyncpg
+import httpx
+import jwt
+import nats
+from nats.js import api as nats_api
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from jwt import PyJWKClient
+from pydantic import BaseModel, Field
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+
+LOG = logging.getLogger("codestra.websocket")
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(message)s")
+
+EVENT_TYPES = {
+    "call.ringing", "call.answered", "call.connected", "call.held", "call.resumed",
+    "call.transfer.started", "call.transfer.completed", "call.hangup", "call.disposition.updated",
+    "recording.starting", "recording.started", "recording.paused", "recording.resumed",
+    "recording.completed", "recording.failed", "recording.available",
+    "agent.ready", "agent.not_ready", "agent.logged_in", "agent.logged_out",
+    "session.expiring", "session.revoked", "realtime.reconnected",
+    "telephony.call.ringing.v1", "telephony.call.answered.v1",
+    "telephony.call.connected.v1", "telephony.call.transferred.v1",
+    "telephony.call.completed.v1", "telephony.call.missed.v1",
+    "telephony.call.dispositioned.v1", "telephony.agent.status-changed.v1",
+}
+
+ACTIVE = Gauge("websocket_connections_active", "Active authenticated sockets")
+TOTAL = Counter("websocket_connections_total", "Authenticated sockets")
+AUTH_FAILURES = Counter("websocket_auth_failures_total", "Authentication failures")
+SENT = Counter("websocket_messages_sent_total", "Messages sent")
+DELIVERY_FAILURES = Counter("websocket_delivery_failures_total", "Delivery failures")
+CLEANUP_FAILURES = Counter("websocket_cleanup_failures_total", "Retention cleanup failures")
+RECONNECTS = Counter("websocket_reconnects_total", "Reconnects")
+REPLAYED = Counter("websocket_replay_events_total", "Events replayed")
+BACKPRESSURE = Counter("websocket_backpressure_disconnects_total", "Backpressure disconnects")
+CROSS_SCOPE = Counter("websocket_cross_scope_denials_total", "Cross-scope denials")
+LATENCY = Histogram("websocket_delivery_latency_seconds", "Persistence-to-socket delivery latency")
+
+
+def now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def secret_file(name: str) -> str:
+    path = os.environ[name]
+    with open(path, encoding="utf-8") as handle:
+        return handle.read().strip()
+
+
+def log_event(message: str, **fields: Any) -> None:
+    safe = {k: v for k, v in fields.items() if k not in {"ticket", "jwt", "token", "phone", "customer_name"}}
+    LOG.info(json.dumps({"timestamp": now().isoformat(), "message": message, **safe}, separators=(",", ":"), default=str))
+
+
+class Settings:
+    database_url = ""
+    internal_token = ""
+    issuer = os.getenv("KEYCLOAK_ISSUER", "https://auth.codestra.co/realms/codestra")
+    audience = os.getenv("KEYCLOAK_AUDIENCE", "codestra-agent-desktop")
+    jwks_url = os.getenv("KEYCLOAK_JWKS_URL", "http://keycloak:8080/realms/codestra/protocol/openid-connect/certs")
+    ws_url = os.getenv("PUBLIC_WS_URL", "wss://api.codestra.agency/ws/agent")
+    allowed_origins = frozenset(filter(None, os.getenv("ALLOWED_ORIGINS", "https://crm.codestra.agency,https://phone.codestra.agency").split(",")))
+    ticket_ttl = min(60, max(30, int(os.getenv("TICKET_TTL_SECONDS", "45"))))
+    auth_timeout = min(10, max(3, int(os.getenv("WS_AUTH_TIMEOUT_SECONDS", "5"))))
+    max_pending = min(1000, max(10, int(os.getenv("MAX_PENDING_MESSAGES", "100"))))
+    max_message_size = min(262144, max(1024, int(os.getenv("MAX_MESSAGE_SIZE", "65536"))))
+    write_timeout = min(10, max(1, int(os.getenv("WRITE_TIMEOUT_SECONDS", "3"))))
+    nats_host = os.getenv("NATS_HOST", "host.docker.internal")
+    nats_port = int(os.getenv("NATS_PORT", "4222"))
+    event_source_health_url = os.getenv("INTERNAL_EVENT_SOURCE_HEALTH_URL", "http://middleware:8095/health")
+    authorization_url = os.getenv(
+        "INTERNAL_AUTHORIZATION_URL",
+        "https://middleware:8095/internal/v1/realtime/authorizations/revalidate",
+    )
+    ticket_consume_url = os.getenv(
+        "INTERNAL_TICKET_CONSUME_URL",
+        "https://middleware:8095/internal/v1/realtime/tickets/consume",
+    )
+    middleware_ca_file = os.getenv("MIDDLEWARE_MTLS_CA_FILE", "")
+    middleware_cert_file = os.getenv("MIDDLEWARE_MTLS_CERT_FILE", "")
+    middleware_key_file = os.getenv("MIDDLEWARE_MTLS_KEY_FILE", "")
+    authorization_timeout = min(5, max(1, int(os.getenv("AUTHORIZATION_TIMEOUT_SECONDS", "3"))))
+    nats_url = os.getenv("NATS_URL", "tls://codestra-nats:4222")
+    nats_credentials_file = os.getenv("NATS_CREDENTIALS_FILE", "")
+    nats_stream = os.getenv("NATS_CALLING_STREAM", "CODESTRA_CALLING_AGENT_EVENTS")
+    event_delivery_enabled = os.getenv("REALTIME_EVENT_DELIVERY_ENABLED", "false").lower() == "true"
+    retention_seconds = 900
+    cleanup_interval = max(30, int(os.getenv("REALTIME_CLEANUP_INTERVAL_SECONDS", "60")))
+
+
+settings = Settings()
+
+
+class Event(BaseModel):
+    event_id: str = Field(min_length=1, max_length=128)
+    schema_version: str = "1.0"
+    type: str
+    correlation_id: str = Field(min_length=1, max_length=128)
+    timestamp: datetime
+    tenant_id: str
+    business_unit_id: str
+    campaign_id: str
+    user_id: str | None = None
+    agent_id: str
+    call_id: str | None = None
+    sequence: int = Field(ge=0)
+    cursor: int | None = Field(default=None, ge=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class Connection:
+    def __init__(self, websocket: WebSocket, scope: dict[str, Any]):
+        self.websocket = websocket
+        self.scope = scope
+        self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(settings.max_pending)
+        self.sender: asyncio.Task[None] | None = None
+        self.delivery_allowed = asyncio.Event()
+        self.delivery_allowed.set()
+
+    def allows(self, event: dict[str, Any]) -> bool:
+        if (
+            event["tenant_id"] != self.scope["tenant_id"]
+            or event["campaign_id"] not in self.scope["campaigns"]
+        ):
+            return False
+        return (
+            self.scope["realtime_role"] == "telephony_supervisor"
+            or event["agent_id"] == self.scope["agent_id"]
+        )
+
+    async def send_loop(self) -> None:
+        while True:
+            item = await self.queue.get()
+            try:
+                await self.delivery_allowed.wait()
+                async with asyncio.timeout(settings.write_timeout):
+                    await self.websocket.send_json(item)
+                SENT.inc()
+                if item.get("timestamp"):
+                    try:
+                        LATENCY.observe(max(0, time.time() - datetime.fromisoformat(item["timestamp"].replace("Z", "+00:00")).timestamp()))
+                    except ValueError:
+                        pass
+            except Exception:
+                DELIVERY_FAILURES.inc()
+                await self.websocket.close(code=4500)
+                return
+
+
+connections: dict[str, Connection] = {}
+delivery_lock = asyncio.Lock()
+
+
+DATABASE_MIGRATION_HEAD = "0002_canonical_scope"
+
+
+async def verify_schema(pool: asyncpg.Pool) -> None:
+    """Fail closed when the independently-run migration is not at HEAD."""
+    at_head = await pool.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM websocket_schema_migrations WHERE version=$1)",
+        DATABASE_MIGRATION_HEAD,
+    )
+    if not at_head:
+        raise RuntimeError(f"database migration head mismatch: expected {DATABASE_MIGRATION_HEAD}")
+    # Connections are process-local. A clean start clears stale ownership only.
+    await pool.execute(
+        "UPDATE realtime_sessions SET active_connection=false WHERE active_connection=true"
+    )
+
+
+async def retention_worker(pool: asyncpg.Pool) -> None:
+    while True:
+        await asyncio.sleep(settings.cleanup_interval)
+        try:
+            async with pool.acquire() as connection, connection.transaction():
+                await connection.execute(
+                    "DELETE FROM realtime_events WHERE persisted_at < now() - ($1 * interval '1 second')",
+                    settings.retention_seconds,
+                )
+                await connection.execute(
+                    "DELETE FROM realtime_sessions WHERE active_connection=false "
+                    "AND expires_at < now() - ($1 * interval '1 second')",
+                    settings.retention_seconds,
+                )
+                await connection.execute("DELETE FROM realtime_idempotency WHERE expires_at < now()")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            CLEANUP_FAILURES.inc()
+            LOG.exception("realtime_retention_cleanup_failed")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings.database_url = secret_file("DATABASE_URL_FILE")
+    settings.internal_token = secret_file("INTERNAL_TOKEN_FILE")
+    # Validate presence at startup, but reload before every request because this
+    # is a short-lived rotated credential.
+    secret_file("MIDDLEWARE_SERVICE_TOKEN_FILE")
+    app.state.pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=20, command_timeout=5)
+    await verify_schema(app.state.pool)
+    retention_task = asyncio.create_task(retention_worker(app.state.pool))
+    app.state.jwks = PyJWKClient(settings.jwks_url, cache_keys=True, lifespan=300)
+    yield
+    for connection in tuple(connections.values()):
+        await connection.websocket.close(code=1012)
+    retention_task.cancel()
+    await asyncio.gather(retention_task, return_exceptions=True)
+    await app.state.pool.close()
+
+
+app = FastAPI(title="Codestra WebSocket Gateway", version="1.0.0", lifespan=lifespan)
+
+
+def roles_of(claims: dict[str, Any]) -> set[str]:
+    realm = set(claims.get("realm_access", {}).get("roles", []))
+    client = set(claims.get("resource_access", {}).get(settings.audience, {}).get("roles", []))
+    return realm | client
+
+
+def decode_access_token(request: Request) -> dict[str, Any]:
+    authorization = request.headers.get("authorization", "")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(401, "bearer token required")
+    token = authorization[7:]
+    try:
+        key = request.app.state.jwks.get_signing_key_from_jwt(token).key
+        claims = jwt.decode(token, key, algorithms=["RS256", "ES256"], issuer=settings.issuer, audience=settings.audience, options={"require": ["exp", "iat", "sub"]})
+    except Exception:
+        AUTH_FAILURES.inc()
+        raise HTTPException(401, "invalid access token") from None
+    required_roles = {"telephony.webphone.use", "realtime.agent.connect"}
+    if not required_roles.issubset(roles_of(claims)):
+        raise HTTPException(403, "required realtime roles missing")
+    required = ("tenant_id", "business_unit_id", "agent_id", "vicidial_user", "extension", "campaigns")
+    if any(not claims.get(field) for field in required) or not isinstance(claims["campaigns"], list):
+        raise HTTPException(403, "agent mapping claims incomplete")
+    if not isinstance(claims.get("authorization_epoch"), int) or claims["authorization_epoch"] < 1:
+        raise HTTPException(403, "authorization epoch missing")
+    claims["realtime_role"] = (
+        "telephony_supervisor"
+        if "realtime.supervisor.connect" in roles_of(claims)
+        else "telephony_agent"
+    )
+    return claims
+
+
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    return {"status": "healthy"}
+
+
+@app.get("/readyz")
+async def readyz(request: Request) -> dict[str, Any]:
+    checks: dict[str, bool] = {"application": True, "authentication_configuration": bool(settings.issuer and settings.audience and settings.jwks_url)}
+    try:
+        checks["database"] = await request.app.state.pool.fetchval("SELECT 1") == 1
+    except Exception:
+        checks["database"] = False
+    try:
+        async with httpx.AsyncClient(timeout=2) as client:
+            response = await client.get(settings.event_source_health_url)
+        checks["internal_event_source"] = response.status_code == 200
+    except Exception:
+        checks["internal_event_source"] = False
+    checks["realtime_state_backend"] = checks["database"]
+    if not all(checks.values()):
+        raise HTTPException(503, detail=checks)
+    return {"status": "ready", "checks": checks}
+
+
+@app.get("/version")
+async def version() -> dict[str, str]:
+    identity = {
+        "service": "codestra-websocket-gateway",
+        "source_sha": os.getenv("SOURCE_SHA", "unknown"),
+        "image_digest": os.getenv("IMAGE_DIGEST", "unknown"),
+        "contract_digest": os.getenv("CALLING_CONTRACT_DIGEST", "unknown"),
+    }
+    if (len(identity["source_sha"]) != 40
+            or not identity["image_digest"].startswith("sha256:")
+            or len(identity["contract_digest"]) != 64):
+        raise HTTPException(503, "immutable release identity unavailable")
+    return identity
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.post("/api/v1/realtime/sessions", status_code=201)
+async def create_session(request: Request, claims: dict[str, Any] = Depends(decode_access_token)) -> dict[str, Any]:
+    session_id = uuid.uuid4()
+    raw_ticket = secrets.token_urlsafe(32)
+    ticket_hash = hashlib.sha256(raw_ticket.encode()).hexdigest()
+    expires_at = now() + timedelta(seconds=settings.ticket_ttl)
+    session_expires = min(datetime.fromtimestamp(claims["exp"], timezone.utc), now() + timedelta(hours=8))
+    async with request.app.state.pool.acquire() as connection, connection.transaction():
+        await connection.execute("""INSERT INTO realtime_sessions
+          (session_id,user_id,tenant_id,business_unit_id,agent_id,vicidial_user,extension,campaigns,
+           realtime_role,authorization_epoch,created_at,expires_at)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12)""",
+          session_id, claims["sub"], claims["tenant_id"], claims["business_unit_id"], claims["agent_id"],
+          claims["vicidial_user"], str(claims["extension"]), json.dumps(claims["campaigns"]),
+          claims["realtime_role"], claims["authorization_epoch"], now(), session_expires)
+        await connection.execute("INSERT INTO realtime_tickets(ticket_hash,session_id,expires_at) VALUES($1,$2,$3)", ticket_hash, session_id, expires_at)
+    log_event("realtime_session_issued", session_id=session_id, user_id=claims["sub"], agent_id=claims["agent_id"], tenant_id=claims["tenant_id"], result="issued")
+    return {"session_id": str(session_id), "expires_at": expires_at.isoformat(), "ws_url": settings.ws_url, "ticket": raw_ticket}
+
+
+async def consume_ticket(pool: asyncpg.Pool, ticket: str) -> dict[str, Any] | None:
+    digest = hashlib.sha256(ticket.encode()).hexdigest()
+    async with pool.acquire() as connection, connection.transaction():
+        row = await connection.fetchrow("""UPDATE realtime_tickets SET used_at=now()
+          WHERE ticket_hash=$1 AND used_at IS NULL AND expires_at>now()
+          RETURNING session_id""", digest)
+        if not row:
+            return None
+        session = await connection.fetchrow("""SELECT * FROM realtime_sessions
+          WHERE session_id=$1 AND revoked_at IS NULL AND expires_at>now() FOR UPDATE""", row["session_id"])
+        if not session:
+            return None
+        conflict = await connection.fetchval("""SELECT session_id FROM realtime_sessions
+          WHERE tenant_id=$1 AND agent_id=$2 AND active_connection=true AND session_id<>$3 AND revoked_at IS NULL LIMIT 1""",
+          session["tenant_id"], session["agent_id"], session["session_id"])
+        if conflict:
+            return {"duplicate": True}
+        await connection.execute("UPDATE realtime_sessions SET active_connection=true WHERE session_id=$1", session["session_id"])
+        result = dict(session)
+        stored_campaigns = result["campaigns"]
+        result["campaigns"] = json.loads(stored_campaigns) if isinstance(stored_campaigns, str) else list(stored_campaigns)
+        return result
+
+
+def middleware_client() -> httpx.AsyncClient:
+    if not all((settings.middleware_ca_file, settings.middleware_cert_file,
+                settings.middleware_key_file, os.getenv("MIDDLEWARE_SERVICE_TOKEN_FILE", ""))):
+        raise RuntimeError("middleware_service_identity_incomplete")
+    return httpx.AsyncClient(
+        timeout=settings.authorization_timeout,
+        verify=settings.middleware_ca_file,
+        cert=(settings.middleware_cert_file, settings.middleware_key_file),
+    )
+
+
+def middleware_headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {secret_file('MIDDLEWARE_SERVICE_TOKEN_FILE')}",
+        "X-Correlation-ID": str(uuid.uuid4()),
+    }
+
+
+async def consume_middleware_ticket(pool: asyncpg.Pool, ticket: str) -> dict[str, Any] | None:
+    """Atomically consume the canonical Middleware ticket and claim local ownership."""
+    try:
+        headers = middleware_headers()
+        async with middleware_client() as client:
+            response = await client.post(
+                settings.ticket_consume_url, headers=headers, json={"ticket": ticket}
+            )
+    except (httpx.HTTPError, RuntimeError):
+        return None
+    if response.status_code != 200:
+        return None
+    try:
+        principal = response.json()
+        expires_at = datetime.fromisoformat(str(principal["expires_at"]).replace("Z", "+00:00"))
+        required = ("tenant_id", "campaign_id", "agent_id", "role",
+                    "authorization_epoch", "maximum_replay_cursor")
+        if (principal.get("active") is not True or any(principal.get(key) is None for key in required)
+                or principal["role"] not in {"telephony_agent", "telephony_supervisor"}
+                or not isinstance(principal["authorization_epoch"], int)
+                or principal["authorization_epoch"] < 1 or expires_at <= now()):
+            return None
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    session_id = uuid.uuid4()
+    async with pool.acquire() as connection, connection.transaction():
+        conflict = await connection.fetchval(
+            """SELECT session_id FROM realtime_sessions
+               WHERE tenant_id=$1 AND agent_id=$2 AND active_connection=true
+                 AND revoked_at IS NULL AND expires_at>now() LIMIT 1""",
+            principal["tenant_id"], principal["agent_id"],
+        )
+        if conflict:
+            return {"duplicate": True}
+        await connection.execute(
+            """INSERT INTO realtime_sessions(
+                 session_id,user_id,tenant_id,business_unit_id,agent_id,vicidial_user,
+                 extension,campaigns,realtime_role,authorization_epoch,created_at,
+                 expires_at,active_connection)
+               VALUES($1,NULL,$2,NULL,$3,NULL,NULL,$4::jsonb,$5,$6,$7,$8,true)""",
+            session_id, principal["tenant_id"], principal["agent_id"],
+            json.dumps([principal["campaign_id"]]), principal["role"],
+            principal["authorization_epoch"], now(), expires_at,
+        )
+    return {**principal, "session_id": session_id,
+            "campaigns": [principal["campaign_id"]],
+            "expires_at": expires_at}
+
+
+async def replay_bounds(
+    pool: asyncpg.Pool, scope: dict[str, Any], last_event_id: str | None
+) -> tuple[int, int, int]:
+    after = 0
+    if last_event_id:
+        value = await pool.fetchval("""SELECT ordinal FROM realtime_events
+          WHERE event_id=$1 AND tenant_id=$2 AND campaign_id=ANY($3::text[])
+            AND ($4='telephony_supervisor' OR agent_id=$5)""",
+          last_event_id, scope["tenant_id"], scope["campaigns"],
+          scope["realtime_role"], scope["agent_id"])
+        if value is None:
+            raise ValueError("replay cursor is outside the authorized scope")
+        after = int(value or 0)
+    watermark = int(await pool.fetchval("SELECT COALESCE(MAX(ordinal), 0) FROM realtime_events") or 0)
+    count = int(await pool.fetchval("""SELECT count(*) FROM realtime_events
+      WHERE ordinal>$1 AND ordinal<=$2 AND tenant_id=$3
+        AND campaign_id=ANY($4::text[])
+        AND ($5='telephony_supervisor' OR agent_id=$6)""",
+      after, watermark, scope["tenant_id"], scope["campaigns"],
+      scope["realtime_role"], scope["agent_id"]) or 0)
+    return after, watermark, count
+
+
+async def replay_page(
+    pool: asyncpg.Pool, scope: dict[str, Any], after: int, watermark: int
+) -> list[tuple[int, dict[str, Any]]]:
+    rows = await pool.fetch("""SELECT ordinal,event_id,schema_version,event_type AS type,correlation_id,occurred_at AS timestamp,
+      tenant_id,business_unit_id,campaign_id,user_id,agent_id,call_id,sequence,payload FROM realtime_events
+      WHERE ordinal>$1 AND ordinal<=$2 AND tenant_id=$3
+        AND campaign_id=ANY($4::text[])
+        AND ($5='telephony_supervisor' OR agent_id=$6)
+      ORDER BY ordinal LIMIT 1000""",
+      after, watermark, scope["tenant_id"], scope["campaigns"],
+      scope["realtime_role"], scope["agent_id"])
+    result: list[tuple[int, dict[str, Any]]] = []
+    for row in rows:
+        document = dict(row)
+        ordinal = int(document.pop("ordinal"))
+        if isinstance(document["payload"], str):
+            document["payload"] = json.loads(document["payload"])
+        document["timestamp"] = row["timestamp"].isoformat()
+        result.append((ordinal, document))
+    return result
+
+
+async def session_is_active(pool: asyncpg.Pool, scope: dict[str, Any]) -> bool:
+    return bool(await pool.fetchval(
+        """SELECT EXISTS(SELECT 1 FROM realtime_sessions
+        WHERE session_id=$1 AND revoked_at IS NULL AND expires_at>now())""",
+        scope["session_id"],
+    ))
+
+
+async def revalidate_authorization(scope: dict[str, Any]) -> str:
+    """Return active, denied, or indeterminate from the middleware authority."""
+    headers = middleware_headers()
+    try:
+        async with middleware_client() as client:
+            for campaign_id in scope["campaigns"]:
+                response = await client.post(settings.authorization_url, headers=headers, json={
+                    "tenant_id": scope["tenant_id"],
+                    "campaign_id": campaign_id,
+                    "agent_id": scope["agent_id"],
+                    "role": scope["realtime_role"],
+                    "authorization_epoch": scope["authorization_epoch"],
+                })
+                if response.status_code in {401, 403, 410}:
+                    return "denied"
+                if response.status_code != 200:
+                    return "indeterminate"
+                status = response.json()
+                expires_at = datetime.fromisoformat(str(status.get("expires_at", "")).replace("Z", "+00:00"))
+                if (
+                    status.get("active") is not True
+                    or status.get("authorization_epoch") != scope["authorization_epoch"]
+                    or expires_at <= now()
+                    or not 1 <= int(status.get("revalidate_after_seconds", 0)) <= 30
+                ):
+                    return "denied"
+    except (httpx.HTTPError, RuntimeError, ValueError, TypeError, json.JSONDecodeError):
+        return "indeterminate"
+    return "active"
+
+
+def calling_subjects(scope: dict[str, Any]) -> tuple[str, ...]:
+    values = (scope["tenant_id"], scope["campaigns"][0], scope["agent_id"])
+    if any(not value or "." in value or "*" in value or ">" in value for value in values):
+        raise RuntimeError("invalid_calling_subject_scope")
+    tenant, campaign, agent = values
+    if scope["realtime_role"] == "telephony_supervisor":
+        return (f"telephony.agent.{tenant}.{campaign}.*", f"telephony.supervisor.{tenant}.{campaign}")
+    return (f"telephony.agent.{tenant}.{campaign}.{agent}",)
+
+
+def canonical_event(envelope: dict[str, Any], cursor: int) -> Event:
+    value = envelope.get("event")
+    if not isinstance(cursor, int) or cursor < 1 or not isinstance(value, dict):
+        raise ValueError("invalid_calling_event_envelope")
+    return Event.model_validate({
+        **value,
+        "schema_version": str(value.get("schema_version")),
+        "timestamp": value.get("occurred_at"),
+        "user_id": value.get("odoo_user_id"),
+        "call_id": value.get("operation_id"),
+        "cursor": cursor,
+        "payload": value,
+    })
+
+
+async def persist_and_deliver(
+    pool: asyncpg.Pool, event: Event, owner: Connection | None = None,
+) -> dict[str, Any]:
+    encoded = json.dumps(event.payload, separators=(",", ":"))
+    if len(encoded.encode()) > settings.max_message_size:
+        raise ValueError("event_payload_too_large")
+    async with delivery_lock:
+        row = await pool.fetchrow("""INSERT INTO realtime_events
+          (event_id,schema_version,event_type,correlation_id,occurred_at,tenant_id,business_unit_id,campaign_id,user_id,agent_id,call_id,sequence,payload)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+          ON CONFLICT(event_id) DO NOTHING RETURNING ordinal""", event.event_id, event.schema_version,
+          event.type, event.correlation_id, event.timestamp, event.tenant_id, event.business_unit_id,
+          event.campaign_id, event.user_id, event.agent_id, event.call_id, event.sequence, encoded)
+        document = event.model_dump(mode="json")
+        delivered = 0
+        recipients = (owner,) if owner else tuple(connections.values())
+        for active in recipients:
+            if not active.allows(document):
+                CROSS_SCOPE.inc()
+                continue
+            claimed = await pool.fetchval(
+                """INSERT INTO realtime_event_delivery(event_id,session_id,attempt_count)
+                   VALUES($1,$2,1) ON CONFLICT(event_id,session_id) DO NOTHING
+                   RETURNING true""",
+                event.event_id, active.scope["session_id"],
+            )
+            if not claimed:
+                continue
+            try:
+                active.queue.put_nowait(document)
+                delivered += 1
+                await pool.execute(
+                    "UPDATE realtime_event_delivery SET delivered_at=now() WHERE event_id=$1 AND session_id=$2",
+                    event.event_id, active.scope["session_id"],
+                )
+            except asyncio.QueueFull:
+                BACKPRESSURE.inc()
+                await active.websocket.close(code=4429)
+    return {"accepted": True, "duplicate": not bool(row), "delivered": delivered}
+
+
+async def forward_jetstream_events(connection: Connection, pool: asyncpg.Pool) -> None:
+    if not settings.event_delivery_enabled:
+        return
+    if not settings.nats_credentials_file:
+        raise RuntimeError("nats_credentials_missing")
+    client = await nats.connect(
+        servers=[settings.nats_url], user_credentials=settings.nats_credentials_file,
+        connect_timeout=3, max_reconnect_attempts=3,
+    )
+    try:
+        config_values: dict[str, Any] = {
+            "ack_policy": nats_api.AckPolicy.EXPLICIT,
+            "deliver_policy": nats_api.DeliverPolicy.NEW,
+            "max_ack_pending": settings.max_pending,
+            "filter_subjects": list(calling_subjects(connection.scope)),
+        }
+        if connection.scope.get("resume_cursor") is not None:
+            config_values.update({
+                "deliver_policy": nats_api.DeliverPolicy.BY_START_SEQUENCE,
+                "opt_start_seq": int(connection.scope["resume_cursor"]) + 1,
+            })
+        subscription = await client.jetstream().pull_subscribe(
+            "", stream=settings.nats_stream,
+            config=nats_api.ConsumerConfig(**config_values),
+        )
+        while True:
+            try:
+                messages = await subscription.fetch(1, timeout=1)
+            except (nats.errors.TimeoutError, asyncio.TimeoutError, TimeoutError):
+                continue
+            for message in messages:
+                try:
+                    metadata = message.metadata
+                    if metadata is None or metadata.sequence is None:
+                        raise ValueError("missing_jetstream_sequence")
+                    event = canonical_event(
+                        json.loads(message.data), int(metadata.sequence.stream),
+                    )
+                    if not connection.allows(event.model_dump(mode="json")):
+                        await message.term()
+                        continue
+                    await persist_and_deliver(pool, event, owner=connection)
+                    await message.ack()
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    await message.term()
+    finally:
+        await client.close()
+
+
+async def run_jetstream(connection: Connection, pool: asyncpg.Pool) -> None:
+    try:
+        await forward_jetstream_events(connection, pool)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        LOG.exception("jetstream_delivery_failed")
+        await connection.websocket.close(code=1011, reason="event_delivery_unavailable")
+
+
+@app.websocket("/ws/agent")
+async def ws_agent(websocket: WebSocket) -> None:
+    origin = websocket.headers.get("origin")
+    if origin not in settings.allowed_origins:
+        CROSS_SCOPE.inc(); await websocket.close(code=4403); return
+    await websocket.accept()
+    scope: dict[str, Any] | None = None
+    connection: Connection | None = None
+    established = False
+    jetstream_task: asyncio.Task[None] | None = None
+    try:
+        try:
+            frame = await asyncio.wait_for(websocket.receive_json(), settings.auth_timeout)
+        except asyncio.TimeoutError:
+            AUTH_FAILURES.inc(); await websocket.close(code=4408); return
+        if frame.get("type") != "auth" or not isinstance(frame.get("ticket"), str) or len(frame["ticket"]) > 256:
+            AUTH_FAILURES.inc(); await websocket.close(code=4401); return
+        scope = await consume_middleware_ticket(websocket.app.state.pool, frame["ticket"])
+        if not scope:
+            AUTH_FAILURES.inc(); await websocket.close(code=4401); return
+        if scope.get("duplicate"):
+            await websocket.close(code=4409); return
+        resume_cursor = frame.get("resume_cursor")
+        if (resume_cursor is not None and
+                (not isinstance(resume_cursor, int) or resume_cursor < 0 or
+                 resume_cursor > scope["maximum_replay_cursor"])):
+            await websocket.close(code=4403, reason="invalid_resume_cursor")
+            return
+        scope["resume_cursor"] = resume_cursor
+        sid = str(scope["session_id"])
+        connection = Connection(websocket, scope)
+        last_event_id = frame.get("last_event_id")
+        try:
+            async with delivery_lock:
+                after, watermark, replay_count = await replay_bounds(
+                    websocket.app.state.pool, scope, last_event_id
+                ) if last_event_id else (0, 0, 0)
+                connections[sid] = connection
+                established = True
+                ACTIVE.inc(); TOTAL.inc()
+                await websocket.send_json({"type": "authenticated", "session_id": sid, "replayed": replay_count})
+                connection.sender = asyncio.create_task(connection.send_loop())
+                jetstream_task = asyncio.create_task(
+                    run_jetstream(connection, websocket.app.state.pool)
+                )
+                while after < watermark:
+                    page = await replay_page(websocket.app.state.pool, scope, after, watermark)
+                    if not page:
+                        break
+                    for ordinal, event in page:
+                        await asyncio.wait_for(
+                            connection.queue.put(event), timeout=settings.write_timeout * 2
+                        )
+                        REPLAYED.inc()
+                        after = ordinal
+        except ValueError:
+            await websocket.close(code=4403, reason="invalid_replay_cursor")
+            return
+        except asyncio.TimeoutError:
+            BACKPRESSURE.inc()
+            await websocket.close(code=4429, reason="replay_backpressure")
+            return
+        if last_event_id:
+            RECONNECTS.inc()
+        next_revalidation = time.monotonic() + 30.0
+        while True:
+            remaining = (scope["expires_at"] - now()).total_seconds()
+            if remaining <= 0:
+                await websocket.close(code=4401, reason="session_expired"); return
+            try:
+                timeout = min(max(0.0, next_revalidation - time.monotonic()), remaining)
+                message = await asyncio.wait_for(websocket.receive_json(), timeout=timeout)
+            except asyncio.TimeoutError:
+                if not await session_is_active(websocket.app.state.pool, scope):
+                    await websocket.close(code=4401, reason="session_expired_or_revoked")
+                    return
+                message = None
+            if time.monotonic() >= next_revalidation:
+                connection.delivery_allowed.clear()
+                authorization = await revalidate_authorization(scope)
+                if authorization != "active":
+                    code = 1008 if authorization == "denied" else 1011
+                    await websocket.close(code=code, reason=f"authorization_{authorization}")
+                    return
+                connection.delivery_allowed.set()
+                next_revalidation = time.monotonic() + 30.0
+            if message is None:
+                continue
+            if message.get("type") == "pong":
+                continue
+            if message.get("type") == "disconnect":
+                await websocket.close(code=1000); return
+            await websocket.send_json({"type": "error", "code": "client_command_not_allowed"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if scope and not scope.get("duplicate"):
+            await websocket.app.state.pool.execute("UPDATE realtime_sessions SET active_connection=false WHERE session_id=$1", scope["session_id"])
+            removed = connections.pop(str(scope["session_id"]), None)
+        else:
+            removed = None
+        if established and removed:
+            ACTIVE.dec()
+        if connection and connection.sender:
+            connection.sender.cancel()
+        if jetstream_task:
+            jetstream_task.cancel()
+
+
+def require_internal(x_codestra_internal_token: str = Header(default="")) -> None:
+    if not secrets.compare_digest(x_codestra_internal_token, settings.internal_token):
+        raise HTTPException(401, "invalid internal identity")
+
+
+@app.post("/internal/v1/realtime/events", status_code=202, dependencies=[Depends(require_internal)])
+async def publish_event(event: Event, request: Request) -> dict[str, Any]:
+    if event.type not in EVENT_TYPES:
+        raise HTTPException(422, "unsupported realtime event type")
+    try:
+        result = await persist_and_deliver(request.app.state.pool, event)
+    except ValueError as exc:
+        raise HTTPException(413, str(exc)) from exc
+    log_event("realtime_event_accepted", event_id=event.event_id, event_type=event.type,
+              tenant_id=event.tenant_id, campaign_id=event.campaign_id, result="accepted",
+              delivered=result["delivered"])
+    return result
+
+
+@app.post("/internal/v1/realtime/sessions/{session_id}/revoke", dependencies=[Depends(require_internal)])
+async def revoke_session(session_id: uuid.UUID, request: Request) -> dict[str, bool]:
+    changed = await request.app.state.pool.fetchval("UPDATE realtime_sessions SET revoked_at=now() WHERE session_id=$1 AND revoked_at IS NULL RETURNING true", session_id)
+    active = connections.get(str(session_id))
+    if active:
+        await active.websocket.close(code=4401)
+    return {"revoked": bool(changed)}
