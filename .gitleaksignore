@@ -27,3 +27,10 @@ f99f26d2484e6cb215b827143bee73fcb2f35908:vicidial/tests/test_phase3b_security.py
 # not credentials and are independently recomputed by calling-contract CI.
 ab869e09c8840d5e7e00424c71c5e2e1ab647d68:evidence/calling/CALLING-CONTRACT-DIGESTS.json:generic-api-key:6
 ab869e09c8840d5e7e00424c71c5e2e1ab647d68:evidence/calling/CALLING-CONTRACT-DIGESTS.json:generic-api-key:8
+# Public, deliberately fake OAuth redaction fixtures in the exact historical
+# test commit below. These values were created for offline tests, were never
+# issued as credentials, and are never used by an authentication path.
+# Exact commit/path/rule/line only: no directory or scanner-rule exclusion.
+df24fb0550768c4d014c57f723524773c4d1748b:tests/test_kong_exporter_credentials.py:generic-api-key:24
+df24fb0550768c4d014c57f723524773c4d1748b:tests/test_kong_exporter_credentials.py:generic-api-key:34
+df24fb0550768c4d014c57f723524773c4d1748b:tests/test_kong_exporter_credentials.py:generic-api-key:39

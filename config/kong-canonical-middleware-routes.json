@@ -1,7 +1,9 @@
 {
+  "schema": "codestra.kong.canonical-routes.v2",
   "canonicalHost": "api.codestra.co",
   "legacyHost": "api.codestra.agency",
-  "allowedExistingRouteNames": [
+  "legacyHostEnabled": false,
+  "unverifiedExistingRouteNames": [
     "codestra-token-validation-certification",
     "cod-web-out-email-production",
     "codestra-communication-canonical-read",
@@ -15,36 +17,52 @@
       "hosts": ["api.codestra.co"],
       "paths": ["/api/v1/callbacks"],
       "methods": ["GET"],
+      "protocols": ["http"],
+      "stripPath": false,
+      "preserveHost": true,
       "serviceHost": "codestra-middleware-integration-api-1",
       "servicePort": 8095,
-      "requiredPlugins": ["jwt", "correlation-id", "rate-limiting", "request-size-limiting"]
+      "securityAuthority": "config/kong-callback-routes.json",
+      "requiredPlugins": ["jwt", "pre-function", "correlation-id", "rate-limiting", "request-size-limiting"]
     },
     {
       "name": "codestra-callback-control",
       "hosts": ["api.codestra.co"],
       "paths": ["/api/v1/control/callbacks"],
       "methods": ["POST"],
+      "protocols": ["http"],
+      "stripPath": false,
+      "preserveHost": true,
       "serviceHost": "codestra-middleware-integration-api-1",
       "servicePort": 8095,
-      "requiredPlugins": ["jwt", "correlation-id", "rate-limiting", "request-size-limiting"]
+      "securityAuthority": "config/kong-callback-routes.json",
+      "requiredPlugins": ["jwt", "pre-function", "correlation-id", "rate-limiting", "request-size-limiting"]
     },
     {
       "name": "codestra-campaign-policy-check",
       "hosts": ["api.codestra.co"],
       "paths": ["/api/v1/automation/policy-check"],
       "methods": ["POST"],
+      "protocols": ["https"],
+      "stripPath": false,
+      "preserveHost": false,
       "serviceHost": "codestra-middleware-integration-api-1",
       "servicePort": 8095,
-      "requiredPlugins": ["jwt", "correlation-id", "rate-limiting", "request-size-limiting"]
+      "securityAuthority": "config/kong-campaign-automation-routes.json",
+      "requiredPlugins": ["jwt", "post-function", "correlation-id", "rate-limiting", "request-size-limiting"]
     },
     {
       "name": "codestra-campaign-result-submit",
       "hosts": ["api.codestra.co"],
       "paths": ["/api/v1/integrations/n8n/results"],
       "methods": ["POST"],
+      "protocols": ["https"],
+      "stripPath": false,
+      "preserveHost": false,
       "serviceHost": "codestra-middleware-integration-api-1",
       "servicePort": 8095,
-      "requiredPlugins": ["jwt", "correlation-id", "rate-limiting", "request-size-limiting"]
+      "securityAuthority": "config/kong-campaign-automation-routes.json",
+      "requiredPlugins": ["jwt", "post-function", "correlation-id", "rate-limiting", "request-size-limiting"]
     }
   ],
   "routes": [
