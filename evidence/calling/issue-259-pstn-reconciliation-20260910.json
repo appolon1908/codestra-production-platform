@@ -1,0 +1,213 @@
+{
+  "attempt": {
+    "audit": [
+      {
+        "actor": "codestra-middleware",
+        "occurred_at": "2026-09-10T16:00:19.167404+00:00",
+        "operation": "external-call.originate",
+        "outcome": "requested",
+        "sequence": 125
+      },
+      {
+        "actor": "codestra-middleware",
+        "occurred_at": "2026-09-10T16:00:19.318985+00:00",
+        "operation": "external-call.originate",
+        "outcome": "failed_or_uncertain",
+        "sequence": 126
+      }
+    ],
+    "authorization_reference": "CHG-20260910-ODOO-PSTN-01",
+    "automatic_retry_permitted": false,
+    "campaign": "ODOO_CALL_TEST_20260910",
+    "correlation_id": "corr-pstn-cert-20260910-6413ed857f8341c2a018cc195dac5ead",
+    "created_at": "2026-09-10T16:00:19.176481Z",
+    "durable_state": "dispatch_unknown",
+    "durable_total_attempt_rows": 1,
+    "expected_uniqueid": "codestra-pstn-29f74ca1cc4aa638712079af4578",
+    "observed_post_count_in_window": 1,
+    "operation_id": "pstn-cert-20260910-7b6e8d4ab49b44cfb68382c6186c6ee9",
+    "policy_caller_id_matches_existing_authorization": true,
+    "policy_destination_matches_existing_authorization": true,
+    "policy_dial_prefix": "8",
+    "policy_dialplan_context": "outbound-didww",
+    "policy_expires_at": "2026-09-10T17:00:00Z",
+    "policy_max_calls": 1,
+    "policy_max_connected_seconds": 30,
+    "policy_recording_requested": false,
+    "policy_release_sha": "86b724819919d5c021c52d27baf27e0f14310fd5",
+    "policy_route_limit": "Retained policy fields were read; the exact live route verifier was not rerun in this reconciliation.",
+    "policy_sha256": "34bbd35c82b6ec5e8986898478154835eaa0d499192619b1e1a911b85d2370fd",
+    "policy_trunk": "didww-out",
+    "reconciliation_rule": "Preserve the consumed row and unknown state. Do not retry, reset the ledger, change operation ID or replace the database to obtain another attempt.",
+    "request_http_status": 503,
+    "request_log_window": {
+      "finished_at": "2026-09-10T16:02:00Z",
+      "started_at": "2026-09-10T15:59:30Z"
+    },
+    "request_method": "POST",
+    "request_path": "/v1/calls/originate",
+    "request_source_is_middleware_private_address": true
+  },
+  "blockers": [
+    {
+      "code": "PSTN_ALLOWANCE_CONSUMED_UNKNOWN",
+      "required_action": "Reconcile the existing attempt without retry or ledger reset. Any future attempt requires a separate explicit authorization after all prerequisites are satisfied."
+    },
+    {
+      "code": "DIDWW_AUTHENTICATION_REJECTED",
+      "required_action": "Reconcile the approved outbound trunk account, authentication mode and protected credential reference with DIDWW. Apply only an authorized secret/configuration correction; do not place a diagnostic call."
+    },
+    {
+      "code": "AUTHORITATIVE_CALL_RECORD_MISSING",
+      "required_action": "Implement and review durable call/CDR evidence for this AMI-originated path, including controlled failures, and correlate existing evidence without inventing a terminal result."
+    },
+    {
+      "code": "EVENT_DELIVERY_UNHEALTHY",
+      "required_action": "Repair the delivery path and reconcile the 97 queued and 51 quarantined events while preserving history and duplicate suppression."
+    },
+    {
+      "code": "ASTERISK_CONFIGURATION_DRIFT",
+      "required_action": "Reconcile the four changed configurations against approved source and backup evidence; do not refresh the checksum baseline merely to suppress the alert."
+    },
+    {
+      "code": "RELEASE_SOURCE_AND_RECOVERY_GATES",
+      "required_action": "Prepare a verified immutable protected-source release and independent recovery reports before using the guarded deployment transaction."
+    },
+    {
+      "code": "MIDDLEWARE_BACKUP_FAILURES",
+      "required_action": "Resolve the four failed backup units and establish fresh off-host recovery and isolated restore evidence."
+    }
+  ],
+  "call_records": {
+    "asterisk_cdr_logging_enabled": true,
+    "asterisk_cdr_logs_congestion": false,
+    "asterisk_cdr_logs_unanswered_calls": false,
+    "asterisk_cdr_registered_backends": [],
+    "authoritative_cdr_disposition_duration_hangup_readback": "not_established",
+    "call_log_rows_for_exact_expected_uniqueid": 0,
+    "default_csv_cdr_file_present": false,
+    "scope_limit": "Queries used only the exact expected uniqueid. Missing rows do not negate the observed attempt and must not release its one-call allowance.",
+    "vicidial_log_rows_for_exact_expected_uniqueid": 0
+  },
+  "evidence_kind": "historical_read_only_reconciliation",
+  "final_status": "SERVER_B_NO_GO_WITH_EXACT_BLOCKERS",
+  "host": {
+    "identity_verified": true,
+    "middleware_private_address": "10.40.0.1",
+    "middleware_public_address": "65.109.65.169",
+    "private_address": "10.40.0.2",
+    "public_address": "65.21.67.207"
+  },
+  "issue": "https://github.com/appolon1908-hue/codestra-production-platform/issues/259",
+  "monitoring": {
+    "asterisk_configuration_files_checked": 10,
+    "asterisk_configuration_mismatches": [
+      "etc/asterisk/pjsip.conf",
+      "etc/asterisk/pjsip-codestra-webrtc-test.conf",
+      "etc/asterisk/extensions-vicidial.conf",
+      "etc/asterisk/http.conf"
+    ],
+    "asterisk_health": "failed",
+    "gateway_dead_letters": 0,
+    "gateway_delivery_attempts": 0,
+    "gateway_outbox_depth": 97,
+    "gateway_outbox_oldest_seconds": 2259186.789,
+    "gateway_outbox_quarantined": 51,
+    "integration_health": "failed",
+    "middleware_backup_failed_units": [
+      "codestra-caddy-backup.service",
+      "codestra-database-certification-backup.service",
+      "codestra-kong-database-backup.service",
+      "codestra-scraper-middleware-backup.service"
+    ],
+    "restricted_adapter_health_last_result": "success",
+    "server_b_root_disk_used_percent": 34
+  },
+  "observation_window": {
+    "finished_at": "2026-09-10T16:55:34Z",
+    "started_at": "2026-09-10T16:46:31Z"
+  },
+  "provider": {
+    "answer_marker_in_correlated_log": false,
+    "asterisk_call_id": "C-00008599",
+    "host": "out.didww.com",
+    "log_markers": [
+      "failed to authenticate",
+      "circuit-busy",
+      "everyone is busy/congested",
+      "hangup"
+    ],
+    "log_reference": {
+      "first_line": 67609,
+      "last_line": 67618,
+      "local_timestamp": "Sep 10 12:00:19",
+      "path": "/var/log/asterisk/messages",
+      "timezone_offset": "-04:00"
+    },
+    "peer_status": "OK (27 ms)",
+    "reachability_limit": "A healthy SIP peer proves reachability, not acceptance of outbound trunk credentials.",
+    "resolved_address": "46.19.210.19:5060",
+    "result": "DIDWW authentication rejection is supported by the correlated Asterisk log; an answered call is not established.",
+    "trunk": "didww-out"
+  },
+  "release_recovery": {
+    "independent_release_and_recovery_gates": "not_established",
+    "limit": "The fixed prepared-transaction authority files were absent; this observation does not establish whether other historical backup copies exist.",
+    "prepared_transaction_plan_present": false,
+    "transaction_journal_present": false,
+    "verified_backup_report_present": false,
+    "verified_release_report_present": false
+  },
+  "runtime": {
+    "active_calls": 0,
+    "active_channels": 0,
+    "asterisk_service": "active",
+    "backend": "memory",
+    "customer_traffic_authorized": false,
+    "deployment_profile": "staging-read-only",
+    "health_http_status": 200,
+    "internal_test_calling": false,
+    "process_counter_limit": "Process-lifetime count is not the durable one-call authority.",
+    "process_lifetime_calls_processed": 1,
+    "production_dialing": false,
+    "readiness_limit": "HTTP 200 certifies only the reported staging profile; the memory backend does not establish production MySQL or end-to-end calling readiness.",
+    "ready_http_status": 200,
+    "restricted_adapter_service": "active",
+    "writes_enabled": false
+  },
+  "schema_version": "1.0",
+  "scope": {
+    "activation_evidence": false,
+    "ledger_rows_changed": 0,
+    "note": "This historical observation is not a fresh calling-readiness payload, release attestation, or authorization for another call.",
+    "originate_requests_sent_during_reconciliation": 0,
+    "production_mutations_performed": 0
+  },
+  "source": {
+    "declared_installed_file_mismatches": 0,
+    "declared_installed_files_checked": 544,
+    "installed_manifest_sha256": "20537e935cafa0df1b06d8b3f85cd61ac08e4d76f535ea123c5f42383b19a6e6",
+    "platform_protected_base_sha": "e6bda82036061922ebbf5b80b52c6129fd2d261f",
+    "protected_branch": "main",
+    "protected_sha_observed": "8642bccacd977b3f894f139ead7058fd71953584",
+    "repository": "appolon1908-hue/Vicidialer-Codestra",
+    "runtime_matches_observed_protected_head": false,
+    "runtime_sha": "86b724819919d5c021c52d27baf27e0f14310fd5",
+    "runtime_source_pointer_and_http_sha_agree": true,
+    "verification_limit": "Declared file hashes and sizes were checked. Signature, provenance, dependency origin, extra-file absence and release preparation were not independently certified."
+  },
+  "transport": {
+    "client_not_after": "2026-11-15T02:54:50Z",
+    "client_san": "spiffe://codestra.internal/vicidial/middleware-vicidial-client",
+    "client_subject": "CN=middleware-vicidial-client",
+    "configured_client_certificate_presented": true,
+    "connected_address": "10.40.0.2",
+    "hmac_health_check_reported": true,
+    "http_status": 200,
+    "method": "GET",
+    "probe_origin": "65.109.65.169",
+    "server_certificate_verify_result": 0,
+    "url": "https://edge.internal.codestra.agency:8443/restricted-vicidial/ready",
+    "verification_limit": "Successful TLS with the configured client certificate was verified. This read did not independently retest client-certificate enforcement, signed command contents, HMAC v2 scope or replay rejection."
+  }
+}
