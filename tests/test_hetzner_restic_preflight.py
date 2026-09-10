@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-SOURCE = Path(__file__).resolve().parents[1] / "operations/backup/hetzner_restic_preflight.py"
+SOURCE = Path(__file__).resolve().parents[1] / "operations/readiness/hetzner_restic_preflight.py"
 SPEC = importlib.util.spec_from_file_location("hetzner_restic_preflight", SOURCE)
 preflight = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(preflight)

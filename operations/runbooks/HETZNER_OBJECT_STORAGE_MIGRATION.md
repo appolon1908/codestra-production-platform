@@ -28,7 +28,7 @@ established before relying on it.
 
 Run the reviewed source without modifying a live checkout:
 
-    python3 operations/backup/hetzner_restic_preflight.py --profile /etc/codestra/backup/hetzner-restic.json
+    python3 operations/readiness/hetzner_restic_preflight.py --profile /etc/codestra/backup/hetzner-restic.json
 
 This validates local configuration and credential-file protection without
 contacting storage. The optional --check-repository flag reads existing
