@@ -1,0 +1,26 @@
+{
+  "compose_validation": "passed",
+  "environment_changes": [
+    "PROVISIONING_SERVICE_URL",
+    "PROVISIONING_SERVICE_CA_FILE"
+  ],
+  "preserved_image": "ghcr.io/codestra-srl/codestra-middleware@sha256:48dbb4201b4cf8abee1600936a84da52a92969ab124fb44a0007059e75d57e85",
+  "added_existing_internal_network": "codestra-provisioning-production_private",
+  "production_server_certificate": "verified_chain_hostname_serverAuth",
+  "keycloak_tls": "HTTP_200",
+  "bundle_sha256": "4733d8cdb74de434db0bd2657f5a1f4743dc39b7cadaa162669bfa44efc24eca",
+  "production_ca_sha256_fingerprint": "efbd45d536cbd8d737c0367fa1e65710b7cc7ed6e93b0059e6e11d7883c63b0b",
+  "observed_at_utc": "2026-09-10T01:22:10.611575+00:00",
+  "server": "65.109.65.169",
+  "source_base_sha": "dec1ed221ecf8247ecace106f19987fe40247481",
+  "overlay_sha256": "9f1c750d8b8909105460efde7b3796daacca8407c15e60b0ce13cc8b86669fbc",
+  "runtime_applied": false,
+  "live_calls_placed": 0,
+  "authentication": {
+    "production_client": "codestra-provisioning-service",
+    "token_http_status": 401,
+    "token_error": "invalid_client",
+    "issuer_client_still_staging": true
+  },
+  "scope": "transport only; session and call readiness not certified"
+}
