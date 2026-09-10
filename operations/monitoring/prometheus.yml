@@ -34,6 +34,35 @@ scrape_configs:
     static_configs:
       - targets: [cadvisor:8080]
 
+  - job_name: websocket_gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets: [codestra-websocket-gateway-gateway-1:8080]
+        labels:
+          websocket_role: primary
+      - targets: [websocket-standby:8080]
+        labels:
+          websocket_role: standby
+
+  - job_name: websocket_readiness
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: [https://api.codestra.agency/readyz]
+        labels:
+          websocket_role: primary
+      - targets: [http://websocket-standby:8080/readyz]
+        labels:
+          websocket_role: standby
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
   - job_name: operations-dashboard-middleware-staging
     metrics_path: /metrics
     oauth2:
@@ -135,6 +164,30 @@ scrape_configs:
         labels: {application: mail-api, environment: production}
       - targets: [http://portal:8080/readyz]
         labels: {application: reseller-portal, environment: production}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # Private GET-only probes; each check states the scope it actually verifies.
+  - job_name: blackbox_platform_services
+    metrics_path: /probe
+    scrape_interval: 30s
+    scrape_timeout: 12s
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: [http://codestra-odoo-1:8069/web/health]
+        labels: {application: odoo, service: odoo, environment: production, check_scope: http-liveness}
+      - targets: [http://codestra-n8n-1:5678/healthz/readiness]
+        labels: {application: n8n, service: n8n, environment: production, check_scope: database-readiness}
+      - targets: [http://codestra-middleware-1:8095/readyz]
+        labels: {application: middleware, service: middleware-api, environment: production, check_scope: runtime-readiness}
+      - targets: [http://middleware-vicidial-adapter:8095/readyz]
+        labels: {application: vicidial, service: vicidial-adapter, environment: production, check_scope: adapter-worker-readiness}
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target

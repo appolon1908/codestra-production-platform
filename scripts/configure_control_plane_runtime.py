@@ -16,11 +16,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = Path(os.getenv("CONTROL_PLANE_ENV_FILE", "/etc/codestra/secrets/control-plane.env"))
+N8N_COMPOSE = Path(os.getenv("N8N_COMPOSE_FILE", ROOT / "deploy/n8n/compose.queue.yaml"))
 ODOO_CONTROLLER = Path(os.getenv("ODOO_EVENT_CONTROLLER", "/opt/codestra/staging-sources/app-odoo-identity-timezone-57ab123cded2-r2/integration/codestra_vicidial_crm/controllers/api.py"))
 
 
 def run(command: list[str], *, stdin: str | None = None) -> None:
     subprocess.run(command, input=stdin, text=True, check=True, stdout=subprocess.DEVNULL)
+
+
+def n8n_compose(*arguments: str) -> list[str]:
+    return ["docker", "compose", "-f", str(N8N_COMPOSE), *arguments]
 
 
 def token() -> str:
@@ -59,11 +64,15 @@ def main() -> None:
         "N8N_MIDDLEWARE_HMAC_SECRET": existing.get("N8N_MIDDLEWARE_HMAC_SECRET") or token(),
         "ODOO_SERVICE_PASSWORD": existing.get("ODOO_SERVICE_PASSWORD") or token(),
         "CONTROL_PLANE_ODOO_URL": "http://codestra-odoo-1:8069/codestra/api/v1/events",
-        "CONTROL_PLANE_N8N_URL": "http://codestra-n8n-1:5678/webhook/codestra-{event_type}",
-        "ODOO_BASE_URL": "http://codestra-odoo-1:8069", "N8N_BASE_URL": "http://codestra-n8n-1:5678",
-        "TELNEXA_BASE_URL": "https://telnexa.internal.codestra.agency:8443", "KLYROW_BASE_URL": "https://10.40.0.4:18000",
-        "KYQRA_BASE_URL": "http://kyqra:3100", "KYQRA_MODE": "test",
-        "TELNEXA_MODE": "simulator", "KLYROW_MODE": "test", "CONTROL_PLANE_OUTBOUND_ENABLED": "true",
+        "CONTROL_PLANE_N8N_URL": "http://n8n-webhook:5678/webhook/codestra-{event_type}",
+        "ODOO_BASE_URL": "http://codestra-odoo-1:8069", "N8N_BASE_URL": "http://n8n-main:5678",
+        "TELNEXA_BASE_URL": "https://10.40.0.4:8443/v1/sms/",
+        "KLYROW_BASE_URL": "https://10.40.0.4:18000/v1/email/",
+        "KYQRA_BASE_URL": "http://10.40.0.4:3100", "KYQRA_MODE": "test",
+        "MIDDLEWARE_INTERNAL_URL": "https://api.codestra.co",
+        "TELNEXA_MODE": "simulator", "KLYROW_MODE": "test",
+        "CONTROL_PLANE_OUTBOUND_ENABLED": "false",
+        "CONTROL_PLANE_PRODUCTION_DELIVERY_AUTHORIZED": "false",
     }
     update_env(values)
 
@@ -87,18 +96,22 @@ env.cr.commit()
         {"id": "codestraMiddlewareHeaderAuth", "name": "Codestra Middleware Header Auth", "type": "httpHeaderAuth", "data": {"name": "Authorization", "value": "Bearer " + values["N8N_OUTBOUND_API_KEY"]}},
         {"id": "codestraMiddlewareEventSigner", "name": "Codestra Middleware Event Signer", "type": "httpCustomAuth", "data": {"json": json.dumps({"headers": {"Authorization": "Bearer " + existing["N8N_MIDDLEWARE_API_KEY"], "X-Codestra-HMAC-Secret": existing["N8N_WEBHOOK_SECRET"]}})}},
     ]
+    # The generated workflows also reference codestraMiddlewareOAuth2. It is
+    # deliberately not generated here: an administrator must provision the
+    # Keycloak client-credentials credential through the approved secret
+    # channel before any workflow can be activated.
     workflows = subprocess.check_output([sys.executable, str(ROOT / "scripts/build_control_plane_workflows.py")], text=True)
     with tempfile.TemporaryDirectory() as directory:
         credential_path=Path(directory)/"credential.json"; workflow_path=Path(directory)/"workflows.json"
         credential_path.write_text(json.dumps(credential)); workflow_path.write_text(workflows)
         os.chmod(credential_path,0o600); os.chmod(workflow_path,0o600)
-        run(["docker","cp",str(credential_path),"codestra-n8n-1:/tmp/codestra-credential.json"])
-        run(["docker","cp",str(workflow_path),"codestra-n8n-1:/tmp/codestra-workflows.json"])
-    run(["docker","exec","-u","0","codestra-n8n-1","chown","node:node","/tmp/codestra-credential.json","/tmp/codestra-workflows.json"])
-    run(["docker","exec","codestra-n8n-1","n8n","import:credentials","--input=/tmp/codestra-credential.json"])
-    run(["docker","exec","codestra-n8n-1","n8n","import:workflow","--input=/tmp/codestra-workflows.json"])
+        run(n8n_compose("cp", str(credential_path), "n8n-main:/tmp/codestra-credential.json"))
+        run(n8n_compose("cp", str(workflow_path), "n8n-main:/tmp/codestra-workflows.json"))
+    run(n8n_compose("exec", "-T", "--user", "0", "n8n-main", "chown", "node:node", "/tmp/codestra-credential.json", "/tmp/codestra-workflows.json"))
+    run(n8n_compose("exec", "-T", "n8n-main", "n8n", "import:credentials", "--input=/tmp/codestra-credential.json"))
+    run(n8n_compose("exec", "-T", "n8n-main", "n8n", "import:workflow", "--input=/tmp/codestra-workflows.json"))
     # Import inactive. Activation is a separate acceptance-gated operation.
-    run(["docker","exec","codestra-n8n-1","rm","-f","/tmp/codestra-credential.json","/tmp/codestra-workflows.json"])
+    run(n8n_compose("exec", "-T", "n8n-main", "rm", "-f", "/tmp/codestra-credential.json", "/tmp/codestra-workflows.json"))
 
 
 if __name__ == "__main__": main()

@@ -64,9 +64,15 @@ def test_admin_system_routes_are_platform_admin_only():
     assert 'self.auth_operator({"platform_admin"})' in source
 
 
-def test_kong_system_route_requires_platform_admin_scope_and_role_header():
+def test_kong_system_routes_require_platform_admin_scope_and_role_header():
     kong = (ROOT / "deploy/kong/control-plane.yml").read_text()
-    assert "paths: [/v1/admin/system]" in kong
+    for path in (
+        "/v1/admin/system/health",
+        "/v1/admin/system/readiness",
+        "/v1/admin/system/databases",
+    ):
+        assert f"- {path}" in kong
+    assert "paths: [/v1/admin/system]" not in kong
     assert 'required = "platform.admin"' in kong
     assert 'set_header("X-Authenticated-Role", "platform_admin")' in kong
     assert 'set_header("X-Authenticated-Role", "tenant_admin")' in kong

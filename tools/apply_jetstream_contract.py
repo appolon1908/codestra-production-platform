@@ -36,7 +36,10 @@ async def apply_contract(
     server: str,
     contract_path: Path | None = None,
     tls: ssl.SSLContext | None = None,
+    replicas_override: int | None = None,
 ) -> None:
+    if replicas_override is not None and replicas_override < 1:
+        raise ValueError("replicas_override must be positive")
     contract = load_contract(contract_path)
     client = await nats.connect(server, connect_timeout=2, tls=tls)
     try:
@@ -47,7 +50,7 @@ async def apply_contract(
                 subjects=item["subjects"],
                 retention=RETENTION[item["retention"]],
                 storage=api.StorageType.FILE,
-                num_replicas=item["replicas"],
+                num_replicas=replicas_override or item["replicas"],
                 max_age=item["max_age_seconds"],
                 duplicate_window=item["duplicate_window_seconds"],
                 max_msg_size=item["max_message_bytes"],

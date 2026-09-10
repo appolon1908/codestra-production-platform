@@ -1,0 +1,13 @@
+# Apply after compose.production-transport.yaml and authenticated preflight.
+services:
+  middleware-webphone-session-issuer:
+    environment:
+      PROVISIONING_SERVICE_CLIENT_ID: codestra-provisioning-service
+      PROVISIONING_SERVICE_CLIENT_SECRET_FILE: /run/secrets/provisioning/production-client-secret
+    volumes:
+      - type: bind
+        source: /etc/codestra/secrets/codestra-compose/provisioning/production-client-secret
+        target: /run/secrets/provisioning/production-client-secret
+        read_only: true
+        bind:
+          create_host_path: false

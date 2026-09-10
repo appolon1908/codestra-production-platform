@@ -24,6 +24,12 @@ elseif (path == "/api/v1/reconciliation" or path:find("^/api/v1/reconciliation/"
   required = "communications.reconciliation.execute"
 elseif path == "/api/v1/reconciliation" or path:find("^/api/v1/reconciliation/") then
   required = "communications.reconciliation.read"
+elseif path == "/api/v1/automation/authorize" then
+  required = "automation.execute"
+elseif path == "/api/v1/automation/execute" then
+  required = "automation.execute"
+elseif path == "/api/v1/automation/results" then
+  required = "automation.result.write"
 elseif path == "/api/v1/results" or path:find("^/api/v1/results/") then
   required = "sync.result.write"
 elseif path:find("^/api/v1/control/campaigns") then

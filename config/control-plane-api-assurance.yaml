@@ -7,6 +7,27 @@ handlers:
   crm_mutation: [POST, PATCH]
 
 endpoints:
+  automation-authorize:
+    gateway_auth:
+      status: gap
+      remediation: Bind route-specific allow/deny gateway tests for this automation endpoint; shared scope enforcement remains enabled.
+    idempotency:
+      status: gap
+      remediation: Bind endpoint-level replay/conflict evidence in addition to existing automation service tests.
+  automation-execute:
+    gateway_auth:
+      status: gap
+      remediation: Bind route-specific allow/deny gateway tests for this automation endpoint; shared scope enforcement remains enabled.
+    idempotency:
+      status: gap
+      remediation: Bind endpoint-level replay/conflict evidence in addition to existing automation service tests.
+  automation-results:
+    gateway_auth:
+      status: gap
+      remediation: Bind route-specific allow/deny gateway tests for this automation endpoint; shared scope enforcement remains enabled.
+    idempotency:
+      status: gap
+      remediation: Bind endpoint-level replay/conflict evidence in addition to existing automation service tests.
   admin-calling-readiness:
     gateway_auth:
       status: gap

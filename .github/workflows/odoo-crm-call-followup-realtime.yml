@@ -1,0 +1,42 @@
+name: Odoo CRM Call Follow-up Realtime
+
+on:
+  pull_request:
+    paths:
+      - "odoo_addons/codestra_crm_call_followup_realtime/**"
+      - "scripts/validate_odoo_crm_call_followup_realtime.py"
+      - ".github/workflows/odoo-crm-call-followup-realtime.yml"
+  push:
+    branches:
+      - "feature/odoo19-crm-call-followup-realtime-lease"
+    paths:
+      - "odoo_addons/codestra_crm_call_followup_realtime/**"
+      - "scripts/validate_odoo_crm_call_followup_realtime.py"
+      - ".github/workflows/odoo-crm-call-followup-realtime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: odoo-crm-call-followup-realtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-gate:
+    name: Realtime lease static gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Reject whitespace and conflict markers
+        run: |
+          git diff --check
+          ! git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- . ':!*.md'
+      - name: Compile Python
+        run: python -m compileall -q odoo_addons/codestra_crm_call_followup_realtime scripts/validate_odoo_crm_call_followup_realtime.py
+      - name: Validate realtime invariants
+        run: python scripts/validate_odoo_crm_call_followup_realtime.py
