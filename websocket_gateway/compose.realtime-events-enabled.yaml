@@ -1,0 +1,11 @@
+services:
+  gateway:
+    environment:
+      REALTIME_EVENT_DELIVERY_ENABLED: "true"
+      NATS_CREDENTIALS_FILE: /run/secrets/realtime_nats_credentials
+    secrets:
+      - realtime_nats_credentials
+
+secrets:
+  realtime_nats_credentials:
+    file: /etc/codestra/secrets/websocket-gateway/realtime-nats.creds
