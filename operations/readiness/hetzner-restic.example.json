@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "region": "fsn1",
+  "bucket": "REPLACE_WITH_PRIVATE_BUCKET",
+  "prefix": "codestra/production",
+  "access_key_id_file": "/etc/codestra/backup/hetzner/access-key-id",
+  "secret_access_key_file": "/etc/codestra/backup/hetzner/secret-access-key",
+  "restic_password_file": "/etc/codestra/backup/hetzner/restic-password"
+}
