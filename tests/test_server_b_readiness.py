@@ -74,6 +74,20 @@ def test_absent_or_reset_probe_is_not_treated_as_success():
     assert sum("HEALTH_UNIT_NOT_PROVEN" in code for code in codes(result)) == 3
 
 
+@pytest.mark.parametrize("document_age,probe_age,passes", [
+    (0, 300, True), (100, 200, True), (100, 201, False),
+    (299, 300, False), (0.5, 300, False),
+])
+def test_probe_freshness_includes_time_since_collection(document_age, probe_age, passes):
+    def update(doc):
+        doc["captured_at"] = (NOW - timedelta(seconds=document_age)).isoformat()
+        for unit in doc["health_units"].values():
+            unit["last_success_age_seconds"] = probe_age
+    result = result_for(update)
+    failed = {code for code in codes(result) if "HEALTH_UNIT_NOT_PROVEN" in code}
+    assert not failed if passes else len(failed) == 3
+
+
 def test_zero_process_counts_do_not_establish_zero_durable_calls():
     result = result_for(lambda doc: doc["call_counters"].update(
         authority="asterisk-process-lifetime", calls_placed_after=1))

@@ -47,6 +47,8 @@ Compute that age from the actual successful probe execution, not collection
 time or a timer's scheduled next run. Completed oneshot services are normally
 inactive: `systemctl is-active` alone is insufficient. `reset-failed` does not
 establish a successful execution.
+The evaluator adds elapsed time since `captured_at` to that recorded age;
+the successful execution must still be within 300 seconds at evaluation time.
 
 `call_counters` requires `authority: "durable-cdr-and-call-ledger"`,
 `same_observation_window: true`, and explicit integer zero for both
@@ -62,7 +64,12 @@ python -m control_plane_service.calling_readiness \
   --observed /protected/observed-calling-evidence.json
 ```
 
-Deploy the evidence producer's additive `server_b` object with this gate. Older
+Deploy the producer's additive `server_b` object and explicitly recorded
+`safety.ENABLE_AGENT_PROVISIONING` and `safety.ENABLE_INTERNAL_TEST_CALLING`
+fields with this gate. The publisher in `control_plane_service.calling_evidence`
+uses the evaluator's flag list and refuses to invent missing observations;
+see [the publishing contract](CALLING_READINESS_API.md#publishing-collector-observations).
+Older
 documents intentionally return `SERVER_B_EVIDENCE_MISSING`; no default silently
 marks a legacy runtime ready. A `READBACK_MATCHES` result still sets
 `production_activation_authorized: false` and `live_state_collected: false`.

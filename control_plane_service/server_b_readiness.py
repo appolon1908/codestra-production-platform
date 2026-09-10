@@ -41,9 +41,12 @@ def evaluate(document, *, source_sha, artifact_digest, release_digest, now=None)
 
     check(document.get("schema_version") == "server-b-readiness.v1", "INVALID_SCHEMA")
     captured = document.get("captured_at")
+    document_age = None
     try:
         captured = datetime.fromisoformat(captured.replace("Z", "+00:00"))
-        fresh = captured.utcoffset() is not None and 0 <= (now - captured).total_seconds() <= 300
+        if captured.utcoffset() is not None:
+            document_age = (now - captured).total_seconds()
+        fresh = document_age is not None and 0 <= document_age <= 300
     except (AttributeError, TypeError, ValueError, OverflowError):
         fresh = False
     check(fresh, "STALE_OR_INVALID_EVIDENCE")
@@ -72,7 +75,9 @@ def evaluate(document, *, source_sha, artifact_digest, release_digest, now=None)
         check(unit.get("result") == "success"
               and type(unit.get("exit_status")) is int and unit["exit_status"] == 0
               and type(unit.get("last_success_age_seconds")) is int
-              and 0 <= unit["last_success_age_seconds"] <= 300,
+              and unit["last_success_age_seconds"] >= 0
+              and fresh
+              and unit["last_success_age_seconds"] + document_age <= 300,
               "HEALTH_UNIT_NOT_PROVEN:" + name)
 
     counters = document.get("call_counters")

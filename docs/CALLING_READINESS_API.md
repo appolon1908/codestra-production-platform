@@ -77,6 +77,7 @@ Observed `safety` requires:
 - Literal `false` for `VICIDIAL_WRITES`, `LIVE_CALL_CONTROL`, `PRODUCTION_DIALING`,
   `LIVE_PSTN_DIALING`, `TELEPHONY_ADMIN_WRITE`, and every operational action flag:
   `ENABLE_VICIDIAL_WRITES`, `ENABLE_CAMPAIGN_SYNC`, `ENABLE_AGENT_SYNC`,
+  `ENABLE_AGENT_PROVISIONING`, `ENABLE_INTERNAL_TEST_CALLING`,
   `ENABLE_LEAD_PUBLICATION`, `ENABLE_LIVE_CALL_CONTROL`, `ENABLE_WARM_TRANSFER`,
   `ENABLE_IVR_ROUTING`, `ENABLE_IVR_CALLBACKS`, `ENABLE_APPT_PREP`,
   `ENABLE_PROVISIONING`, `ENABLE_PRODUCTION_DIALING`, `ENABLE_EMAIL_DELIVERY`,
@@ -97,6 +98,38 @@ Observed `proofs` contains `backup`, `restore`, `rollback`, `monitoring`, `ident
 `route_policy`. Each requires `passed: true`, the matching `contract_digest` and
 `release_digest`, plus the retained proof's `evidence_digest` (`sha256:`).
 The deployment authority remains responsible for proof authenticity and retention.
+
+Observed `server_b` is also required. Its complete contract is documented in
+[`SERVER_B_CALLING_READINESS.md`](SERVER_B_CALLING_READINESS.md), including the
+read-only profile, runtime/queue/health checks, and durable call counters.
+
+## Publishing collector observations
+
+`control_plane_service.calling_evidence` publishes a collector's recorded
+`calling-evidence.v1` document atomically. It uses the evaluator's `FLAGS`
+definition, so the producer requires the same fields, including
+`ENABLE_AGENT_PROVISIONING` and `ENABLE_INTERNAL_TEST_CALLING`. Read both from
+the canonical adapter's effective runtime configuration; never infer them from
+`writes_enabled`. Missing fields are rejected. An explicitly unavailable
+observation may be JSON `null`, which the readiness evaluator blocks.
+
+The collector must supply `server_b`, all required safety observations, and
+the other recorded evidence. The publisher normalizes explicit `false`/`DISABLED`
+and `true`/`ENABLED` strings. It preserves unknowns, enabled flags, collection
+timestamps, identities, counters, and proofs. It does not collect live state or
+turn a published document into successful certification.
+
+```bash
+python3 -m control_plane_service.calling_evidence \
+  --readback /protected/collector/calling-readback.json \
+  --output /run/calling-readback/observed.json
+```
+
+The existing destination directory must be operator-owned, with its setgid
+group readable by service UID 10001, so the atomic replacement inherits the
+approved group. Output files use mode 0640. Invalid input leaves the previous
+file untouched; its original timestamps still expire normally. Publication
+does not change the separate expected release file.
 
 ## CLI and tests
 
