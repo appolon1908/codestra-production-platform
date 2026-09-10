@@ -1,0 +1,83 @@
+{
+  "asterisk_config_mismatches": [
+    "etc/asterisk/pjsip.conf",
+    "etc/asterisk/pjsip-codestra-webrtc-test.conf",
+    "etc/asterisk/extensions-vicidial.conf",
+    "etc/asterisk/http.conf"
+  ],
+  "asterisk_process_counts": {
+    "active_calls": 0,
+    "active_channels": 0,
+    "calls_processed": 0
+  },
+  "captured_at": "2026-09-10T15:35:34.999268+00:00",
+  "durable_call_counters": "NOT_VERIFIED",
+  "final_status": "SERVER_B_NO_GO_WITH_EXACT_BLOCKERS",
+  "gateway_metrics": {
+    "corrupt": 0,
+    "delivery_attempts": 0,
+    "delivery_failures": 0,
+    "gaps": 0,
+    "outbox_depth": 87,
+    "outbox_oldest_seconds": 2254674.903,
+    "outbox_quarantined": 51
+  },
+  "health_units": {
+    "codestra-asterisk-health.service": {
+      "ActiveState": "failed",
+      "ExecMainStatus": "1",
+      "Result": "exit-code"
+    },
+    "codestra-integration-health.service": {
+      "ActiveState": "failed",
+      "ExecMainStatus": "1",
+      "Result": "exit-code"
+    },
+    "codestra-vicidial-restricted-adapter-health.service": {
+      "ActiveState": "inactive",
+      "ExecMainStatus": "0",
+      "Result": "success"
+    }
+  },
+  "isolated_restore": "NOT_EXECUTED",
+  "operations": "read-only",
+  "private_ip": "10.40.0.2",
+  "private_mtls": "NOT_RECHECKED_IN_THIS_OBSERVATION",
+  "production_activation_authorized": false,
+  "public_ip": "65.21.67.207",
+  "ready": {
+    "body": {
+      "backend": "memory",
+      "checks": {
+        "external_call_policy": true,
+        "hmac": true,
+        "kill_switches": true,
+        "release": true,
+        "repository": true,
+        "source_policy": true,
+        "state_store": true
+      },
+      "customer_traffic_authorized": false,
+      "deployment_profile": "production-external-one-call",
+      "internal_test_calling": false,
+      "production_dialing": true,
+      "release_sha": "f43aa44fa0082eb2bb15be9ec3950ddfd8bc72e1",
+      "release_verified": true,
+      "status": "ready",
+      "writes_enabled": false
+    },
+    "http_status": 200
+  },
+  "rollback_rehearsal": "NOT_EXECUTED",
+  "schema_version": "server-b-runtime-observation.v1",
+  "version": {
+    "body": {
+      "application": "codestra-vicidial-restricted-adapter",
+      "build_id": "vicidial-r3-f43aa44fa008",
+      "environment": "production-candidate",
+      "git_sha": "f43aa44fa0082eb2bb15be9ec3950ddfd8bc72e1",
+      "verified": true
+    },
+    "http_status": 200
+  }
+}

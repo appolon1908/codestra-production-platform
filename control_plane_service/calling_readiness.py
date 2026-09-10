@@ -13,6 +13,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import server_b_readiness
+
 
 AUTHORITIES = {
     "middleware": "Middleware-", "vicidial": "Vicidialer-Codestra",
@@ -26,6 +28,7 @@ FLAGS = (
     "VICIDIAL_WRITES", "LIVE_CALL_CONTROL", "PRODUCTION_DIALING",
     "LIVE_PSTN_DIALING", "TELEPHONY_ADMIN_WRITE",
     "ENABLE_VICIDIAL_WRITES", "ENABLE_CAMPAIGN_SYNC", "ENABLE_AGENT_SYNC",
+    "ENABLE_AGENT_PROVISIONING", "ENABLE_INTERNAL_TEST_CALLING",
     "ENABLE_LEAD_PUBLICATION", "ENABLE_LIVE_CALL_CONTROL", "ENABLE_WARM_TRANSFER",
     "ENABLE_IVR_ROUTING", "ENABLE_IVR_CALLBACKS", "ENABLE_APPT_PREP",
     "ENABLE_PROVISIONING", "ENABLE_PRODUCTION_DIALING",
@@ -142,6 +145,13 @@ def evaluate(expected, observed, *, now=None):
     for field in ("event_lag_seconds", "reconciliation_depth"):
         check(type(safety.get(field)) is int and safety[field] == 0,
               "NONZERO_OR_UNKNOWN:" + field)
+    vicidial = _object(expected_components.get("vicidial"))
+    for code in server_b_readiness.evaluate(
+        observed.get("server_b"), source_sha=vicidial.get("source_sha"),
+        artifact_digest=vicidial.get("artifact_digest"),
+        release_digest=expected.get("release_digest"), now=now,
+    ):
+        check(False, code, "vicidial")
     proofs = _object(observed.get("proofs"))
     for name in PROOFS:
         proof = _object(proofs.get(name))
