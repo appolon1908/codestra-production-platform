@@ -3,7 +3,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -16,11 +15,22 @@ SPEC.loader.exec_module(preflight)
 
 
 @pytest.fixture
-def secure_directory():
-    # Use a private directory beneath this checkout; /tmp is intentionally
-    # rejected because another user can write to that ancestor.
-    with tempfile.TemporaryDirectory(prefix="hetzner-profile-", dir=SOURCE.parents[2]) as name:
-        yield Path(name)
+def secure_directory(tmp_path):
+    # Model the ambient CI ancestors as trusted; hosted runners may use
+    # shared directories. The fixture directory and all descendants retain
+    # their real modes/owners, including the unsafe-ancestor regression cases.
+    ancestors = {(item.stat().st_dev, item.stat().st_ino) for item in tmp_path.parents}
+    original_fstat = os.fstat
+
+    def controlled_ancestors(descriptor):
+        info = original_fstat(descriptor)
+        if (info.st_dev, info.st_ino) in ancestors:
+            return SimpleNamespace(st_mode=info.st_mode & ~0o022, st_uid=0,
+                                   st_dev=info.st_dev, st_ino=info.st_ino)
+        return info
+
+    with patch.object(preflight.os, "fstat", side_effect=controlled_ancestors):
+        yield tmp_path
 
 
 @pytest.fixture
