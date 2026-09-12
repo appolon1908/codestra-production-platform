@@ -22,7 +22,7 @@ are explicitly `FAIL` or `BLOCKED`.
 
 | Component | Exact candidate revision | Review state | Artifact state |
 | --- | --- | --- | --- |
-| Odoo | `0c2c1328d596ab9a00914aed1a9d91506e1cc33a` | PR #131 open; exact-head checks running; required review pending | no immutable production image digest |
+| Odoo | `0c2c1328d596ab9a00914aed1a9d91506e1cc33a` | PR #131 open; exact-head checks green; required review pending | CI image build/scan passed; production digest not fixed |
 | Middleware | `55328e8881258dfd102c9f07d34a46b3b30cb101` | PR #263 open; exact source and merge-result checks green; required review pending | CI build passed; production digest not fixed |
 | Klyrow | `269c75538ed498c9afdc6bb279c7379094daf787` | PR #126 open; frontend/test/secrets/image checks green; required review pending | production digest not fixed |
 | Keycloak desired state | `2f9cafb62a639bd10c044060dc4e0e7902e4f979` | PR #115 open; protected trust update and production credentials pending | configuration only; not applied |
@@ -46,7 +46,8 @@ Odoo addon version is `19.0.1.0.0`.
 - Klyrow exact candidate CI is green for frontend, tests, secret scanning, and
   image build. Its focused authorization/attestation suite reported 72 passed
   and one PostgreSQL-only skip.
-- Odoo source tests pass. The full immutable-image Odoo 19/PostgreSQL 17.6
+- Odoo exact-head source, merge-result, security, dependency, image, and
+  runtime checks pass. The full immutable-image Odoo 19/PostgreSQL 17.6
   runtime job installed and tested all 155 reviewed modules, passed browser and
   administrator/schema audits, and passed a disposable paired database and
   filestore restore. This is test-environment recovery evidence, not the
@@ -54,6 +55,11 @@ Odoo addon version is `19.0.1.0.0`.
 - Platform callback compatibility tests pass: 212 tests cover signed ingress,
   replay, normalized delivery/bounce/defer/complaint/unsubscribe forwarding,
   and the existing Odoo callback routing surface.
+- Two newly disclosed fixable image vulnerabilities were closed without a
+  waiver: the reseller portal pins Python 3.12.14 plus Debian's fixed PCRE2
+  package, and the private gateway pins the current Alpine image plus the fixed
+  `libuuid` package. Local Trivy scans report zero HIGH/CRITICAL findings; the
+  gateway's byte-for-byte two-build reproducibility test also passes.
 - Keycloak identity, service-access, secret-segregation, password-reset,
   workflow, and runtime-hardening checks pass until the repository's expected
   production credential certification gate. PR #115 remains red because those
@@ -89,7 +95,7 @@ These observations describe the installed system, not the candidate above.
 | Gate | Status | Evidence / blocker |
 | --- | --- | --- |
 | `RELEASE_SOURCE_CERTIFIED` | **FAIL** | No merged immutable cross-repository release; checked-in source lock is FAIL. |
-| `PROTECTED_CI` | **FAIL** | Middleware and Klyrow candidate checks are green, but Odoo/platform checks and reviews remain pending and Keycloak exact-head certification is red by design. |
+| `PROTECTED_CI` | **FAIL** | Odoo and Klyrow exact-head checks are green. Middleware protected-trust checks and Keycloak exact-head certification remain red by design; platform checks and required reviews remain pending. |
 | `STAGING_CERTIFIED` | **BLOCKED** | Exact candidate has not been deployed to isolated staging and the required auth/routing/restart/alert matrix has not run. |
 | `DKIM_ROTATION_CERTIFIED` | **BLOCKED** | New selectors/keys have not been generated, published, signed, verified, or retired in controlled batches. See `DKIM_CERTIFICATION.csv`. |
 | `BACKUP_VERIFIED` | **BLOCKED** | No fresh encrypted backup bound to the final release tuple and change ID. |
