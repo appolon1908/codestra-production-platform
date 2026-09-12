@@ -1,7 +1,9 @@
 # Telnexa SMS production repository reconciliation
 
-Date: 2026-09-12  
-Scope: Odoo -> Middleware -> n8n (optional orchestration only) -> Telnexa -> Jasmin -> carrier -> DLR/MO -> Telnexa -> Middleware -> Odoo  
+Date: 2026-09-12
+
+Scope: Odoo -> Middleware -> n8n (optional orchestration only) -> Telnexa -> Jasmin -> carrier -> DLR/MO -> Telnexa -> Middleware -> Odoo
+
 Decision at inventory time: `NO_GO`
 
 This is the mandatory pre-implementation inventory for the Telnexa SMS

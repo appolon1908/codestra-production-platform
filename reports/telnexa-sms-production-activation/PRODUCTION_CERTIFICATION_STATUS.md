@@ -1,8 +1,11 @@
 # Telnexa SMS production certification status
 
-Certification timestamp: 2026-09-12T13:36:31+02:00  
-Current decision: `NO_GO`  
-Transactional status: `NOT_AUTHORIZED`  
+Certification timestamp: 2026-09-12T13:36:31+02:00
+
+Current decision: `NO_GO`
+
+Transactional status: `NOT_AUTHORIZED`
+
 Campaign status: `DISABLED`
 
 This package adapts the production mission to the requested Telnexa SMS path:
@@ -60,7 +63,7 @@ restore or rollback.
 | Telnexa base exact-head CI | PASS | [run 34658149559](https://github.com/appolon1908-hue/telnexa/actions/runs/34658149559) |
 | Telnexa candidate exact source/merge/private contract/security | PASS | [run 34691478919](https://github.com/appolon1908-hue/telnexa/actions/runs/34691478919), [private contract run 34691478925](https://github.com/appolon1908-hue/telnexa/actions/runs/34691478925), and [real Middleware GET contract run 34691478911](https://github.com/appolon1908-hue/telnexa/actions/runs/34691478911) |
 | Telnexa base immutable release | FAIL | [run 34658149648](https://github.com/appolon1908-hue/telnexa/actions/runs/34658149648): Keycloak image contains critical CVE-2026-75595 in Netty 4.1.136.Final; fixed upstream version is not yet available in the pinned official Keycloak release used by the repository |
-| Middleware candidate required CI | FAIL at first head / exact rerun pending | [run 34690948972](https://github.com/appolon1908-hue/Middleware-/actions/runs/34690948972): type errors repaired in current head `f9bc648b49a2e69aae1d7a272cb392e65888b3a4`; [rerun 34691331306](https://github.com/appolon1908-hue/Middleware-/actions/runs/34691331306) is pending |
+| Middleware candidate required CI | PASS on current head | [run 34691331306](https://github.com/appolon1908-hue/Middleware-/actions/runs/34691331306) passed on `f9bc648b49a2e69aae1d7a272cb392e65888b3a4`; [first-head run 34690948972](https://github.com/appolon1908-hue/Middleware-/actions/runs/34690948972) records the repaired type-check failure |
 | Middleware protected trust | BLOCKED | [contract run 34690948907](https://github.com/appolon1908-hue/Middleware-/actions/runs/34690948907) and [trusted evidence run 34690948942](https://github.com/appolon1908-hue/Middleware-/actions/runs/34690948942) reject stale protected hashes. Exact transition hashes are recorded on PR 267; the candidate does not self-authorize them. |
 | Keycloak candidate source and merge validation | PASS | [run 34690965263](https://github.com/appolon1908-hue/Keycloak/actions/runs/34690965263); bootstrap approval remains separate |
 | Keycloak bootstrap | BLOCKED | [run 34690965256](https://github.com/appolon1908-hue/Keycloak/actions/runs/34690965256) returned `missing-independent-approval`, as designed |
