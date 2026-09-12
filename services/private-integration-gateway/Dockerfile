@@ -1,8 +1,10 @@
-FROM python:3.12.14-alpine3.24@sha256:1887c114801a8c82a4ec01daa52cfe7fc3f63573640e2247320289807ac1c3bb
+FROM python:3.12.14-alpine3.24@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a
 
 ARG SOURCE_COMMIT_SHA
 RUN test "${#SOURCE_COMMIT_SHA}" -eq 40 \
     && case "${SOURCE_COMMIT_SHA}" in *[!0-9a-f]*) exit 1 ;; *) : ;; esac \
+    && apk add --no-cache libuuid=2.42.3-r1 \
+    && rm -f /var/log/apk.log \
     && addgroup -g 10001 gateway \
     && adduser -D -u 10001 -G gateway gateway \
     && install -d -o 10001 -g 10001 -m 0700 /data

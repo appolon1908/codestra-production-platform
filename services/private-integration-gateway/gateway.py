@@ -125,6 +125,8 @@ KLYROW_FORWARDED_EMAIL_STATUS_EVENTS = {
     "klyrow.email.bounced",
     "klyrow.email.deferred",
     "klyrow.email.held",
+    "klyrow.email.complained",
+    "klyrow.email.unsubscribed",
 }
 PROJECTION_MESSAGE_STATES = {
     "accepted",

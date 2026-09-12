@@ -1986,7 +1986,7 @@ def test_new_ingress_events_are_dispatched_with_control_plane_authentication(
 
 @pytest.mark.parametrize(
     "event_type",
-    [None, "", "klyrow.email.opened", "klyrow.email.complained"],
+    [None, "", "klyrow.email.opened", "klyrow.email.clicked"],
 )
 def test_unsupported_klyrow_status_is_rejected_before_persistence(
     tmp_path: Path,
