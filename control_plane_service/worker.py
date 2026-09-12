@@ -13,7 +13,7 @@ import urllib.parse
 from pathlib import Path
 import nats
 
-from .core import Store
+from .core import KLYROW_EMAIL_STATUS_EVENTS, Store
 from .providers import submit
 from .leasing import (
     WORKER_ID,
@@ -131,7 +131,7 @@ def once() -> int:
         envelope = json.loads(row["envelope"])
         if envelope.get("source") == "klyrow" and envelope.get("event_type") == "klyrow.email.event":
             inner_type = str((envelope.get("payload") or {}).get("event_type", ""))
-            if inner_type in {"klyrow.email.delivered", "klyrow.email.bounced", "klyrow.email.deferred"}:
+            if inner_type in KLYROW_EMAIL_STATUS_EVENTS:
                 envelope["metadata"] = dict(envelope.get("metadata") or {})
                 envelope["metadata"]["transport_event_type"] = envelope["event_type"]
                 envelope["event_type"] = inner_type
@@ -193,7 +193,7 @@ def once() -> int:
                         (row["event_id"], target_name, WORKER_ID, row["lease_token"]))
                 continue
         target = os.getenv("CONTROL_PLANE_" + target_name.upper() + "_URL", "")
-        if target_name == "odoo" and str(envelope.get("event_type")) in {"klyrow.email.delivered", "klyrow.email.bounced", "klyrow.email.deferred"}:
+        if target_name == "odoo" and str(envelope.get("event_type")) in KLYROW_EMAIL_STATUS_EVENTS:
             target = os.getenv("CONTROL_PLANE_ODOO_EMAIL_STATUS_URL", target)
         event_slug = {"kyqra.record.created": "crawler-result-created", "kyqra.job.completed": "crawler-job-completed", "kyqra.job.failed": "crawler-job-failed"}.get(str(envelope.get("event_type")))
         if not event_slug: event_slug = str(envelope.get("event_type", "")).removeprefix("telnexa.").removeprefix("klyrow.").replace(".", "-")

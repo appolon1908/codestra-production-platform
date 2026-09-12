@@ -17,11 +17,11 @@ evidence in addition to this source inventory.
 | Klyrow | `appolon1908-hue/klyrow.com:main` | `229a3d88ad159eed8fa55cb4f6312388273f554f` | clean detached checkout |
 | Middleware | `appolon1908-hue/Middleware-:main` | `05c78f2ea9b56643cbbec42d8f3c0f3a763f6cf1` | clean detached checkout |
 | Odoo | `appolon1908-hue/Odoo:main` | `58fbca6ecd0fa29380989642e778ba7d928a8941` | clean detached checkout |
-| Production platform base | `appolon1908-hue/codestra-production-platform:release/production-activation` | `8503530cc46485fbfb322864ab199166cb922776` | PR branch rebased onto this revision |
-| Production mission PR source before rebase | `docs/production-activation-master-mission-20260912` | `2e307b44fd24846d23439ac592a6f13041fea289` | remote source recorded before reconciliation |
+| Production platform base | `appolon1908-hue/codestra-production-platform:release/production-activation` | `7d16bcd58260f8329655b621b4f01a1e3a1e5576` | clean protected base after PR #359 merged |
+| Production mission PR source | `docs/production-activation-master-mission-20260912` | `738e5ca439714c4fc380c46522c79a4c075512eb` | merged as protected-base revision above |
 | Keycloak (service-auth scope only) | `appolon1908-hue/Keycloak:main` | `04845e3e47595fedde82957b97dd7c3ce0f9ae41` | remote exact head inspected |
 | Caddy (private-route/TLS scope only) | `appolon1908-hue/Caddy:main` | `dc6f7e4447d76d611d9b8ce9068b34e87b90d948` | remote exact head inspected |
-| n8n configuration | production-platform control-plane manifests at the base revision above | `8503530cc46485fbfb322864ab199166cb922776` | source inventory only; email workflows inactive |
+| n8n | `appolon1908-hue/N8N:main` | `dd100d8ebd17f7eb90871522e74863dedbccd2e9` | exact remote head plus platform workflow inventory; email workflows inactive |
 
 The revision in this document is inventory evidence, not a release manifest.
 The candidate release manifest must be regenerated after all component changes
@@ -33,7 +33,7 @@ are approved and immutable artifacts exist.
 | --- | --- | --- | --- |
 | Business record and user-visible outcome | Odoo | PARTIAL | Durable Middleware callback records exist, but outbound transactional mail still has a direct SMTP path and read-back does not yet expose the complete lifecycle vocabulary. |
 | Policy, tenant authorization, orchestration, projection, and metering control | Middleware | PARTIAL | The communications service is the canonical control-plane API and has durable commands/events, tenant checks, idempotency, and usage projection. Its runtime binding is still declared `UNVERIFIED_TEMPLATE_ONLY`, and production callback/send switches are closed. |
-| Delivery authority and provider lifecycle | Klyrow | PARTIAL | The canonical Middleware adapter terminates at Klyrow `POST /v1/email/messages`; provider outbox, callbacks, suppressions, and durable events exist. Only SAFE and a one-message transactional canary are enforceable; an authoritative post-canary transactional-production policy is missing. |
+| Delivery authority and provider lifecycle | Klyrow | PARTIAL | The canonical Middleware adapter terminates at Klyrow `POST /v1/email/messages`; provider outbox, callbacks, suppressions, and durable events exist. Main still enforces SAFE/one-message canary. Candidate PR #126 adds strict enforcement of Middleware's command-bound post-canary authority without making Klyrow a second policy store. |
 | Optional sequencing | n8n | EXISTS | Email lifecycle workflows are inactive and call the control plane. n8n is not the source of policy, quota, suppression, provider lifecycle, or billing truth. It is not required in the current canonical send critical path. |
 | SMTP delivery | Postal/provider behind Klyrow | EXISTS | Existing provider infrastructure is preserved. This mission does not rebuild it. Production certification still needs exact-candidate health and live evidence. |
 | Service identity | Keycloak plus private gateway TLS | PARTIAL | Klyrow's Middleware route requires service identity, issuer/audience/scope and tenant binding; exact-candidate staging and production authentication evidence is not yet present. |
@@ -55,7 +55,7 @@ are approved and immutable artifacts exist.
 | --- | --- | --- |
 | EXISTS | Klyrow reconciles safe-mode controls and fails closed when delivery configuration is incoherent. | Preserve. |
 | EXISTS | `ProductionCanaryGate` durably reserves and claims exactly one allowed transactional canary. | Preserve for `TRANSACTIONAL_CANARY`. |
-| MISSING | There is no durable, versioned `TRANSACTIONAL_PRODUCTION` policy. With safe mode off, every transactional message still enters the consumed one-shot gate. | Implement one authoritative policy with expiry, scope, quotas, kill switches, privileged activation, immutable audit, and request plus worker-time enforcement. |
+| PARTIAL | Main has no durable, versioned `TRANSACTIONAL_PRODUCTION` policy. Candidate Middleware PR #263 adds the authoritative policy with expiry, bounded scope, quotas, kill switches, privileged activation, append-only audit, and exact-release binding; it is not merged or deployed. | Complete protected review/CI, then certify the exact immutable candidate in staging. |
 | PARTIAL | Campaign execution has separate disabled/canary/production environment switches. | Keep campaign disabled. Do not reuse or activate its broad production boolean. Require a later separate compliance policy and authorization. |
 | OBSOLETE | Scattered booleans alone as proof of production authorization. | Retain them only as outer fail-closed circuit breakers; they must not substitute for the durable authorization policy. |
 
@@ -65,8 +65,8 @@ are approved and immutable artifacts exist.
 | --- | --- | --- |
 | EXISTS | Middleware validates tenant, sender, domain, stream, suppression, and marketing consent before command creation. | Preserve as control-plane authorization. |
 | EXISTS | Klyrow verifies tenant state, domain verification, allowed sender, stream, suppression, sandbox recipients, resource suspensions, warm-up controls, and daily tenant quota. | Preserve as delivery-boundary defense in depth. |
-| MISSING | Klyrow has no production authorization binding an approved tenant, domains, senders, recipient scope, message categories, quotas, change ID, launch window, actors, environment, and exact release. | Add to the single production-delivery policy; never trust request JSON as authorization. |
-| EXISTS | Klyrow `platform_admin` mutations require an exact owner identity, OIDC issuer/subject, verified email, fresh MFA, non-service identity, and local membership. | Reuse for production-policy mutations; ordinary tenant roles and service accounts must be denied. |
+| PARTIAL | Main has no post-canary production attestation. Middleware PR #263 creates the complete authorization record and injects a command-bound attestation after caller validation; Klyrow PR #126 validates it over the exact private service identity and again at worker time. | Merge/certify both exact heads together; never treat caller JSON or a Klyrow-local row as production authorization. |
+| EXISTS | Klyrow `platform_admin` mutations require an exact owner identity, OIDC issuer/subject, verified email, fresh MFA, non-service identity, and local membership. | Preserve for Klyrow-owned delivery controls. Middleware production-policy mutations use the separate `production-operator` capability; ordinary tenant roles, workflows, and business users are denied. |
 
 ### Sender identity and provider adapters
 
@@ -82,9 +82,9 @@ are approved and immutable artifacts exist.
 | --- | --- | --- |
 | EXISTS | Klyrow provider callbacks validate HMAC or Postal signatures, use replay records, attach provider IDs to platform messages, persist lifecycle events, and enqueue durable Middleware events. | Preserve; prove signature rejection, replay safety, and out-of-order behavior against the exact candidate. |
 | EXISTS | `message_id`, Middleware command ID, `correlation_id`, `idempotency_key`, tenant, sender, recipient, and provider identifiers are carried or durably bound through the canonical Klyrow path. | Preserve one durable logical identity and test it end to end. |
-| EXISTS | Middleware has a body-bound HMAC callback ingress with TTL/replay protection, durable inbox/projection, and Odoo delivery worker. | Preserve; the deployed ingress and Odoo delivery switches are currently closed. |
-| PARTIAL | Odoo `codestra_middleware_bridge` stores durable, immutable callback records. | Extend the read-back mapping from delivered/bounced/deferred to requested, accepted, queued, provider_accepted, delivered, deferred, bounced, complained, suppressed, rejected, and failed. |
-| MISSING | Odoo has no canonical outbound transactional-email client for Middleware. | Implement by adapting the existing Middleware transport pattern; do not build delivery logic inside Odoo. |
+| PARTIAL | Middleware's body-bound HMAC callback ingress has TTL/replay protection and a durable raw inbox. PR #263 now projects the dedicated Klyrow callback into the canonical communication record by original command identity, including cross-process lookup. | Complete protected CI and staging callback/replay/out-of-order proof. |
+| PARTIAL | Odoo `codestra_middleware_bridge` stores durable callback records. Candidate Odoo work adds an immutable transactional outbox/read-back projection with the full requested lifecycle vocabulary. | Complete Odoo runtime review/test and exact-candidate staging read-back. |
+| PARTIAL | Main has no canonical outbound transactional-email client for Middleware. Candidate Odoo work adds only that missing opt-in bridge, defaults both control switches off, commits intent before POST, and uses GET-only reconciliation after an uncertain result. | Review/merge with the matching `odoo-email` Keycloak identity; do not activate legacy direct SMTP for this path. |
 
 ### Idempotency
 
@@ -104,7 +104,7 @@ are approved and immutable artifacts exist.
 
 | Classification | Finding | Required action |
 | --- | --- | --- |
-| PARTIAL | Klyrow has tenant daily quota, warm-up and abuse controls; Middleware has tenant controls. | Preserve, but add production-policy per-minute, per-hour, and per-day limits with tenant isolation and atomic/concurrency-safe enforcement. Do not increase defaults. |
+| PARTIAL | Klyrow has tenant daily quota, warm-up and abuse controls. Middleware PR #263 adds append-only minute/hour/day reservations and cross-process idempotency serialization. | Preserve; prove concurrent limits and tenant isolation in protected CI/staging. Do not increase defaults. |
 
 ### Metering
 
@@ -117,7 +117,7 @@ are approved and immutable artifacts exist.
 
 | Classification | Finding | Required action |
 | --- | --- | --- |
-| PARTIAL | Klyrow has general audit records and Middleware has durable command/event auditability. | Add append-only production-policy audit records with actor, timestamp, environment, action, resource, before/after, change ID, correlation ID, reason, and result. |
+| PARTIAL | Klyrow has general audit records. Middleware PR #263 adds hash-chained production-policy before/after audit events with actor, environment, action, change ID, correlation ID, reason, and result. | Complete protected review and retention/access certification. |
 
 ### Odoo integration
 
@@ -125,13 +125,13 @@ are approved and immutable artifacts exist.
 | --- | --- | --- |
 | PARTIAL | Durable inbound delivery status exists. | Complete lifecycle vocabulary and backend-derived display. |
 | DUPLICATE | Direct SMTP outbound integration coexists with the desired control-plane path. | Inventory callers, migrate transactional sends to Middleware, then deprecate without breaking existing mail infrastructure. |
-| MISSING | Canonical transactional outbound transport to Middleware. | Add only this missing integration. |
+| PARTIAL | Canonical transactional outbound transport is absent from main and implemented in the candidate `codestra_email_middleware` module. | Complete protected review/runtime tests; keep `CODESTRA_EMAIL_ENABLED=false` and `ALLOW_LIVE_EMAIL=false` until authorization. |
 
 ### n8n workflows
 
 | Classification | Finding | Required action |
 | --- | --- | --- |
-| EXISTS | CP24/25/26/27/33 lifecycle workflows and communications workflow definitions exist with `active:false`. | Keep inactive until exact-candidate staging certification and explicit need. All writes must remain through Middleware. |
+| EXISTS | The exact N8N main catalog declares transactional send, CRM follow-up, delivery reconciliation, suppression, unsubscribe and inbound workflows as `DESIGN_ONLY`/`active:false`; `EMAIL_SEND=false`, direct Klyrow/Postal/SMTP access is prohibited, and direct email-send nodes are excluded. | Keep inactive until exact-candidate staging certification and explicit need. All writes must remain through Middleware. |
 | OBSOLETE | Treating n8n state as production authorization, quota, suppression, metering, or provider truth. | Prohibited; no implementation found or planned. |
 
 ### Observability and alerts
@@ -146,7 +146,7 @@ are approved and immutable artifacts exist.
 | Classification | Finding | Required action |
 | --- | --- | --- |
 | EXISTS | The platform provides release-manifest schemas, protected validation workflows, signed-artifact controls, rollback manifests, and source-lock tooling. | Reuse; never weaken validators. |
-| PARTIAL | `PRODUCTION-SOURCE-LOCK.yaml` explicitly reports `status: FAIL`, `production_certified: false`, and `deployment_authorized: false`. PR #359 initially lacked current-base evidence and independent approval. | Rebase, run exact-head checks, obtain CODEOWNER/independent approval, then generate the candidate manifest with all component SHAs, digests, config/migration versions, timestamp, and change ID. |
+| PARTIAL | Historical `PRODUCTION-SOURCE-LOCK.yaml` reports `status: FAIL`, `production_certified: false`, and `deployment_authorized: false`. Mission PR #359 is merged, but component PRs and an exact immutable cross-repository candidate are not yet approved. | Obtain CODEOWNER/independent approval, merge exact component heads, then generate the candidate manifest with all SHAs, digests, config/migration versions, timestamp, and change ID. |
 
 ### Kill switches
 
@@ -166,8 +166,9 @@ are approved and immutable artifacts exist.
 
 ## Implementation boundary decided by this inventory
 
-1. Extend Klyrow's canonical Middleware route with the missing durable
-   transactional-production policy and audit/quotas/kill switches.
+1. Keep the durable transactional-production policy, audit, quotas, and
+   privileged kill switch in Middleware; Klyrow validates the command-bound
+   attestation and never becomes a parallel policy authority.
 2. Keep the existing one-message gate as `TRANSACTIONAL_CANARY` and leave
    campaign execution closed.
 3. Extend the existing Middleware projection/adapter only where required; do
@@ -184,7 +185,7 @@ are approved and immutable artifacts exist.
 
 `PRODUCTION_AUTHORIZATION=NOT_ACTIVE`
 
-`TRANSACTIONAL_POLICY=MISSING`
+`TRANSACTIONAL_POLICY=CANDIDATE_NOT_MERGED`
 
 `CAMPAIGN_MODE=DISABLED`
 
