@@ -1,8 +1,9 @@
 # Backblaze to Hetzner backup migration
 
 The selected destination is a private Hetzner Object Storage bucket using Restic.
-This change prepares configuration and a read-only preflight. It does not switch
-an existing job, initialize storage, move backup data, or certify recovery.
+This runbook records a completed bounded encrypted seed transfer and isolated
+restore. It does not switch an existing backup job or certify independent
+recovery, complete historical migration, retention, or production readiness.
 
 ## Destination and credentials
 
@@ -72,7 +73,7 @@ retention, data integrity or an isolated restore.
 | Caddy, database certification, scraper/middleware | Current off-host jobs use an SSH destination. Moving these to S3 requires reviewed transport changes, rather than only changing the central Restic URL. |
 | VICIdial | Preserve its independently encrypted configuration/database backups and verify the new off-host copy and isolated restore before production activation. |
 
-## Discovery on 2026-09-10
+## Discovery before the verified seed transfer on 2026-09-10
 
 Core host 65.109.65.169 still selected the B2 S3 repository.
 Its protected Hetzner Cloud token returned HTTP 401. The candidate
