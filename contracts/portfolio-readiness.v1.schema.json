@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codestra.example/contracts/portfolio-readiness.v1.schema.json",
+  "title": "Codestra portfolio readiness",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "gates", "failed_gates", "gate_count", "external_effects", "as_of"],
+  "properties": {
+    "schema_version": {"const": "portfolio.readiness.v1"},
+    "status": {"enum": ["ready", "blocked"]},
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_locked", "image_pinned", "checks_green", "approval_recorded"],
+      "properties": {
+        "source_locked": {"type": "boolean"},
+        "image_pinned": {"type": "boolean"},
+        "checks_green": {"type": "boolean"},
+        "approval_recorded": {"type": "boolean"}
+      }
+    },
+    "failed_gates": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "gate_count": {"const": 4},
+    "external_effects": {"const": "disabled"},
+    "as_of": {"type": "string", "format": "date-time"}
+  }
+}
