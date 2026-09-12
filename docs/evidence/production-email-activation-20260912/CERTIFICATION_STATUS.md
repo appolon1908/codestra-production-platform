@@ -1,10 +1,15 @@
 # Codestra transactional email production certification status
 
-**Evidence cutoff:** 2026-09-12  
-**Release/change ID:** `EMAIL-PROD-20260912-01` (candidate only; not authorized)  
-**Decision:** `NOT_AUTHORIZED`  
-**Transactional state:** `SAFE / candidate source only`  
-**Campaign state:** `DISABLED`  
+**Evidence cutoff:** 2026-09-12
+
+**Release/change ID:** `EMAIL-PROD-20260912-01` (candidate only; not authorized)
+
+**Decision:** `NOT_AUTHORIZED`
+
+**Transactional state:** `SAFE / candidate source only`
+
+**Campaign state:** `DISABLED`
+
 **External effects in this change:** none
 
 This is the single index for the production-email certification package. It
@@ -166,4 +171,3 @@ staging and production tuples.
    P1 with one approved tenant/domain/sender and an approved recipient, capture
    SPF/DKIM/DMARC, callback, Odoo, idempotency, metering and suppression
    evidence, observe it, and expand only if the stop thresholds remain clear.
-
