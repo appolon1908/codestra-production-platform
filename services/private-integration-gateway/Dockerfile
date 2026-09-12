@@ -4,6 +4,7 @@ ARG SOURCE_COMMIT_SHA
 RUN test "${#SOURCE_COMMIT_SHA}" -eq 40 \
     && case "${SOURCE_COMMIT_SHA}" in *[!0-9a-f]*) exit 1 ;; *) : ;; esac \
     && apk add --no-cache libuuid=2.42.3-r1 \
+    && rm -f /var/log/apk.log \
     && addgroup -g 10001 gateway \
     && adduser -D -u 10001 -G gateway gateway \
     && install -d -o 10001 -g 10001 -m 0700 /data
