@@ -1,7 +1,7 @@
 # Production email repository reconciliation
 
-**Inventory time:** 2026-09-12  
-**Change scope:** Odoo -> Middleware -> optional n8n orchestration -> Klyrow -> Postal/provider -> callback -> Middleware -> Odoo  
+**Inventory time:** 2026-09-12
+**Change scope:** Odoo -> Middleware -> optional n8n orchestration -> Klyrow -> Postal/provider -> callback -> Middleware -> Odoo
 **External effects:** none; no production flag, credential, DNS record, workflow, or recipient was changed
 
 This is the mandatory pre-implementation inventory for

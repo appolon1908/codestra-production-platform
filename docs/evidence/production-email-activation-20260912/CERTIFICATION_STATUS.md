@@ -22,7 +22,7 @@ are explicitly `FAIL` or `BLOCKED`.
 
 | Component | Exact candidate revision | Review state | Artifact state |
 | --- | --- | --- | --- |
-| Odoo | `38dce17c3929e648225ce2ae8d6c010654828592` | PR #131 open; required review/checks pending | no immutable production image digest |
+| Odoo | `0c2c1328d596ab9a00914aed1a9d91506e1cc33a` | PR #131 open; exact-head checks running; required review pending | no immutable production image digest |
 | Middleware | `55328e8881258dfd102c9f07d34a46b3b30cb101` | PR #263 open; exact source and merge-result checks green; required review pending | CI build passed; production digest not fixed |
 | Klyrow | `269c75538ed498c9afdc6bb279c7379094daf787` | PR #126 open; frontend/test/secrets/image checks green; required review pending | production digest not fixed |
 | Keycloak desired state | `2f9cafb62a639bd10c044060dc4e0e7902e4f979` | PR #115 open; protected trust update and production credentials pending | configuration only; not applied |
