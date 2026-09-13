@@ -1225,6 +1225,43 @@ def test_release_evidence_rejects_failed_vulnerability_gate(tmp_path: Path) -> N
         )
 
 
+def test_safe_extract_does_not_depend_on_version_specific_tar_filter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = load_source_script(
+        "install-klyrow-production-validator.py", "kpv_installer_portable_extract"
+    )
+    source_sha = "d" * 40
+    release = tmp_path / "release"
+    run_checked(
+        [
+            sys.executable,
+            "-I",
+            str(SOURCE / "build-operator-artifact.py"),
+            "--source-sha",
+            source_sha,
+            "--output",
+            str(release),
+            "--workflow-run",
+            "pytest",
+        ]
+    )
+
+    def reject_extractall(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("safe extraction must not call TarFile.extractall")
+
+    monkeypatch.setattr(installer.tarfile.TarFile, "extractall", reject_extractall)
+    destination = tmp_path / "extract"
+    destination.mkdir(mode=0o700)
+    payload = installer.safe_extract(
+        release / f"klyrow-production-validator-{source_sha}.tar.gz",
+        destination,
+        source_sha,
+    )
+    assert {path.name for path in payload.iterdir()} == installer.EXPECTED_MEMBERS
+    assert all(path.is_file() and not path.is_symlink() for path in payload.iterdir())
+
+
 def run_checked(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, text=True, capture_output=True, check=True, **kwargs)
 
