@@ -37,6 +37,7 @@ CHANNEL_EVENTS = {
 }
 KLYROW_EMAIL_STATUS_EVENTS = {
     "klyrow.email.delivered", "klyrow.email.bounced", "klyrow.email.deferred",
+    "klyrow.email.complained", "klyrow.email.unsubscribed",
 }
 MESSAGE_STATES = {"created", "validated", "blocked", "queued", "accepted", "sent", "delivered", "failed", "rejected", "cancelled", "expired", "undeliverable", "inbound_received", "deferred", "bounced", "complained", "opened", "clicked", "unsubscribed"}
 

@@ -80,6 +80,16 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(item["payload"]["provider_event_type"], "klyrow.email.held")
         self.assertEqual(item["payload"]["status"], "deferred")
 
+    def test_private_klyrow_compliance_statuses_reach_dispatch(self):
+        for event_type in ("klyrow.email.complained", "klyrow.email.unsubscribed"):
+            with self.subTest(event_type=event_type):
+                item = validate_envelope(envelope(
+                    event_type="klyrow.email.event",
+                    idempotency_key=event_type,
+                    payload={"event_type": event_type, "message_id": "message-1"},
+                ), "klyrow", "event-" + event_type)
+                self.assertEqual(item["event_type"], event_type)
+
     def test_external_odoo_message_callback_skips_missing_local_projection(self):
         item = validate_envelope(envelope(
             event_type="klyrow.email.event",
