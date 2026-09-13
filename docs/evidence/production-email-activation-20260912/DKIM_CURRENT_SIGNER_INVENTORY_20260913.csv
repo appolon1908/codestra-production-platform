@@ -1,0 +1,15 @@
+domain,current_selector,rsa_bits,dns_txt_present,dns_public_key_matches_signer,postal_domain_checks,verified_at_utc,rotation_certified
+beyvra.com,postal-u4vERE,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+breero.com,postal-v9x3wW,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+breero.shop,postal-m1R4Pr,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+codestra.agency,postal-b79ujj,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+codestra.cloud,postal-exxYRj,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+codestra.co,postal-H8XQUC,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+codestra.digital,postal-IshPZY,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+codestra.media,postal-X4UwEk,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+klyrow.com,postal-S9A5KX,2048,YES,YES,OK,2026-09-13T15:10:41Z,NO
+kyqra.com,postal-Qn4gqW,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+moneybee.loan,postal-KCYegB,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+moneybeeloan.com,postal-iDLQhE,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+nativoenglish.com,postal-j0BvFH,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO
+telnexa.co,postal-euyADI,1024,YES,YES,OK,2026-09-13T15:10:41Z,NO

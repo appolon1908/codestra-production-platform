@@ -81,9 +81,11 @@ These observations describe the installed system, not the candidate above.
   four bounced, one complained, and 25 held. Callback queues were empty when
   observed; that does not prove the candidate end-to-end callback path.
 - Postal reports the existing 14 domains' ordinary SPF, DKIM, MX, and
-  return-path checks as OK with current selector `S9A5KX`. Receiver-side
-  authentication for a candidate canary and the required DKIM security
-  rotation are not certified.
+  return-path checks as OK. A 2026-09-13 read-only inventory verified each
+  domain's distinct selector and matched every published DNS public key to
+  the active Postal signer. Thirteen signers remain RSA-1024; only
+  `klyrow.com` is RSA-2048. Receiver-side authentication for a candidate
+  canary and controlled rotation of the remaining keys are not certified.
 - A recent encrypted operational backup exists, but it is not the final
   exact-candidate recovery point and has not completed the required isolated
   production restore rehearsal.
@@ -105,7 +107,7 @@ These observations describe the installed system, not the candidate above.
 | `TRANSACTIONAL_POLICY` | **BLOCKED** | Source implementation exists in Middleware PR #263 but is not merged, deployed, authorized, or activated. |
 | `E2E_CANARY` | **BLOCKED** | No owner-approved candidate live message was sent. The earlier one-message allowance is consumed and cannot authorize another send. |
 | `SPF` | **BLOCKED** | Existing DNS check is OK; candidate receiver-side canary header evidence is absent. |
-| `DKIM` | **BLOCKED** | Existing selector check is OK; rotation and candidate receiver-side header evidence are absent. |
+| `DKIM` | **BLOCKED** | All 14 current DNS public keys match their active Postal signers, but 13 remain RSA-1024; controlled rotation and candidate receiver-side header evidence are absent. |
 | `DMARC` | **BLOCKED** | Candidate receiver-side canary header evidence is absent. |
 | `CALLBACKS` | **BLOCKED** | Source replay/projection tests pass; no exact-candidate provider-to-Klyrow-to-Middleware-to-Odoo live proof exists. |
 | `IDEMPOTENCY` | **BLOCKED** | Source tests cover duplicate/conflict/timeout/replay/restart cases; exact-candidate staging plus one-live-message metering proof is absent. |
@@ -150,6 +152,8 @@ staging and production tuples.
   `EXISTS`/`PARTIAL`/`MISSING`/`DUPLICATE`/`OBSOLETE` decisions.
 - `DKIM_CERTIFICATION.csv` — all 14 current sending domains, explicitly
   uncertified for rotation.
+- `DKIM_CURRENT_SIGNER_INVENTORY_20260913.csv` — sanitized selector, key-size,
+  provider-check, and DNS-to-signer match evidence; no private material.
 - `../../PRODUCTION_EMAIL_RUNBOOK.md` — activation, shutdown, provider,
   callback, reputation, DKIM, revocation, quota, credential, rollback, restore,
   and incident re-enable procedures.
