@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "status": "CANDIDATE_UNAPPROVED",
+  "generated_at": "2026-09-12T13:36:31+02:00",
+  "release_change_id": null,
+  "source": {
+    "telnexa": {
+      "base_sha": "73abfcbfc4904859d58221cdb1dfb1ad93bf5a33",
+      "candidate_sha": "556277062d2a908baf1607204a0bddc2e0660b1c",
+      "pull_request": "https://github.com/appolon1908-hue/telnexa/pull/36"
+    },
+    "middleware": {
+      "base_sha": "05c78f2ea9b56643cbbec42d8f3c0f3a763f6cf1",
+      "candidate_sha": "f9bc648b49a2e69aae1d7a272cb392e65888b3a4",
+      "pull_request": "https://github.com/appolon1908-hue/Middleware-/pull/267"
+    },
+    "keycloak_config": {
+      "base_sha": "04845e3e47595fedde82957b97dd7c3ce0f9ae41",
+      "candidate_sha": "f3c0c1116890a0c9097473545fed045fc2010276",
+      "pull_request": "https://github.com/appolon1908-hue/Keycloak/pull/116"
+    },
+    "odoo": {
+      "sha": "58fbca6ecd0fa29380989642e778ba7d928a8941",
+      "changed": false
+    },
+    "n8n": {
+      "sha": "dd100d8ebd17f7eb90871522e74863dedbccd2e9",
+      "changed": false
+    },
+    "production_platform_base": {
+      "sha": "7d16bcd58260f8329655b621b4f01a1e3a1e5576",
+      "branch": "release/production-activation"
+    },
+    "openbao": {
+      "sha": "5f5e3583585081e450f945440a1fab503bfa8399",
+      "changed": false,
+      "required_pull_request": "https://github.com/appolon1908-hue/Codestra-OpenBao/pull/69"
+    },
+    "caddy": {
+      "sha": "dc6f7e4447d76d611d9b8ce9068b34e87b90d948",
+      "changed": false
+    }
+  },
+  "artifacts": {
+    "telnexa_api_image_digest": null,
+    "jasmin_image_digest": null,
+    "webhook_relay_image_digest": null,
+    "keycloak_image_digest": null,
+    "signatures_verified": false,
+    "rollback_artifact_digest": null
+  },
+  "configuration_version": null,
+  "database_migration_version": "telnexa/010_sms_production_policy.sql",
+  "authorization_record_id": null,
+  "production_owner": null,
+  "notes": [
+    "This manifest is a source candidate inventory, not a production release manifest.",
+    "Null values are mandatory blockers and must not be replaced with placeholders.",
+    "No carrier, deployment, recipient, callback, DNS, backup restore, or production mutation is asserted."
+  ]
+}

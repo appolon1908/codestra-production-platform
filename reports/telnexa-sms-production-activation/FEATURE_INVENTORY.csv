@@ -1,0 +1,32 @@
+capability,classification,authority,disposition
+SMS submit API,EXISTS,Telnexa billing.app,Reuse POST /api/v1/messages
+idempotency read-back,EXISTS,Telnexa billing.app,Reuse GET by-idempotency and never second POST
+message identity,PARTIAL,Middleware and Telnexa,Repair canonical event envelope
+request idempotency,EXISTS,Telnexa and Middleware,Retain durable locks and semantic conflict
+post-canary delivery policy,MISSING,Telnexa,Implement one audited fail-closed authority
+sender approval,EXISTS,Telnexa,Install only carrier-approved values
+destination policy,PARTIAL,Telnexa,Add owner-approved scope and keep USA denied
+carrier adapter,PARTIAL,Telnexa and Jasmin,Add DIDWW capability gate without rebuilding Jasmin
+carrier credentials,MISSING,OpenBao,Merge policy and install runtime values externally
+throughput policy,PARTIAL,Telnexa,Bind exact carrier-approved MPS/TPS
+spend ceiling,PARTIAL,Telnexa billing,Confirm authoritative USD 2 account grain
+suppression,EXISTS,Telnexa,Retain final admission check
+provider DLR/MO intake,EXISTS,Telnexa,Retain signed replay-safe inbox
+Middleware callback publisher,PARTIAL,Telnexa,Align URL identity envelope headers and HMAC
+Middleware event inbox,EXISTS,Middleware,Reuse durable inbox replay guard and ledger
+Middleware canonical route,PARTIAL,Middleware and Keycloak,Replace old route without parallel authority
+Odoo outbound bridge,EXISTS,Odoo,Retain post-commit immutable outbox
+Odoo final read-back,PARTIAL,Odoo and Middleware,Certify durable end-to-end projection
+n8n orchestration,PARTIAL,n8n,Keep inactive and non-authoritative unless needed
+metering,EXISTS,Telnexa,Certify one logical message equals billed segments
+carrier reconciliation,PARTIAL,Telnexa,Prove against bounded carrier evidence
+audit history,EXISTS,Telnexa,Extend to production-policy mutations
+observability,PARTIAL,Telnexa and platform,Add and certify production alerts
+kill switches,PARTIAL,Telnexa and platform,Create one reviewed read-back and rehearse
+signed immutable images,PARTIAL,production platform,Repair Keycloak scan and certify exact digests
+backup and restore,PARTIAL,Telnexa,Run fresh exact-candidate isolated restore
+rollback,PARTIAL,Telnexa and platform,Rehearse stop-new-sends with callbacks available
+source lock,PARTIAL,production platform,Refresh after approved protected merges
+duplicate private provider runtime,DUPLICATE,Telnexa billing.sms_provider_service,Do not activate as second authority
+legacy direct Jasmin gateway,DUPLICATE,production platform,Retire from canonical outbound path
+campaign SMS,PARTIAL,Telnexa,Keep disabled pending separate authorization
