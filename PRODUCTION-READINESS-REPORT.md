@@ -5,6 +5,18 @@ Production target: `65.109.65.169`
 Staging target: `2.29.17.172`
 Decision: **NO-GO**
 
+## Superseding Klyrow mTLS update — 2026-09-13
+
+The September 2 Klyrow private-mTLS failure below is superseded. Read-only
+certificate inspection, a live authenticated TLS 1.3 handshake to Server A,
+and Server A's restricted fail-closed certifier now establish
+`KLYROW_PRODUCTION_MTLS=PASS`. The exact certificate metadata and certification
+boundary are recorded in
+`docs/evidence/production-email-activation-20260912/KLYROW_MTLS_CERTIFICATION_20260913.md`.
+This update changes only the Klyrow mTLS gate; the overall production decision
+remains **NO-GO**, and the private Docker-network and exact-release gates remain
+blocked.
+
 ## Verified progress
 
 - Platform PR [#181](https://github.com/appolon1908-hue/codestra-production-platform/pull/181) merged through protected automation at `5aec485814149434750f2313370ae0ae39db5bd8`.
@@ -15,7 +27,11 @@ Decision: **NO-GO**
 - Appolon Middleware source `f3437709c06747249586598590145234ea2c7327` and digest `sha256:a5c508fea8634351fb1bdd11e22a6cea520e436355cba3305456a07a3e0a2484` implement the three n8n API gaps, but are not deployed.
 - Branch protections retain strict status checks, conversation resolution, admin enforcement, and force-push/deletion denial. No bypass was used.
 - All dangerous external-effect switches remain disabled. No email, SMS, social post, advertisement, model request, payment, or PSTN call was initiated.
-- Klyrow and Telnexa source-defined public health/readiness endpoints pass with authoritative DNS, exact peer, and TLS hostname verification; private mTLS/service-identity integration gates remain FAIL (`evidence/server65/PROVIDER-READONLY-HEALTH-20260902.md`).
+- Klyrow and Telnexa source-defined public health/readiness endpoints passed
+  with authoritative DNS, exact peer, and TLS hostname verification in the
+  September 2 capture. At that cutoff their private mTLS/service-identity gates
+  remained FAIL (`evidence/server65/PROVIDER-READONLY-HEALTH-20260902.md`);
+  Klyrow alone is superseded to PASS by the September 13 evidence linked above.
 - Provider credential read-back is fail-closed: Klyrow authority and consumer states disagree, Telnexa consumer validation fails despite an active declaration, and Kyqra is uninitialized (`evidence/server65/PROVIDER-CREDENTIAL-STATE-20260902.md`).
 - All 24 known unpinned deployments were refreshed from safe live Docker metadata; none has a digest-pinned Compose reference, only four expose a valid repository/SHA pair, and four deployment authorities remain under inaccessible `/root` worktrees (`evidence/server65/SOURCE-AUTHORITY-24-DEPLOYMENTS-20260902.yaml`).
 - The three required n8n gaps are reconciled without inflating the 641 runtime-derived record count: two absent contracts remain in the required-gap register and live Kong record `ep-0577` is the broken collection route (`evidence/server65/API-GAP-RECONCILIATION-20260902.yaml`).
