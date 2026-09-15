@@ -193,7 +193,8 @@ docker image inspect "$postgres_image" >/dev/null
 rehearsal_password_file="$work_dir/rehearsal-db-password"
 openssl rand -hex 32 > "$rehearsal_password_file"
 chmod 0444 "$rehearsal_password_file"
-docker network create --internal --subnet 10.253.255.0/28 "$network" >/dev/null
+# Docker's address allocator selects an unused subnet for this rehearsal.
+docker network create --internal "$network" >/dev/null
 docker volume create "$volume" >/dev/null
 docker run -d --name "$container" --network "$network" \
     --network-alias postgres \
@@ -426,8 +427,42 @@ proxy_mode = False
 http_port = 8069
 workers = 0
 max_cron_threads = 0
-addons_path = /usr/lib/python3/dist-packages/odoo/addons,/mnt/extra-addons,/mnt/integration-addons,/mnt/call-center-addons
 EOF
+python3 - "$work_dir" <<'PY'
+import json
+from pathlib import Path
+import re
+import sys
+
+work = Path(sys.argv[1])
+layout = json.loads((work / "runtime-layout.json").read_text())
+if layout.get("schema_version") != 1:
+    raise SystemExit("unsupported runtime backup layout")
+addons = layout["odoo_addons_path"]
+if not all(re.fullmatch(r"/[A-Za-z0-9_./-]+", item) for item in addons.split(",")):
+    raise SystemExit("invalid restored addon path")
+record, = [c for c in layout["containers"] if c["name"] == "codestra-odoo-1"]
+expected = dict(line.split() for line in (work / "BACKUP-MANIFEST.tsv").read_text().splitlines())
+if record["image_id"] != expected["codestra-odoo-1"]:
+    raise SystemExit("runtime layout/image archive mismatch")
+configuration = (work / "restored-configuration").resolve()
+mounts = []
+for mount in sorted(record["readonly_binds"], key=lambda m: (len(Path(m["destination"]).parts), m["destination"])):
+    destination = mount["destination"]
+    if not destination.startswith("/mnt/"):
+        continue
+    source = configuration / mount["source"].lstrip("/")
+    if not source.exists() or not source.resolve().is_relative_to(configuration):
+        raise SystemExit("restored addon mount is missing or escapes isolated restore")
+    if any(c in str(source) + destination for c in "\n\r\0:"):
+        raise SystemExit("invalid restored mount path")
+    mounts.extend(["-v", f"{source}:{destination}:ro"])
+if not mounts:
+    raise SystemExit("no restored addon mounts")
+(work / "odoo-addon-mounts.nul").write_bytes(b"".join(x.encode() + b"\0" for x in mounts))
+with (work / "odoo-rehearsal.conf").open("a") as config:
+    config.write(f"addons_path = {addons}\n")
+PY
 printf 'db_password = %s\n' "$(<"$rehearsal_password_file")" >> "$work_dir/odoo-rehearsal.conf"
 chmod 0400 "$work_dir/odoo-rehearsal.conf"
 chown 100:101 "$work_dir/odoo-rehearsal.conf"
@@ -436,13 +471,12 @@ odoo_image=$(awk '$1 == "codestra-odoo-1" {print $2}' "$work_dir/BACKUP-MANIFEST
 test -n "$odoo_image"
 docker image inspect "$odoo_image" >/dev/null
 application_health_started_ns=$(date +%s%N)
+mapfile -d '' -t odoo_addon_mounts < "$work_dir/odoo-addon-mounts.nul"
 docker run -d --name "$odoo_container" --network "$network" \
     --user 100:101 \
     -v "$work_dir/restored-volumes/odoo:/var/lib/odoo" \
     -v "$work_dir/odoo-rehearsal.conf:/etc/odoo/odoo.conf:ro" \
-    -v "$work_dir/restored-configuration/opt/codestra/odoo-addons:/mnt/extra-addons:ro" \
-    -v "$work_dir/restored-configuration/opt/codestra/staging-sources/app-odoo-identity-timezone-57ab123cded2-r2/integration:/mnt/integration-addons:ro" \
-    -v "$work_dir/restored-configuration/opt/codestra/staging-sources/app-odoo-identity-timezone-57ab123cded2-r2/call-center:/mnt/call-center-addons:ro" \
+    "${odoo_addon_mounts[@]}" \
     --entrypoint odoo "$odoo_image" \
     --config=/etc/odoo/odoo.conf --no-database-list --max-cron-threads=0 --workers=0 >/dev/null
 
@@ -546,6 +580,7 @@ MEASURED_RTO_MS=${measured_rto_ms}
 CONFIGURATION_RESTORE_GATE=PASS
 LOCAL_RUNTIME_IMAGE_ARCHIVE_GATE=PASS
 EXACT_RUNTIME_IMAGE_ID_BINDING_GATE=PASS
+EXACT_RUNTIME_ADDON_MOUNT_RESTORE_GATE=PASS
 MIDDLEWARE_CANDIDATE_IMAGE=${middleware_image}
 MIDDLEWARE_CANDIDATE_SOURCE_SHA=${middleware_source_sha}
 MIDDLEWARE_MIGRATION_HEAD=${middleware_database_head}

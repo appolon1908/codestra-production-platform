@@ -84,7 +84,7 @@ EOF
 verify_payload || fail
 [ ! -L "$restore_source" ] || fail
 [ -f "$restore_source" ] || fail
-[ "$(sha256sum "$restore_source" | awk '{print $1}')" = fe18115933a7acff7c85cf3649d371351a2cf11c2ae2f7f7f1f9303d14c56f66 ] || fail
+[ "$(sha256sum "$restore_source" | awk '{print $1}')" = 4d03988f1ab00c8e5644980568b1fb715b5d329880c19c5f6caa6d6e7154ba61 ] || fail
 [ ! -L "$database_manifest_source" ] || fail
 [ -f "$database_manifest_source" ] || fail
 [ ! -L "$database_validator_source" ] || fail

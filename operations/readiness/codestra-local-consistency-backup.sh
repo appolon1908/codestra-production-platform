@@ -9,6 +9,17 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 work_dir="${backup_root}/.work-${stamp}"
 final_dir="${backup_root}/${stamp}"
 paused=()
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+snapshot_helper=
+for candidate in "$script_dir/snapshot_runtime.py" /opt/codestra/operations/readiness/snapshot_runtime.py; do
+    if [[ -f "$candidate" && -r "$candidate" ]]; then
+        snapshot_helper=$candidate
+        break
+    fi
+done
+test -n "$snapshot_helper"
+exec 9>/run/lock/codestra-readiness-backup.lock
+flock --nonblock 9
 
 validate_owner_window_waiver() {
     /usr/bin/python3 - <<'PY'
@@ -92,6 +103,8 @@ cleanup() {
 
 trap cleanup EXIT
 trap 'echo "BACKUP_STATUS=FAIL" >&2' ERR
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 hour=$(TZ=America/New_York date +%H)
 if (( 10#$hour < 0 || 10#$hour >= 4 )); then
@@ -117,6 +130,8 @@ for container in codestra-postgres-1 codestra-redis-1 codestra-odoo-1 codestra-m
     printf '%s\t%s\n' "$container" "$image_id" >> "$work_dir/BACKUP-MANIFEST.tsv"
 done
 
+python3 "$snapshot_helper" inventory --work-dir "$work_dir"
+
 gpg_probe='codestra-readiness-gpg-self-test-v1'
 gpg_roundtrip=$(printf '%s' "$gpg_probe" \
     | gpg --homedir /etc/codestra/backup-gpg --batch --yes --trust-model always \
@@ -131,22 +146,9 @@ docker image save \
     | gzip -n > "$work_dir/runtime-images.tar.gz"
 
 tar -czf "$work_dir/configuration.tar.gz" -C / \
-    etc/codestra/secrets \
-    etc/caddy \
-    opt/codestra/compose/compose.yaml \
-    opt/codestra/compose/compose.middleware-runtime.yaml \
-    opt/codestra/compose/compose.phase-n2-activation.yaml \
-    opt/codestra/compose/compose.final-production-trust.yaml \
-    opt/codestra/compose/compose.scraper-ingress-disabled.yaml \
-    opt/codestra/compose/compose.health-contract-remediation.yaml \
-    opt/codestra/compose/compose.live-delivery-safety.yaml \
-    opt/codestra/env \
-    opt/codestra/config/odoo \
-    opt/codestra/odoo-addons \
-    opt/codestra/staging-sources/app-odoo-identity-timezone-57ab123cded2-r2 \
-    opt/codestra/identity-platform/deploy/compose.identity.yaml \
-    opt/codestra/identity-platform/gateway/oauth2-proxy.cfg \
-    opt/codestra/identity-platform/realms/codestra-realm.json
+    --null --verbatim-files-from -T "$work_dir/configuration-paths.nul"
+python3 "$snapshot_helper" verify-configuration --work-dir "$work_dir"
+python3 "$snapshot_helper" verify-layout --work-dir "$work_dir"
 
 pause_started_ns=$(date +%s%N)
 for service in codestra-odoo-1 codestra-n8n-1 codestra-middleware-1 codestra-identity-keycloak-1; do
@@ -176,10 +178,7 @@ docker exec codestra-postgres-1 psql -U postgres -d codestra_odoo -At -F '|' -v 
     -c "SELECT store_fname, checksum FROM ir_attachment WHERE store_fname IS NOT NULL ORDER BY store_fname" \
     > "$work_dir/odoo-attachments.tsv"
 
-odoo_owner=$(docker run --rm \
-    -v codestra_odoo_data:/source/odoo:ro \
-    alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce \
-    stat -c '%u:%g' /source/odoo)
+odoo_owner=$(<"$work_dir/odoo-volume-owner.txt")
 cat > "$work_dir/ODOO-BACKUP-METADATA" <<EOF
 BACKUP_ID=${stamp}
 DATABASE=codestra_odoo
@@ -188,17 +187,13 @@ ODOO_UID=${odoo_owner%%:*}
 ODOO_GID=${odoo_owner##*:}
 EOF
 
-docker run --rm \
-    -v codestra_odoo_data:/source/odoo:ro \
-    -v codestra_n8n_data:/source/n8n:ro \
-    -v "$work_dir":/backup \
-    alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce \
-    sh -ec 'tar -czf /backup/application-volumes.tar.gz -C /source odoo n8n'
+python3 "$snapshot_helper" archive-volumes --work-dir "$work_dir"
 
 resume_services
 pause_ended_ns=$(date +%s%N)
 pause_duration_ms=$(( (pause_ended_ns - pause_started_ns) / 1000000 ))
 verify_service_recovery
+python3 "$snapshot_helper" verify-layout --work-dir "$work_dir"
 
 (
     cd "$work_dir"
@@ -207,7 +202,7 @@ verify_service_recovery
         expected-codestra_n8n-owners.txt expected-keycloak-owners.txt expected-default-acl.txt \
         odoo-attachments.tsv ODOO-BACKUP-METADATA \
         application-volumes.tar.gz configuration.tar.gz runtime-images.tar.gz \
-        BACKUP-MANIFEST.tsv > SHA256SUMS
+        BACKUP-MANIFEST.tsv runtime-layout.json configuration-paths.nul > SHA256SUMS
     sha256sum -c SHA256SUMS
 )
 
@@ -217,7 +212,7 @@ tar -czf "$work_dir/codestra-${stamp}.tar.gz" -C "$work_dir" \
     expected-codestra_n8n-owners.txt expected-keycloak-owners.txt expected-default-acl.txt \
     odoo-attachments.tsv ODOO-BACKUP-METADATA \
     application-volumes.tar.gz configuration.tar.gz runtime-images.tar.gz \
-    BACKUP-MANIFEST.tsv SHA256SUMS
+    BACKUP-MANIFEST.tsv runtime-layout.json configuration-paths.nul SHA256SUMS
 
 gpg --homedir /etc/codestra/backup-gpg --batch --yes --trust-model always \
     --recipient 'Codestra Backup Recipient' \
