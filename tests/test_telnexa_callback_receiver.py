@@ -36,3 +36,19 @@ def test_telnexa_callback_receiver_is_not_imported_by_container_caddy() -> None:
     root = Path("operations/caddy/Caddyfile").read_text()
     assert "import telnexa-events.caddy" not in root
     assert "Host-Caddy-only" in SOURCE
+
+
+
+def test_telnexa_callback_client_identity_is_declared_in_pki_inventory() -> None:
+    manifest = Path("operations/tls/certificates.tsv").read_text()
+    row = next(
+        line for line in manifest.splitlines()
+        if line.startswith("telnexa-callback-client|")
+    )
+    fields = row.split("|")
+    assert fields[1] == "client"
+    assert fields[2] == "/etc/codestra/pki/telnexa-callback-client/client.crt"
+    assert fields[3] == "/etc/codestra/pki/telnexa-callback-client/client.key"
+    assert fields[4] == "/etc/codestra/pki/private-integration-ca/ca.crt"
+    assert fields[5] == "/etc/codestra/pki/private-integration-ca/ca.key"
+    assert fields[8] == "URI:spiffe://codestra/internal/telnexa/callback"
