@@ -4441,3 +4441,24 @@ def test_release_cannot_deploy_or_send_communications():
         "canary",
     ):
         assert prohibited not in workflow
+
+
+def test_production_compose_prepares_but_does_not_activate_middleware_mtls() -> None:
+    source = (ROOT / "services/private-integration-gateway/compose.production.yaml").read_text()
+    assert 'MIDDLEWARE_FORWARDING_ENABLED: "false"' in source
+    assert (
+        "MIDDLEWARE_EVENTS_URL: "
+        "https://middleware-sms-events.internal.codestra.agency:18081/api/v1/events/telnexa"
+    ) in source
+    assert "MIDDLEWARE_EVENTS_CA_FILE: /run/secrets/middleware_events_ca" in source
+    assert (
+        "MIDDLEWARE_EVENTS_CLIENT_CERT_FILE: "
+        "/run/secrets/middleware_events_client_cert"
+    ) in source
+    assert (
+        "MIDDLEWARE_EVENTS_CLIENT_KEY_FILE: "
+        "/run/secrets/middleware_events_client_key"
+    ) in source
+    assert '"middleware-sms-events.internal.codestra.agency:10.40.0.1"' in source
+    assert "LIVE_SUBMISSION_ENABLED: \"false\"" in source
+    assert "PRODUCTION_DELIVERY_AUTHORIZED: \"false\"" in source
