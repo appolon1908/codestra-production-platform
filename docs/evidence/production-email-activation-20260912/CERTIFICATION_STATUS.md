@@ -1,6 +1,6 @@
 # Codestra transactional email production certification status
 
-**Evidence cutoff:** 2026-09-12
+**Evidence cutoff:** 2026-09-13
 
 **Release/change ID:** `EMAIL-PROD-20260912-01` (candidate only; not authorized)
 
@@ -22,13 +22,13 @@ are explicitly `FAIL` or `BLOCKED`.
 
 | Component | Exact candidate revision | Review state | Artifact state |
 | --- | --- | --- | --- |
-| Odoo | `0c2c1328d596ab9a00914aed1a9d91506e1cc33a` | PR #131 open; exact-head checks green; required review pending | CI image build/scan passed; production digest not fixed |
-| Middleware | `55328e8881258dfd102c9f07d34a46b3b30cb101` | PR #263 open; exact source and merge-result checks green; required review pending | CI build passed; production digest not fixed |
-| Klyrow | `269c75538ed498c9afdc6bb279c7379094daf787` | PR #126 open; frontend/test/secrets/image checks green; required review pending | production digest not fixed |
-| Keycloak desired state | `2f9cafb62a639bd10c044060dc4e0e7902e4f979` | PR #115 open; protected trust update and production credentials pending | configuration only; not applied |
+| Odoo | `0c2c1328d596ab9a00914aed1a9d91506e1cc33a` | PR #131 merged as `71f1ce6969ae41d1cd57af368be67259fea4eacb` | CI image build/scan passed; production digest not fixed |
+| Middleware | `711f248ef638fd7c755c8d21da8a5718017096c3` | PR #263 merged as `b16a7a5692e86e18ed5e2be9f3338ad0b1b700cf` | Release publication remains gated by signed Security Owner/VEX evidence; production digest not fixed |
+| Klyrow | `47af16eea036c0d36e7b7f9e817cc5a59e3ebb3a` | PR #126 open and mergeable; exact-head checks green; required independent review pending | production digest not fixed |
+| Keycloak desired state | `df08271fe8eeb21360a6583bb073e7b6537b8451` | PR #115 open; the validated successor commit is not published because the available GitHub credential lacks workflow scope | configuration only; not applied |
 | n8n | `dd100d8ebd17f7eb90871522e74863dedbccd2e9` | protected main inspected; email workflows `DESIGN_ONLY`, inactive | not in the send critical path |
 | Caddy | `dc6f7e4447d76d611d9b8ce9068b34e87b90d948` | protected main inspected for the existing private mTLS route | no candidate change |
-| Production platform protected base | `7d16bcd58260f8329655b621b4f01a1e3a1e5576` | PR #359 merged | follow-up branch is not a release |
+| Production platform protected base | `b8cc100aec14c497228d3bac35dc491ff5ca6ec5` | Current protected head; PRs #363, #364, and #365 are mergeable with exact-head checks green and independent review pending | follow-up branches are not releases |
 
 No production release SHA, signed cross-repository manifest, candidate image
 tuple, configuration version, or rollback artifact is fixed yet. Middleware's
@@ -43,9 +43,9 @@ Odoo addon version is `19.0.1.0.0`.
   connector contracts, observability contracts, and synthetic no-effect E2E.
   The full local suite reported 2,816 passed, 194 skipped, plus 94 passing
   subtests.
-- Klyrow exact candidate CI is green for frontend, tests, secret scanning, and
-  image build. Its focused authorization/attestation suite reported 72 passed
-  and one PostgreSQL-only skip.
+- Klyrow exact candidate CI is green for contracts, frontend, tests, secret
+  scanning, image build, and deploy-readiness source checks. Its refreshed
+  focused authorization/attestation suite reported 92 passed and two skips.
 - Odoo exact-head source, merge-result, security, dependency, image, and
   runtime checks pass. The full immutable-image Odoo 19/PostgreSQL 17.6
   runtime job installed and tested all 155 reviewed modules, passed browser and
@@ -76,14 +76,22 @@ These observations describe the installed system, not the candidate above.
   It is therefore not the candidate source.
 - Klyrow is healthy, but the post-canary production path remains closed. The
   durable one-message allowance is already consumed.
+- Klyrow's installed private mTLS transport is now certified. The provider
+  server, provider client, and Server A listener certificates are present and
+  valid; a live TLS 1.3 connection passed chain and hostname verification, and
+  Server A's restricted certifier passed the identity, credential-revocation,
+  tenant-isolation, and redaction gates. See
+  `KLYROW_MTLS_CERTIFICATION_20260913.md`.
 - Sanitized counts observed during reconciliation were 27 logical messages,
   15 delivered outbox records, and provider events comprising 502 delivered,
   four bounced, one complained, and 25 held. Callback queues were empty when
   observed; that does not prove the candidate end-to-end callback path.
 - Postal reports the existing 14 domains' ordinary SPF, DKIM, MX, and
-  return-path checks as OK with current selector `S9A5KX`. Receiver-side
-  authentication for a candidate canary and the required DKIM security
-  rotation are not certified.
+  return-path checks as OK. A 2026-09-13 read-only inventory verified each
+  domain's distinct selector and matched every published DNS public key to
+  the active Postal signer. Thirteen signers remain RSA-1024; only
+  `klyrow.com` is RSA-2048. Receiver-side authentication for a candidate
+  canary and controlled rotation of the remaining keys are not certified.
 - A recent encrypted operational backup exists, but it is not the final
   exact-candidate recovery point and has not completed the required isolated
   production restore rehearsal.
@@ -95,17 +103,19 @@ These observations describe the installed system, not the candidate above.
 | Gate | Status | Evidence / blocker |
 | --- | --- | --- |
 | `RELEASE_SOURCE_CERTIFIED` | **FAIL** | No merged immutable cross-repository release; checked-in source lock is FAIL. |
-| `PROTECTED_CI` | **FAIL** | Odoo and Klyrow exact-head checks are green. Middleware protected-trust checks and Keycloak exact-head certification remain red by design; platform checks and required reviews remain pending. |
+| `PROTECTED_CI` | **FAIL** | Odoo and Middleware are merged; Klyrow and platform exact-head checks are green. Required independent reviews and Keycloak exact-head publication/certification remain pending. |
+| `KLYROW_MTLS` | **PASS** | Installed provider/server identities, live TLS 1.3 chain and hostname verification, old-credential denial, and tenant isolation passed. See `KLYROW_MTLS_CERTIFICATION_20260913.md`. |
+| `PRIVATE_PROVIDER_NETWORKS` | **BLOCKED** | The governed three-network reconciler is protected source, but the last sanctioned Server A inventory did not contain the networks and the installed restricted operator cannot execute the reconciler or attest the current protected tuple. No network mutation was performed. |
 | `STAGING_CERTIFIED` | **BLOCKED** | Exact candidate has not been deployed to isolated staging and the required auth/routing/restart/alert matrix has not run. |
 | `DKIM_ROTATION_CERTIFIED` | **BLOCKED** | New selectors/keys have not been generated, published, signed, verified, or retired in controlled batches. See `DKIM_CERTIFICATION.csv`. |
 | `BACKUP_VERIFIED` | **BLOCKED** | No fresh encrypted backup bound to the final release tuple and change ID. |
 | `RESTORE_REHEARSAL` | **BLOCKED** | No isolated restore of the final production recovery point with timing and critical email/audit-state read-back. |
 | `ROLLBACK_REHEARSAL` | **BLOCKED** | Stop-new-sends plus callback-preserving application/config/database rollback has not been rehearsed for the final tuple. |
 | `PRODUCTION_AUTHORIZATION` | **BLOCKED** | No owner-approved immutable policy record exists; required owners, launch window, bounded scope, quotas, release SHA, timestamps, and review/expiry are unset. |
-| `TRANSACTIONAL_POLICY` | **BLOCKED** | Source implementation exists in Middleware PR #263 but is not merged, deployed, authorized, or activated. |
+| `TRANSACTIONAL_POLICY` | **BLOCKED** | Source implementation from Middleware PR #263 is merged but is not published, deployed, authorized, or activated. |
 | `E2E_CANARY` | **BLOCKED** | No owner-approved candidate live message was sent. The earlier one-message allowance is consumed and cannot authorize another send. |
 | `SPF` | **BLOCKED** | Existing DNS check is OK; candidate receiver-side canary header evidence is absent. |
-| `DKIM` | **BLOCKED** | Existing selector check is OK; rotation and candidate receiver-side header evidence are absent. |
+| `DKIM` | **BLOCKED** | All 14 current DNS public keys match their active Postal signers, but 13 remain RSA-1024; controlled rotation and candidate receiver-side header evidence are absent. |
 | `DMARC` | **BLOCKED** | Candidate receiver-side canary header evidence is absent. |
 | `CALLBACKS` | **BLOCKED** | Source replay/projection tests pass; no exact-candidate provider-to-Klyrow-to-Middleware-to-Odoo live proof exists. |
 | `IDEMPOTENCY` | **BLOCKED** | Source tests cover duplicate/conflict/timeout/replay/restart cases; exact-candidate staging plus one-live-message metering proof is absent. |
@@ -150,6 +160,10 @@ staging and production tuples.
   `EXISTS`/`PARTIAL`/`MISSING`/`DUPLICATE`/`OBSOLETE` decisions.
 - `DKIM_CERTIFICATION.csv` — all 14 current sending domains, explicitly
   uncertified for rotation.
+- `DKIM_CURRENT_SIGNER_INVENTORY_20260913.csv` — sanitized selector, key-size,
+  provider-check, and DNS-to-signer match evidence; no private material.
+- `KLYROW_MTLS_CERTIFICATION_20260913.md` — sanitized certificate metadata,
+  live TLS verification, and restricted fail-closed identity certification.
 - `../../PRODUCTION_EMAIL_RUNBOOK.md` — activation, shutdown, provider,
   callback, reputation, DKIM, revocation, quota, credential, rollback, restore,
   and incident re-enable procedures.
