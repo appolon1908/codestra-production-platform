@@ -11,10 +11,12 @@ classification:
 lifecycle:
   promotion_order: [development, testing, staging, production]
   development: "development"
-  testing: "namespace-conflict: testing/* already exists"
+  testing: "testing"
   staging: "staging"
   production: "production"
   exact_branch_exception: true
+  exception_notes:
+    - "testing: exact refs/heads/testing is blocked by existing testing/* namespace; historical refs preserved"
 governance:
   canonical_owner_is_authority: true
   transferred_owner_refs_are_non_authoritative: true
