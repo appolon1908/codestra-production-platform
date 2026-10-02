@@ -1,0 +1,47 @@
+# Host-Caddy-only private Telnexa delivery-event ingress. Do not import this
+# file into the container Caddy root: 10.40.0.1 and host loopback belong to
+# the host namespace. Installation remains pending until the dedicated
+# Telnexa callback client certificate and trust material are present.
+https://middleware-sms-events.internal.codestra.agency:18081 {
+	bind 10.40.0.1
+	tls /etc/caddy/private/telnexa-events/tls-fullchain.crt /etc/caddy/private/telnexa-events/tls.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /etc/caddy/private/telnexa-events/telnexa-callback-client.crt
+		}
+	}
+
+	request_body {
+		max_size 1MB
+	}
+
+	@telnexa_event {
+		remote_ip 10.40.0.4
+		method POST
+		path /api/v1/events/telnexa
+	}
+	handle @telnexa_event {
+		reverse_proxy 127.0.0.1:18112 {
+			header_up X-Forwarded-Proto https
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	handle {
+		respond "Forbidden" 403
+	}
+
+	log {
+		output file /var/log/caddy/telnexa-events-access.log {
+			roll_size 20MiB
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format filter {
+			request>headers>Authorization delete
+			request>headers>Cookie delete
+			request>headers>Idempotency-Key delete
+			request>headers>X-Signature delete
+			request>headers>X-Event-Id delete
+		}
+	}
+}

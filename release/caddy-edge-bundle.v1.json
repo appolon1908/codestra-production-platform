@@ -23,6 +23,11 @@
       "sha256": "da62c5270eab8f75272bb8eeb1763947441d4ffb4b0623bc9cac2517a2727c6a"
     },
     {
+      "path": "operations/caddy/telnexa-events.caddy",
+      "deployment_target": "host-caddy-pending",
+      "sha256": "d0dd785581b431204e68828f8ce0849bb0bcd92f4fa4ed6a8519c4916e499f01"
+    },
+    {
       "path": "operations/caddy/snippets/security-headers.caddy",
       "deployment_target": "container-caddy",
       "sha256": "6d1c509d85e11d30726ddada58d682502cfd4c0e2993fc7cdb5ca306cb16b195"

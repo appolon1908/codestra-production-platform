@@ -14,9 +14,13 @@ services:
       JASMIN_DLR_CALLBACK_URL: http://gateway:8080/internal/v1/jasmin/dlr
       LIVE_SUBMISSION_ENABLED: "false"
       PRODUCTION_DELIVERY_AUTHORIZED: "false"
-      # Forwarding is activated only with separately issued outbound mTLS
-      # material and an approved MIDDLEWARE_EVENTS_URL deployment overlay.
+      # Forwarding remains disabled. These bindings only prepare the reviewed
+      # outbound mTLS path for later bounded staging certification.
       MIDDLEWARE_FORWARDING_ENABLED: "false"
+      MIDDLEWARE_EVENTS_URL: https://middleware-sms-events.internal.codestra.agency:18081/api/v1/events/telnexa
+      MIDDLEWARE_EVENTS_CA_FILE: /run/secrets/middleware_events_ca
+      MIDDLEWARE_EVENTS_CLIENT_CERT_FILE: /run/secrets/middleware_events_client_cert
+      MIDDLEWARE_EVENTS_CLIENT_KEY_FILE: /run/secrets/middleware_events_client_key
       # Command persistence is a separately reviewed production activation.
       INTEGRATION_COMMAND_INTAKE_ENABLED: "false"
       SERVICE_TENANT_BINDINGS_FILE: /run/secrets/private_gateway_tenant_bindings
@@ -29,6 +33,11 @@ services:
       - gateway_data:/data
     secrets:
       - private_gateway_tenant_bindings
+      - middleware_events_ca
+      - middleware_events_client_cert
+      - middleware_events_client_key
+    extra_hosts:
+      - "middleware-sms-events.internal.codestra.agency:10.40.0.1"
     ports:
       - "127.0.0.1:18443:8080"
     networks: [private_api, telnexa_backend]
@@ -56,3 +65,9 @@ volumes:
 secrets:
   private_gateway_tenant_bindings:
     file: ${PRIVATE_GATEWAY_TENANT_BINDINGS_FILE:-/etc/kyqra-telnexa-integration/tenant-bindings.json}
+  middleware_events_ca:
+    file: ${MIDDLEWARE_EVENTS_CA_SOURCE_FILE:-/etc/codestra/mtls/middleware-events/ca.crt}
+  middleware_events_client_cert:
+    file: ${MIDDLEWARE_EVENTS_CLIENT_CERT_SOURCE_FILE:-/etc/codestra/mtls/middleware-events/client.crt}
+  middleware_events_client_key:
+    file: ${MIDDLEWARE_EVENTS_CLIENT_KEY_SOURCE_FILE:-/etc/codestra/mtls/middleware-events/client.key}
