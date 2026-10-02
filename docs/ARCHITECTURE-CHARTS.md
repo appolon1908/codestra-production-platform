@@ -1,7 +1,7 @@
 # codestra-production-platform — Architecture Charts
 
-> Repository: `appolon1908/codestra-production-platform`  
-> Baseline branch: `release/production-activation`  
+> Repository: `appolon1908/codestra-production-platform`
+> Baseline branch: `release/production-activation`
 > Repository-local visual architecture. Update these diagrams when implementation or authority changes.
 
 ## 1. System context
