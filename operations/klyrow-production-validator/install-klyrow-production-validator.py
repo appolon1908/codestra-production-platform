@@ -441,7 +441,7 @@ def verify_release(
 
 def safe_extract(archive: Path, destination: Path, source_sha: str) -> Path:
     prefix = f"klyrow-production-validator-{source_sha}"
-    seen: set[str] = set()
+    members: dict[str, tarfile.TarInfo] = {}
     total_size = 0
     with tarfile.open(archive, "r:gz") as bundle:
         for member in bundle.getmembers():
@@ -457,13 +457,56 @@ def safe_extract(archive: Path, destination: Path, source_sha: str) -> Path:
             total_size += member.size
             if total_size > 16 * 1024 * 1024:
                 raise InstallError("archive payload too large")
-            if pure.parts[1] in seen:
+            name = pure.parts[1]
+            if name in members:
                 raise InstallError("duplicate archive member")
-            seen.add(pure.parts[1])
-        if seen != EXPECTED_MEMBERS:
+            members[name] = member
+        if set(members) != EXPECTED_MEMBERS:
             raise InstallError("incomplete archive")
-        bundle.extractall(destination, filter="data")
-    return destination / prefix
+        payload = destination / prefix
+        payload.mkdir(mode=0o700, exist_ok=False)
+        directory = os.open(
+            payload,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        try:
+            for name, member in members.items():
+                source = bundle.extractfile(member)
+                if source is None:
+                    raise InstallError("archive member unreadable")
+                descriptor = os.open(
+                    name,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | os.O_NOFOLLOW
+                    | os.O_CLOEXEC,
+                    0o600,
+                    dir_fd=directory,
+                )
+                try:
+                    remaining = member.size
+                    while remaining:
+                        chunk = source.read(min(131072, remaining))
+                        if not chunk:
+                            raise InstallError("archive member truncated")
+                        written = 0
+                        while written < len(chunk):
+                            count = os.write(descriptor, chunk[written:])
+                            if count <= 0:
+                                raise InstallError("archive member write failed")
+                            written += count
+                        remaining -= len(chunk)
+                    if source.read(1):
+                        raise InstallError("archive member size mismatch")
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+                    source.close()
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    return payload
 
 
 def public_key_details(path: Path) -> tuple[str, str]:

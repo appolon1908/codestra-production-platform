@@ -98,6 +98,53 @@ class SourceLockRemoteAuditTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["recorded_sha"], "")
 
+    def test_empty_self_reference_binds_only_to_exact_github_workflow_sha(self) -> None:
+        authority = {
+            "path": "$.protected_platform",
+            "repository": "owner/platform",
+            "branch": "release/production",
+            "recorded_sha": "",
+        }
+        sha = "3" * 40
+        self.assertTrue(
+            MODULE.workflow_sha_binding(
+                authority,
+                sha,
+                repository="owner/platform",
+                ref="refs/heads/release/production",
+                sha=sha,
+            )
+        )
+        rejected = (
+            {"repository": "owner/other", "ref": "refs/heads/release/production", "sha": sha},
+            {"repository": "owner/platform", "ref": "refs/pull/7/merge", "sha": sha},
+            {"repository": "owner/platform", "ref": "refs/heads/release/production", "sha": "invalid"},
+            {"repository": "owner/platform", "ref": "refs/heads/release/production", "sha": "4" * 40},
+        )
+        for context in rejected:
+            with self.subTest(context=context):
+                self.assertFalse(
+                    MODULE.workflow_sha_binding(authority, sha, **context)
+                )
+
+    def test_nonempty_invalid_recorded_sha_cannot_use_workflow_binding(self) -> None:
+        authority = {
+            "path": "$.protected_platform",
+            "repository": "owner/platform",
+            "branch": "release/production",
+            "recorded_sha": "pending",
+        }
+        sha = "5" * 40
+        self.assertFalse(
+            MODULE.workflow_sha_binding(
+                authority,
+                sha,
+                repository="owner/platform",
+                ref="refs/heads/release/production",
+                sha=sha,
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

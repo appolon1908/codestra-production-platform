@@ -109,6 +109,11 @@ once through a no-follow descriptor into a private mode-0700 staging directory.
 The installer verifies, extracts, copies, and records digests only from that
 mode-0600 snapshot, so changes to owner-writable handoff paths cannot replace
 evidence or signer authority between verification and installation.
+Archive extraction does not depend on the version-specific `tarfile` data
+filter. After validating the complete fixed member set, it creates each regular
+payload file exclusively through a no-follow directory descriptor, enforces the
+per-file and total size bounds while copying, and syncs the private extraction
+directory before installation.
 
 It installs a root-owned version directory under
 `/opt/codestra/operators/klyrow-production-validator/<source-sha>/`, verifies

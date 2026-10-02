@@ -132,6 +132,34 @@ def resolve_ref(repository: str, branch: str, token: str) -> str:
     return sha
 
 
+def workflow_sha_binding(
+    authority: dict[str, str],
+    remote_sha: str,
+    *,
+    repository: str,
+    ref: str,
+    sha: str,
+) -> bool:
+    """Bind a self-referential protected branch to GitHub's exact run SHA.
+
+    A commit cannot contain its own SHA.  The source lock therefore leaves the
+    platform SHA empty and relies on protected-release provenance.  Accept that
+    representation only for the repository and branch executing this workflow,
+    and only after the GitHub API independently resolves the branch to the same
+    full commit SHA.  Pull-request refs and any non-empty invalid recorded SHA
+    remain mismatches.
+    """
+
+    workflow_sha = sha.strip().lower()
+    return bool(
+        authority["recorded_sha"] == ""
+        and authority["repository"].lower() == repository.strip().lower()
+        and authority["branch"] == normalize_ref(ref)
+        and SHA_RE.fullmatch(workflow_sha)
+        and remote_sha == workflow_sha
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
@@ -143,6 +171,9 @@ def main() -> int:
     if not authorities:
         fail("no repository/ref authorities were discovered in the source lock")
     token = os.environ.get("GITHUB_TOKEN", "")
+    workflow_repository = os.environ.get("GITHUB_REPOSITORY", "")
+    workflow_ref = os.environ.get("GITHUB_REF", "")
+    workflow_sha = os.environ.get("GITHUB_SHA", "")
     results: list[dict[str, Any]] = []
     for authority in authorities:
         record: dict[str, Any] = dict(authority)
@@ -150,11 +181,35 @@ def main() -> int:
             remote = resolve_ref(authority["repository"], authority["branch"], token)
             record["remote_sha"] = remote
             record["recorded_sha_valid"] = bool(SHA_RE.fullmatch(authority["recorded_sha"]))
-            record["matches"] = record["recorded_sha_valid"] and authority["recorded_sha"] == remote
+            workflow_bound = workflow_sha_binding(
+                authority,
+                remote,
+                repository=workflow_repository,
+                ref=workflow_ref,
+                sha=workflow_sha,
+            )
+            record["workflow_sha_bound"] = workflow_bound
+            record["effective_sha"] = (
+                authority["recorded_sha"]
+                if record["recorded_sha_valid"]
+                else workflow_sha.strip().lower() if workflow_bound else None
+            )
+            record["identity_source"] = (
+                "recorded_sha"
+                if record["recorded_sha_valid"]
+                else "github_workflow_exact_sha" if workflow_bound else None
+            )
+            record["matches"] = bool(
+                (record["recorded_sha_valid"] and authority["recorded_sha"] == remote)
+                or workflow_bound
+            )
             record["status"] = "PASS" if record["matches"] else "MISMATCH"
         except RuntimeError as exc:
             record["remote_sha"] = None
             record["recorded_sha_valid"] = bool(SHA_RE.fullmatch(authority["recorded_sha"]))
+            record["workflow_sha_bound"] = False
+            record["effective_sha"] = None
+            record["identity_source"] = None
             record["matches"] = False
             record["status"] = "ERROR"
             record["error"] = str(exc)
