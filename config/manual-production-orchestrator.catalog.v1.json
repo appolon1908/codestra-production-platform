@@ -55,7 +55,7 @@
     {
       "order": 40,
       "wave": "applications",
-      "repository": "appolon1908-hue/codestra",
+      "repository": "appolon1908/codestra",
       "repository_id": 1319808791,
       "default_branch": "main",
       "role": "application",
@@ -73,7 +73,7 @@
     {
       "order": 42,
       "wave": "applications",
-      "repository": "appolon1908-hue/backend2",
+      "repository": "appolon1908/backend2",
       "repository_id": 1319903950,
       "default_branch": "main",
       "role": "application",

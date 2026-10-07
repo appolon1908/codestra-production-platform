@@ -764,5 +764,92 @@ class GitHubOriginSecurityTests(unittest.TestCase):
             self.assertEqual(request.call_count, 1)
 
 
+
+class CodestraApplicationTransferTests(unittest.TestCase):
+    APPLICATIONS = (
+        ("appolon1908/codestra", 1319808791),
+        ("appolon1908/backend2", 1319903950),
+    )
+
+    def setUp(self):
+        self.catalog = json.loads(CATALOG.read_text())
+        self.template = json.loads(TEMPLATE.read_text())
+
+    def contract_for(self, repository, repository_id):
+        return {
+            "schema_version": MODULE.CONTRACT_SCHEMA,
+            "repository": repository,
+            "repository_id": repository_id,
+            "default_branch": "main",
+            "role": "application",
+            "release_intent_workflow": MODULE.INTENT_WORKFLOW,
+            "deployment_authority": True,
+            "required_checks": ["orchestrator-contract"],
+            "supported_phases": ["plan", "staging", "canary", "production"],
+            "artifact_policy": {
+                "minimum_images": 1, "maximum_images": 1,
+                "require_digest": True,
+                "allow_rebuild_after_staging": False,
+                "allow_retag_after_staging": False,
+            },
+            "environments": {
+                "staging": "staging-readonly",
+                "canary": "production-readonly-canary",
+                "production": "production",
+            },
+            "safety": {
+                "external_effects_default": False,
+                "live_email_delivery": False,
+                "live_sms_delivery": False,
+                "live_pstn_dialing": False,
+                "odoo_write": False,
+                "n8n_external_delivery": False,
+                "live_trading": False,
+                "payment_execution": False,
+            },
+        }
+
+    def test_catalog_accepts_authorized_canonical_application_contracts(self):
+        for repository, repository_id in self.APPLICATIONS:
+            with self.subTest(repository=repository):
+                expected = next(item for item in self.catalog["repositories"]
+                                if item["repository_id"] == repository_id)
+                MODULE.validate_contract(self.contract_for(repository, repository_id), expected)
+
+    def test_catalog_rejects_former_application_owner(self):
+        for repository, repository_id in self.APPLICATIONS:
+            with self.subTest(repository=repository):
+                expected = next(item for item in self.catalog["repositories"]
+                                if item["repository_id"] == repository_id)
+                contract = self.contract_for(repository.replace("appolon1908/", "appolon1908-hue/"), repository_id)
+                with self.assertRaisesRegex(MODULE.PolicyError, "contract repository mismatch"):
+                    MODULE.validate_contract(contract, expected)
+
+    def test_catalog_rejects_swapped_application_ids(self):
+        for repository, repository_id in self.APPLICATIONS:
+            with self.subTest(repository=repository):
+                expected = next(item for item in self.catalog["repositories"]
+                                if item["repository_id"] == repository_id)
+                wrong_id = next(value for _, value in self.APPLICATIONS if value != repository_id)
+                with self.assertRaisesRegex(MODULE.PolicyError, "contract repository ID mismatch"):
+                    MODULE.validate_contract(self.contract_for(repository, wrong_id), expected)
+
+    def test_candidate_accepts_only_canonical_application_names(self):
+        canonical = copy.deepcopy(self.template)
+        for component in canonical["components"]:
+            for repository, _ in self.APPLICATIONS:
+                former = repository.replace("appolon1908/", "appolon1908-hue/")
+                if component["repository"] == former:
+                    component["repository"] = repository
+        MODULE.validate_candidate(self.catalog, canonical, phase="plan", allow_template=True)
+        for repository, _ in self.APPLICATIONS:
+            for owner in ("appolon1908-hue", "unapproved-owner"):
+                with self.subTest(repository=repository, owner=owner):
+                    stale = copy.deepcopy(canonical)
+                    component = next(item for item in stale["components"] if item["repository"] == repository)
+                    component["repository"] = owner + "/" + repository.split("/")[1]
+                    with self.assertRaisesRegex(MODULE.PolicyError, "unexpected candidate repository"):
+                        MODULE.validate_candidate(self.catalog, stale, phase="plan", allow_template=True)
+
 if __name__ == "__main__":
     unittest.main()
