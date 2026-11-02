@@ -2152,11 +2152,9 @@ def _waiver_files(tmp_path: Path, monkeypatch, content: str | None = None) -> tu
 
     def root_owned_fstat(descriptor):
         info = real_fstat(descriptor)
-        return type(
-            "RootOwnedStat",
-            (),
-            {"st_mode": info.st_mode, "st_uid": 0, "st_gid": 0},
-        )()
+        values = list(info)
+        values[4:6] = [0, 0]
+        return os.stat_result(values)
 
     monkeypatch.setattr(OPERATOR.os, "fstat", root_owned_fstat)
     monkeypatch.setattr(OPERATOR, "OWNER_WAIVER_DIR", tmp_path)
@@ -2214,15 +2212,17 @@ def test_unsafe_owner_waiver_permissions_are_denied(monkeypatch, tmp_path) -> No
 
 
 def test_non_root_owner_waiver_is_denied(monkeypatch, tmp_path) -> None:
+    real_fstat = os.fstat
     _waiver_files(tmp_path, monkeypatch)
+    def unprivileged_fstat(descriptor):
+        values = list(real_fstat(descriptor))
+        values[4:6] = [1000, 1000]
+        return os.stat_result(values)
+
     monkeypatch.setattr(
         OPERATOR.os,
         "fstat",
-        lambda _descriptor: type(
-            "UnprivilegedStat",
-            (),
-            {"st_mode": 0o100600, "st_uid": 1000, "st_gid": 1000},
-        )(),
+        unprivileged_fstat,
     )
     with pytest.raises(OPERATOR.OperatorError, match="unsafe ownership"):
         OPERATOR.validate_owner_window_waiver()
@@ -2718,11 +2718,9 @@ def test_readiness_backup_validation_hashes_exact_evidence(monkeypatch, tmp_path
     real_fstat = OPERATOR.os.fstat
 
     def root_owned(info):
-        return type(
-            "RootOwnedStat",
-            (),
-            {"st_mode": info.st_mode, "st_uid": 0, "st_gid": 0},
-        )()
+        values = list(info)
+        values[4:6] = [0, 0]
+        return os.stat_result(values)
 
     monkeypatch.setattr(OPERATOR.Path, "lstat", lambda path: root_owned(real_lstat(path)))
     monkeypatch.setattr(OPERATOR.os, "fstat", lambda descriptor: root_owned(real_fstat(descriptor)))

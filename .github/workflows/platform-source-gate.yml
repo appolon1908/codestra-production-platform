@@ -253,3 +253,18 @@ jobs:
         run: |
           "${RUNNER_TEMP}/gitleaks-bin" git --no-banner --redact --exit-code 1 \
             --log-opts="${GITLEAKS_LOG_OPTS}"
+
+  source-validation:
+    name: codestra/source-validation
+    needs: [validate]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require every application source gate to succeed
+        env:
+          RESULT_0: ${{ needs.validate.result }}
+        run: |
+          set -eu
+          test "$RESULT_0" = success
