@@ -8,6 +8,21 @@
       "context": "codestra/source-validation",
       "integration_id": 15368,
       "workflow": ".github/workflows/platform-source-gate.yml"
+    },
+    {
+      "context": "production-gate",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/production-merge-gate.yml"
+    },
+    {
+      "context": "checks-only-policy",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/production-merge-gate.yml"
+    },
+    {
+      "context": "diagnose",
+      "integration_id": 15368,
+      "workflow": ".github/workflows/gitleaks-pr-diagnostics.yml"
     }
   ],
   "replaces_contexts": [
